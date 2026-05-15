@@ -1,239 +1,620 @@
 #!/usr/bin/env bash
-# model-manager.sh - manage model lifecycle: candidate -> benchmarked -> accepted -> wired.
-#
-# Usage:
-#   model-manager discover [family]
-#   model-manager list-candidates
-#   model-manager select <family> <hf_repo> <quant>
-#   model-manager benchmark <family:candidate-id>
-#   model-manager accept <family:candidate-id>
-#   model-manager status [family]
-#
-# Notes:
-# - Metadata stored in:
-#   - configs/candidates.json
-#   - runs/benchmarks/<id>.json
-# - On accept, model is wired into profiles.json as a new profile.
-
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-source "$SCRIPT_DIR/lib.sh"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+runs_dir="${LOCAL_LLM_RUNS_DIR:-$repo_root/runs}"
 
-CANDIDATES_JSON="$CONFIG_DIR/candidates.json"
-BENCHMARKS_DIR="$RUNS_DIR/benchmarks"
+usage() {
+    cat <<'EOF'
+Usage: model-manager <command> [options]
 
-ensure_dirs
-mkdir -p "$BENCHMARKS_DIR"
-require_jq
+Commands:
+  discover   Find candidate models
+  select     Select a candidate model
+  benchmark  Benchmark a selected model
+  accept     Accept benchmark results
+  status     Show model-manager status
 
-# Ensure candidates.json exists
-if [[ ! -f "$CANDIDATES_JSON" ]]; then
-  echo '{}' | jq '.' > "$CANDIDATES_JSON"
-fi
-
-# Subcommands
-
-cmd_discover() {
-  local family="${1:-}"
-  if [[ -z "$family" ]]; then
-    log_info "Usage: model-manager discover [family]"
-    log_info "Example: model-manager discover qwen"
-    return
-  fi
-
-  # Validate family
-  local fam
-  fam="$(get_family "$family")"
-  if [[ -z "$fam" ]]; then
-    die "Unknown family: $family"
-  fi
-
-  log_info "Discovery for family: $family"
-  log_info "This should call model-search.py or HuggingFace API to list candidate GGUFs."
-  log_info "For now, this is a scaffold."
-  log_info "TODO: integrate model-search.py and write candidates to $CANDIDATES_JSON"
+Options:
+  -h, --help  Show this help
+EOF
+    printf '\nRepository: %s\n' "$repo_root"
 }
 
-cmd_list_candidates() {
-  local entries
-  entries="$(jq -r 'to_entries[] | .key' "$CANDIDATES_JSON" 2>/dev/null || true)"
-  if [[ -z "$entries" ]]; then
-    log_info "No candidates recorded."
-    return
-  fi
-
-  echo "Candidates:"
-  echo "$entries" | while IFS= read -r id; do
-    local summary
-    summary="$(jq -r --arg id "$id" '.[$id] | "\(.family):\(.quant) from \(.hf_repo) status=\(.status)"' "$CANDIDATES_JSON")"
-    echo "  $summary"
-  done
+not_implemented() {
+    local command_name="$1"
+    printf 'model-manager %s: not implemented yet\n' "$command_name" >&2
+    return 1
 }
 
-cmd_select() {
-  local family="$1"
-  local hf_repo="$2"
-  local quant="$3"
-
-  # Validate family
-  get_family "$family" >/dev/null || die "Unknown family: $family"
-
-  local id
-  id="${family}_$(date -u +%Y%m%d%H%M%S)"
-
-  # Upsert candidate
-  local tmp
-  tmp="$(jq \
-    --arg id "$id" \
-    --arg family "$family" \
-    --arg hf_repo "$hf_repo" \
-    --arg quant "$quant" \
-    '.[$id] = {
-        family: $family,
-        hf_repo: $hf_repo,
-        quant: $quant,
-        status: "candidate",
-        created_at: (now | todate)
-      }' "$CANDIDATES_JSON")"
-  echo "$tmp" > "$CANDIDATES_JSON"
-
-  log_info "Candidate created: $id"
-  log_info "Details: family=$family hf_repo=$hf_repo quant=$quant"
+ensure_runs_dirs() {
+    mkdir -p "$runs_dir/candidates" "$runs_dir/selections" "$runs_dir/benchmarks"
 }
 
-cmd_benchmark() {
-  local key="$1"
-  # Expect family:candidate-id or similar; for now treat as candidate ID.
-  local candidate_id
-  candidate_id="$(echo "$key" | cut -d: -f2)"
+count_json_files() {
+    local dir="$1"
+    local -a files=()
 
-  if [[ -z "$candidate_id" ]]; then
-    die "Usage: model-manager benchmark <family:candidate-id>"
-  fi
+    if [[ -d "$dir" ]]; then
+        shopt -s nullglob
+        files=("$dir"/*.json)
+        shopt -u nullglob
+    fi
 
-  local entry
-  entry="$(jq -r --arg id "$candidate_id" '.[$id] // empty' "$CANDIDATES_JSON")"
-  if [[ -z "$entry" ]]; then
-    die "Unknown candidate: $candidate_id"
-  fi
-
-  log_info "Benchmark for candidate: $candidate_id"
-  log_info "TODO: actually run benchmark (e.g., llama-bench or custom prompt set)."
-  log_info "For now, mark as 'benchmarked' with placeholder metrics."
-
-  local bench_file="$BENCHMARKS_DIR/${candidate_id}.json"
-  jq -n \
-    --arg id "$candidate_id" \
-    --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-    '{
-        candidate_id: $id,
-        timestamp: $ts,
-        tokens_per_sec: 0,
-        latency_p50: 0,
-        latency_p95: 0,
-        quality_score: 0,
-        notes: "placeholder"
-      }' > "$bench_file"
-
-  # Update status
-  local tmp
-  tmp="$(jq --arg id "$candidate_id" '.[$id].status = "benchmarked"' "$CANDIDATES_JSON")"
-  echo "$tmp" > "$CANDIDATES_JSON"
-
-  log_info "Benchmark recorded at: $bench_file"
-}
-
-cmd_accept() {
-  local key="$1"
-  local candidate_id
-  candidate_id="$(echo "$key" | cut -d: -f2)"
-
-  if [[ -z "$candidate_id" ]]; then
-    die "Usage: model-manager accept <family:candidate-id>"
-  fi
-
-  local entry
-  entry="$(jq -r --arg id "$candidate_id" '.[$id] // empty' "$CANDIDATES_JSON")"
-  if [[ -z "$entry" ]]; then
-    die "Unknown candidate: $candidate_id"
-  fi
-
-  local family hf_repo quant
-  family="$(echo "$entry" | jq -r '.family')"
-  hf_repo="$(echo "$entry" | jq -r '.hf_repo')"
-  quant="$(echo "$entry" | jq -r '.quant')"
-
-  # Generate a profile key: family:accepted-<short-id>
-  local short_id
-  short_id="$(echo "$candidate_id" | rev | cut -d_ -f1 | rev)"
-  local profile_key="${family}:accepted-${short_id}"
-
-  # Add profile to profiles.json
-  local tmp
-  tmp="$(jq \
-    --arg pk "$profile_key" \
-    --arg fam "$family" \
-    --arg hf "$hf_repo" \
-    --arg q "$quant" \
-    '.profiles[$pk] = {
-        family: $fam,
-        model_name: ($fam + "-" + $q),
-        hf_repo: $hf,
-        quant: $q,
-        context: 32768,
-        ngl: 999,
-        batch: 256,
-        ubatch: 256,
-        mmproj: "none",
-        reasoning_effort: "none",
-        extra_flags: [],
-        output_limit: 4096
-      }' "$PROFILES_JSON")"
-  echo "$tmp" > "$PROFILES_JSON"
-
-  # Update candidate status
-  local ctmp
-  ctmp="$(jq --arg id "$candidate_id" '.[$id].status = "accepted"' "$CANDIDATES_JSON")"
-  echo "$ctmp" > "$CANDIDATES_JSON"
-
-  log_info "Candidate accepted and wired into profiles.json as: $profile_key"
+    printf '%s\n' "${#files[@]}"
 }
 
 cmd_status() {
-  local family="${1:-}"
-  if [[ -n "$family" ]]; then
-    log_info "Status for family: $family"
-    jq -r --arg f "$family" '
-      to_entries[]
-      | select(.value.family == $f)
-      | "\(.key) \(.value.status) (\(.value.hf_repo))"
-    ' "$CANDIDATES_JSON" 2>/dev/null || log_info "No candidates for family: $family"
-  else
-    log_info "Overall model lifecycle status:"
-    # Count by status
-    jq -r '
-      to_entries
-      | group_by(.value.status)
-      | map({status: (.[0].value.status), count: length})
-      | .[]
-      | "\(.status): \(.count)"
-    ' "$CANDIDATES_JSON" 2>/dev/null || log_info "No candidates."
-  fi
+    ensure_runs_dirs
+    printf 'Model Manager Status\n'
+    printf '====================\n'
+    printf 'Runs dir: %s\n' "$runs_dir"
+    printf 'Candidates: %s\n' "$(count_json_files "$runs_dir/candidates")"
+    printf 'Selections: %s\n' "$(count_json_files "$runs_dir/selections")"
+    printf 'Benchmarks: %s\n' "$(count_json_files "$runs_dir/benchmarks")"
 }
 
-# Dispatch
+cmd_discover() {
+    local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
+    local query='GGUF'
+    local limit=8
+    local json=false
 
-case "${1:-}" in
-  discover) shift; cmd_discover "$@" ;;
-  list-candidates) cmd_list_candidates ;;
-  select) shift; cmd_select "$@" ;;
-  benchmark) shift; cmd_benchmark "$@" ;;
-  accept) shift; cmd_accept "$@" ;;
-  status) shift; cmd_status "$@" ;;
-  *)
-    echo "Usage: model-manager {discover|list-candidates|select|benchmark|accept|status} [args...]"
-    exit 1
-    ;;
-esac
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --target)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--target requires local or remote:<host>' >&2
+                    return 2
+                fi
+                target="$2"
+                shift 2
+                ;;
+            --query)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--query requires text' >&2
+                    return 2
+                fi
+                query="$2"
+                shift 2
+                ;;
+            --limit)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--limit requires a number' >&2
+                    return 2
+                fi
+                limit="$2"
+                shift 2
+                ;;
+            --json)
+                json=true
+                shift
+                ;;
+            -h|--help)
+                usage
+                return 0
+                ;;
+            *)
+                printf 'Unknown discover option: %s\n' "$1" >&2
+                return 2
+                ;;
+        esac
+    done
+
+    case "$limit" in
+        ''|*[!0-9]*)
+            printf 'invalid limit: %s\n' "$limit" >&2
+            return 2
+            ;;
+    esac
+
+    case "$target" in
+        local)
+            ;;
+        remote:*)
+            if [[ -z "${target#remote:}" ]]; then
+                printf 'remote target requires a host: %s\n' "$target" >&2
+                return 2
+            fi
+            ;;
+        *)
+            printf 'invalid target: %s\n' "$target" >&2
+            printf 'expected local or remote:<host>\n' >&2
+            return 2
+            ;;
+    esac
+
+    if [[ "$json" == true ]]; then
+        python3 - "$target" "$query" "$limit" <<'PY'
+import json
+import sys
+
+target, query, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])
+print(json.dumps({"target": target, "query": query, "limit": limit}, separators=(",", ":")))
+PY
+        return 0
+    fi
+
+    case "$target" in
+        local)
+            "$repo_root/scripts/model-discovery.sh" --local --query "$query" --limit "$limit"
+            ;;
+        remote:*)
+            "$repo_root/scripts/model-discovery.sh" --host "${target#remote:}" --query "$query" --limit "$limit"
+            ;;
+    esac
+}
+
+cmd_select() {
+    local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
+    local repo=''
+    local family=''
+    local alias=''
+    local purpose=''
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --target)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--target requires local or remote:<host>' >&2
+                    return 2
+                fi
+                target="$2"
+                shift 2
+                ;;
+            --repo)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--repo requires a value' >&2
+                    return 2
+                fi
+                repo="$2"
+                shift 2
+                ;;
+            --family)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--family requires a value' >&2
+                    return 2
+                fi
+                family="$2"
+                shift 2
+                ;;
+            --alias)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--alias requires a value' >&2
+                    return 2
+                fi
+                alias="$2"
+                shift 2
+                ;;
+            --purpose)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--purpose requires a value' >&2
+                    return 2
+                fi
+                purpose="$2"
+                shift 2
+                ;;
+            -h|--help)
+                usage
+                return 0
+                ;;
+            *)
+                printf 'Unknown select option: %s\n' "$1" >&2
+                return 2
+                ;;
+        esac
+    done
+
+    if [[ -z "$repo" ]]; then
+        printf '%s\n' 'select requires --repo' >&2
+        return 2
+    fi
+    if [[ -z "$family" ]]; then
+        printf '%s\n' 'select requires --family' >&2
+        return 2
+    fi
+    if [[ -z "$alias" ]]; then
+        printf '%s\n' 'select requires --alias' >&2
+        return 2
+    fi
+
+    case "$target" in
+        local)
+            ;;
+        remote:*)
+            if [[ -z "${target#remote:}" ]]; then
+                printf 'remote target requires a host: %s\n' "$target" >&2
+                return 2
+            fi
+            ;;
+        *)
+            printf 'invalid target: %s\n' "$target" >&2
+            printf 'expected local or remote:<host>\n' >&2
+            return 2
+            ;;
+    esac
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' 'python3 is required for selection JSON' >&2
+        return 1
+    fi
+
+    ensure_runs_dirs
+    local timestamp
+    local safe_family
+    local output_file
+    local unique_suffix
+    timestamp="$(date +%Y%m%d-%H%M%S)"
+    safe_family="${family//[^A-Za-z0-9_.-]/-}"
+    unique_suffix="$$"
+    output_file="$runs_dir/selections/${timestamp}-${safe_family}-${unique_suffix}.json"
+    while [[ -e "$output_file" ]]; do
+        unique_suffix="${unique_suffix}x"
+        output_file="$runs_dir/selections/${timestamp}-${safe_family}-${unique_suffix}.json"
+    done
+
+    python3 - "$output_file" "$repo" "$family" "$alias" "$target" "$purpose" <<'PY'
+import json
+import sys
+
+output_file, repo, family, alias, target, purpose = sys.argv[1:]
+selection = {"repo": repo, "family": family, "alias": alias, "target": target}
+if purpose:
+    selection["purpose"] = purpose
+with open(output_file, "w", encoding="utf-8") as handle:
+    json.dump(selection, handle, separators=(",", ":"))
+    handle.write("\n")
+PY
+
+    printf 'Selected %s\n' "$repo"
+    printf 'Wrote selection: %s\n' "$output_file"
+}
+
+cmd_benchmark() {
+    local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
+    local repo=''
+    local family=''
+    local alias=''
+    local profiles='reliable'
+    local -a profile_list=()
+    local dry_run=false
+    local record_only=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --target)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--target requires local or remote:<host>' >&2
+                    return 2
+                fi
+                target="$2"
+                shift 2
+                ;;
+            --repo)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--repo requires a value' >&2
+                    return 2
+                fi
+                repo="$2"
+                shift 2
+                ;;
+            --family)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--family requires a value' >&2
+                    return 2
+                fi
+                family="$2"
+                shift 2
+                ;;
+            --alias)
+                if [[ $# -lt 2 ]]; then
+                    printf '%s\n' '--alias requires a value' >&2
+                    return 2
+                fi
+                alias="$2"
+                shift 2
+                ;;
+            --profiles)
+                if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+                    printf '%s\n' '--profiles requires a non-empty value' >&2
+                    return 2
+                fi
+                profiles="$2"
+                shift 2
+                ;;
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            --record-only)
+                record_only=true
+                shift
+                ;;
+            -h|--help)
+                usage
+                return 0
+                ;;
+            *)
+                printf 'Unknown benchmark option: %s\n' "$1" >&2
+                return 2
+                ;;
+        esac
+    done
+
+    if [[ -z "$repo" ]]; then
+        printf '%s\n' 'benchmark requires --repo' >&2
+        return 2
+    fi
+    if [[ -z "$family" ]]; then
+        printf '%s\n' 'benchmark requires --family' >&2
+        return 2
+    fi
+    if [[ -z "$alias" ]]; then
+        printf '%s\n' 'benchmark requires --alias' >&2
+        return 2
+    fi
+
+    ensure_runs_dirs
+
+    case "$profiles" in
+        ,*|*,|*,,*)
+            printf '%s\n' '--profiles contains an empty profile' >&2
+            return 2
+            ;;
+    esac
+
+    IFS=, read -r -a profile_list <<<"$profiles"
+    local profile
+    for profile in "${profile_list[@]}"; do
+        if [[ -z "$profile" ]]; then
+            printf '%s\n' '--profiles contains an empty profile' >&2
+            return 2
+        fi
+        case "$profile" in
+            *[!A-Za-z0-9_.-]*)
+                printf 'invalid benchmark profile: %s\n' "$profile" >&2
+                return 2
+                ;;
+        esac
+    done
+
+    case "$target" in
+        local)
+            ;;
+        remote:*)
+            if [[ -z "${target#remote:}" ]]; then
+                printf 'remote target requires a host: %s\n' "$target" >&2
+                return 2
+            fi
+            ;;
+        *)
+            printf 'invalid target: %s\n' "$target" >&2
+            printf 'expected local or remote:<host>\n' >&2
+            return 2
+            ;;
+    esac
+
+    if [[ "$dry_run" != true && "$record_only" != true ]]; then
+        printf '%s\n' 'benchmark currently supports --dry-run only' >&2
+        return 2
+    fi
+
+    if [[ "$record_only" == true ]]; then
+        if ! command -v python3 >/dev/null 2>&1; then
+            printf '%s\n' 'python3 is required for benchmark JSON' >&2
+            return 1
+        fi
+
+        local timestamp
+        local result_timestamp
+        local safe_family
+        local safe_profile
+        local output_file
+        local unique_suffix
+        timestamp="$(date +%Y%m%d-%H%M%S)"
+        result_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        safe_family="${family//[^A-Za-z0-9_.-]/-}"
+        for profile in "${profile_list[@]}"; do
+            safe_profile="${profile//[^A-Za-z0-9_.-]/-}"
+            unique_suffix="$$"
+            output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
+            while [[ -e "$output_file" ]]; do
+                unique_suffix="${unique_suffix}x"
+                output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
+            done
+
+            python3 - "$output_file" "$target" "$repo" "$family" "$alias" "$profile" "$result_timestamp" <<'PY'
+import json
+import sys
+
+output_file, target, repo, family, alias, profile, timestamp = sys.argv[1:]
+result = {
+    "target": target,
+    "repo": repo,
+    "family": family,
+    "alias": alias,
+    "profile": profile,
+    "ctx": None,
+    "batch": None,
+    "ubatch": None,
+    "ngl": None,
+    "load_status": "not_run",
+    "prompt_tok_s": None,
+    "decode_tok_s": None,
+    "command": "",
+    "timestamp": timestamp,
+}
+with open(output_file, "w", encoding="utf-8") as handle:
+    json.dump(result, handle, separators=(",", ":"))
+    handle.write("\n")
+PY
+
+            printf 'Wrote benchmark result: %s\n' "$output_file"
+        done
+        return 0
+    fi
+
+    printf 'Benchmark plan\n'
+    printf 'repo=%s\n' "$repo"
+    printf 'family=%s\n' "$family"
+    printf 'alias=%s\n' "$alias"
+    printf 'profiles=%s\n' "$profiles"
+    printf 'target=%s\n' "$target"
+}
+
+cmd_accept() {
+    local benchmark_file=''
+    local dry_run=false
+    local json_fields
+    local repo
+    local family
+    local alias
+    local target
+    local profile
+    local start_script
+    local max_start=0
+    local start_path
+    local start_name
+    local start_number
+    local start_value
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            -h|--help)
+                usage
+                return 0
+                ;;
+            --*)
+                printf 'Unknown accept option: %s\n' "$1" >&2
+                return 2
+                ;;
+            *)
+                if [[ -n "$benchmark_file" ]]; then
+                    printf 'accept accepts one benchmark JSON file, got extra argument: %s\n' "$1" >&2
+                    return 2
+                fi
+                benchmark_file="$1"
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$benchmark_file" ]]; then
+        printf '%s\n' 'accept requires a benchmark JSON file' >&2
+        return 2
+    fi
+
+    if [[ "$dry_run" != true ]]; then
+        printf '%s\n' 'accept currently supports --dry-run only' >&2
+        return 2
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' 'python3 is required to parse benchmark JSON' >&2
+        return 1
+    fi
+
+    if ! json_fields="$(python3 - "$benchmark_file" <<'PY'
+import json
+import os
+import sys
+
+path = sys.argv[1]
+if not os.path.exists(path):
+    raise SystemExit(f"benchmark JSON not found: {path}")
+if not os.path.isfile(path):
+    raise SystemExit(f"benchmark JSON is not a file: {path}")
+try:
+    with open(path, encoding="utf-8") as handle:
+        result = json.load(handle)
+except OSError as exc:
+    raise SystemExit(f"benchmark JSON is unreadable: {path}: {exc}") from exc
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"benchmark JSON is invalid: {path}: {exc}") from exc
+
+if not isinstance(result, dict):
+    raise SystemExit("benchmark JSON must be an object")
+
+required = ("repo", "family", "alias", "target", "profile", "load_status")
+for key in required:
+    if key not in result:
+        raise SystemExit(f"benchmark JSON missing required field: {key}")
+    if not isinstance(result[key], str):
+        raise SystemExit(f"benchmark JSON field must be a string: {key}")
+    if any(ord(char) < 32 or ord(char) == 127 for char in result[key]):
+        raise SystemExit(f"benchmark JSON field contains a control character: {key}")
+
+if result["load_status"] != "success":
+    raise SystemExit(f"benchmark JSON load_status is not success: {result['load_status']}")
+print("\t".join(result[key] for key in required[:-1]))
+PY
+)"; then
+        return 1
+    fi
+
+    IFS=$'\t' read -r repo family alias target profile <<<"$json_fields"
+
+    shopt -s nullglob
+    for start_path in "$repo_root"/scripts/start*.sh; do
+        start_name="${start_path##*/}"
+        start_number="${start_name#start}"
+        start_number="${start_number%.sh}"
+        if [[ -n "$start_number" && "$start_number" != *[!0-9]* ]]; then
+            start_value=$((10#$start_number))
+            if (( start_value > max_start )); then
+                max_start="$start_value"
+            fi
+        fi
+    done
+    shopt -u nullglob
+    start_script="scripts/start$((max_start + 1)).sh"
+
+    printf 'Accept plan\n'
+    printf 'repo=%s\n' "$repo"
+    printf 'family=%s\n' "$family"
+    printf 'alias=%s\n' "$alias"
+    printf 'target=%s\n' "$target"
+    printf 'profile=%s\n' "$profile"
+    printf 'Dry-run actions:\n'
+    printf 'would create %s\n' "$start_script"
+    printf 'would update scripts/oc-local\n'
+    printf 'would update installer.sh\n'
+    printf 'would update README.md\n'
+    printf 'would update test_oc_local.sh\n'
+}
+
+main() {
+    local command_name="${1:-}"
+
+    case "$command_name" in
+        -h|--help|'')
+            usage
+            ;;
+        status)
+            cmd_status
+            ;;
+        discover)
+            cmd_discover "${@:2}"
+            ;;
+        select)
+            cmd_select "${@:2}"
+            ;;
+        benchmark)
+            cmd_benchmark "${@:2}"
+            ;;
+        accept)
+            cmd_accept "${@:2}"
+            ;;
+        *)
+            printf 'Unknown command: %s\n\n' "$command_name" >&2
+            usage >&2
+            return 1
+            ;;
+    esac
+}
+
+main "$@"
