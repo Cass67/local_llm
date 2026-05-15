@@ -16,7 +16,7 @@ Tooling for running local LLMs via llama.cpp, managed from a single, config-driv
 Simplified flow:
 
 - You:
-  - oc-local qwen reliable
+  - ./oc-local qwen reliable
 - oc-local:
   - reads configs/profiles.json
   - builds llama-server command
@@ -27,20 +27,27 @@ Simplified flow:
 
 ## Quick Start
 
+From the repo root (or worktree):
+
 - List available profiles:
-  - oc-local list-profiles
-- Show a profile:
-  - oc-local show qwen:reliable
+  - ./oc-local list-profiles
+- Show all models and profiles:
+  - ./oc-local --info
+- Show a single profile:
+  - ./oc-local show qwen:reliable
+  - ./oc-local qwen:reliable --info
 - Start a model:
-  - oc-local qwen reliable
-  - oc-local qwen-coder reliable --lean
+  - ./oc-local qwen reliable
+  - ./oc-local qwen-coder reliable --lean
+- Start using family:profile syntax:
+  - ./oc-local gpt-oss:speed
 - Dry-run (no launch):
-  - oc-local qwen reliable --dry-run
+  - ./oc-local qwen reliable --dry-run
 - Inspect recent runs:
-  - oc-local last-runs 5
+  - ./oc-local last-runs 5
 
 Symlinks like oc-qwen-reliable still work and map to:
-  oc-local qwen reliable
+  ./oc-local qwen reliable
 
 ## Profiles
 
@@ -60,24 +67,31 @@ Each defines:
 
 All concrete settings live in configs/profiles.json.
 
+Use:
+- ./oc-local --info            # overview of all models/profiles
+- ./oc-local list-profiles     # compact list
+- ./oc-local show qwen:reliable  # full profile details
+
 ## Model Lifecycle (model-manager)
 
 Use model-manager.sh to manage candidate models:
 
 - Discover:
-  - model-manager.sh discover qwen
+  - ./model-manager.sh discover qwen
 - List candidates:
-  - model-manager.sh list-candidates
+  - ./model-manager.sh list-candidates
 - Select a candidate:
-  - model-manager.sh select qwen unsloth/Qwen3.6-35B-A3B-GGUF UD-Q3_K_XL
+  - ./model-manager.sh select qwen unsloth/Qwen3.6-35B-A3B-GGUF UD-Q3_K_XL
 - Benchmark:
-  - model-manager.sh benchmark qwen:<candidate-id>
+  - ./model-manager.sh benchmark qwen:<candidate-id>
 - Accept (wire into profiles.json):
-  - model-manager.sh accept qwen:<candidate-id>
+  - ./model-manager.sh accept qwen:<candidate-id>
 - Status:
-  - model-manager.sh status
+  - ./model-manager.sh status
 
 ## Notes
 
 - No start*.sh scripts; all launch behavior is via oc-local + profiles.json.
 - All shell scripts should source scripts/lib.sh for shared utilities.
+- For help:
+  - ./oc-local --help
