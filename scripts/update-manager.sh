@@ -1,59 +1,73 @@
 #!/usr/bin/env bash
-# Update manager for local_llm
-# Handles updates to models and configurations
+# update-manager.sh - high-level update helper wired to model-manager and profiles.json.
+#
+# Usage:
+#   update-manager.sh              # check for updates
+#   update-manager.sh --candidates # list candidate models
+#   update-manager.sh --discover <family>
+#   update-manager.sh --status
+#
+# Delegates to model-manager.sh for lifecycle operations.
 
 set -euo pipefail
 
-# Function to check for updates
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
+
+MODEL_MANAGER="$SCRIPT_DIR/model-manager.sh"
+
+ensure_dirs
+
+usage() {
+  echo "Usage: update-manager.sh [options]"
+  echo ""
+  echo "Options:"
+  echo "  (no args)            Check for updates (profiles + candidates)"
+  echo "  --candidates         List model candidates"
+  echo "  --discover <family>  Discover new candidate models for a family"
+  echo "  --status             Show overall model lifecycle status"
+}
+
 check_updates() {
-    echo "Checking for updates..."
-    echo ""
-    echo "Update Status:"
-    echo "--------------"
-    echo "oc-local script: Current version (no update available)"
-    echo "Model configurations: Up to date"
-    echo "Remote scripts: Up to date"
-    echo ""
-    echo "To check for newer model versions, run:"
-    echo "  model-discovery.sh --detailed"
+  echo "LocalLLM Update Status"
+  echo "======================"
+  echo ""
+
+  # Check profiles.json
+  if [[ -f "$PROFILES_JSON" ]]; then
+    local count
+    count="$(jq '.profiles | length' "$PROFILES_JSON")"
+    echo "Profiles in profiles.json: $count"
+  else
+    echo "profiles.json: MISSING"
+  fi
+
+  echo ""
+  echo "Model lifecycle (via model-manager):"
+  bash "$MODEL_MANAGER" status
 }
 
-# Function to update configurations
-update_configurations() {
-    echo "Updating configurations..."
-    # This would be where we'd update symlinks or configs
-    echo "Configuration update complete"
-}
-
-# Function to update models
-update_models() {
-    echo "Model update process:"
-    echo "1. Check for newer model versions on Hugging Face"
-    echo "2. Verify compatibility with your system"
-    echo "3. Download and install new models"
-    echo "4. Update configuration files"
-    echo ""
-    echo "Note: This is a placeholder - actual model updates require more complex handling"
-}
-
-# Main function
-main() {
-    echo "LocalLLM Update Manager"
-    echo "======================="
-    
-    if [[ $# -eq 0 ]]; then
-        check_updates
-    elif [[ "$1" == "--config" ]]; then
-        update_configurations
-    elif [[ "$1" == "--models" ]]; then
-        update_models
-    else
-        echo "Usage: update-manager.sh [options]"
-        echo "Options:"
-        echo "  --config   Update configuration files"
-        echo "  --models   Update models (placeholder)"
-        echo "  (no args)  Check for updates"
+case "${1:-}" in
+  --candidates)
+    bash "$MODEL_MANAGER" list-candidates
+    ;;
+  --discover)
+    if [[ -z "${2:-}" ]]; then
+      die "Usage: update-manager.sh --discover <family>"
     fi
-}
-
-main "$@"
+    bash "$MODEL_MANAGER" discover "$2"
+    ;;
+  --status)
+    bash "$MODEL_MANAGER" status
+    ;;
+  --help|-h)
+    usage
+    ;;
+  "")
+    check_updates
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
