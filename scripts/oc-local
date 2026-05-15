@@ -89,9 +89,20 @@ parse_args() {
     esac
   done
 
-  # MODE is "run", interpret positional args as [family] [profile]
-  SUBCMD_ARG1="${args[0]:-}"
-  SUBCMD_ARG2="${args[1]:-}"
+  # MODE is "run", interpret positional args as:
+  # - [family] [profile], or
+  # - family:profile
+  local first="${args[0]:-}"
+  local second="${args[1]:-}"
+
+  if [[ "$first" == *:* && -z "$second" ]]; then
+    # family:profile
+    SUBCMD_ARG1="${first%%:*}"
+    SUBCMD_ARG2="${first#*:}"
+  else
+    SUBCMD_ARG1="$first"
+    SUBCMD_ARG2="$second"
+  fi
 }
 
 parse_args "$@"
@@ -167,23 +178,79 @@ mode_run() {
 
   # If called via symlink (e.g., oc-qwen-reliable), try to extract family and profile.
   if [[ -z "$family" || -z "$profile_name" ]]; then
-    local base
-    base="$(basename "$0")"
-    # Pattern: oc-<family>-<profile>
-    if [[ "$base" == oc-* ]]; then
-      local suffix="${base#oc-}"
-      local first_dash
-      first_dash="${suffix%%-*}"
-      local rest="${suffix#*-}"
-      if [[ -n "$first_dash" && -n "$rest" && "$first_dash" != "$rest" ]]; then
-        family="$first_dash"
-        profile_name="$rest"
-      else
-        die "Could not infer family/profile from: $base"
-      fi
+    if $INFO_ONLY; then
+      # Allow: ./oc-local --info without family/profile
+      :
     else
-      die "Usage: oc-local [family] [profile] [--dry-run|--info|--lean|--no-ssh|--quiet|--] [extra-args...]"
+      local base
+      base="$(basename "$0")"
+      # Only treat as symlink-style if it is NOT "oc-local" itself
+      # Pattern: oc-<family>-<profile>
+      if [[ "$base" == oc-* && "$base" != "oc-local" ]]; then
+        local suffix="${base#oc-}"
+        local first_dash
+        first_dash="${suffix%%-*}"
+        local rest="${suffix#*-}"
+        if [[ -n "$first_dash" && -n "$rest" && "$first_dash" != "$rest" ]]; then
+          family="$first_dash"
+          profile_name="$rest"
+        else
+          die "Could not infer family/profile from: $base"
+        fi
+      else
+        die "Usage: oc-local [family] [profile] [--dry-run|--info|--lean|--no-ssh|--quiet|--] [extra-args...]"
+      fi
     fi
+  fi
+
+  # Info-only mode (can be global or per-profile)
+  if $INFO_ONLY; then
+    if [[ -z "$family" || -z "$profile_name" ]]; then
+      # Global info: list all profiles with short description
+      echo "Available models (profiles):"
+      echo ""
+
+      local profiles
+      profiles="$(list_profiles)"
+
+      echo "$profiles" | while IFS= read -r p; do
+        local family profile_name model_name context batch ubatch quant
+        family="$(echo "$p" | cut -d: -f1)"
+        profile_name="$(echo "$p" | cut -d: -f2)"
+
+        local profile_json
+        profile_json="$(jq -r --arg k "$p" '.profiles[$k]' "$PROFILES_JSON" 2>/dev/null)"
+
+        model_name="$(echo "$profile_json" | jq -r '.model_name // ""')"
+        context="$(echo "$profile_json" | jq -r '.context // ""')"
+        batch="$(echo "$profile_json" | jq -r '.batch // ""')"
+        ubatch="$(echo "$profile_json" | jq -r '.ubatch // ""')"
+        quant="$(echo "$profile_json" | jq -r '.quant // ""')"
+
+        local short
+        short="$(printf "%s (%s) ctx=%s batch=%s" "$model_name" "$profile_name" "$context" "$batch")"
+
+        echo "  ${BOLD}$p${RESET} $short"
+      done
+    else
+      # Single profile info
+      local profile_key="${family}:${profile_name}"
+      local profile
+      profile="$(get_profile "$profile_key")"
+      if [[ -z "$profile" ]]; then
+        die "Unknown profile: $profile_key"
+      fi
+      echo "Profile: $profile_key"
+      echo "$profile" | jq .
+      echo "LLAMA_SERVER_BIN: $LLAMA_SERVER_BIN"
+      echo "REMOTE_HOST: ${REMOTE_HOST:-<not set>}"
+    fi
+    return
+  fi
+
+  # For non-info modes, require family/profile
+  if [[ -z "$family" || -z "$profile_name" ]]; then
+    die "Usage: oc-local [family] [profile] [--dry-run|--info|--lean|--no-ssh|--quiet|--] [extra-args...]"
   fi
 
   local profile_key="${family}:${profile_name}"
@@ -191,15 +258,6 @@ mode_run() {
   profile="$(get_profile "$profile_key")"
   if [[ -z "$profile" ]]; then
     die "Unknown profile: $profile_key"
-  fi
-
-  # Info-only mode
-  if $INFO_ONLY; then
-    echo "Profile: $profile_key"
-    echo "$profile" | jq .
-    echo "LLAMA_SERVER_BIN: $LLAMA_SERVER_BIN"
-    echo "REMOTE_HOST: ${REMOTE_HOST:-<not set>}"
-    return
   fi
 
   # Build command from profile
