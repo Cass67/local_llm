@@ -1,329 +1,364 @@
 #!/usr/bin/env bash
-# oc-local: central launcher for local LLMs via llama.cpp.
-#
-# Usage:
-#   oc-local [family] [profile] [--dry-run] [--info] [--lean] [--no-ssh] [--quiet] [--] [extra-args...]
-#   oc-local list-profiles
-#   oc-local show <family:profile>
-#   oc-local last-runs [N]
-#
-# Examples:
-#   oc-local qwen reliable
-#   oc-local qwen-coder reliable --lean
-#   oc-local list-profiles
-#   oc-local show qwen:reliable
-#   oc-local last-runs 5
-
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-source "$SCRIPT_DIR/lib.sh"
-
-ensure_dirs
-
-# Argument parsing
-DRY_RUN=false
-INFO_ONLY=false
-LEAN=false
-NO_SSH=false
-QUIET=false
-EXTRA_ARGS=()
-
-MODE="run"
-SUBCMD_ARG1=""
-SUBCMD_ARG2=""
-
 usage() {
-  cat <<'EOF'
-Usage: oc-local [family] [profile] [--dry-run|--info|--lean|--no-ssh|--quiet|--] [extra-args...]
-       oc-local list-profiles
-       oc-local show <family:profile>
-       oc-local last-runs [N]
+  cat >&2 <<'EOF'
+Usage: oc-local [family] [profile] [--lean] [--dry-run] [--info] [--remote HOST] [--user USER] [-k] [opencode args...]
 
+Profiles must match the llama.cpp profile that this wrapper starts remotely.
 Profiles are family-specific. Use --info to see exact context, quant, batch, and command.
 
 Options:
-  --dry-run                 print the llama-server command without starting it
-  --info                    print profile information
-  --lean                    reduce generated client-side prompt overhead where supported
-  --no-ssh                  run locally instead of through SSH
-  --quiet                   suppress launcher status output
-  --target local|remote:<host>
-
-Environment:
-  OC_LOCAL_TARGET           default target, local or remote:<host>
-  OC_LOCAL_LLAMA_DIR        llama.cpp checkout directory
+  --lean     remove OpenCode plugins for a smaller starting prompt
+  --dry-run  print actions and generated override config without running them
+  --info     print resolved server and OpenCode settings, then exit
+  --remote HOST
+  --user USER
+  -k         allow SSH password prompt when key auth is not configured.
 EOF
 }
 
-parse_args() {
-  local args=()
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --help|-h)
-        usage
-        exit 0
-        ;;
-      list-profiles)
-        MODE="list-profiles"
-        return
-        ;;
-      show)
-        MODE="show"
-        SUBCMD_ARG1="${2:-}"
-        return
-        ;;
-      last-runs)
-        MODE="last-runs"
-        SUBCMD_ARG1="${2:-10}"
-        return
-        ;;
-      --dry-run)
-        DRY_RUN=true
-        shift
-        ;;
-      --info)
-        INFO_ONLY=true
-        shift
-        ;;
-      --lean)
-        LEAN=true
-        shift
-        ;;
-      --no-ssh)
-        NO_SSH=true
-        shift
-        ;;
-      --quiet)
-        QUIET=true
-        shift
-        ;;
-      --)
-        shift
-        EXTRA_ARGS+=("$@")
-        return
-        ;;
-      -*)
-        # Treat unknown flags as extra args for llama-server
-        EXTRA_ARGS+=("$1")
-        shift
-        ;;
-      *)
-        args+=("$1")
-        shift
-        ;;
-    esac
-  done
+lean=false
+dry_run=false
+info=false
 
-  # MODE is "run", interpret positional args as:
-  # - [family] [profile], or
-  # - family:profile
-  local first="${args[0]:-}"
-  local second="${args[1]:-}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --lean)
+      lean=true
+      shift
+      ;;
+    --dry-run)
+      dry_run=true
+      shift
+      ;;
+    --info)
+      info=true
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      printf 'unknown option: %s\n' "$1" >&2
+      usage
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
-  if [[ "$first" == *:* && -z "$second" ]]; then
-    # family:profile
-    SUBCMD_ARG1="${first%%:*}"
-    SUBCMD_ARG2="${first#*:}"
-  else
-    SUBCMD_ARG1="$first"
-    SUBCMD_ARG2="$second"
+default_profile=''
+default_family=''
+case "$(basename "$0")" in
+  oc-qwen) default_family=qwen ;;
+  oc-qwen-coder|oc-coder|oc-code) default_family=qwen-coder ;;
+  oc-gemma) default_family=gemma ;;
+  oc-gemma-vision) default_family=gemma-vision ;;
+  oc-gpt-oss) default_family=gpt-oss ;;
+  oc-deepseek-r1|oc-deepseek) default_family=deepseek-r1 ;;
+  oc-speed) default_profile=speed ;;
+  oc-fastlong) default_profile=fastlong ;;
+  oc-balanced) default_profile=balanced ;;
+  oc-reliable) default_profile=reliable ;;
+  oc-tiny) default_profile=tiny ;;
+  oc-qwen-speed) default_family=qwen; default_profile=speed ;;
+  oc-qwen-fastlong) default_family=qwen; default_profile=fastlong ;;
+  oc-qwen-balanced) default_family=qwen; default_profile=balanced ;;
+  oc-qwen-reliable) default_family=qwen; default_profile=reliable ;;
+  oc-qwen-tiny) default_family=qwen; default_profile=tiny ;;
+  oc-qwen-coder-speed|oc-coder-speed) default_family=qwen-coder; default_profile=speed ;;
+  oc-qwen-coder-fastlong|oc-coder-fastlong) default_family=qwen-coder; default_profile=fastlong ;;
+  oc-qwen-coder-balanced|oc-coder-balanced) default_family=qwen-coder; default_profile=balanced ;;
+  oc-qwen-coder-reliable|oc-coder-reliable) default_family=qwen-coder; default_profile=reliable ;;
+  oc-qwen-coder-tiny|oc-coder-tiny) default_family=qwen-coder; default_profile=tiny ;;
+  oc-gemma-speed) default_family=gemma; default_profile=speed ;;
+  oc-gemma-fastlong) default_family=gemma; default_profile=fastlong ;;
+  oc-gemma-balanced) default_family=gemma; default_profile=balanced ;;
+  oc-gemma-reliable) default_family=gemma; default_profile=reliable ;;
+  oc-gemma-tiny) default_family=gemma; default_profile=tiny ;;
+  oc-gemma-vision-speed) default_family=gemma-vision; default_profile=speed ;;
+  oc-gemma-vision-fastlong) default_family=gemma-vision; default_profile=fastlong ;;
+  oc-gemma-vision-balanced) default_family=gemma-vision; default_profile=balanced ;;
+  oc-gemma-vision-reliable) default_family=gemma-vision; default_profile=reliable ;;
+  oc-gemma-vision-tiny) default_family=gemma-vision; default_profile=tiny ;;
+  oc-gpt-oss-speed) default_family=gpt-oss; default_profile=speed ;;
+  oc-gpt-oss-fastlong) default_family=gpt-oss; default_profile=fastlong ;;
+  oc-gpt-oss-balanced) default_family=gpt-oss; default_profile=balanced ;;
+  oc-gpt-oss-reliable) default_family=gpt-oss; default_profile=reliable ;;
+  oc-gpt-oss-tiny) default_family=gpt-oss; default_profile=tiny ;;
+  oc-deepseek-r1-speed|oc-deepseek-speed) default_family=deepseek-r1; default_profile=speed ;;
+  oc-deepseek-r1-fastlong|oc-deepseek-fastlong) default_family=deepseek-r1; default_profile=fastlong ;;
+  oc-deepseek-r1-balanced|oc-deepseek-balanced) default_family=deepseek-r1; default_profile=balanced ;;
+  oc-deepseek-r1-reliable|oc-deepseek-reliable) default_family=deepseek-r1; default_profile=reliable ;;
+  oc-deepseek-r1-tiny|oc-deepseek-tiny) default_family=deepseek-r1; default_profile=tiny ;;
+esac
+
+family="${default_family:-qwen}"
+if [[ $# -gt 0 ]]; then
+  case "$1" in
+    qwen|qwen-coder|gemma|gemma-vision|gpt-oss|deepseek-r1)
+      family="$1"
+      shift
+      ;;
+  esac
+fi
+
+if [[ $# -lt 1 ]]; then
+  if [[ -z "$default_profile" ]]; then
+    usage
+    exit 2
   fi
-}
+  profile="$default_profile"
+else
+  profile="$1"
+  shift
+fi
 
-parse_args "$@"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --lean)
+      lean=true
+      shift
+      ;;
+    --dry-run)
+      dry_run=true
+      shift
+      ;;
+    --info)
+      info=true
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
-# Subcommands
+case "$profile" in
+  speed) remote_profile=speed ;;
+  fastlong) remote_profile=fastlong ;;
+  balanced) remote_profile=balanced ;;
+  reliable) remote_profile=reliable ;;
+  tiny) remote_profile=tiny ;;
+  *)
+    printf 'unknown profile: %s\n' "$profile" >&2
+    usage
+    exit 2
+    ;;
+esac
 
-mode_list_profiles() {
-  require_jq
-  local profiles
-  profiles="$(list_profiles)"
+remote_host="${OC_LOCAL_REMOTE_HOST:-ubt26}"
+remote_dir="${OC_LOCAL_REMOTE_DIR:-/home/cass/llama.cpp}"
+reasoning_effort=none
+case "$family" in
+  qwen)
+    remote_script=./start3.sh
+    model_name="qwen3.6-35b-a3b"
+    hf_repo="unsloth/Qwen3.6-35B-A3B-GGUF"
+    mmproj_mode=none
+    case "$profile" in
+      speed) context=32768; ngl=999; batch=1024; ubatch=1024; quant="UD-Q3_K_XL" ;;
+      fastlong) context=40960; ngl=999; batch=1024; ubatch=1024; quant="UD-Q3_K_XL" ;;
+      balanced) context=49152; ngl=999; batch=1024; ubatch=1024; quant="UD-Q3_K_XL" ;;
+      reliable) context=65536; ngl=45; batch=256; ubatch=256; quant="UD-Q3_K_XL" ;;
+      tiny) context=40960; ngl=999; batch=1024; ubatch=1024; quant="UD-Q2_K_XL" ;;
+    esac
+    ;;
+  qwen-coder)
+    remote_script=./start2.sh
+    model_name="qwen3-coder-30b-a3b-instruct"
+    hf_repo="unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
+    mmproj_mode=none
+    case "$profile" in
+      speed) context=32768; ngl=999; batch=512; ubatch=512; quant="IQ4_XS" ;;
+      fastlong) context=40960; ngl=999; batch=512; ubatch=512; quant="IQ4_XS" ;;
+      balanced) context=49152; ngl=999; batch=256; ubatch=256; quant="UD-Q3_K_XL" ;;
+      reliable) context=65536; ngl=999; batch=128; ubatch=128; quant="UD-Q3_K_XL" ;;
+      tiny) context=65536; ngl=999; batch=256; ubatch=256; quant="UD-Q2_K_XL" ;;
+    esac
+    ;;
+  gemma)
+    remote_script=./start4.sh
+    model_name="gemma-4-31b-it"
+    hf_repo="unsloth/gemma-4-31B-it-GGUF"
+    mmproj_mode=disabled
+    case "$profile" in
+      speed) context=32768; ngl=999; batch=512; ubatch=512; quant="IQ4_XS" ;;
+      fastlong) context=40960; ngl=999; batch=256; ubatch=256; quant="UD-Q2_K_XL" ;;
+      balanced) context=49152; ngl=999; batch=128; ubatch=128; quant="UD-Q2_K_XL" ;;
+      reliable) context=65536; ngl=999; batch=128; ubatch=128; quant="UD-Q2_K_XL" ;;
+      tiny) context=40960; ngl=999; batch=512; ubatch=512; quant="UD-Q2_K_XL" ;;
+    esac
+    ;;
+  gemma-vision)
+    remote_script=./start5.sh
+    model_name="gemma-4-31b-it-vision"
+    hf_repo="unsloth/gemma-4-31B-it-GGUF"
+    mmproj_mode=enabled
+    case "$profile" in
+      speed) context=32768; ngl=999; batch=128; ubatch=128; quant="UD-Q2_K_XL" ;;
+      fastlong) context=40960; ngl=999; batch=64; ubatch=64; quant="UD-Q2_K_XL" ;;
+      balanced) context=32768; ngl=999; batch=64; ubatch=64; quant="UD-Q2_K_XL" ;;
+      reliable) context=32768; ngl=999; batch=64; ubatch=64; quant="UD-Q2_K_XL" ;;
+      tiny) context=32768; ngl=999; batch=64; ubatch=64; quant="UD-IQ2_M" ;;
+    esac
+    ;;
+  gpt-oss)
+    remote_script=./start6.sh
+    model_name="gpt-oss-20b"
+    hf_repo="unsloth/gpt-oss-20b-GGUF"
+    mmproj_mode=none
+    case "$profile" in
+      speed) context=131072; ngl=999; batch=1024; ubatch=1024; quant="UD-Q8_K_XL"; reasoning_effort=medium ;;
+      fastlong) context=131072; ngl=999; batch=512; ubatch=512; quant="UD-Q8_K_XL"; reasoning_effort=medium ;;
+      balanced) context=131072; ngl=999; batch=256; ubatch=256; quant="UD-Q8_K_XL"; reasoning_effort=high ;;
+      reliable) context=131072; ngl=999; batch=128; ubatch=128; quant="UD-Q8_K_XL"; reasoning_effort=high ;;
+      tiny) context=131072; ngl=999; batch=256; ubatch=256; quant="UD-Q4_K_XL"; reasoning_effort=high ;;
+    esac
+    ;;
+  deepseek-r1)
+    remote_script=./start7.sh
+    model_name="deepseek-r1-distill-qwen-32b"
+    hf_repo="unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF"
+    mmproj_mode=none
+    case "$profile" in
+      speed) context=16384; ngl=999; batch=128; ubatch=128; quant="Q3_K_M" ;;
+      fastlong) context=16384; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
+      balanced) context=16384; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
+      reliable) context=16384; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
+      tiny) context=32768; ngl=999; batch=64; ubatch=64; quant="Q2_K" ;;
+    esac
+    ;;
+  *)
+    printf 'unknown model family: %s\n' "$family" >&2
+    usage
+    exit 2
+    ;;
+esac
+remote_start="$remote_script $remote_profile"
+default_output_limit=4096
+if [[ "$family" == gpt-oss || "$family" == deepseek-r1 ]]; then
+  default_output_limit=16384
+fi
+output_limit="${OC_LOCAL_OUTPUT_LIMIT:-$default_output_limit}"
+reserved="${OC_LOCAL_RESERVED:-4096}"
+base_url="${OC_LOCAL_BASE_URL:-http://cass.lan:8080/v1}"
+api_key="${OC_LOCAL_API_KEY:-sk-dummy}"
+model="${OC_LOCAL_MODEL:-localllm/$model_name}"
+wait_seconds="${OC_LOCAL_WAIT_SECONDS:-180}"
 
-  if [[ -z "$profiles" ]]; then
-    log_error "No profiles found in $PROFILES_JSON"
+plugin_json=''
+plugin_mode=normal
+if [[ "$lean" == true ]]; then
+  plugin_json='"plugin":[],'
+  plugin_mode=lean
+fi
+
+config_content=$(cat <<EOF
+{${plugin_json}"provider":{"localllm":{"npm":"@ai-sdk/openai-compatible","name":"LocalLLM","options":{"baseURL":"${base_url}","apiKey":"${api_key}"},"models":{"${model_name}":{"name":"${model_name}","tool_call":false,"limit":{"context":${context},"output":${output_limit}}}}}},"compaction":{"auto":true,"prune":true,"reserved":${reserved}}}
+EOF
+)
+
+server_command="./build/bin/llama-server -hf ${hf_repo}:${quant}"
+if [[ "$mmproj_mode" == disabled ]]; then
+  server_command+=" --no-mmproj"
+fi
+server_command+=" --host 0.0.0.0 --port 8080 -ngl ${ngl} -c ${context} --flash-attn on -ub ${ubatch} -b ${batch} --threads \"\$(nproc)\" --prio 2"
+if [[ "$family" == qwen ]]; then
+  server_command+=" --mlock"
+fi
+server_command+=" --no-warmup --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0.0"
+if [[ "$family" != gpt-oss && "$family" != deepseek-r1 ]]; then
+  server_command+=" --reasoning off"
+elif [[ "$family" == gpt-oss ]]; then
+  server_command+=" --chat-template-kwargs '{\"reasoning_effort\":\"${reasoning_effort}\"}'"
+fi
+server_command+=" --alias ${model_name}"
+
+if [[ "$info" == true ]]; then
+  printf 'family=%s\n' "$family"
+  printf 'profile=%s\n' "$profile"
+  printf 'model=%s\n' "$model"
+  printf 'model_name=%s\n' "$model_name"
+  printf 'remote_host=%s\n' "$remote_host"
+  printf 'remote_dir=%s\n' "$remote_dir"
+  printf 'remote_start=%s\n' "$remote_start"
+  printf 'hf_repo=%s\n' "$hf_repo"
+  printf 'quant=%s\n' "$quant"
+  printf 'ctx=%s\n' "$context"
+  printf 'batch=%s\n' "$batch"
+  printf 'ubatch=%s\n' "$ubatch"
+  printf 'ngl=%s\n' "$ngl"
+  printf 'mmproj=%s\n' "$mmproj_mode"
+  printf 'reasoning_effort=%s\n' "$reasoning_effort"
+  printf 'alias=%s\n' "$model_name"
+  printf 'plugin_mode=%s\n' "$plugin_mode"
+  printf 'output_limit=%s\n' "$output_limit"
+  printf 'reserved=%s\n' "$reserved"
+  printf 'base_url=%s\n' "$base_url"
+  printf 'wait_seconds=%s\n' "$wait_seconds"
+  printf 'command=%s\n' "$server_command"
+  printf 'OPENCODE_CONFIG_CONTENT=%s\n' "$config_content"
+  exit 0
+fi
+
+if [[ "$dry_run" == true ]]; then
+  printf 'family=%s\n' "$family"
+  printf 'profile=%s\n' "$profile"
+  printf 'context=%s\n' "$context"
+  printf 'plugin_mode=%s\n' "$plugin_mode"
+  printf 'remote_host=%s\n' "$remote_host"
+  printf 'remote_start=%s\n' "$remote_start"
+  printf 'model=%s\n' "$model"
+  printf 'wait_seconds=%s\n' "$wait_seconds"
+  printf 'config=%s\n' "$config_content"
+  exit 0
+fi
+
+printf 'Restarting remote llama.cpp %s profile %s (%s context) on %s...\n' "$family" "$profile" "$context" "$remote_host" >&2
+ssh "$remote_host" bash -s -- "$remote_dir" "$remote_script" "$remote_profile" <<'REMOTE_START'
+set -euo pipefail
+remote_dir="$1"
+remote_script="$2"
+remote_profile="$3"
+cd "$remote_dir"
+pkill -f '[l]lama-server' || true
+log="llama-${remote_profile}.log"
+rm -f "$log"
+nohup "$remote_script" "$remote_profile" >"$log" 2>&1 < /dev/null &
+REMOTE_START
+
+printf 'Waiting for llama.cpp API on %s...\n' "$remote_host" >&2
+deadline=$((SECONDS + wait_seconds))
+until ssh "$remote_host" 'curl -fsS http://127.0.0.1:8080/v1/models >/dev/null 2>&1'; do
+  if (( SECONDS >= deadline )); then
+    printf 'timed out waiting for remote llama.cpp API after %s seconds\n' "$wait_seconds" >&2
+    printf 'check remote log: ssh %s %q\n' "$remote_host" "tail -80 $remote_dir/llama-${remote_profile}.log" >&2
     exit 1
   fi
+  sleep 2
+done
 
-  echo "Available profiles (family:profile):"
-  echo "$profiles" | while IFS= read -r p; do
-    local family profile_name
-    family="$(echo "$p" | cut -d: -f1)"
-    profile_name="$(echo "$p" | cut -d: -f2)"
-    local flags=""
-    if [[ "$profile_name" == "reliable" ]]; then flags=" [stable]"; fi
-    if [[ "$profile_name" == "speed" ]]; then flags=" [fast]"; fi
-    if [[ "$profile_name" == "tiny" ]]; then flags=" [small]"; fi
-    echo "  ${BOLD}${p}${RESET}${flags}"
-  done
-}
-
-mode_show() {
-  local key="$SUBCMD_ARG1"
-  [[ -n "$key" ]] || die "Usage: oc-local show <family:profile>"
-
-  local profile
-  profile="$(get_profile "$key")"
-  if [[ -z "$profile" ]]; then
-    die "Unknown profile: $key"
+printf 'Waiting for llama.cpp API at %s/models...\n' "$base_url" >&2
+until curl -fsS "$base_url/models" >/dev/null 2>&1; do
+  if (( SECONDS >= deadline )); then
+    printf 'remote API is ready, but %s/models is not reachable from this machine\n' "$base_url" >&2
+    exit 1
   fi
+  sleep 2
+done
 
-  echo "Profile: $key"
-  echo "$profile" | jq .
-}
-
-mode_last_runs() {
-  local n="${SUBCMD_ARG1:-10}"
-  if [[ ! -d "$RUNS_DIR" ]]; then
-    log_info "No runs directory found."
-    return
-  fi
-
-  local files
-  files="$(find "$RUNS_DIR" -name '*.json' -type f | sort -r | head -n "$n")"
-  if [[ -z "$files" ]]; then
-    log_info "No recent runs found."
-    return
-  fi
-
-  echo "Last $n run(s):"
-  while IFS= read -r f; do
-    local summary
-    summary="$(jq -r '
-      "\(.profile) \(.phase) at \(.timestamp) \(.stop_time // "")"
-    ' "$f" 2>/dev/null || echo "$f")"
-    echo "  $summary"
-  done <<< "$files"
-}
-
-# Main run mode
-
-mode_run() {
-  local family="$SUBCMD_ARG1"
-  local profile_name="$SUBCMD_ARG2"
-
-  # If called via symlink (e.g., oc-qwen-reliable), try to extract family and profile.
-  if [[ -z "$family" || -z "$profile_name" ]]; then
-    if $INFO_ONLY; then
-      # Allow: ./oc-local --info without family/profile
-      :
-    else
-      local base
-      base="$(basename "$0")"
-      # Only treat as symlink-style if it is NOT "oc-local" itself
-      # Pattern: oc-<family>-<profile>
-      if [[ "$base" == oc-* && "$base" != "oc-local" ]]; then
-        local suffix="${base#oc-}"
-        local first_dash
-        first_dash="${suffix%%-*}"
-        local rest="${suffix#*-}"
-        if [[ -n "$first_dash" && -n "$rest" && "$first_dash" != "$rest" ]]; then
-          family="$first_dash"
-          profile_name="$rest"
-        else
-          die "Could not infer family/profile from: $base"
-        fi
-      else
-        die "Usage: oc-local [family] [profile] [--dry-run|--info|--lean|--no-ssh|--quiet|--] [extra-args...]"
-      fi
-    fi
-  fi
-
-  # Info-only mode (can be global or per-profile)
-  if $INFO_ONLY; then
-    if [[ -z "$family" || -z "$profile_name" ]]; then
-      # Global info: list all profiles with short description
-      echo "Available models (profiles):"
-      echo ""
-
-      local profiles
-      profiles="$(list_profiles)"
-
-      echo "$profiles" | while IFS= read -r p; do
-        local family profile_name model_name context batch ubatch quant
-        family="$(echo "$p" | cut -d: -f1)"
-        profile_name="$(echo "$p" | cut -d: -f2)"
-
-        local profile_json
-        profile_json="$(jq -r --arg k "$p" '.profiles[$k]' "$PROFILES_JSON" 2>/dev/null)"
-
-        model_name="$(echo "$profile_json" | jq -r '.model_name // ""')"
-        context="$(echo "$profile_json" | jq -r '.context // ""')"
-        batch="$(echo "$profile_json" | jq -r '.batch // ""')"
-        ubatch="$(echo "$profile_json" | jq -r '.ubatch // ""')"
-        quant="$(echo "$profile_json" | jq -r '.quant // ""')"
-
-        local short
-        short="$(printf "%s (%s) ctx=%s batch=%s" "$model_name" "$profile_name" "$context" "$batch")"
-
-        echo "  ${BOLD}$p${RESET} $short"
-      done
-    else
-      # Single profile info
-      local profile_key="${family}:${profile_name}"
-      local profile
-      profile="$(get_profile "$profile_key")"
-      if [[ -z "$profile" ]]; then
-        die "Unknown profile: $profile_key"
-      fi
-      echo "Profile: $profile_key"
-      echo "$profile" | jq .
-      echo "LLAMA_SERVER_BIN: $LLAMA_SERVER_BIN"
-      echo "REMOTE_HOST: ${REMOTE_HOST:-<not set>}"
-    fi
-    return
-  fi
-
-  # For non-info modes, require family/profile
-  if [[ -z "$family" || -z "$profile_name" ]]; then
-    die "Usage: oc-local [family] [profile] [--dry-run|--info|--lean|--no-ssh|--quiet|--] [extra-args...]"
-  fi
-
-  local profile_key="${family}:${profile_name}"
-  local profile
-  profile="$(get_profile "$profile_key")"
-  if [[ -z "$profile" ]]; then
-    die "Unknown profile: $profile_key"
-  fi
-
-  # Build command from profile
-  local cmd_line
-  cmd_line="$(echo "$profile" | build_llama_cmd "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}")"
-
-  if $DRY_RUN; then
-    echo "DRY-RUN: would execute:"
-    echo "$cmd_line"
-    return
-  fi
-
-  # Observability: record start
-  local run_file
-  run_file="$(write_run_metadata "$profile_key" "start")"
-
-  # Run model (local or remote)
-  if $QUIET; then
-    if $NO_SSH || [[ -z "$REMOTE_HOST" ]]; then
-      eval "$cmd_line" >/dev/null 2>&1 &
-    else
-      ssh_run "cd \"\$HOME/local_llm\" && $cmd_line" >/dev/null 2>&1 &
-    fi
-  else
-    log_info "Starting profile $profile_key"
-    log_info "Run metadata: $run_file"
-    if $NO_SSH || [[ -z "$REMOTE_HOST" ]]; then
-      eval "$cmd_line" &
-    else
-      ssh_run "cd \"\$HOME/local_llm\" && $cmd_line" &
-    fi
-    local pid=$!
-    log_info "llama-server PID: $pid"
-  fi
-}
-
-case "$MODE" in
-  list-profiles) mode_list_profiles ;;
-  show) mode_show ;;
-  last-runs) mode_last_runs ;;
-  run) mode_run ;;
-esac
+printf 'Starting OpenCode with %s context (%s plugins)...\n' "$context" "$plugin_mode" >&2
+OPENCODE_CONFIG_CONTENT="$config_content" exec opencode -m "$model" "$@"

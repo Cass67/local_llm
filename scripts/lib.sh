@@ -4,19 +4,21 @@
 
 set -euo pipefail
 
-# Directories (relative to repo root)
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-SCRIPTS_DIR="$REPO_ROOT/scripts"
-CONFIG_DIR="$REPO_ROOT/configs"
-RUNS_DIR="$REPO_ROOT/runs"
-PROFILES_JSON="$CONFIG_DIR/profiles.json"
+# Determine install layout:
+# - SCRIPT_DIR: directory where lib.sh lives
+# - CONFIG_DIR: ~/.local/share/local_llm/config
+# - RUNS_DIR: ~/.local/share/local_llm/runs
+SCRIPT_DIR="${LIB_SH_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+CONFIG_DIR="${LOCAL_LLM_CONFIG_DIR:-$HOME/.local/share/local_llm/config}"
+RUNS_DIR="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
+PROFILES_JSON="${CONFIG_DIR}/profiles.json"
 
 # Runtime
-LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-$SCRIPTS_DIR/llama-server}"
-LLAMA_CPP_DIR="${LLAMA_CPP_DIR:-$SCRIPTS_DIR/llama.cpp}"
+LLAMA_CPP_DIR="${LLAMA_CPP_DIR:-$HOME/local_llm/llama.cpp}"
+LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-$LLAMA_CPP_DIR/llama-server}"
 MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-$HOME/.cache/local_llm/models}"
 HF_TOKEN="${HF_TOKEN:-}"
-REMOTE_USER="${REMOTE_USER:-cass}"
+REMOTE_USER="${REMOTE_USER:-$(whoami)}"
 REMOTE_HOST="${REMOTE_HOST:-}"
 REMOTE_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
@@ -148,8 +150,10 @@ build_llama_cmd() {
     cmd+=("${extra_args[@]}")
   fi
 
-  # output as space-joined command (caller may eval or exec)
-  printf "%s\n" "${cmd[@]}"
+  # output as single-line command (caller may eval)
+  # join array into one line; elements are already simple tokens/paths
+  local IFS=" "
+  echo "${cmd[*]}"
 }
 
 # Run a command on the remote host via SSH.
@@ -157,7 +161,19 @@ build_llama_cmd() {
 ssh_run() {
   [[ -n "$REMOTE_HOST" ]] || die "REMOTE_HOST not set; cannot ssh_run"
   local cmd="$*"
-  ssh $REMOTE_SSH_OPTS "${REMOTE_USER}@${REMOTE_HOST}" "$cmd"
+  local base_ssh_cmd=(
+    ssh
+    "${REMOTE_SSH_OPTS:-}"
+    "${REMOTE_USER}@${REMOTE_HOST}"
+  )
+
+  # Remove empty elements (e.g., when REMOTE_SSH_OPTS is unset)
+  local clean_ssh_cmd=()
+  for part in "${base_ssh_cmd[@]}"; do
+    [[ -n "$part" ]] && clean_ssh_cmd+=("$part")
+  done
+
+  "${clean_ssh_cmd[@]}" "$cmd"
 }
 
 # Wait for llama-server to respond (HTTP GET /)

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib.sh"
+LIB_SH_SCRIPT_DIR="$SCRIPT_DIR" source "$SCRIPT_DIR/lib.sh"
 
 MODEL_MANAGER="$SCRIPT_DIR/model-manager.sh"
 
@@ -30,11 +30,23 @@ get_ram() {
 }
 
 discover_models() {
+  gpu_info="None"
+  vram_info="Unknown"
+  if command -v system_profiler >/dev/null 2>&1; then
+    gpu_info="$(system_profiler SPDisplaysDataType 2>/dev/null | grep "Chipset Model" | head -1 | sed 's/.*Chipset Model: //')"
+    vram_info="$(system_profiler SPDisplaysDataType 2>/dev/null | grep "VRAM" | head -1 | xargs)"
+    [ -z "$vram_info" ] && vram_info="Unknown"
+  fi
+  [ -z "$gpu_info" ] && gpu_info="None"
+
   echo "Model Discovery Results:"
   echo "-----------------------"
+  echo "Hardware source: local"
   echo "Based on your system configuration:"
   echo "- CPU Cores: $(get_cpu_cores)"
   echo "- RAM: $(get_ram) GB"
+  echo "- GPU: ${gpu_info:-None}"
+  echo "- VRAM: ${vram_info:-Unknown}"
   echo ""
   echo "Recommended model families (see profiles in profiles.json):"
   echo "- qwen: general-purpose"

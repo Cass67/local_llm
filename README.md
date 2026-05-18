@@ -30,6 +30,16 @@ Use Gemma vision when image input matters:
 oc-gemma-vision-reliable --lean
 ```
 
+Remote usage (SSH):
+
+- By default, `--remote` means: SSH to the given host and run llama-server there.
+- Use `--user` to set the SSH username.
+- Use `-k` to allow password prompt when key auth is not configured.
+
+```bash
+oc-local qwen reliable --remote 192.166.2.1 --user cass -k
+```
+
 Inspect exact settings without starting anything:
 
 ```bash
@@ -164,20 +174,13 @@ Explicit style:
 oc-local <family> <profile> --lean
 ```
 
-Target style:
+Remote style (SSH):
 
 ```bash
-# Run beside a local llama.cpp checkout
-oc-qwen-heretic-reliable --lean --target local
-
-# Run on a remote llama.cpp host
-oc-qwen-heretic-reliable --lean --target remote:ubt26
-
-# Generic remote target form
-oc-local qwen-heretic reliable --target remote:<host>
+oc-local qwen-heretic reliable --remote 192.166.2.1 --user cass -k
 ```
 
-`--target local` starts `llama-server` directly in `OC_LOCAL_LLAMA_DIR`. `--target remote:<host>` starts it over SSH in `OC_LOCAL_REMOTE_DIR`. If `--target` is omitted, `OC_LOCAL_TARGET` is used; the default is `remote:${OC_LOCAL_REMOTE_HOST:-ubt26}`.
+`--remote` SSH-targets the model server. Use `--user` to specify the SSH username and `-k` to allow password prompt when key auth is not configured.
 
 Families:
 
@@ -210,7 +213,7 @@ Options:
 | `--lean` | Removes OpenCode plugins from generated config to reduce prompt overhead. |
 | `--dry-run` | Prints machine-readable-ish wrapper actions and generated config. |
 | `--info` | Prints full resolved model/server/OpenCode settings and exits. No SSH. No server start. |
-| `--target local\|remote:<host>` | Chooses whether to start llama.cpp locally or over SSH. |
+| `--remote <host>` | SSH to the given host and run llama-server there instead of locally. |
 | `-s <id>`, `--session <id>` | Restarts the selected model on the chosen target, then resumes the OpenCode session with that id. |
 
 Resume an existing OpenCode session on a different local model:
@@ -302,8 +305,6 @@ ssh ubt26 'chmod +x /home/cass/llama.cpp/start2.sh /home/cass/llama.cpp/start3.s
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OC_LOCAL_TARGET` | `remote:${OC_LOCAL_REMOTE_HOST:-ubt26}` | Default runtime target; use `local` or `remote:<host>`. |
-| `OC_LOCAL_LLAMA_DIR` | `$HOME/llama.cpp` | Local llama.cpp directory for `--target local`. |
 | `OC_LOCAL_REMOTE_HOST` | `ubt26` | SSH target for model server. |
 | `OC_LOCAL_REMOTE_DIR` | `/home/cass/llama.cpp` | Remote llama.cpp directory. |
 | `OC_LOCAL_BASE_URL` | `http://cass.lan:8080/v1` | OpenAI-compatible llama.cpp API URL from client machine. |

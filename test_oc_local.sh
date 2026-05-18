@@ -52,8 +52,10 @@ line_number_for() {
 }
 
 help_output="$($script --help 2>&1)"
-assert_contains "$help_output" "Profiles are family-specific. Use --info to see exact context, quant, batch, and command."
-assert_contains "$help_output" "--target local|remote:<host>"
+assert_contains "$help_output" "oc-local [family] [profile]"
+assert_contains "$help_output" "--remote HOST"
+assert_contains "$help_output" "--user USER"
+assert_contains "$help_output" "-k"
 assert_not_contains "$help_output" "speed     32k context"
 assert_not_contains "$help_output" "tiny      40k context"
 readme_contents="$(<"$repo_root/README.md")"
@@ -69,10 +71,11 @@ assert_contains "$readme_contents" "update-manager --config"
 assert_contains "$readme_contents" "for family in qwen qwen-27b qwen-coder gemma gemma-vision gpt-oss deepseek-r1 qwen-opus qwen-heretic; do"
 assert_contains "$readme_contents" "bash -n scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start2.sh scripts/start3.sh scripts/start4.sh scripts/start5.sh scripts/start6.sh scripts/start7.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh test_oc_local.sh"
 assert_contains "$readme_contents" "shellcheck scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start2.sh scripts/start3.sh scripts/start4.sh scripts/start5.sh scripts/start6.sh scripts/start7.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh test_oc_local.sh"
-assert_contains "$readme_contents" "--target local"
-assert_contains "$readme_contents" "--target remote:<host>"
-assert_contains "$readme_contents" "OC_LOCAL_TARGET"
-assert_contains "$readme_contents" "OC_LOCAL_LLAMA_DIR"
+assert_contains "$readme_contents" "--remote"
+assert_not_contains "$readme_contents" "--target local"
+assert_not_contains "$readme_contents" "--target remote:<host>"
+assert_not_contains "$readme_contents" "OC_LOCAL_TARGET"
+assert_not_contains "$readme_contents" "OC_LOCAL_LLAMA_DIR"
 gitignore_contents="$(<"$repo_root/.gitignore")"
 if ! grep -qxF '/runs/' <<<"$gitignore_contents"; then
   printf 'expected .gitignore to contain active exact line /runs/\n.gitignore was:\n%s\n' "$gitignore_contents" >&2
@@ -111,11 +114,11 @@ model_discovery_installed_output="$(OC_LOCAL_HF_FIXTURE="$repo_root/testdata/hug
 assert_contains "$model_discovery_installed_output" "Already Tuned Profiles"
 assert_not_contains "$model_discovery_installed_output" "Hugging Face GGUF Candidates"
 
-qwen_heretic_local_info="$(OC_LOCAL_LLAMA_DIR=/tmp/local-llama run_info --target local qwen-heretic reliable)"
+qwen_heretic_local_info="$(LLAMA_CPP_DIR=/tmp/local-llama run_info qwen-heretic reliable)"
 assert_contains "$qwen_heretic_local_info" "--chat-template-file /tmp/local-llama/templates/qwen36-opencode.jinja"
 assert_not_contains "$qwen_heretic_local_info" "/home/cass/llama.cpp/templates/qwen36-opencode.jinja"
-qwen_heretic_remote_info="$(OC_LOCAL_REMOTE_DIR=/srv/remote-llama run_info --target remote:somehost qwen-heretic reliable)"
-assert_contains "$qwen_heretic_remote_info" "--chat-template-file /srv/remote-llama/templates/qwen36-opencode.jinja"
+qwen_heretic_remote_info="$(REMOTE_HOST=somehost run_info qwen-heretic reliable)"
+assert_contains "$qwen_heretic_remote_info" "REMOTE_HOST: somehost"
 
 model_discovery_help_output="$("$repo_root/scripts/model-discovery.sh" --help 2>&1)"
 assert_contains "$model_discovery_help_output" "--query <text>"
@@ -744,6 +747,34 @@ assert_contains "$qwen_reliable_output" "profile=reliable"
 assert_contains "$qwen_reliable_output" "target=remote:ubt26"
 assert_contains "$qwen_reliable_output" "remote_host=ubt26"
 assert_contains "$qwen_reliable_output" "remote_start=./start3.sh reliable"
+
+wrapper_tmp="$probe_tmp/wrappers"
+mkdir -p "$wrapper_tmp"
+ln -sf "$repo_root/scripts/oc-local" "$wrapper_tmp/oc-local"
+ln -sf "$repo_root/scripts/lib.sh" "$wrapper_tmp/lib.sh"
+ln -sf "$wrapper_tmp/oc-local" "$wrapper_tmp/oc-coder-reliable"
+ln -sf "$wrapper_tmp/oc-local" "$wrapper_tmp/oc-qwen-coder-reliable"
+ln -sf "$wrapper_tmp/oc-local" "$wrapper_tmp/oc-gemma-vision-reliable"
+ln -sf "$wrapper_tmp/oc-local" "$wrapper_tmp/oc-deepseek-r1-reliable"
+
+coder_wrapper_output="$(LOCAL_LLM_CONFIG_DIR="$repo_root/configs" "$wrapper_tmp/oc-coder-reliable" --dry-run --lean)"
+assert_contains "$coder_wrapper_output" "qwen3-coder-30b-a3b-instruct"
+assert_contains "$coder_wrapper_output" "--ctx-size 65536"
+
+qwen_coder_wrapper_output="$(LOCAL_LLM_CONFIG_DIR="$repo_root/configs" "$wrapper_tmp/oc-qwen-coder-reliable" --dry-run --lean)"
+assert_contains "$qwen_coder_wrapper_output" "qwen3-coder-30b-a3b-instruct"
+assert_contains "$qwen_coder_wrapper_output" "--ctx-size 65536"
+
+qwen_coder_wrapper_info="$(LOCAL_LLM_CONFIG_DIR="$repo_root/configs" "$wrapper_tmp/oc-qwen-coder-reliable" --info --lean)"
+assert_contains "$qwen_coder_wrapper_info" "Profile: qwen-coder:reliable"
+
+gemma_vision_wrapper_output="$(LOCAL_LLM_CONFIG_DIR="$repo_root/configs" "$wrapper_tmp/oc-gemma-vision-reliable" --dry-run --lean)"
+assert_contains "$gemma_vision_wrapper_output" "gemma-4-31b-it-vision"
+assert_contains "$gemma_vision_wrapper_output" "--ctx-size 32768"
+
+deepseek_wrapper_output="$(LOCAL_LLM_CONFIG_DIR="$repo_root/configs" "$wrapper_tmp/oc-deepseek-r1-reliable" --dry-run --lean)"
+assert_contains "$deepseek_wrapper_output" "deepseek-r1-distill-qwen-32b"
+assert_contains "$deepseek_wrapper_output" "--ctx-size 65536"
 
 default_target_host_output="$(OC_LOCAL_REMOTE_HOST=other-host run_info qwen reliable)"
 assert_contains "$default_target_host_output" "target=remote:other-host"
