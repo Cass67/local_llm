@@ -59,6 +59,10 @@ default_profile=''
 default_family=''
 case "$(basename "$0")" in
   oc-qwen) default_family=qwen ;;
+  oc-qwen-mtp) default_family=qwen; default_profile=reliable ;;
+  oc-qwen-27b|oc-qwen-27b-mtp|oc-qwen36-27b|oc-qwen36-27b-mtp) default_family=qwen-27b; default_profile=reliable ;;
+  oc-qwen-opus|oc-qwen-opus-mtp) default_family=qwen-opus; default_profile=reliable ;;
+  oc-qwen-heretic|oc-qwen-heretic-mtp) default_family=qwen-heretic; default_profile=reliable ;;
   oc-qwen-coder|oc-coder|oc-code) default_family=qwen-coder ;;
   oc-gemma) default_family=gemma ;;
   oc-gemma-vision) default_family=gemma-vision ;;
@@ -69,11 +73,26 @@ case "$(basename "$0")" in
   oc-balanced) default_profile=balanced ;;
   oc-reliable) default_profile=reliable ;;
   oc-tiny) default_profile=tiny ;;
-  oc-qwen-speed) default_family=qwen; default_profile=speed ;;
-  oc-qwen-fastlong) default_family=qwen; default_profile=fastlong ;;
-  oc-qwen-balanced) default_family=qwen; default_profile=balanced ;;
-  oc-qwen-reliable) default_family=qwen; default_profile=reliable ;;
-  oc-qwen-tiny) default_family=qwen; default_profile=tiny ;;
+  oc-qwen-speed|oc-qwen-mtp-speed) default_family=qwen; default_profile=speed ;;
+  oc-qwen-fastlong|oc-qwen-mtp-fastlong) default_family=qwen; default_profile=fastlong ;;
+  oc-qwen-balanced|oc-qwen-mtp-balanced) default_family=qwen; default_profile=balanced ;;
+  oc-qwen-reliable|oc-qwen-mtp-reliable) default_family=qwen; default_profile=reliable ;;
+  oc-qwen-tiny|oc-qwen-mtp-tiny) default_family=qwen; default_profile=tiny ;;
+  oc-qwen-27b-speed|oc-qwen-27b-mtp-speed|oc-qwen36-27b-speed|oc-qwen36-27b-mtp-speed) default_family=qwen-27b; default_profile=speed ;;
+  oc-qwen-27b-fastlong|oc-qwen-27b-mtp-fastlong|oc-qwen36-27b-fastlong|oc-qwen36-27b-mtp-fastlong) default_family=qwen-27b; default_profile=fastlong ;;
+  oc-qwen-27b-balanced|oc-qwen-27b-mtp-balanced|oc-qwen36-27b-balanced|oc-qwen36-27b-mtp-balanced) default_family=qwen-27b; default_profile=balanced ;;
+  oc-qwen-27b-reliable|oc-qwen-27b-mtp-reliable|oc-qwen36-27b-reliable|oc-qwen36-27b-mtp-reliable) default_family=qwen-27b; default_profile=reliable ;;
+  oc-qwen-27b-tiny|oc-qwen-27b-mtp-tiny|oc-qwen36-27b-tiny|oc-qwen36-27b-mtp-tiny) default_family=qwen-27b; default_profile=tiny ;;
+  oc-qwen-opus-speed|oc-qwen-opus-mtp-speed) default_family=qwen-opus; default_profile=speed ;;
+  oc-qwen-opus-fastlong|oc-qwen-opus-mtp-fastlong) default_family=qwen-opus; default_profile=fastlong ;;
+  oc-qwen-opus-balanced|oc-qwen-opus-mtp-balanced) default_family=qwen-opus; default_profile=balanced ;;
+  oc-qwen-opus-reliable|oc-qwen-opus-mtp-reliable) default_family=qwen-opus; default_profile=reliable ;;
+  oc-qwen-opus-tiny|oc-qwen-opus-mtp-tiny) default_family=qwen-opus; default_profile=tiny ;;
+  oc-qwen-heretic-speed|oc-qwen-heretic-mtp-speed) default_family=qwen-heretic; default_profile=speed ;;
+  oc-qwen-heretic-fastlong|oc-qwen-heretic-mtp-fastlong) default_family=qwen-heretic; default_profile=fastlong ;;
+  oc-qwen-heretic-balanced|oc-qwen-heretic-mtp-balanced) default_family=qwen-heretic; default_profile=balanced ;;
+  oc-qwen-heretic-reliable|oc-qwen-heretic-mtp-reliable) default_family=qwen-heretic; default_profile=reliable ;;
+  oc-qwen-heretic-tiny|oc-qwen-heretic-mtp-tiny) default_family=qwen-heretic; default_profile=tiny ;;
   oc-qwen-coder-speed|oc-coder-speed) default_family=qwen-coder; default_profile=speed ;;
   oc-qwen-coder-fastlong|oc-coder-fastlong) default_family=qwen-coder; default_profile=fastlong ;;
   oc-qwen-coder-balanced|oc-coder-balanced) default_family=qwen-coder; default_profile=balanced ;;
@@ -104,7 +123,7 @@ esac
 family="${default_family:-qwen}"
 if [[ $# -gt 0 ]]; then
   case "$1" in
-    qwen|qwen-coder|gemma|gemma-vision|gpt-oss|deepseek-r1)
+    qwen|qwen-27b|qwen-opus|qwen-heretic|qwen-coder|gemma|gemma-vision|gpt-oss|deepseek-r1)
       family="$1"
       shift
       ;;
@@ -165,8 +184,8 @@ reasoning_effort=none
 case "$family" in
   qwen)
     remote_script=./start3.sh
-    model_name="qwen3.6-35b-a3b"
-    hf_repo="unsloth/Qwen3.6-35B-A3B-GGUF"
+    model_name="qwen3.6-35b-a3b-mtp"
+    hf_repo="unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
     mmproj_mode=none
     case "$profile" in
       speed) context=32768; ngl=999; batch=1024; ubatch=1024; quant="UD-Q3_K_XL" ;;
@@ -187,6 +206,45 @@ case "$family" in
       balanced) context=49152; ngl=999; batch=256; ubatch=256; quant="UD-Q3_K_XL" ;;
       reliable) context=65536; ngl=999; batch=128; ubatch=128; quant="UD-Q3_K_XL" ;;
       tiny) context=65536; ngl=999; batch=256; ubatch=256; quant="UD-Q2_K_XL" ;;
+    esac
+    ;;
+  qwen-27b)
+    remote_script=./start8.sh
+    model_name="qwen3.6-27b-mtp"
+    hf_repo="unsloth/Qwen3.6-27B-MTP-GGUF"
+    mmproj_mode=none
+    case "$profile" in
+      speed) context=49152; ngl=999; batch=128; ubatch=128; quant="Q3_K_M" ;;
+      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="Q3_K_M" ;;
+      balanced) context=49152; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
+      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
+      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
+    esac
+    ;;
+  qwen-opus)
+    remote_script=./start9.sh
+    model_name="qwen3.6-27b-opus-mtp"
+    hf_repo="noctrex/Qwopus3.6-27B-v1-preview-MTP-GGUF"
+    mmproj_mode=none
+    case "$profile" in
+      speed) context=49152; ngl=999; batch=128; ubatch=128; quant="IQ3_M" ;;
+      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="IQ3_M" ;;
+      balanced) context=49152; ngl=999; batch=64; ubatch=64; quant="IQ3_M" ;;
+      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="IQ3_M" ;;
+      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="IQ3_M" ;;
+    esac
+    ;;
+  qwen-heretic)
+    remote_script=./start10.sh
+    model_name="qwen3.6-27b-heretic-mtp"
+    hf_repo="llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-GGUF"
+    mmproj_mode=none
+    case "$profile" in
+      speed) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
+      fastlong) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
+      balanced) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
+      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
+      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
     esac
     ;;
   gemma)

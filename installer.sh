@@ -124,7 +124,7 @@ done
 
 # Family-profile wrappers: oc-qwen-reliable, etc.
 # Skip if the resulting name would be "oc-local"
-for family in qwen qwen-coder gemma gemma-vision gpt-oss deepseek-r1; do
+for family in qwen qwen-27b qwen-opus qwen-heretic qwen-coder gemma gemma-vision gpt-oss deepseek-r1; do
     for profile in speed fastlong balanced reliable tiny; do
         local_name="oc-${family}-${profile}"
         if [[ "$local_name" != "oc-local" ]]; then
@@ -137,6 +137,29 @@ EOF
             chmod +x "$BIN_DIR/$local_name"
         fi
     done
+done
+
+# MTP-visible wrappers: oc-qwen-mtp, oc-qwen-27b-mtp, oc-qwen-opus-mtp, oc-qwen-heretic-mtp.
+for family in qwen qwen-27b qwen-opus qwen-heretic; do
+    for profile in speed fastlong balanced reliable tiny; do
+        local_name="oc-${family}-mtp-${profile}"
+        rm -f "$BIN_DIR/$local_name"
+        cat > "$BIN_DIR/$local_name" <<EOF
+#!/usr/bin/env bash
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+exec "\$SCRIPT_DIR/oc-local" "$family" "$profile" "\$@"
+EOF
+        chmod +x "$BIN_DIR/$local_name"
+    done
+
+    local_name="oc-${family}-mtp"
+    rm -f "$BIN_DIR/$local_name"
+    cat > "$BIN_DIR/$local_name" <<EOF
+#!/usr/bin/env bash
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+exec "\$SCRIPT_DIR/oc-local" "$family" reliable "\$@"
+EOF
+    chmod +x "$BIN_DIR/$local_name"
 done
 
 # Coder convenience wrappers
