@@ -34,10 +34,37 @@ MODE="run"
 SUBCMD_ARG1=""
 SUBCMD_ARG2=""
 
+usage() {
+  cat <<'EOF'
+Usage: oc-local [family] [profile] [--dry-run|--info|--lean|--no-ssh|--quiet|--] [extra-args...]
+       oc-local list-profiles
+       oc-local show <family:profile>
+       oc-local last-runs [N]
+
+Profiles are family-specific. Use --info to see exact context, quant, batch, and command.
+
+Options:
+  --dry-run                 print the llama-server command without starting it
+  --info                    print profile information
+  --lean                    reduce generated client-side prompt overhead where supported
+  --no-ssh                  run locally instead of through SSH
+  --quiet                   suppress launcher status output
+  --target local|remote:<host>
+
+Environment:
+  OC_LOCAL_TARGET           default target, local or remote:<host>
+  OC_LOCAL_LLAMA_DIR        llama.cpp checkout directory
+EOF
+}
+
 parse_args() {
   local args=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --help|-h)
+        usage
+        exit 0
+        ;;
       list-profiles)
         MODE="list-profiles"
         return

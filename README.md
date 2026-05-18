@@ -356,9 +356,9 @@ curl -fsS http://cass.lan:8080/v1/chat/completions \
 ## Verification
 
 ```bash
-bash -n scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh installer.sh scripts/start2.sh scripts/start3.sh scripts/start4.sh scripts/start5.sh scripts/start6.sh scripts/start7.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh test_oc_local.sh
+bash -n scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start2.sh scripts/start3.sh scripts/start4.sh scripts/start5.sh scripts/start6.sh scripts/start7.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh test_oc_local.sh
 ./test_oc_local.sh
-shellcheck scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh installer.sh scripts/start2.sh scripts/start3.sh scripts/start4.sh scripts/start5.sh scripts/start6.sh scripts/start7.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh test_oc_local.sh
+shellcheck scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start2.sh scripts/start3.sh scripts/start4.sh scripts/start5.sh scripts/start6.sh scripts/start7.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh test_oc_local.sh
 oc-qwen-coder-reliable --lean --info
 oc-gemma-vision-reliable --lean --info
 oc-gpt-oss-reliable --lean --info
