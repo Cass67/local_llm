@@ -708,9 +708,12 @@ assert_contains "$start6_contents" "reasoning_effort=high"
 assert_contains "$start7_contents" "unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF"
 assert_contains "$start7_contents" "Q3_K_M"
 assert_contains "$start7_contents" "--alias deepseek-r1-distill-qwen-32b"
-assert_contains "$start8_contents" "unsloth/Qwen3.6-27B-GGUF"
-assert_contains "$start8_contents" "IQ4_XS"
-assert_contains "$start8_contents" "--alias qwen3.6-27b"
+assert_contains "$start8_contents" "unsloth/Qwen3.6-27B-MTP-GGUF"
+assert_contains "$start8_contents" "--spec-type draft-mtp"
+assert_contains "$start8_contents" "--spec-draft-n-max 2"
+assert_contains "$start8_contents" "--alias qwen3.6-27b-mtp"
+assert_contains "$(<"$repo_root/scripts/start9.sh")" "--alias qwen3.6-27b-opus-mtp"
+assert_contains "$(<"$repo_root/scripts/start10.sh")" "--alias qwen3.6-27b-heretic-mtp"
 if [[ "$start5_contents" == *"--no-mmproj"* ]]; then
   printf 'expected start5.sh to allow mmproj for vision\n' >&2
   exit 1

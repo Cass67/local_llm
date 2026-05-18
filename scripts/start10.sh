@@ -12,36 +12,36 @@ case "$profile" in
     ctx=65536
     batch=64
     ubatch=64
-    hf_file="Qwen3.6-27B-NEO-CODE-HERE-2T-OT-IQ4_XS.gguf"
+    hf_file="Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q3_K_M.gguf"
     chat_template_kwargs=(--chat-template-kwargs '{"enable_thinking":false}')
     ;;
   fastlong)
     ngl=999
-    ctx=98304
+    ctx=65536
     batch=64
     ubatch=64
-    hf_file="Qwen3.6-27B-NEO-CODE-HERE-2T-OT-IQ3_M.gguf"
+    hf_file="Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q3_K_M.gguf"
     ;;
   balanced)
     ngl=999
-    ctx=98304
+    ctx=65536
     batch=64
     ubatch=64
-    hf_file="Qwen3.6-27B-NEO-CODE-HERE-2T-OT-IQ3_M.gguf"
+    hf_file="Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q3_K_M.gguf"
     ;;
   reliable)
     ngl=999
     ctx=65536
     batch=64
     ubatch=64
-    hf_file="Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q4_K_M.gguf"
+    hf_file="Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q3_K_M.gguf"
     ;;
   tiny)
     ngl=999
-    ctx=131072
+    ctx=65536
     batch=64
     ubatch=64
-    hf_file="Qwen3.6-27B-NEO-CODE-HERE-2T-OT-IQ2_M.gguf"
+    hf_file="Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q3_K_M.gguf"
     ;;
   *)
     echo "Usage: $0 {speed|fastlong|balanced|reliable|tiny}" >&2
@@ -50,7 +50,7 @@ case "$profile" in
 esac
 
 exec ./build/bin/llama-server \
-  -hf "DavidAU/Qwen3.6-27B-Heretic-Uncensored-FINETUNE-NEO-CODE-Di-IMatrix-MAX-GGUF" \
+  -hf "llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-GGUF" \
   --hf-file "$hf_file" \
   --chat-template-file "$chat_template_file" \
   "${chat_template_kwargs[@]}" \
@@ -70,4 +70,6 @@ exec ./build/bin/llama-server \
   --top-k 20 \
   --min-p 0.0 \
   --presence-penalty 0.0 \
-  --alias qwen3.6-27b-heretic-code
+  --spec-type draft-mtp \
+  --spec-draft-n-max 2 \
+  --alias qwen3.6-27b-heretic-mtp

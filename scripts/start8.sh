@@ -9,35 +9,35 @@ case "$profile" in
     ctx=49152
     batch=128
     ubatch=128
-    quant="IQ4_XS"
+    hf_file="Qwen3.6-27B-Q3_K_M.gguf"
     ;;
   fastlong)
     ngl=999
     ctx=49152
     batch=128
     ubatch=128
-    quant="IQ4_XS"
+    hf_file="Qwen3.6-27B-Q3_K_M.gguf"
     ;;
   balanced)
     ngl=999
     ctx=49152
     batch=64
     ubatch=64
-    quant="IQ4_XS"
+    hf_file="Qwen3.6-27B-Q3_K_M.gguf"
     ;;
   reliable)
     ngl=999
     ctx=65536
     batch=64
     ubatch=64
-    quant="IQ4_XS"
+    hf_file="Qwen3.6-27B-Q3_K_M.gguf"
     ;;
   tiny)
     ngl=999
-    ctx=98304
+    ctx=65536
     batch=64
     ubatch=64
-    quant="UD-Q3_K_XL"
+    hf_file="Qwen3.6-27B-Q3_K_M.gguf"
     ;;
   *)
     echo "Usage: $0 {speed|fastlong|balanced|reliable|tiny}" >&2
@@ -46,7 +46,8 @@ case "$profile" in
 esac
 
 exec ./build/bin/llama-server \
-  -hf "unsloth/Qwen3.6-27B-GGUF:${quant}" \
+  -hf "unsloth/Qwen3.6-27B-MTP-GGUF" \
+  --hf-file "$hf_file" \
   --no-mmproj \
   --host 0.0.0.0 \
   --port 8080 \
@@ -63,4 +64,6 @@ exec ./build/bin/llama-server \
   --top-k 20 \
   --min-p 0.0 \
   --presence-penalty 0.0 \
-  --alias qwen3.6-27b
+  --spec-type draft-mtp \
+  --spec-draft-n-max 2 \
+  --alias qwen3.6-27b-mtp
