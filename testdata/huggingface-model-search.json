@@ -1,0 +1,12 @@
+[
+  {"id":"TinyOrg/Tiny-1B-GGUF","downloads":9999999,"likes":0,"tags":["gguf","text-generation"]},
+  {"id":"HugeOrg/Huge-70B-GGUF","downloads":8888888,"likes":0,"tags":["gguf","reasoning"]},
+  {"id":"TargetOrg/Target-16B-GGUF","downloads":7777777,"likes":0,"tags":["gguf","text-generation"]},
+  {"id":"HugeOrg/Huge-80B-GGUF","downloads":6666666,"likes":0,"tags":["gguf","reasoning"]},
+  {"id":"HugeOrg/Huge-405B-A22B-GGUF","downloads":5555555,"likes":0,"tags":["gguf","reasoning"]},
+  {"id":"unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF","downloads":1200,"likes":45,"tags":["gguf","llama.cpp","text-generation","code"]},
+  {"id":"unsloth/gpt-oss-20b-GGUF","downloads":900,"likes":40,"tags":["gguf","llama.cpp","reasoning"]},
+  {"id":"OddOrg/Odd-E4B-GGUF","downloads":2000,"likes":0,"tags":["gguf","text-generation"]},
+  {"id":"UnknownOrg/Unknown-GGUF","downloads":1000,"likes":0,"tags":["gguf","text-generation"]},
+  {"id":"example/not-a-gguf-model","downloads":5000,"likes":100,"tags":["safetensors"]}
+]

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-runs_dir="${LOCAL_LLM_RUNS_DIR:-$repo_root/runs}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_SH_SCRIPT_DIR="$SCRIPT_DIR" source "$SCRIPT_DIR/lib.sh"
+
+runs_dir="$RUNS_DIR"
 
 usage() {
     cat <<'EOF'
