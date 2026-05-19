@@ -124,7 +124,7 @@ done
 
 # Family-profile wrappers: oc-qwen-reliable, etc.
 # Skip if the resulting name would be "oc-local"
-for family in qwen qwen-27b qwen-opus qwen-heretic qwen-coder gemma gemma-vision gpt-oss deepseek-r1; do
+for family in qwen qwen-hauhau qwen-27b-hauhau glm-hauhau gemma-hauhau qwen-27b qwen-opus qwen-heretic qwen-coder gemma gemma-vision gpt-oss deepseek-r1; do
     for profile in speed fastlong balanced reliable tiny; do
         local_name="oc-${family}-${profile}"
         if [[ "$local_name" != "oc-local" ]]; then
@@ -138,6 +138,36 @@ EOF
         fi
     done
 done
+
+local_name="oc-qwen-hauhau"
+rm -f "$BIN_DIR/$local_name"
+cat > "$BIN_DIR/$local_name" <<EOF
+#!/usr/bin/env bash
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+exec "\$SCRIPT_DIR/oc-local" qwen-hauhau reliable "\$@"
+EOF
+chmod +x "$BIN_DIR/$local_name"
+
+for family in qwen-27b-hauhau glm-hauhau gemma-hauhau; do
+    local_name="oc-${family}"
+    rm -f "$BIN_DIR/$local_name"
+    cat > "$BIN_DIR/$local_name" <<EOF
+#!/usr/bin/env bash
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+exec "\$SCRIPT_DIR/oc-local" "$family" reliable "\$@"
+EOF
+    chmod +x "$BIN_DIR/$local_name"
+done
+
+# Session-resume shortcut for the HauhauCS aggressive model.
+local_name="oc-qwen-hauhau-ses-2009"
+rm -f "$BIN_DIR/$local_name"
+cat > "$BIN_DIR/$local_name" <<EOF
+#!/usr/bin/env bash
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+exec "\$SCRIPT_DIR/oc-local" qwen-hauhau reliable "\$@" --lean -s ses_2009bfccfffeEVdvBAajurVOi4
+EOF
+chmod +x "$BIN_DIR/$local_name"
 
 # MTP-visible wrappers: oc-qwen-mtp, oc-qwen-27b-mtp, oc-qwen-opus-mtp, oc-qwen-heretic-mtp.
 for family in qwen qwen-27b qwen-opus qwen-heretic; do
