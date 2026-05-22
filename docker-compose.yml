@@ -1,0 +1,23 @@
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: "3002"
+    volumes:
+      - open-webui:/app/backend/data
+
+  local-llm-caddy:
+    image: caddy:2
+    container_name: local-llm-caddy
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - open-webui
+    volumes:
+      - ${LOCAL_LLM_CADDYFILE:-./scripts/Caddyfile.local-llm}:/etc/caddy/Caddyfile:ro
+
+volumes:
+  open-webui:
