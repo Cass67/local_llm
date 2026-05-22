@@ -44,7 +44,7 @@ esac
 exec ./build/bin/llama-server \
   -hf "HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive" \
   --hf-file "$hf_file" \
-  --no-mmproj \
+  --mmproj-auto \
   --host 0.0.0.0 \
   --port 8080 \
   -ngl "$ngl" \
@@ -55,6 +55,7 @@ exec ./build/bin/llama-server \
   --threads "$(nproc)" \
   --prio 2 \
   --no-warmup \
+  --chat-template-kwargs '{"enable_thinking":false}' \
   --temp 0.6 \
   --top-p 0.95 \
   --top-k 20 \

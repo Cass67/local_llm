@@ -4,6 +4,8 @@ set -euo pipefail
 profile="${1:-reliable}"
 port="${LLAMA_PORT:-8080}"
 hf_file="Qwen3.6-27B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf"
+llama_cpp_dir="$(pwd)"
+chat_template_file="${llama_cpp_dir}/templates/qwen36-opencode.jinja"
 
 case "$profile" in
   speed)
@@ -56,6 +58,8 @@ exec ./build/bin/llama-server \
   --threads "$(nproc)" \
   --prio 2 \
   --no-warmup \
+  --chat-template-file "$chat_template_file" \
+  --chat-template-kwargs '{"enable_thinking":false}' \
   --temp 0.6 \
   --top-p 0.95 \
   --top-k 20 \

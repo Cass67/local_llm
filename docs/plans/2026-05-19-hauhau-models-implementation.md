@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add three Hauhau model families, benchmark them on `ubt26`, and install local shortcuts.
+**Goal:** Add Hauhau model families, benchmark them on `ubt26`, and install local shortcuts.
 
 **Architecture:** Add one launcher per model family and wire each into `oc-local` metadata and installer shortcut generation. Benchmark remotely before final profile promotion, using conservative values and lowering context or quant only if needed.
 
@@ -17,11 +17,10 @@
 
 **Step 1: Add assertions**
 
-Add checks for `qwen-27b-hauhau`, `glm-hauhau`, and `gemma-hauhau`:
+Add checks for `qwen-27b-hauhau` and `gemma-hauhau`:
 
 ```bash
 assert_contains "$installer_contents" "qwen-27b-hauhau"
-assert_contains "$installer_contents" "glm-hauhau"
 assert_contains "$installer_contents" "gemma-hauhau"
 
 qwen_27b_hauhau_info="$(run_info qwen-27b-hauhau reliable --lean)"
@@ -29,12 +28,6 @@ assert_contains "$qwen_27b_hauhau_info" "family=qwen-27b-hauhau"
 assert_contains "$qwen_27b_hauhau_info" "model_name=qwen3.6-27b-hauhau"
 assert_contains "$qwen_27b_hauhau_info" "hf_repo=HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive"
 assert_contains "$qwen_27b_hauhau_info" "remote_start=./start12.sh reliable"
-
-glm_hauhau_info="$(run_info glm-hauhau reliable --lean)"
-assert_contains "$glm_hauhau_info" "family=glm-hauhau"
-assert_contains "$glm_hauhau_info" "model_name=glm-4.7-flash-hauhau"
-assert_contains "$glm_hauhau_info" "hf_repo=HauhauCS/GLM-4.7-Flash-Uncensored-HauhauCS-Aggressive"
-assert_contains "$glm_hauhau_info" "remote_start=./start13.sh reliable"
 
 gemma_hauhau_info="$(run_info gemma-hauhau reliable --lean)"
 assert_contains "$gemma_hauhau_info" "family=gemma-hauhau"
@@ -53,7 +46,6 @@ Expected: FAIL because the new families and launchers are not implemented.
 
 **Files:**
 - Create: `scripts/start12.sh`
-- Create: `scripts/start13.sh`
 - Create: `scripts/start14.sh`
 - Modify: `scripts/oc-local`
 - Modify: `installer.sh`
@@ -63,13 +55,11 @@ Expected: FAIL because the new families and launchers are not implemented.
 Create launchers following the `start11.sh` style. Use aliases:
 
 - `qwen3.6-27b-hauhau`
-- `glm-4.7-flash-hauhau`
 - `gemma4-26b-a4b-hauhau`
 
 Use `--hf-file` with:
 
 - `Qwen3.6-27B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf`
-- `GLM-4.7-Flash-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf`
 - `Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf`
 
 **Step 2: Wire `oc-local`**
@@ -77,22 +67,21 @@ Use `--hf-file` with:
 Add basename mappings and family cases for:
 
 - `qwen-27b-hauhau`
-- `glm-hauhau`
 - `gemma-hauhau`
 
 Use reliable defaults `ctx=65536`, `batch=64`, `ubatch=64`, `ngl=999`.
 
 **Step 3: Update installer**
 
-Add the three families to the family/profile wrapper loop and add base reliable wrappers if needed.
+Add the two families to the family/profile wrapper loop and add base reliable wrappers if needed.
 
 **Step 4: Verify**
 
 Run:
 
 ```bash
-bash -n scripts/oc-local installer.sh scripts/start12.sh scripts/start13.sh scripts/start14.sh test_oc_local.sh
-shellcheck scripts/oc-local installer.sh scripts/start12.sh scripts/start13.sh scripts/start14.sh
+bash -n scripts/oc-local installer.sh scripts/start12.sh scripts/start14.sh test_oc_local.sh
+shellcheck scripts/oc-local installer.sh scripts/start12.sh scripts/start14.sh
 bash test_oc_local.sh
 ```
 
@@ -102,22 +91,21 @@ Expected: syntax and shellcheck pass; tests pass unless unrelated existing test 
 
 **Files:**
 - Remote: `/home/cass/llama.cpp/start12.sh`
-- Remote: `/home/cass/llama.cpp/start13.sh`
 - Remote: `/home/cass/llama.cpp/start14.sh`
 
 **Step 1: Install local shortcuts**
 
 Run: `./installer.sh`
 
-Expected: `~/.local/bin/oc-qwen-27b-hauhau`, `~/.local/bin/oc-glm-hauhau`, and `~/.local/bin/oc-gemma-hauhau` exist.
+Expected: `~/.local/bin/oc-qwen-27b-hauhau` and `~/.local/bin/oc-gemma-hauhau` exist.
 
 **Step 2: Copy remote launchers**
 
 Run:
 
 ```bash
-scp scripts/start12.sh scripts/start13.sh scripts/start14.sh ubt26:/home/cass/llama.cpp/
-ssh ubt26 'chmod +x /home/cass/llama.cpp/start12.sh /home/cass/llama.cpp/start13.sh /home/cass/llama.cpp/start14.sh && bash -n /home/cass/llama.cpp/start12.sh /home/cass/llama.cpp/start13.sh /home/cass/llama.cpp/start14.sh'
+scp scripts/start12.sh scripts/start14.sh ubt26:/home/cass/llama.cpp/
+ssh ubt26 'chmod +x /home/cass/llama.cpp/start12.sh /home/cass/llama.cpp/start14.sh && bash -n /home/cass/llama.cpp/start12.sh /home/cass/llama.cpp/start14.sh'
 ```
 
 Expected: exit code 0.
@@ -139,7 +127,7 @@ For each start script, run it under `timeout 180` and inspect whether it loads o
 ssh ubt26 'cd /home/cass/llama.cpp && timeout 180 ./start12.sh reliable >/tmp/start12-hauhau.log 2>&1; echo start12=$?; tail -80 /tmp/start12-hauhau.log'
 ```
 
-Repeat for `start13.sh` and `start14.sh`.
+Repeat for `start14.sh`.
 
 **Step 3: Record results**
 
@@ -153,8 +141,8 @@ Write a markdown table with load status, chosen quant, context, batch, and any t
 Run:
 
 ```bash
-bash -n scripts/oc-local installer.sh scripts/start11.sh scripts/start12.sh scripts/start13.sh scripts/start14.sh test_oc_local.sh
-shellcheck scripts/oc-local installer.sh scripts/start11.sh scripts/start12.sh scripts/start13.sh scripts/start14.sh
+bash -n scripts/oc-local installer.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh test_oc_local.sh
+shellcheck scripts/oc-local installer.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh
 ```
 
 Verify installed shortcuts with `--info --lean` for each new base command.

@@ -138,6 +138,66 @@ model-manager benchmark --repo <repo> --family <family> --alias <alias> --target
 
 Use the explicit install commands below when you change `scripts/oc-local` or any `scripts/start*.sh` launcher.
 
+## Server Service
+
+`ubt26` runs `llama-server` through a user systemd service. The service has a stable `ExecStart` that calls `run-current-model.sh`; `oc-local` updates `current-model.env` and then runs:
+
+```bash
+systemctl --user restart llama-server.service
+```
+
+The current model selection is mutable and stored on the server in `current-model.env`. For example, the restored Qwen vision service uses:
+
+```bash
+REMOTE_SCRIPT=./start11.sh
+REMOTE_PROFILE=reliable
+```
+
+This avoids rewriting unit files and avoids fighting a root-owned `Restart=always` process.
+
+## Web Switcher
+
+The public Open WebUI path is fronted by `local-llm-switcher` on `ubt26`:
+
+- Open WebUI listens on http://127.0.0.1:3002.
+- local-llm-switcher listens on http://127.0.0.1:3001.
+- Cloudflare stays pointed at port 3001, so the public tunnel does not need to change.
+- The switcher proxies normal Open WebUI traffic to `127.0.0.1:3002` and injects a compact model selector.
+
+Switcher endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/local-llm/models` | List allowed launcher/profile choices. |
+| `GET /api/local-llm/current` | Show the selected `current-model.env` entry and live llama.cpp model aliases. |
+| `POST /api/local-llm/switch` | Write `current-model.env`, restart `llama-server.service`, and wait for the requested alias. |
+| `GET /_switcher` | Fallback page using the same APIs when the injected Open WebUI widget is unavailable. |
+
+Inspect or restart the remote services:
+
+```bash
+ssh ubt26 'systemctl --user status local-llm-switcher.service llama-server.service'
+ssh ubt26 'journalctl --user -u local-llm-switcher.service -n 160 --no-pager'
+ssh ubt26 'journalctl --user -u llama-server.service -n 160 --no-pager'
+ssh ubt26 'docker ps --filter name=open-webui'
+ssh ubt26 'docker logs --tail 120 open-webui'
+ssh ubt26 'docker restart open-webui'
+ssh ubt26 'systemctl --user restart local-llm-switcher.service llama-server.service'
+```
+
+Probe the switcher, fallback page, and proxied Open WebUI directly on `ubt26`:
+
+```bash
+ssh ubt26 'curl -fsS http://127.0.0.1:3001/api/local-llm/current; curl -fsS http://127.0.0.1:3001/_switcher >/dev/null; curl -fsS http://127.0.0.1:3001/ >/dev/null; curl -fsS http://127.0.0.1:3002/ >/dev/null'
+```
+
+Rollback if the proxy fails:
+
+```bash
+ssh ubt26 'systemctl --user disable --now local-llm-switcher.service'
+ssh ubt26 'docker rm -f open-webui && docker run -d --name open-webui --restart unless-stopped --network host -e PORT=3001 -v open-webui:/app/backend/data ghcr.io/open-webui/open-webui:main'
+```
+
 ## What This Does
 
 `scripts/oc-local`:
@@ -151,7 +211,7 @@ Use the explicit install commands below when you change `scripts/oc-local` or an
 llama.cpp launchers:
 
 - `scripts/start2.sh`: Qwen3-Coder 30B A3B Instruct.
-- `scripts/start3.sh`: Qwen3.6 35B A3B.
+- `scripts/start3.sh`: Qwen3.6 35B A3B, vision-enabled with `--mmproj-auto`.
 - `scripts/start4.sh`: Gemma 4 31B text-only.
 - `scripts/start5.sh`: Gemma 4 31B vision.
 - `scripts/start6.sh`: gpt-oss 20B.
@@ -159,6 +219,7 @@ llama.cpp launchers:
 - `scripts/start8.sh`: Qwen3.6 27B dense.
 - `scripts/start9.sh`: Qwen3.5 27B Opus reasoning distill benchmark candidate.
 - `scripts/start10.sh`: DavidAU Qwen3.6 27B Heretic uncensored code finetune candidate.
+- `scripts/start11.sh`: Hauhau Qwen3.6 35B A3B uncensored candidate, vision-enabled with `--mmproj-auto`.
 
 ## Command Shape
 
@@ -186,7 +247,8 @@ Families:
 
 | Family | Purpose | Model id |
 | --- | --- | --- |
-| `qwen` | Default coding/chat profile | `localllm/qwen3.6-35b-a3b` |
+| `qwen` | Default coding/chat profile with vision projector enabled | `localllm/qwen3.6-35b-a3b-mtp` |
+| `qwen-hauhau` | Hauhau Qwen3.6 35B vision-enabled candidate | `localllm/qwen3.6-35b-a3b-hauhau` |
 | `qwen-27b` | Qwen3.6 27B dense-thinking comparison; not the responsive daily driver | `localllm/qwen3.6-27b` |
 | `qwen-coder` | Code-specialized Qwen Coder | `localllm/qwen3-coder-30b-a3b-instruct` |
 | `gemma` | Gemma text-only | `localllm/gemma-4-31b-it` |
@@ -225,9 +287,13 @@ oc-qwen-coder-reliable --lean --session ses_abc123
 
 ## Recommended Choices
 
+Qwen 35B defaults are vision-enabled. The default `qwen` family and the `qwen-hauhau` candidate load their multimodal projector with `--mmproj-auto`; use `--info` to inspect the resolved `mmproj=enabled` setting before starting a long session.
+
+Quant, KV Q4/Q5, and MMQ changes remain future benchmark/promotion work. The 2026-05-22 Qwen vision quant benchmark did not justify adding q8 KV launcher flags, changing quant files, or enabling `GGML_HIP_FORCE_MMQ` by default.
+
 | Goal | Command | Why |
 | --- | --- | --- |
-| Best default local OpenCode | `oc-qwen-reliable --lean` | Fast decode, stable behavior, long context. |
+| Best default local OpenCode | `oc-qwen-reliable --lean` | Fast decode, stable behavior, long context, and vision projector enabled. |
 | Qwen dense-thinking comparison | `oc-qwen-27b-reliable --lean` | Dense 27B thinking model; not the responsive daily driver. |
 | Qwen dense fastest profile | `oc-qwen-27b-speed --lean` | IQ4, 49k context; fastest stable 27B profile, but still about 30 tok/s decode. |
 | Qwen dense reliable | `oc-qwen-27b-reliable --lean` | IQ4, 65k context; more room, but slower prompt eval. |
@@ -297,8 +363,15 @@ scp scripts/start7.sh ubt26:/home/cass/llama.cpp/start7.sh
 scp scripts/start8.sh ubt26:/home/cass/llama.cpp/start8.sh
 scp scripts/start9.sh ubt26:/home/cass/llama.cpp/start9.sh
 scp scripts/start10.sh ubt26:/home/cass/llama.cpp/start10.sh
+scp scripts/start11.sh ubt26:/home/cass/llama.cpp/start11.sh
+scp scripts/start12.sh ubt26:/home/cass/llama.cpp/start12.sh
+scp scripts/start14.sh ubt26:/home/cass/llama.cpp/start14.sh
+scp scripts/run-current-model.sh ubt26:/home/cass/llama.cpp/run-current-model.sh
+scp scripts/local-llm-switcher.py ubt26:/home/cass/llama.cpp/local-llm-switcher.py
+scp scripts/local-llm-switcher.service ubt26:/home/cass/.config/systemd/user/local-llm-switcher.service
 
-ssh ubt26 'chmod +x /home/cass/llama.cpp/start2.sh /home/cass/llama.cpp/start3.sh /home/cass/llama.cpp/start4.sh /home/cass/llama.cpp/start5.sh /home/cass/llama.cpp/start6.sh /home/cass/llama.cpp/start7.sh /home/cass/llama.cpp/start8.sh /home/cass/llama.cpp/start9.sh /home/cass/llama.cpp/start10.sh'
+ssh ubt26 'chmod +x /home/cass/llama.cpp/start2.sh /home/cass/llama.cpp/start3.sh /home/cass/llama.cpp/start4.sh /home/cass/llama.cpp/start5.sh /home/cass/llama.cpp/start6.sh /home/cass/llama.cpp/start7.sh /home/cass/llama.cpp/start8.sh /home/cass/llama.cpp/start9.sh /home/cass/llama.cpp/start10.sh /home/cass/llama.cpp/start11.sh /home/cass/llama.cpp/start12.sh /home/cass/llama.cpp/start14.sh /home/cass/llama.cpp/run-current-model.sh'
+ssh ubt26 'systemctl --user daemon-reload && systemctl --user enable --now local-llm-switcher.service'
 ```
 
 ## Environment Overrides
@@ -336,8 +409,8 @@ ssh ubt26 'cd /home/cass/llama.cpp && ./start3.sh reliable'
 Inspect remote logs:
 
 ```bash
-ssh ubt26 'tail -120 /home/cass/llama.cpp/llama-reliable.log'
-ssh ubt26 'grep -E "offloaded|KV buffer|eval time|prompt eval" /home/cass/llama.cpp/llama-reliable.log'
+ssh ubt26 'journalctl --user -u llama-server.service -n 160 --no-pager'
+ssh ubt26 'journalctl --user -u llama-server.service -n 300 --no-pager | grep -E "offloaded|KV buffer|eval time|prompt eval|mmproj"'
 ```
 
 Check active server:
@@ -351,15 +424,17 @@ Run a tiny API probe:
 ```bash
 curl -fsS http://cass.lan:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  --data '{"model":"qwen3.6-35b-a3b","messages":[{"role":"user","content":"Reply with exactly: ok"}],"max_tokens":8,"temperature":0}'
+  --data '{"model":"qwen3.6-35b-a3b-hauhau","messages":[{"role":"user","content":"Reply with exactly: ok"}],"max_tokens":8,"temperature":0}'
 ```
 
 ## Verification
 
 ```bash
-bash -n scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start2.sh scripts/start3.sh scripts/start4.sh scripts/start5.sh scripts/start6.sh scripts/start7.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh test_oc_local.sh
+python3 -m py_compile scripts/local-llm-switcher.py
+for script in scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh; do bash -n "$script" || exit 1; done
 ./test_oc_local.sh
-shellcheck scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start2.sh scripts/start3.sh scripts/start4.sh scripts/start5.sh scripts/start6.sh scripts/start7.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh test_oc_local.sh
+shellcheck scripts/oc-local scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh
+ssh ubt26 'systemctl --user is-active local-llm-switcher.service llama-server.service; curl -fsS http://127.0.0.1:3001/api/local-llm/current; curl -fsS http://127.0.0.1:3001/ >/dev/null; curl -fsS http://127.0.0.1:3002/ >/dev/null'
 oc-qwen-coder-reliable --lean --info
 oc-gemma-vision-reliable --lean --info
 oc-gpt-oss-reliable --lean --info
@@ -372,7 +447,7 @@ oc-gpt-oss-reliable --lean --info
 Check for CPU-offloaded layers or CPU KV:
 
 ```bash
-ssh ubt26 'grep -E "offloaded|CPU KV|KV buffer|eval time" /home/cass/llama.cpp/llama-reliable.log'
+ssh ubt26 'journalctl --user -u llama-server.service -n 300 --no-pager | grep -E "offloaded|CPU KV|KV buffer|eval time"'
 ```
 
 If decode drops hard, prefer a profile with full GPU offload over a higher quant. For Coder, `UD-Q3_K_XL` reliable is faster than old `IQ4_XS` reliable because it keeps all layers on GPU.

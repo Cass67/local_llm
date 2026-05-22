@@ -105,6 +105,14 @@ fi
 # Create convenience wrapper scripts (no symlinks)
 echo "Installing convenience commands..."
 
+# Remove wrappers for families that were removed after benchmarking.
+rm -f "$BIN_DIR"/oc-glm-hauhau \
+      "$BIN_DIR"/oc-glm-hauhau-speed \
+      "$BIN_DIR"/oc-glm-hauhau-fastlong \
+      "$BIN_DIR"/oc-glm-hauhau-balanced \
+      "$BIN_DIR"/oc-glm-hauhau-reliable \
+      "$BIN_DIR"/oc-glm-hauhau-tiny
+
 # Basic profile wrappers: oc-speed, etc.
 for profile in speed fastlong balanced reliable tiny; do
     local_name="oc-${profile}"
@@ -124,7 +132,7 @@ done
 
 # Family-profile wrappers: oc-qwen-reliable, etc.
 # Skip if the resulting name would be "oc-local"
-for family in qwen qwen-hauhau qwen-27b-hauhau glm-hauhau gemma-hauhau qwen-27b qwen-opus qwen-heretic qwen-coder gemma gemma-vision gpt-oss deepseek-r1; do
+for family in qwen qwen-hauhau qwen-27b-hauhau gemma-hauhau qwen-27b qwen-opus qwen-heretic qwen-coder gemma gemma-vision gpt-oss deepseek-r1; do
     for profile in speed fastlong balanced reliable tiny; do
         local_name="oc-${family}-${profile}"
         if [[ "$local_name" != "oc-local" ]]; then
@@ -148,7 +156,7 @@ exec "\$SCRIPT_DIR/oc-local" qwen-hauhau reliable "\$@"
 EOF
 chmod +x "$BIN_DIR/$local_name"
 
-for family in qwen-27b-hauhau glm-hauhau gemma-hauhau; do
+for family in qwen-27b-hauhau gemma-hauhau; do
     local_name="oc-${family}"
     rm -f "$BIN_DIR/$local_name"
     cat > "$BIN_DIR/$local_name" <<EOF

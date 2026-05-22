@@ -1,0 +1,15 @@
+[Unit]
+Description=Local LLM Open WebUI Switcher Proxy
+After=network.target llama-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/llama.cpp
+Environment=OPENWEBUI_BASE_URL=http://127.0.0.1:3002
+Environment=LLAMA_API_BASE=http://127.0.0.1:8080
+ExecStart=/usr/bin/python3 %h/llama.cpp/local-llm-switcher.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
