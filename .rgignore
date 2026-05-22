@@ -1,13 +1,4 @@
-*.log
-.pytest_cache/
-__pycache__/
-*.pyc
-.worktrees/
-.worktrees
-/runs/
-/docs/plans/
-/docs/superpowers/
-# Secret-bearing files and directories: never commit these by default.
+# Keep ripgrep aligned with the default secret-exclusion policy.
 .env
 .env.*
 *.env

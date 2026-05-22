@@ -7,7 +7,8 @@ import html
 import http.client
 import json
 import os
-import subprocess
+import selectors
+import signal
 import tempfile
 import threading
 import time
@@ -16,20 +17,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
-
 
 LLAMA_DIR = Path(os.environ.get("LLAMA_DIR", "/home/cass/llama.cpp"))
 CURRENT_MODEL_ENV = Path(
     os.environ.get("LLAMA_CURRENT_MODEL_ENV", str(LLAMA_DIR / "current-model.env"))
 )
 LLAMA_API_BASE = os.environ.get("LLAMA_API_BASE", "http://127.0.0.1:8080").rstrip("/")
-OPENWEBUI_BASE_URL = os.environ.get(
-    "OPENWEBUI_BASE_URL", "http://127.0.0.1:3002"
-).rstrip("/")
+OPENWEBUI_BASE_URL = os.environ.get("OPENWEBUI_BASE_URL", "http://127.0.0.1:3002").rstrip("/")
 SWITCH_TIMEOUT_SECONDS = int(os.environ.get("SWITCH_TIMEOUT_SECONDS", "180"))
 SWITCHER_HOST = os.environ.get("SWITCHER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "3001"))
+OPENWEBUI_CONTAINER = os.environ.get("OPENWEBUI_CONTAINER", "open-webui")
+OPENWEBUI_DB_PATH = os.environ.get("OPENWEBUI_DB_PATH", "/app/backend/data/webui.db")
+SYSTEMCTL_BIN = os.environ.get("SYSTEMCTL_BIN", "/usr/bin/systemctl")
+DOCKER_BIN = os.environ.get("DOCKER_BIN", "/usr/bin/docker")
 POLL_INTERVAL_SECONDS = 2.0
 COPY_CHUNK_SIZE = 64 * 1024
 HOP_BY_HOP_HEADERS = {
@@ -43,6 +44,14 @@ HOP_BY_HOP_HEADERS = {
     "upgrade",
 }
 CSP_HEADERS = {"content-security-policy", "content-security-policy-report-only"}
+CACHE_HEADERS = {"cache-control", "etag", "expires", "last-modified", "pragma"}
+CACHE_VALIDATION_HEADERS = {
+    "if-match",
+    "if-modified-since",
+    "if-none-match",
+    "if-range",
+    "if-unmodified-since",
+}
 PROXY_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
 
 switch_lock = threading.Lock()
@@ -134,6 +143,15 @@ class ApiError(Exception):
         super().__init__(detail)
 
 
+class CommandError(Exception):
+    def __init__(self, args: list[str], returncode: int, stdout: str, stderr: str) -> None:
+        self.args_list = args
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        super().__init__(f"command failed with exit code {returncode}: {args[0]}")
+
+
 class ThreadingHTTPServerReuse(ThreadingHTTPServer):
     allow_reuse_address = True
 
@@ -185,11 +203,85 @@ def verify_launcher(model: Model) -> None:
         raise ApiError(409, f"launcher for {model.id} is not executable: {path}")
 
 
+def http_json_get(base_url: str, path: str) -> dict[str, Any]:
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise OSError("base URL must be http or https")
+
+    connection_cls = (
+        http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    )
+    connection = connection_cls(parsed.hostname, parsed.port, timeout=5)
+    try:
+        connection.request("GET", path, headers={"Accept": "application/json"})
+        response = connection.getresponse()
+        return json.loads(response.read().decode("utf-8"))
+    finally:
+        connection.close()
+
+
+def read_from_selector(selector: selectors.BaseSelector) -> tuple[dict[int, bytes], bool]:
+    chunks: dict[int, bytes] = {}
+    for key, _events in selector.select(timeout=0.05):
+        chunk = os.read(key.fd, COPY_CHUNK_SIZE)
+        if chunk:
+            chunks[key.fd] = chunk
+        else:
+            selector.unregister(key.fd)
+            os.close(key.fd)
+    return chunks, bool(selector.get_map())
+
+
+def run_command(args: list[str], timeout_seconds: float = 15) -> str:
+    executable = args[0]
+    if not executable.startswith("/"):
+        raise ValueError(f"command path must be absolute: {executable}")
+
+    stdout_read, stdout_write = os.pipe()
+    stderr_read, stderr_write = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(stdout_read)
+        os.close(stderr_read)
+        os.dup2(stdout_write, 1)
+        os.dup2(stderr_write, 2)
+        os.close(stdout_write)
+        os.close(stderr_write)
+        os.execv(executable, args)
+
+    os.close(stdout_write)
+    os.close(stderr_write)
+    os.set_blocking(stdout_read, False)
+    os.set_blocking(stderr_read, False)
+
+    output = {stdout_read: [], stderr_read: []}
+    deadline = time.monotonic() + timeout_seconds
+    with selectors.DefaultSelector() as selector:
+        selector.register(stdout_read, selectors.EVENT_READ)
+        selector.register(stderr_read, selectors.EVENT_READ)
+        returncode: int | None = None
+        while returncode is None or selector.get_map():
+            for fd, chunk in read_from_selector(selector)[0].items():
+                output[fd].append(chunk)
+            if returncode is None:
+                waited_pid, status = os.waitpid(pid, os.WNOHANG)
+                if waited_pid:
+                    returncode = os.waitstatus_to_exitcode(status)
+            if returncode is None and time.monotonic() > deadline:
+                os.kill(pid, signal.SIGKILL)
+                _waited_pid, status = os.waitpid(pid, 0)
+                returncode = os.waitstatus_to_exitcode(status)
+
+    stdout = b"".join(output[stdout_read]).decode("utf-8", errors="replace")
+    stderr = b"".join(output[stderr_read]).decode("utf-8", errors="replace")
+    if returncode:
+        raise CommandError(args, returncode, stdout, stderr)
+    return stdout
+
+
 def get_live_models() -> dict[str, Any]:
     try:
-        request = Request(f"{LLAMA_API_BASE}/v1/models", headers={"Accept": "application/json"})
-        with urlopen(request, timeout=5) as response:
-            body = json.loads(response.read().decode("utf-8"))
+        body = http_json_get(LLAMA_API_BASE, "/v1/models")
     except (OSError, json.JSONDecodeError) as exc:
         return {"available": False, "error": str(exc)}
 
@@ -211,12 +303,95 @@ def wait_for_alias(alias: str, timeout_seconds: int) -> bool:
 
 
 def restart_llama_server() -> None:
-    subprocess.run(
-        ["systemctl", "--user", "restart", "llama-server.service"],
-        check=True,
-        text=True,
-        capture_output=True,
+    run_command([SYSTEMCTL_BIN, "--user", "restart", "llama-server.service"])
+
+
+def sync_openwebui_selected_model(alias: str) -> dict[str, Any]:
+    script = r'''
+import json
+import sqlite3
+import sys
+import time
+
+db_path, alias = sys.argv[1:]
+connection = sqlite3.connect(db_path)
+cursor = connection.cursor()
+updated = 0
+now = int(time.time())
+admin_row = cursor.execute(
+    "select id from user where role='admin' order by created_at limit 1"
+).fetchone()
+owner_id = admin_row[0] if admin_row else cursor.execute(
+    "select id from user order by created_at limit 1"
+).fetchone()[0]
+
+cursor.execute(
+    """
+    insert into model
+        (id, user_id, base_model_id, name, meta, params, created_at, updated_at, is_active)
+    values (?, ?, null, ?, ?, ?, ?, ?, 1)
+    on conflict(id) do update set
+        name=excluded.name,
+        updated_at=excluded.updated_at,
+        is_active=1
+    """,
+    (alias, owner_id, alias, json.dumps({}), json.dumps({}), now, now),
+)
+model_rows = cursor.rowcount
+
+for user_id, settings_text in cursor.execute("select id, settings from user").fetchall():
+    if not settings_text or settings_text == "null":
+        settings = {}
+    else:
+        try:
+            settings = json.loads(settings_text)
+        except json.JSONDecodeError:
+            continue
+    try:
+        settings = dict(settings)
+    except (TypeError, ValueError):
+        settings = {}
+    ui = settings.get("ui")
+    if not isinstance(ui, dict):
+        ui = {}
+        settings["ui"] = ui
+    ui["models"] = [alias]
+    cursor.execute(
+        "update user set settings=?, updated_at=? where id=?",
+        (json.dumps(settings), now, user_id),
     )
+    grant_id = f"model:{alias}:user:{user_id}:read"
+    cursor.execute(
+        """
+        insert or ignore into access_grant
+            (id, resource_type, resource_id, principal_type, principal_id, permission,
+             created_at)
+        values (?, 'model', ?, 'user', ?, 'read', ?)
+        """,
+        (grant_id, alias, user_id, now),
+    )
+    updated += 1
+
+connection.commit()
+print(json.dumps({"updated": updated, "model_rows": model_rows, "alias": alias}))
+'''
+    try:
+        output = run_command(
+            [
+                DOCKER_BIN,
+                "exec",
+                OPENWEBUI_CONTAINER,
+                "python3",
+                "-c",
+                script,
+                OPENWEBUI_DB_PATH,
+                alias,
+            ]
+        )
+        result = json.loads(output.strip() or "{}")
+        return result if isinstance(result, dict) else {"updated": 0}
+    except (OSError, CommandError, json.JSONDecodeError) as exc:
+        return {"updated": 0, "error": str(exc)}
 
 
 def switch_to_model(model_id: object) -> dict[str, Any]:
@@ -228,12 +403,18 @@ def switch_to_model(model_id: object) -> dict[str, Any]:
         write_current_model(model)
         try:
             restart_llama_server()
-        except subprocess.CalledProcessError as exc:
+        except CommandError as exc:
             detail = exc.stderr.strip() or exc.stdout.strip() or str(exc)
             raise ApiError(502, f"restart failed: {detail}") from exc
         if not wait_for_alias(model.alias, SWITCH_TIMEOUT_SECONDS):
             raise ApiError(504, f"timed out waiting for llama-server alias {model.alias}")
-    return {"ok": True, "model": model.as_dict()}
+        openwebui_sync = sync_openwebui_selected_model(model.alias)
+    return {
+        "ok": True,
+        "model": model.as_dict(),
+        "openwebui": openwebui_sync,
+        "reload_recommended": True,
+    }
 
 
 def current_model_payload() -> dict[str, Any]:
@@ -273,13 +454,20 @@ def proxy_response_headers(headers: list[tuple[str, str]]) -> list[tuple[str, st
     return [
         (name, value)
         for name, value in headers
-        if header_name(name) not in HOP_BY_HOP_HEADERS
-        and header_name(name) != "content-length"
+        if header_name(name) not in HOP_BY_HOP_HEADERS and header_name(name) != "content-length"
     ]
 
 
 def injected_html_headers(headers: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    blocked = HOP_BY_HOP_HEADERS | CSP_HEADERS | {"content-length", "content-encoding"}
+    blocked = (
+        HOP_BY_HOP_HEADERS
+        | CSP_HEADERS
+        | CACHE_HEADERS
+        | {
+            "content-length",
+            "content-encoding",
+        }
+    )
     return [(name, value) for name, value in headers if header_name(name) not in blocked]
 
 
@@ -306,19 +494,122 @@ def inject_widget(body: bytes, content_type: str) -> bytes:
 
 
 def widget_snippet() -> str:
-    return r'''
-<div id="local-llm-switcher" style="position:fixed;right:16px;bottom:16px;z-index:2147483647;background:#111827;color:#f9fafb;border:1px solid #374151;border-radius:12px;padding:10px 12px;font:13px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-shadow:0 12px 36px rgba(0,0,0,.35);display:flex;gap:8px;align-items:center;max-width:calc(100vw - 32px)">
-  <label for="local-llm-switcher-select" style="font-weight:600;white-space:nowrap">Local LLM</label>
-  <select id="local-llm-switcher-select" style="max-width:260px;background:#1f2937;color:#f9fafb;border:1px solid #4b5563;border-radius:8px;padding:5px"></select>
-  <span id="local-llm-switcher-status" style="color:#d1d5db;white-space:nowrap">loading</span>
+    return r"""
+<style>
+  #local-llm-switcher {
+    position: fixed;
+    right: 16px;
+    bottom: max(96px, env(safe-area-inset-bottom));
+    z-index: 2147483647;
+    font: 13px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #local-llm-switcher-toggle {
+    background: #111827;
+    color: #f9fafb;
+    border: 1px solid #374151;
+    border-radius: 999px;
+    padding: 8px 10px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, .35);
+    cursor: pointer;
+  }
+  #local-llm-switcher-panel {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    background: #111827;
+    color: #f9fafb;
+    border: 1px solid #374151;
+    border-radius: 12px;
+    padding: 10px 12px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, .35);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    width: max-content;
+    max-width: min(360px, calc(100vw - 32px));
+  }
+  #local-llm-switcher:not(.is-open) #local-llm-switcher-panel {
+    display: none;
+  }
+  #local-llm-switcher label,
+  #local-llm-switcher-status {
+    white-space: nowrap;
+  }
+  #local-llm-switcher label {
+    font-weight: 600;
+  }
+  #local-llm-switcher-select {
+    max-width: 260px;
+    background: #1f2937;
+    color: #f9fafb;
+    border: 1px solid #4b5563;
+    border-radius: 8px;
+    padding: 5px;
+  }
+  #local-llm-switcher-status {
+    color: #d1d5db;
+  }
+  @media (max-width: 640px) {
+    #local-llm-switcher {
+      right: 8px;
+      bottom: max(96px, env(safe-area-inset-bottom));
+    }
+    #local-llm-switcher-panel {
+      width: min(72vw, 320px);
+      max-width: calc(100vw - 16px);
+    }
+    #local-llm-switcher-select {
+      flex: 1;
+      min-width: 0;
+      max-width: none;
+    }
+    #local-llm-switcher-status {
+      display: none;
+    }
+  }
+  @media (hover: none), (pointer: coarse), (max-width: 900px) {
+    #local-llm-switcher {
+      right: 8px;
+      bottom: max(96px, env(safe-area-inset-bottom));
+    }
+    #local-llm-switcher-panel {
+      width: min(72vw, 320px);
+      max-width: calc(100vw - 16px);
+    }
+    #local-llm-switcher-select {
+      flex: 1;
+      min-width: 0;
+      max-width: none;
+    }
+    #local-llm-switcher-status {
+      display: none;
+    }
+  }
+</style>
+<div id="local-llm-switcher">
+  <button id="local-llm-switcher-toggle" type="button" aria-expanded="false"
+    aria-label="Local LLM switcher">LLM</button>
+  <div id="local-llm-switcher-panel">
+    <label for="local-llm-switcher-select">Local LLM</label>
+    <select id="local-llm-switcher-select"></select>
+    <span id="local-llm-switcher-status">loading</span>
+  </div>
 </div>
 <script>
 (() => {
   const root = document.getElementById('local-llm-switcher');
+  const toggle = document.getElementById('local-llm-switcher-toggle');
   const select = document.getElementById('local-llm-switcher-select');
   const status = document.getElementById('local-llm-switcher-status');
-  if (!root || !select || !status) return;
+  if (!root || !toggle || !select || !status) return;
+  toggle.addEventListener('click', () => {
+    const isOpen = root.classList.toggle('is-open');
+    toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  });
   const setStatus = (text) => { status.textContent = text; };
+  const goToNewChat = (alias) => {
+    window.location.href = '/?local_llm_model=' + encodeURIComponent(alias) + '&t=' + Date.now();
+  };
   const load = async () => {
     try {
       const [modelsRes, currentRes] = await Promise.all([
@@ -351,7 +642,10 @@ def widget_snippet() -> str:
         body: JSON.stringify({id}),
       });
       if (!response.ok) throw new Error(await response.text());
-      setStatus('ready');
+      const body = await response.json();
+      const alias = body.model && body.model.alias ? body.model.alias : id;
+      setStatus('ready: ' + alias);
+      goToNewChat(alias);
     } catch (error) {
       setStatus('switch failed');
       await load();
@@ -362,7 +656,7 @@ def widget_snippet() -> str:
   load();
 })();
 </script>
-'''
+"""
 
 
 def fallback_html() -> bytes:
@@ -382,6 +676,9 @@ def fallback_html() -> bytes:
   <script>
   const status = document.getElementById('fallback-status');
   const select = document.getElementById('fallback-model');
+  function goToNewChat(alias) {{
+    window.location.href = '/?local_llm_model=' + encodeURIComponent(alias) + '&t=' + Date.now();
+  }}
   async function refresh() {{
     const response = await fetch('/api/local-llm/current');
     const body = await response.json();
@@ -395,12 +692,18 @@ def fallback_html() -> bytes:
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify({{id: select.value}}),
     }});
-    status.textContent = await response.text();
+    const text = await response.text();
+    status.textContent = text;
+    try {{
+      const body = JSON.parse(text);
+      const alias = body.model && body.model.alias ? body.model.alias : select.value;
+      goToNewChat(alias);
+    }} catch (error) {{}}
   }});
   refresh();
   </script>
 </body>
-</html>""".encode("utf-8")
+</html>""".encode()
 
 
 class SwitcherHandler(BaseHTTPRequestHandler):
@@ -446,7 +749,13 @@ class SwitcherHandler(BaseHTTPRequestHandler):
                 self.send_json(405, {"detail": "method not allowed"})
         except ApiError as exc:
             self.send_json(exc.status, {"detail": exc.detail})
-        except Exception as exc:  # pragma: no cover - safety net for service logs.
+        except (
+            CommandError,
+            OSError,
+            ValueError,
+            http.client.HTTPException,
+            json.JSONDecodeError,
+        ) as exc:
             self.send_json(500, {"detail": str(exc)})
 
     def send_json(self, status: int, payload: object) -> None:
@@ -471,7 +780,11 @@ class SwitcherHandler(BaseHTTPRequestHandler):
         path = self.path if self.path.startswith("/") else f"/{self.path}"
         headers = self.proxy_request_headers(upstream.netloc)
         body = self.read_request_body()
-        connection_cls = http.client.HTTPSConnection if upstream.scheme == "https" else http.client.HTTPConnection
+        connection_cls = (
+            http.client.HTTPSConnection
+            if upstream.scheme == "https"
+            else http.client.HTTPConnection
+        )
         connection = connection_cls(upstream.hostname, upstream.port, timeout=60)
         try:
             connection.request(self.command, path, body=body, headers=headers)
@@ -488,7 +801,7 @@ class SwitcherHandler(BaseHTTPRequestHandler):
             lower = header_name(name)
             if lower in HOP_BY_HOP_HEADERS or lower == "host":
                 continue
-            if lower == "accept-encoding":
+            if lower == "accept-encoding" or lower in CACHE_VALIDATION_HEADERS:
                 continue
             headers[name] = value
         headers["Host"] = host
@@ -511,6 +824,9 @@ class SwitcherHandler(BaseHTTPRequestHandler):
             self.send_response(response.status, response.reason)
             for name, value in injected_html_headers(headers):
                 self.send_header(name, value)
+            self.send_header("Cache-Control", "no-store, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Connection", "close")
             self.end_headers()

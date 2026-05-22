@@ -1,0 +1,57 @@
+{
+	auto_https off
+}
+
+:3001 {
+	handle /api/local-llm/* {
+		reverse_proxy 127.0.0.1:3003
+	}
+
+	handle /_switcher {
+		reverse_proxy 127.0.0.1:3003
+	}
+
+	handle /ws/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	handle /_app/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	handle /static/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	handle /assets/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	handle /ollama/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	handle /oauth/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	handle /favicon* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	handle /manifest.json {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	handle /robots.txt {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3003
+	}
+}

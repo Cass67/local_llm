@@ -71,7 +71,7 @@ assert_contains "$readme_contents" "model-manager discover"
 assert_contains "$readme_contents" "update-manager is a compatibility helper"
 assert_contains "$readme_contents" "update-manager --config"
 assert_contains "$readme_contents" "for family in qwen qwen-27b qwen-coder gemma gemma-vision gpt-oss deepseek-r1 qwen-opus qwen-heretic; do"
-assert_contains "$readme_contents" "for script in scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh; do bash -n \"\$script\" || exit 1; done"
+assert_contains "$readme_contents" "for script in scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh; do bash -n \"\$script\" || exit 1; done"
 assert_contains "$readme_contents" "shellcheck scripts/oc-local scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh"
 assert_contains "$readme_contents" "systemctl --user restart llama-server.service"
 assert_contains "$readme_contents" "run-current-model.sh"
@@ -80,17 +80,55 @@ assert_contains "$readme_contents" 'localllm/qwen3.6-35b-a3b-mtp'
 assert_contains "$readme_contents" "scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh"
 assert_contains "$readme_contents" "journalctl --user -u llama-server.service"
 assert_contains "$readme_contents" "Open WebUI listens on http://127.0.0.1:3002"
-assert_contains "$readme_contents" "local-llm-switcher listens on http://127.0.0.1:3001"
+assert_contains "$readme_contents" "Caddy listens on http://127.0.0.1:3001"
+assert_contains "$readme_contents" "local-llm-switcher listens on http://127.0.0.1:3003"
 assert_contains "$readme_contents" "Cloudflare stays pointed at port 3001"
+assert_contains "$readme_contents" "local-llm-caddy"
+assert_contains "$readme_contents" "run-local-llm-caddy-container.sh"
+assert_contains "$readme_contents" "Caddyfile.local-llm"
+assert_contains "$readme_contents" "stored selected model"
+assert_contains "$readme_contents" "Open WebUI model row and read grants"
+assert_contains "$readme_contents" "fresh chat pane"
+assert_contains "$readme_contents" "Model Workflow"
+assert_contains "$readme_contents" "model-manager select"
+assert_contains "$readme_contents" "docs/benchmarks/"
+assert_contains "$readme_contents" "docs/plans/"
+assert_contains "$readme_contents" "docs/superpowers/"
+if ! grep -qxF '/docs/plans/' "$repo_root/.gitignore"; then
+  printf 'expected .gitignore to ignore /docs/plans/\n' >&2
+  exit 1
+fi
+if ! grep -qxF '/docs/superpowers/' "$repo_root/.gitignore"; then
+  printf 'expected .gitignore to ignore /docs/superpowers/\n' >&2
+  exit 1
+fi
+switcher_contents="$(<"$repo_root/scripts/local-llm-switcher.py")"
+assert_contains "$switcher_contents" "@media (max-width: 640px)"
+assert_contains "$switcher_contents" "@media (hover: none), (pointer: coarse), (max-width: 900px)"
+assert_contains "$switcher_contents" "local-llm-switcher-toggle"
+assert_contains "$switcher_contents" "local-llm-switcher-panel"
+assert_contains "$switcher_contents" "bottom: max(96px, env(safe-area-inset-bottom))"
+assert_contains "$switcher_contents" "border-radius: 999px"
+assert_contains "$switcher_contents" "position: absolute"
+assert_contains "$switcher_contents" "bottom: calc(100% + 8px)"
+assert_contains "$switcher_contents" "right: 0"
+assert_contains "$switcher_contents" '"cache-control"'
+assert_contains "$switcher_contents" '"if-none-match"'
+assert_contains "$switcher_contents" "no-store"
+assert_not_contains "$switcher_contents" "top: 50%"
+assert_not_contains "$switcher_contents" "top: 12px"
+assert_not_contains "$switcher_contents" "bottom: 16px"
+assert_contains "$readme_contents" "without prompting"
 assert_contains "$readme_contents" "GET /api/local-llm/models"
 assert_contains "$readme_contents" "GET /api/local-llm/current"
 assert_contains "$readme_contents" "POST /api/local-llm/switch"
 assert_contains "$readme_contents" "GET /_switcher"
 assert_contains "$readme_contents" "systemctl --user status local-llm-switcher.service llama-server.service"
 assert_contains "$readme_contents" "docker ps --filter name=open-webui"
+assert_contains "$readme_contents" "docker ps --filter name=local-llm-caddy"
 assert_contains "$readme_contents" "docker restart open-webui"
-assert_contains "$readme_contents" "systemctl --user restart local-llm-switcher.service llama-server.service"
-assert_contains "$readme_contents" "systemctl --user disable --now local-llm-switcher.service"
+assert_contains "$readme_contents" "systemctl --user restart local-llm-switcher.service llama-server.service && /home/cass/llama.cpp/run-local-llm-caddy-container.sh"
+assert_contains "$readme_contents" "docker rm -f local-llm-caddy && systemctl --user disable --now local-llm-switcher.service"
 assert_contains "$readme_contents" "docker rm -f open-webui && docker run -d --name open-webui --restart unless-stopped --network host -e PORT=3001 -v open-webui:/app/backend/data ghcr.io/open-webui/open-webui:main"
 assert_contains "$readme_contents" "--remote"
 assert_not_contains "$readme_contents" "--target local"
@@ -126,7 +164,7 @@ assert_not_contains "$model_discovery_output" "Recommended models:"
 qwen_target_line="$(line_number_for "$model_discovery_output" "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF")"
 tiny_small_line="$(line_number_for "$model_discovery_output" "TinyOrg/Tiny-1B-GGUF")"
 huge_line="$(line_number_for "$model_discovery_output" "HugeOrg/Huge-70B-GGUF")"
-if (( qwen_target_line >= tiny_small_line || tiny_small_line >= huge_line )); then
+if ((qwen_target_line >= tiny_small_line || tiny_small_line >= huge_line)); then
   printf 'expected ranked order qwen target before tiny small before huge\noutput was:\n%s\n' "$model_discovery_output" >&2
   exit 1
 fi
@@ -441,7 +479,7 @@ trap cleanup_accept_start08 EXIT
 accept_start08_trap_line="$(line_number_for "$(<"$repo_root/test_oc_local.sh")" "trap cleanup_accept_start08 EXIT")"
 accept_start08_create_line="$(line_number_for "$(<"$repo_root/test_oc_local.sh")" "printf '#!/usr/bin/env bash\\n' >\"\$accept_start08\"")"
 assert_not_contains "$(<"$repo_root/test_oc_local.sh")" "accept_start08_backup=\"\$accept_tmp/start08.sh.sentinel\""
-if (( accept_start08_trap_line >= accept_start08_create_line )); then
+if ((accept_start08_trap_line >= accept_start08_create_line)); then
   printf 'expected start08 cleanup trap before creating scripts/start08.sh\n' >&2
   exit 1
 fi

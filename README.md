@@ -157,12 +157,33 @@ This avoids rewriting unit files and avoids fighting a root-owned `Restart=alway
 
 ## Web Switcher
 
-The public Open WebUI path is fronted by `local-llm-switcher` on `ubt26`:
+The public Open WebUI path uses three local services on `ubt26`:
 
+- Caddy listens on http://127.0.0.1:3001.
 - Open WebUI listens on http://127.0.0.1:3002.
-- local-llm-switcher listens on http://127.0.0.1:3001.
+- local-llm-switcher listens on http://127.0.0.1:3003.
 - Cloudflare stays pointed at port 3001, so the public tunnel does not need to change.
-- The switcher proxies normal Open WebUI traffic to `127.0.0.1:3002` and injects a compact model selector.
+- Caddy routes `/api/local-llm/*` and `/_switcher` to the switcher.
+- Caddy routes Open WebUI API, asset, and WebSocket traffic directly to Open WebUI.
+- Caddy routes page HTML through the switcher so it can inject the bottom-right `LLM` pill.
+
+This split is intentional. Python's stdlib HTTP server is enough for the switcher API and HTML injection, but it is not a WebSocket reverse proxy. Caddy handles WebSockets so Open WebUI chat updates render correctly.
+
+The injected picker is a compact bottom-right pill that expands into a popover above the pill. It is kept out of the Open WebUI header and composer areas, and injected HTML is served with `Cache-Control: no-store` so browser cache revalidation does not pin an old widget after deployment.
+
+Browser switch flow:
+
+1. The model picker calls `POST /api/local-llm/switch`.
+2. The switcher writes `/home/cass/llama.cpp/current-model.env`.
+3. The switcher restarts `llama-server.service`.
+4. The switcher waits until `/v1/models` reports the expected alias.
+5. The switcher updates Open WebUI's stored selected model.
+6. The switcher ensures an Open WebUI model row and read grants exist for that alias.
+7. The browser navigates to a fresh chat pane without prompting.
+
+Existing Open WebUI chats keep their own stored model id. Do not force old chats onto a new backend model; use Open WebUI reference/clone/branch features when carrying context across model switches.
+
+Remote launcher aliases must match the switcher allowlist. If a remote `start*.sh` uses a stale `--alias`, switching can time out or leave `llama-server` unreachable from the switcher.
 
 Switcher endpoints:
 
@@ -173,28 +194,67 @@ Switcher endpoints:
 | `POST /api/local-llm/switch` | Write `current-model.env`, restart `llama-server.service`, and wait for the requested alias. |
 | `GET /_switcher` | Fallback page using the same APIs when the injected Open WebUI widget is unavailable. |
 
-Inspect or restart the remote services:
+## Model Workflow
+
+The durable workflow for finding, adding, benchmarking, and promoting models belongs here in the README. Scratch implementation plans under `docs/plans/` and agent workflow notes under `docs/superpowers/` are not durable project docs.
+
+Find candidates:
+
+```bash
+model-discovery --query "qwen coder gguf" --limit 10
+model-manager discover --target remote:ubt26 --query "qwen coder gguf"
+```
+
+Select a candidate for lifecycle tracking:
+
+```bash
+model-manager select --repo <hf-repo> --family <family> --alias <alias> --target remote:ubt26
+```
+
+Benchmark before promotion:
+
+```bash
+model-manager benchmark --repo <hf-repo> --family <family> --alias <alias> --target remote:ubt26 --dry-run
+scripts/bench-mtp-remote.sh <family> <alias>
+scripts/bench-installed-kv-remote.sh
+```
+
+Promote a model only after a benchmark justifies it:
+
+1. Add or update the matching `scripts/startN.sh` launcher.
+2. Add the family/profile mapping in `scripts/oc-local`.
+3. Add the model to `scripts/local-llm-switcher.py` if it should appear in Open WebUI.
+4. Update the family table and recommendations in this README.
+5. Add/update assertions in `test_oc_local.sh`.
+6. Deploy the launcher to `/home/cass/llama.cpp/` on `ubt26`.
+7. Verify the launcher `--alias` exactly matches `/v1/models` and the switcher allowlist.
+
+Keep benchmark result reports in `docs/benchmarks/`. Do not keep one-off implementation plans or agent notes in git.
+
+Inspect or restart the remote services and containers:
 
 ```bash
 ssh ubt26 'systemctl --user status local-llm-switcher.service llama-server.service'
 ssh ubt26 'journalctl --user -u local-llm-switcher.service -n 160 --no-pager'
 ssh ubt26 'journalctl --user -u llama-server.service -n 160 --no-pager'
+ssh ubt26 'docker ps --filter name=local-llm-caddy'
+ssh ubt26 'docker logs --tail 120 local-llm-caddy'
 ssh ubt26 'docker ps --filter name=open-webui'
 ssh ubt26 'docker logs --tail 120 open-webui'
 ssh ubt26 'docker restart open-webui'
-ssh ubt26 'systemctl --user restart local-llm-switcher.service llama-server.service'
+ssh ubt26 'systemctl --user restart local-llm-switcher.service llama-server.service && /home/cass/llama.cpp/run-local-llm-caddy-container.sh'
 ```
 
 Probe the switcher, fallback page, and proxied Open WebUI directly on `ubt26`:
 
 ```bash
-ssh ubt26 'curl -fsS http://127.0.0.1:3001/api/local-llm/current; curl -fsS http://127.0.0.1:3001/_switcher >/dev/null; curl -fsS http://127.0.0.1:3001/ >/dev/null; curl -fsS http://127.0.0.1:3002/ >/dev/null'
+ssh ubt26 'curl -fsS http://127.0.0.1:3001/api/local-llm/current; curl -fsS http://127.0.0.1:3001/_switcher >/dev/null; curl -fsS http://127.0.0.1:3001/ >/dev/null; curl -fsS http://127.0.0.1:3002/ >/dev/null; curl -fsS http://127.0.0.1:3003/api/local-llm/current >/dev/null'
 ```
 
 Rollback if the proxy fails:
 
 ```bash
-ssh ubt26 'systemctl --user disable --now local-llm-switcher.service'
+ssh ubt26 'docker rm -f local-llm-caddy && systemctl --user disable --now local-llm-switcher.service'
 ssh ubt26 'docker rm -f open-webui && docker run -d --name open-webui --restart unless-stopped --network host -e PORT=3001 -v open-webui:/app/backend/data ghcr.io/open-webui/open-webui:main'
 ```
 
@@ -368,10 +428,12 @@ scp scripts/start12.sh ubt26:/home/cass/llama.cpp/start12.sh
 scp scripts/start14.sh ubt26:/home/cass/llama.cpp/start14.sh
 scp scripts/run-current-model.sh ubt26:/home/cass/llama.cpp/run-current-model.sh
 scp scripts/local-llm-switcher.py ubt26:/home/cass/llama.cpp/local-llm-switcher.py
+scp scripts/Caddyfile.local-llm ubt26:/home/cass/llama.cpp/Caddyfile.local-llm
+scp scripts/run-local-llm-caddy-container.sh ubt26:/home/cass/llama.cpp/run-local-llm-caddy-container.sh
 scp scripts/local-llm-switcher.service ubt26:/home/cass/.config/systemd/user/local-llm-switcher.service
 
-ssh ubt26 'chmod +x /home/cass/llama.cpp/start2.sh /home/cass/llama.cpp/start3.sh /home/cass/llama.cpp/start4.sh /home/cass/llama.cpp/start5.sh /home/cass/llama.cpp/start6.sh /home/cass/llama.cpp/start7.sh /home/cass/llama.cpp/start8.sh /home/cass/llama.cpp/start9.sh /home/cass/llama.cpp/start10.sh /home/cass/llama.cpp/start11.sh /home/cass/llama.cpp/start12.sh /home/cass/llama.cpp/start14.sh /home/cass/llama.cpp/run-current-model.sh'
-ssh ubt26 'systemctl --user daemon-reload && systemctl --user enable --now local-llm-switcher.service'
+ssh ubt26 'chmod +x /home/cass/llama.cpp/start2.sh /home/cass/llama.cpp/start3.sh /home/cass/llama.cpp/start4.sh /home/cass/llama.cpp/start5.sh /home/cass/llama.cpp/start6.sh /home/cass/llama.cpp/start7.sh /home/cass/llama.cpp/start8.sh /home/cass/llama.cpp/start9.sh /home/cass/llama.cpp/start10.sh /home/cass/llama.cpp/start11.sh /home/cass/llama.cpp/start12.sh /home/cass/llama.cpp/start14.sh /home/cass/llama.cpp/run-current-model.sh /home/cass/llama.cpp/run-local-llm-caddy-container.sh'
+ssh ubt26 'systemctl --user daemon-reload && systemctl --user enable --now local-llm-switcher.service && /home/cass/llama.cpp/run-local-llm-caddy-container.sh'
 ```
 
 ## Environment Overrides
@@ -431,10 +493,10 @@ curl -fsS http://cass.lan:8080/v1/chat/completions \
 
 ```bash
 python3 -m py_compile scripts/local-llm-switcher.py
-for script in scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh; do bash -n "$script" || exit 1; done
+for script in scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh; do bash -n "$script" || exit 1; done
 ./test_oc_local.sh
 shellcheck scripts/oc-local scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh
-ssh ubt26 'systemctl --user is-active local-llm-switcher.service llama-server.service; curl -fsS http://127.0.0.1:3001/api/local-llm/current; curl -fsS http://127.0.0.1:3001/ >/dev/null; curl -fsS http://127.0.0.1:3002/ >/dev/null'
+ssh ubt26 'systemctl --user is-active local-llm-switcher.service llama-server.service; docker ps --filter name=local-llm-caddy --format "{{.Names}} {{.Status}}"; curl -fsS http://127.0.0.1:3001/api/local-llm/current; curl -fsS http://127.0.0.1:3001/ >/dev/null; curl -fsS http://127.0.0.1:3002/ >/dev/null; curl -fsS http://127.0.0.1:3003/api/local-llm/current >/dev/null'
 oc-qwen-coder-reliable --lean --info
 oc-gemma-vision-reliable --lean --info
 oc-gpt-oss-reliable --lean --info
