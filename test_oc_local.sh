@@ -329,13 +329,15 @@ cat >"$update_tmp/tree-matching-basename.json" <<'JSON'
 JSON
 cat >"$update_tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
-printf '{"repo":"Example/Model-GGUF","file":"Model-Q4_K_M.gguf","size_gb":"17","cache":"remote"}\n'
+printf '{"repo":"Example/Model-GGUF","file":"Model-Q4_K_M.gguf","size_gb":"17","cache":"remote","revision":"oldrev"}\n'
 EOF
 chmod +x "$update_tmp/bin/ssh"
-update_same_basename_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$update_tmp/tree-matching-basename.json" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host --dry-run)"
+update_same_basename_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$update_tmp/tree-matching-basename.json" LOCAL_LLM_HF_REVISION_FIXTURE="newrev" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host --dry-run)"
 assert_contains "$update_same_basename_output" "Recommended Updates"
-assert_not_contains "$update_same_basename_output" "current=Model-Q4_K_M.gguf"
-assert_not_contains "$update_same_basename_output" "latest-fitting=Q4/Model-Q4_K_M.gguf"
+assert_contains "$update_same_basename_output" "current=Model-Q4_K_M.gguf"
+assert_contains "$update_same_basename_output" "latest-fitting=Q4/Model-Q4_K_M.gguf"
+assert_contains "$update_same_basename_output" "reason=same-file-newer-snapshot"
+assert_contains "$update_same_basename_output" "cached_revision=oldrev latest_revision=newrev"
 cat >"$update_tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail

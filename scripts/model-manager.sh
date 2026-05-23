@@ -533,7 +533,10 @@ for root in roots:
                 size_gb = os.path.getsize(path) / 1_000_000_000
             except OSError:
                 size_gb = 0
-            print(json.dumps({"repo": repo, "file": name, "size_gb": f"{size_gb:.1f}", "cache": "remote"}, separators=(",", ":")))
+            revision = ""
+            if marker in path and "/snapshots/" in path:
+                revision = path.split("/snapshots/", 1)[1].split("/", 1)[0]
+            print(json.dumps({"repo": repo, "file": name, "size_gb": f"{size_gb:.1f}", "cache": "remote", "revision": revision}, separators=(",", ":")))
 REMOTE_CACHE
   )"; then
     printf 'Warning: remote cache inventory failed for %s\n' "$target" >&2
@@ -554,7 +557,7 @@ for line in sys.argv[1].splitlines():
         fields = parsed if isinstance(parsed, dict) else {}
     if fields.get("cache") != "remote":
         continue
-    print(json.dumps({key: fields.get(key, "") for key in ("cache", "repo", "file", "size_gb")}, separators=(",", ":")))
+    print(json.dumps({key: fields.get(key, "") for key in ("cache", "repo", "file", "size_gb", "revision")}, separators=(",", ":")))
 PY
 }
 
@@ -593,7 +596,31 @@ except json.JSONDecodeError:
     fields = {}
 else:
     fields = parsed if isinstance(parsed, dict) else {}
-print(f"{fields.get('repo', '')}\t{fields.get('file', '')}")
+print(f"{fields.get('repo', '')}\t{fields.get('file', '')}\t{fields.get('revision', '')}")
+PY
+}
+
+hf_latest_revision() {
+  local repo="$1"
+  if [[ -n "${LOCAL_LLM_HF_REVISION_FIXTURE:-}" ]]; then
+    printf '%s\n' "$LOCAL_LLM_HF_REVISION_FIXTURE"
+    return 0
+  fi
+  python3 - "$repo" <<'PY'
+import json
+import sys
+import urllib.request
+import urllib.parse
+
+repo = sys.argv[1]
+url = "https://huggingface.co/api/models/" + urllib.parse.quote(repo, safe="/")
+try:
+    with urllib.request.urlopen(url, timeout=20) as response:
+        data = json.load(response)
+except Exception:
+    print("")
+else:
+    print(data.get("sha") or data.get("lastModified") or "")
 PY
 }
 
@@ -726,13 +753,13 @@ cmd_update() {
   fi
   [[ "$target" == remote:* ]] || return 0
 
-  local inventory line repo_file repo file cached_basename dynamic_choice latest_quant latest_file latest_basename lower_file
+  local inventory line repo_file repo file cached_revision cached_basename dynamic_choice latest_quant latest_file latest_basename lower_file latest_revision reason
   local remote_output delete_status deleted_file download_status key value audit_file
   inventory="$(remote_cache_inventory "$target")"
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     repo_file="$(cache_inventory_repo_file "$line")"
-    IFS=$'\t' read -r repo file <<<"$repo_file"
+    IFS=$'\t' read -r repo file cached_revision <<<"$repo_file"
     [[ -n "$repo" && -n "$file" && "$repo" != unknown ]] || continue
     lower_file="$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')"
     case "$lower_file" in
@@ -743,13 +770,26 @@ cmd_update() {
     latest_file="$(printf '%s\n' "$dynamic_choice" | sed -n '2p')"
     cached_basename="${file##*/}"
     latest_basename="${latest_file##*/}"
-    [[ -n "$latest_file" && "$latest_basename" != "$cached_basename" ]] || continue
+    reason='new-file'
+    latest_revision=''
+    if [[ -n "$latest_file" && "$latest_basename" == "$cached_basename" ]]; then
+      latest_revision="$(hf_latest_revision "$repo")"
+      if [[ -n "$cached_revision" && -n "$latest_revision" && "$cached_revision" != "$latest_revision" ]]; then
+        reason='same-file-newer-snapshot'
+      else
+        continue
+      fi
+    fi
+    [[ -n "$latest_file" ]] || continue
     if [[ "$dry_run" == true ]]; then
       printf 'recommendation repo=%s current=%s latest-fitting=%s' "$repo" "$file" "$latest_file"
       if [[ -n "$latest_quant" ]]; then
         printf ' quant=%s' "$latest_quant"
       fi
-      printf ' target=%s' "$target"
+      printf ' target=%s reason=%s' "$target" "$reason"
+      if [[ "$reason" == same-file-newer-snapshot ]]; then
+        printf ' cached_revision=%s latest_revision=%s' "$cached_revision" "$latest_revision"
+      fi
       printf ' would_download_repo=%s would_download_file=%s would_delete_remote_basename=%s\n' "$repo" "$latest_file" "$cached_basename"
       continue
     fi
