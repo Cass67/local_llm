@@ -360,6 +360,8 @@ update_yes_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$up
 assert_contains "$update_yes_output" "Update result"
 assert_contains "$update_yes_output" "download_status=success"
 assert_contains "$update_yes_output" "delete_status=deleted"
+assert_contains "$update_yes_output" "download_tool="
+assert_contains "$(<"$update_tmp/update-remote.sh")" "python3 -m pip install --user -U 'huggingface_hub[cli]'"
 assert_contains "$(<"$update_tmp/update-remote.sh")" "huggingface-cli download \"\$new_repo\" \"\$selected_file\""
 assert_contains "$(<"$update_tmp/update-remote.sh")" "rm -f"
 replace_tmp="$(mktemp -d)"

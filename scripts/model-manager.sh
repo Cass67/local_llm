@@ -819,10 +819,15 @@ cmd_update() {
       continue
     fi
 
-    if ! remote_output="$(run_remote_replace "${target#remote:}" "$cached_basename" "$repo" "$latest_file" "$latest_quant")"; then
+    local remote_output_file
+    remote_output_file="$(mktemp)"
+    if ! run_remote_replace "${target#remote:}" "$cached_basename" "$repo" "$latest_file" "$latest_quant" | tee "$remote_output_file"; then
+      rm -f "$remote_output_file"
       printf 'remote update failed for %s current=%s\n' "$repo" "$cached_basename" >&2
       return 1
     fi
+    remote_output="$(<"$remote_output_file")"
+    rm -f "$remote_output_file"
     delete_status='unknown'
     deleted_file='none'
     download_status='unknown'
@@ -968,6 +973,21 @@ new_repo="$(decode_b64 "$new_repo_b64")"
 selected_file="$(decode_b64 "$selected_file_b64")"
 selected_quant="$(decode_b64 "$selected_quant_b64")"
 
+ensure_download_tool() {
+  export PATH="$HOME/.local/bin:$PATH"
+  if command -v huggingface-cli >/dev/null 2>&1 || command -v hf >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf 'download_tool=missing\n'
+    return 1
+  fi
+  printf 'download_tool_bootstrap=python3 -m pip install --user huggingface_hub[cli]\n'
+  python3 -m pip install --user -U 'huggingface_hub[cli]'
+  export PATH="$HOME/.local/bin:$PATH"
+  command -v huggingface-cli >/dev/null 2>&1 || command -v hf >/dev/null 2>&1
+}
+
 case "$old_file" in
   ''|*/*|*..*)
     printf '%s\n' 'error=unsafe_old_file'
@@ -1003,21 +1023,23 @@ done
 download_status=unknown
 if [[ -z "$selected_file" ]]; then
   download_status=no_file
+elif ! ensure_download_tool; then
+  download_status=no_tool
 elif command -v huggingface-cli >/dev/null 2>&1; then
-  if huggingface-cli download "$new_repo" "$selected_file" >/dev/null 2>&1; then
+  printf 'download_tool=huggingface-cli\n'
+  printf 'download_start=%s:%s\n' "$new_repo" "$selected_file"
+  if huggingface-cli download "$new_repo" "$selected_file"; then
     download_status=success
-    printf 'download_tool=huggingface-cli\n'
   else
     download_status=failed
-    printf 'download_tool=huggingface-cli\n'
   fi
 elif command -v hf >/dev/null 2>&1; then
-  if hf download "$new_repo" "$selected_file" >/dev/null 2>&1; then
+  printf 'download_tool=hf\n'
+  printf 'download_start=%s:%s\n' "$new_repo" "$selected_file"
+  if hf download "$new_repo" "$selected_file"; then
     download_status=success
-    printf 'download_tool=hf\n'
   else
     download_status=failed
-    printf 'download_tool=hf\n'
   fi
 else
   download_status=no_tool
