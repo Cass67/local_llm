@@ -1024,6 +1024,7 @@ cmd_replace() {
 
 cmd_delete() {
   local repo=''
+  local profile_pattern=''
   local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
   local dry_run=true
   local yes=false
@@ -1038,6 +1039,14 @@ cmd_delete() {
         target="$2"
         shift 2
         ;;
+      --profile)
+        [[ $# -ge 2 && "$2" != --* ]] || {
+          printf '%s\n' '--profile requires family:profile or family:*' >&2
+          return 2
+        }
+        profile_pattern="$2"
+        shift 2
+        ;;
       --dry-run)
         dry_run=true
         shift
@@ -1048,7 +1057,7 @@ cmd_delete() {
         shift
         ;;
       -h | --help)
-        printf '%s\n' 'Usage: model-manager delete <repo> --target remote:<host> [--dry-run|--yes]'
+        printf '%s\n' 'Usage: model-manager delete <repo>|--profile family:profile --target remote:<host> [--dry-run|--yes]'
         return 0
         ;;
       --*)
@@ -1066,8 +1075,12 @@ cmd_delete() {
     esac
   done
 
-  [[ -n "$repo" ]] || {
-    printf '%s\n' 'delete requires a repo' >&2
+  if [[ -n "$repo" && -n "$profile_pattern" ]]; then
+    printf '%s\n' 'delete accepts either a repo or --profile, not both' >&2
+    return 2
+  fi
+  [[ -n "$repo" || -n "$profile_pattern" ]] || {
+    printf '%s\n' 'delete requires a repo or --profile' >&2
     return 2
   }
   case "$target" in
@@ -1083,6 +1096,11 @@ cmd_delete() {
   fi
 
   ensure_runs_dirs
+  if [[ -n "$profile_pattern" ]]; then
+    cmd_delete_profile "$profile_pattern" "$target" "$dry_run" "$yes"
+    return $?
+  fi
+
   local alias
   alias="$(infer_alias "$repo")"
   printf 'Delete %s\n' "$([[ "$yes" == true ]] && printf 'result' || printf 'dry-run')"
@@ -1104,6 +1122,79 @@ cmd_delete() {
   printf 'removed_switcher_count=%s\n' "$removed_switcher"
   printf 'remote_cache_delete:\n'
   run_remote_delete_repo_cache "${target#remote:}" "$repo" delete
+}
+
+cmd_delete_profile() {
+  local profile_pattern="$1"
+  local target="$2"
+  local dry_run="$3"
+  local yes="$4"
+  local profiles_json="${LOCAL_LLM_PROFILES_JSON:-$repo_root/configs/profiles.json}"
+  if [[ ! -f "$profiles_json" && -f "$HOME/.local/share/local_llm/config/profiles.json" ]]; then
+    profiles_json="$HOME/.local/share/local_llm/config/profiles.json"
+  fi
+
+  [[ "$profile_pattern" == *:* ]] || {
+    printf '%s\n' '--profile requires family:profile or family:*' >&2
+    return 2
+  }
+  [[ -f "$profiles_json" ]] || {
+    printf 'profiles JSON not found: %s\n' "$profiles_json" >&2
+    return 1
+  }
+
+  local mode
+  mode=plan
+  if [[ "$yes" == true && "$dry_run" != true ]]; then
+    mode=delete
+  fi
+
+  printf 'Delete profile %s\n' "$([[ "$mode" == delete ]] && printf 'result' || printf 'dry-run')"
+
+  python3 - "$profiles_json" "$profile_pattern" "$mode" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+pattern = sys.argv[2]
+mode = sys.argv[3]
+family, wanted_profile = pattern.split(":", 1)
+data = json.loads(path.read_text(encoding="utf-8"))
+profiles = data.get("profiles")
+if not isinstance(profiles, dict):
+    raise SystemExit("profiles JSON missing profiles object")
+
+matched = {}
+remaining = {}
+for key, value in profiles.items():
+    if not isinstance(value, dict):
+        continue
+    key_family, sep, key_profile = key.partition(":")
+    is_match = key_family == family and (wanted_profile == "*" or key_profile == wanted_profile)
+    if is_match:
+        matched[key] = value
+    else:
+        remaining[key] = value
+
+if not matched:
+    raise SystemExit(f"no profiles match: {pattern}")
+
+repos = sorted({value.get("hf_repo") for value in matched.values() if value.get("hf_repo")})
+print(f"profile_pattern={pattern}")
+for key in sorted(matched):
+    print(f"matched_profile={key} repo={matched[key].get('hf_repo', '')}")
+for repo in repos:
+    remaining_refs = sum(1 for value in remaining.values() if value.get("hf_repo") == repo)
+    action = "keep" if remaining_refs else "delete"
+    print(f"cache_action={action} repo={repo} remaining_refs={remaining_refs}")
+
+if mode == "delete":
+    for key in matched:
+        profiles.pop(key, None)
+    path.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    print(f"removed_profile_count={len(matched)}")
+PY
 }
 
 infer_family() {

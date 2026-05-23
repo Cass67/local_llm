@@ -1093,6 +1093,28 @@ if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/control.json" --dry
   exit 1
 fi
 assert_contains "$(<"$accept_control_output")" "benchmark JSON field contains a control character: family"
+delete_profile_tmp="$(mktemp -d)"
+cp "$repo_root/configs/profiles.json" "$delete_profile_tmp/profiles.json"
+delete_profile_dry_output="$(LOCAL_LLM_PROFILES_JSON="$delete_profile_tmp/profiles.json" "$repo_root/scripts/model-manager.sh" delete --profile 'gemma-vision:*' --target remote:bench-host --dry-run)"
+assert_contains "$delete_profile_dry_output" "Delete profile dry-run"
+assert_contains "$delete_profile_dry_output" "profile_pattern=gemma-vision:*"
+assert_contains "$delete_profile_dry_output" "matched_profile=gemma-vision:balanced repo=unsloth/gemma-4-31B-it-GGUF"
+assert_contains "$delete_profile_dry_output" "matched_profile=gemma-vision:tiny repo=unsloth/gemma-4-31B-it-GGUF"
+assert_contains "$delete_profile_dry_output" "cache_action=keep repo=unsloth/gemma-4-31B-it-GGUF remaining_refs=5"
+delete_profile_yes_output="$(LOCAL_LLM_PROFILES_JSON="$delete_profile_tmp/profiles.json" "$repo_root/scripts/model-manager.sh" delete --profile 'gemma-vision:*' --target remote:bench-host --yes)"
+assert_contains "$delete_profile_yes_output" "Delete profile result"
+assert_contains "$delete_profile_yes_output" "removed_profile_count=5"
+python3 - "$delete_profile_tmp/profiles.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    profiles = json.load(handle)["profiles"]
+if any(key.startswith("gemma-vision:") for key in profiles):
+    raise SystemExit("gemma-vision profiles were not removed")
+if not any(key.startswith("gemma:") for key in profiles):
+    raise SystemExit("gemma profiles should remain")
+PY
 cat >"$accept_tmp/failed-load.json" <<'EOF'
 {"repo":"Example/Foo-GGUF","family":"foo","alias":"foo-30b","target":"local","profile":"reliable","load_status":"failed"}
 EOF

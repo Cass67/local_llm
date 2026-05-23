@@ -587,6 +587,7 @@ model-manager list --target "remote:$MODEL_HOST"
 model-manager update --target "remote:$MODEL_HOST" --dry-run
 model-manager replace <old-file> <new-repo> --target "remote:$MODEL_HOST" --dry-run
 model-manager delete <hf-repo> --target "remote:$MODEL_HOST" --dry-run
+model-manager delete --profile 'gemma-vision:*' --target "remote:$MODEL_HOST" --dry-run
 model-discovery --query "qwen coder gguf" --limit 10
 model-manager discover --target "remote:$MODEL_HOST" --query "qwen coder gguf"
 ```
@@ -595,6 +596,8 @@ model-manager discover --target "remote:$MODEL_HOST" --query "qwen coder gguf"
 Use `model-manager replace ... --yes` only after reviewing the dry-run; it deletes by basename under known remote model cache directories and records an audit JSON under `runs/replacements/`.
 
 Use `model-manager delete <hf-repo> --yes` only after reviewing the dry-run. Delete removes matching local selections, removes the model from the Open WebUI switcher allowlist, and deletes matching remote cached GGUF files for that Hugging Face repo.
+
+Use `model-manager delete --profile 'family:*' --yes` to remove local profile entries without deleting a shared remote cache while another profile still references the same Hugging Face repo. For example, deleting `gemma-vision:*` keeps the shared `unsloth/gemma-4-31B-it-GGUF` cache if `gemma:*` still references it.
 
 Select a candidate for lifecycle tracking:
 
