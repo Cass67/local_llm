@@ -206,11 +206,11 @@ case "$family" in
     hf_repo="unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
     mmproj_mode=enabled
     case "$profile" in
-      speed) context=32768; ngl=999; batch=128; ubatch=128; quant="Qwen3.6-35B-A3B-UD-IQ4_XS.gguf" ;;
-      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="Qwen3.6-35B-A3B-UD-IQ4_XS.gguf" ;;
-      balanced) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-UD-IQ4_XS.gguf" ;;
-      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-UD-IQ4_XS.gguf" ;;
-      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-UD-IQ4_XS.gguf" ;;
+      speed) context=32768; ngl=999; batch=128; ubatch=128; quant="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf" ;;
+      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf" ;;
+      balanced) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf" ;;
+      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf" ;;
+      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf" ;;
     esac
     ;;
   qwen-coder)

@@ -28,7 +28,7 @@ case "${RUN_Q4:-0}" in
 esac
 
 cases=(
-  'qwen|unsloth/Qwen3.6-35B-A3B-MTP-GGUF|file|Qwen3.6-35B-A3B-UD-IQ4_XS.gguf|qwen3.6-35b-a3b-mtp|65536|64|64|enabled|qwen_thinking_off|mtp'
+  'qwen|unsloth/Qwen3.6-35B-A3B-MTP-GGUF|file|Qwen3.6-35B-A3B-UD-IQ4_NL.gguf|qwen3.6-35b-a3b-mtp|65536|64|64|enabled|qwen_thinking_off|mtp'
   'qwen-hauhau|HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive|file|Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf|qwen3.6-35b-a3b-hauhau|65536|64|64|enabled|qwen_thinking_off|none'
   'qwen-27b-hauhau|HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive|file|Qwen3.6-27B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf|qwen3.6-27b-hauhau|65536|64|64|enabled|qwen_template_thinking_off|none'
   'gemma-hauhau|HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced|file|Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf|gemma4-26b-a4b-hauhau|65536|64|64|enabled|none|none'
@@ -333,7 +333,7 @@ run_one() {
   decode_tps="$(last_number_for 'eval.*tokens per second|decode.*tok/s|decode.*t/s' "$log_file")"
   kv_log="$(first_log_match 'KV.*buffer|cache.*type|cache_type|cache-type' "$log_file")"
 
-  if [[ "$status" == success && ( -z "$prompt_tps" || -z "$decode_tps" ) ]]; then
+  if [[ "$status" == success && (-z "$prompt_tps" || -z "$decode_tps") ]]; then
     status="parse_failed"
     notes="missing throughput metrics"
   fi

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 profile="${1:-reliable}"
-hf_file="Qwen3.6-35B-A3B-UD-IQ4_XS.gguf"
+hf_file="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf"
 
 case "$profile" in
   speed)

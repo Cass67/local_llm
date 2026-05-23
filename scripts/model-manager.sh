@@ -536,7 +536,7 @@ for root in roots:
             revision = ""
             if marker in path and "/snapshots/" in path:
                 revision = path.split("/snapshots/", 1)[1].split("/", 1)[0]
-            print(json.dumps({"repo": repo, "file": name, "size_gb": f"{size_gb:.1f}", "cache": "remote", "revision": revision}, separators=(",", ":")))
+            print(json.dumps({"repo": repo, "file": name, "path": path, "size_gb": f"{size_gb:.1f}", "cache": "remote", "revision": revision}, separators=(",", ":")))
 REMOTE_CACHE
   )"; then
     printf 'Warning: remote cache inventory failed for %s\n' "$target" >&2
@@ -557,7 +557,7 @@ for line in sys.argv[1].splitlines():
         fields = parsed if isinstance(parsed, dict) else {}
     if fields.get("cache") != "remote":
         continue
-    print(json.dumps({key: fields.get(key, "") for key in ("cache", "repo", "file", "size_gb", "revision")}, separators=(",", ":")))
+    print(json.dumps({key: fields.get(key, "") for key in ("cache", "repo", "file", "path", "size_gb", "revision")}, separators=(",", ":")))
 PY
 }
 
@@ -596,7 +596,140 @@ except json.JSONDecodeError:
     fields = {}
 else:
     fields = parsed if isinstance(parsed, dict) else {}
-print(f"{fields.get('repo', '')}\t{fields.get('file', '')}\t{fields.get('revision', '')}")
+print(f"{fields.get('repo', '')}\t{fields.get('file', '')}\t{fields.get('revision', '')}\t{fields.get('path', '')}")
+PY
+}
+
+run_remote_delete_exact_path() {
+  local host="$1"
+  local old_path="$2"
+  local old_path_b64
+
+  old_path_b64="$(
+    python3 - "$old_path" <<'PY'
+import base64
+import sys
+
+print(base64.b64encode(sys.argv[1].encode()).decode())
+PY
+  )"
+
+  {
+    printf "old_path_b64='%s'\n" "$old_path_b64"
+    cat <<'REMOTE_DELETE_EXACT'
+set -euo pipefail
+
+old_path="$(python3 - "$old_path_b64" <<'PY'
+import base64
+import sys
+
+print(base64.b64decode(sys.argv[1]).decode(), end="")
+PY
+)"
+
+home="${HOME:?}"
+case "$old_path" in
+  "$home/.cache/huggingface/hub/"*|"$home/.cache/local_llm/models/"*|"$home/.cache/llama.cpp/"*) ;;
+  *)
+    printf 'deleted=none\n'
+    printf 'delete_status=unsafe_path\n'
+    exit 0
+    ;;
+esac
+
+case "$old_path" in
+  *.gguf|*.GGUF) ;;
+  *)
+    printf 'deleted=none\n'
+    printf 'delete_status=unsafe_path\n'
+    exit 0
+    ;;
+esac
+
+if [[ -f "$old_path" ]]; then
+  rm -f -- "$old_path"
+  printf 'deleted=%s\n' "$(basename -- "$old_path")"
+  printf 'delete_status=deleted\n'
+else
+  printf 'deleted=none\n'
+  printf 'delete_status=not_found\n'
+fi
+REMOTE_DELETE_EXACT
+  } | ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" bash -s
+}
+
+run_remote_delete_repo_basename() {
+  local host="$1"
+  local repo="$2"
+  local basename="$3"
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" python3 - "$repo" "$basename" <<'PY'
+import os
+import sys
+
+repo, basename = sys.argv[1:]
+roots = [
+    os.path.expanduser("~/.cache/huggingface/hub"),
+    os.path.expanduser("~/.cache/local_llm/models"),
+    os.path.expanduser("~/.cache/llama.cpp"),
+]
+deleted = 0
+for root in roots:
+    if not os.path.isdir(root):
+        continue
+    for current_root, _, files in os.walk(root):
+        if basename not in files:
+            continue
+        path = os.path.join(current_root, basename)
+        found_repo = "unknown"
+        marker = "models--"
+        if marker in path and "/snapshots/" in path:
+            repo_part = path.split(marker, 1)[1].split("/snapshots/", 1)[0]
+            found_repo = repo_part.replace("--", "/", 1)
+        if found_repo != repo:
+            continue
+        os.remove(path)
+        deleted += 1
+print(f"deleted={basename if deleted else 'none'}")
+print(f"delete_status={'deleted' if deleted else 'not_found'}")
+print(f"deleted_count={deleted}")
+PY
+}
+
+update_local_model_references() {
+  local repo="$1"
+  local old_file="$2"
+  local new_file="$3"
+
+  python3 - "$repo_root" "$repo" "$old_file" "$new_file" <<'PY'
+import pathlib
+import sys
+
+repo_root = pathlib.Path(sys.argv[1])
+repo = sys.argv[2]
+old_file = sys.argv[3]
+new_file = sys.argv[4]
+candidate_files = [
+    repo_root / "scripts" / "oc-local",
+    repo_root / "scripts" / "bench-mtp-remote.sh",
+    repo_root / "scripts" / "bench-installed-kv-remote.sh",
+]
+candidate_files.extend(sorted((repo_root / "scripts").glob("start*.sh")))
+
+changed = []
+for path in candidate_files:
+    if not path.is_file():
+        continue
+    text = path.read_text(encoding="utf-8")
+    if old_file not in text or repo not in text:
+        continue
+    updated = text.replace(old_file, new_file)
+    if updated == text:
+        continue
+    path.write_text(updated, encoding="utf-8")
+    changed.append(str(path.relative_to(repo_root)))
+
+print(f"reference_status={'updated' if changed else 'unchanged'}")
+print(f"reference_files={','.join(changed) if changed else 'none'}")
 PY
 }
 
@@ -753,14 +886,14 @@ cmd_update() {
   fi
   [[ "$target" == remote:* ]] || return 0
 
-  local inventory line repo_file repo file cached_revision cached_basename dynamic_choice latest_quant latest_file latest_basename lower_file latest_revision reason update_number
+  local inventory line repo_file repo file cached_revision cached_path cached_basename dynamic_choice latest_quant latest_file latest_basename lower_file latest_revision reason update_number
   local remote_output delete_status deleted_file download_status key value audit_file
   update_number=0
   inventory="$(remote_cache_inventory "$target")"
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     repo_file="$(cache_inventory_repo_file "$line")"
-    IFS=$'\t' read -r repo file cached_revision <<<"$repo_file"
+    IFS=$'\t' read -r repo file cached_revision cached_path <<<"$repo_file"
     [[ -n "$repo" && -n "$file" && "$repo" != unknown ]] || continue
     lower_file="$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')"
     case "$lower_file" in
@@ -821,7 +954,7 @@ cmd_update() {
 
     local remote_output_file
     remote_output_file="$(mktemp)"
-    if ! run_remote_replace "${target#remote:}" "$cached_basename" "$repo" "$latest_file" "$latest_quant" | tee "$remote_output_file"; then
+    if ! run_remote_replace "${target#remote:}" "__local_llm_download_only__.gguf" "$repo" "$latest_file" "$latest_quant" | tee "$remote_output_file"; then
       rm -f "$remote_output_file"
       printf 'remote update failed for %s current=%s\n' "$repo" "$cached_basename" >&2
       return 1
@@ -836,15 +969,62 @@ cmd_update() {
       value="${line#*=}"
       case "$key" in
         deleted) deleted_file="$value" ;;
-        delete_status) delete_status="$value" ;;
         download_status) download_status="$value" ;;
       esac
     done <<<"$remote_output"
+    if [[ "$download_status" == success && "$reason" == new-file ]]; then
+      local delete_output
+      delete_output="$(run_remote_delete_repo_basename "${target#remote:}" "$repo" "$cached_basename")"
+      printf '%s\n' "$delete_output"
+      while IFS= read -r line; do
+        key="${line%%=*}"
+        value="${line#*=}"
+        case "$key" in
+          deleted) deleted_file="$value" ;;
+          delete_status) delete_status="$value" ;;
+        esac
+      done <<<"$delete_output"
+    elif [[ "$download_status" == success && -n "$cached_path" ]]; then
+      local delete_output
+      delete_output="$(run_remote_delete_exact_path "${target#remote:}" "$cached_path")"
+      printf '%s\n' "$delete_output"
+      while IFS= read -r line; do
+        key="${line%%=*}"
+        value="${line#*=}"
+        case "$key" in
+          deleted) deleted_file="$value" ;;
+          delete_status) delete_status="$value" ;;
+        esac
+      done <<<"$delete_output"
+    elif [[ "$download_status" == success ]]; then
+      delete_status=not_found
+      deleted_file=none
+    else
+      delete_status=not_attempted
+      deleted_file=none
+    fi
+    local reference_output reference_status reference_files
+    reference_status=not_attempted
+    reference_files=none
+    if [[ "$download_status" == success ]]; then
+      reference_output="$(update_local_model_references "$repo" "$cached_basename" "$latest_file")"
+      printf '%s\n' "$reference_output"
+      while IFS= read -r line; do
+        key="${line%%=*}"
+        value="${line#*=}"
+        case "$key" in
+          reference_status) reference_status="$value" ;;
+          reference_files) reference_files="$value" ;;
+        esac
+      done <<<"$reference_output"
+    fi
     audit_file="$(write_replacement_audit "$cached_basename" "$repo" "$latest_quant" "$latest_file" "$target" update "$delete_status" "$deleted_file" "$download_status")"
     printf 'updated repo=%s old=%s new=%s target=%s\n' "$repo" "$cached_basename" "$latest_file" "$target"
     printf 'download_status=%s\n' "$download_status"
     printf 'delete_status=%s\n' "$delete_status"
     printf 'deleted=%s\n' "$deleted_file"
+    printf 'reference_status=%s\n' "$reference_status"
+    printf 'reference_files=%s\n' "$reference_files"
     printf 'audit_file=%s\n' "$audit_file"
     if [[ "$delete_status" != deleted || "$download_status" != success ]]; then
       return 1
@@ -988,6 +1168,53 @@ ensure_download_tool() {
   command -v huggingface-cli >/dev/null 2>&1 || command -v hf >/dev/null 2>&1
 }
 
+download_with_python() {
+  python3 - "$new_repo" "$selected_file" <<'PY'
+import json
+import os
+import pathlib
+import shutil
+import sys
+import tempfile
+import urllib.parse
+import urllib.request
+
+repo, selected_file = sys.argv[1:]
+api_url = "https://huggingface.co/api/models/" + urllib.parse.quote(repo, safe="/")
+with urllib.request.urlopen(api_url, timeout=60) as response:
+    metadata = json.load(response)
+revision = metadata.get("sha") or "main"
+repo_cache = "models--" + repo.replace("/", "--")
+target_dir = pathlib.Path.home() / ".cache" / "huggingface" / "hub" / repo_cache / "snapshots" / revision / pathlib.PurePosixPath(selected_file).parent
+target_dir.mkdir(parents=True, exist_ok=True)
+target_path = target_dir / pathlib.PurePosixPath(selected_file).name
+url = "https://huggingface.co/" + urllib.parse.quote(repo, safe="/") + "/resolve/main/" + urllib.parse.quote(selected_file, safe="/")
+fd, temp_name = tempfile.mkstemp(prefix=target_path.name + ".", suffix=".tmp", dir=str(target_dir))
+downloaded = 0
+try:
+    with os.fdopen(fd, "wb") as output, urllib.request.urlopen(url, timeout=60) as response:
+        total = int(response.headers.get("Content-Length") or 0)
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            output.write(chunk)
+            downloaded += len(chunk)
+            if total:
+                print(f"download_progress={downloaded}/{total}")
+            else:
+                print(f"download_progress={downloaded}")
+    shutil.move(temp_name, target_path)
+except Exception:
+    try:
+        os.unlink(temp_name)
+    except OSError:
+        pass
+    raise
+print(f"download_path={target_path}")
+PY
+}
+
 case "$old_file" in
   ''|*/*|*..*)
     printf '%s\n' 'error=unsafe_old_file'
@@ -1024,7 +1251,13 @@ download_status=unknown
 if [[ -z "$selected_file" ]]; then
   download_status=no_file
 elif ! ensure_download_tool; then
-  download_status=no_tool
+  printf 'download_tool=python-urllib\n'
+  printf 'download_start=%s:%s\n' "$new_repo" "$selected_file"
+  if download_with_python; then
+    download_status=success
+  else
+    download_status=failed
+  fi
 elif command -v huggingface-cli >/dev/null 2>&1; then
   printf 'download_tool=huggingface-cli\n'
   printf 'download_start=%s:%s\n' "$new_repo" "$selected_file"
