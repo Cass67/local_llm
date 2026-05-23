@@ -306,6 +306,7 @@ JSON
 cat >"$update_tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 printf '{"repo":"Example/Model-GGUF","file":"Model-Q2_K.gguf","size_gb":"8","cache":"remote"}\n'
+printf '{"repo":"Example/Model-GGUF","file":"mmproj-BF16.gguf","size_gb":"1","cache":"remote"}\n'
 EOF
 chmod +x "$update_tmp/bin/ssh"
 update_missing_dry_run_output="$update_tmp/missing-dry-run.out"
@@ -313,11 +314,14 @@ if PATH="$update_tmp/bin:$PATH" "$repo_root/scripts/model-manager.sh" update --t
   printf 'expected update without --dry-run to fail\n' >&2
   exit 1
 fi
-assert_contains "$(<"$update_missing_dry_run_output")" "update currently requires --dry-run"
+assert_contains "$(<"$update_missing_dry_run_output")" "update requires exactly one of --dry-run or --yes"
 update_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$update_tmp/tree.json" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host --dry-run)"
 assert_contains "$update_output" "Updates"
 assert_contains "$update_output" "current=Model-Q2_K.gguf"
 assert_contains "$update_output" "latest-fitting=Model-Q4_K_M.gguf"
+assert_contains "$update_output" "would_download_repo=Example/Model-GGUF"
+assert_contains "$update_output" "would_delete_remote_basename=Model-Q2_K.gguf"
+assert_not_contains "$update_output" "current=mmproj-BF16.gguf"
 cat >"$update_tmp/tree-matching-basename.json" <<'JSON'
 [
   {"type":"file","path":"Q4/Model-Q4_K_M.gguf","size":17000000000}
@@ -332,6 +336,25 @@ update_same_basename_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FI
 assert_contains "$update_same_basename_output" "Recommended Updates"
 assert_not_contains "$update_same_basename_output" "current=Model-Q4_K_M.gguf"
 assert_not_contains "$update_same_basename_output" "latest-fitting=Q4/Model-Q4_K_M.gguf"
+cat >"$update_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"bash -s"* ]]; then
+  cat >"$LOCAL_LLM_FAKE_UPDATE_SCRIPT"
+  printf 'deleted=Model-Q2_K.gguf\n'
+  printf 'delete_status=deleted\n'
+  printf 'download_status=success\n'
+else
+  printf '{"repo":"Example/Model-GGUF","file":"Model-Q2_K.gguf","size_gb":"8","cache":"remote"}\n'
+fi
+EOF
+chmod +x "$update_tmp/bin/ssh"
+update_yes_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$update_tmp/tree.json" LOCAL_LLM_FAKE_UPDATE_SCRIPT="$update_tmp/update-remote.sh" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host --yes)"
+assert_contains "$update_yes_output" "Update result"
+assert_contains "$update_yes_output" "download_status=success"
+assert_contains "$update_yes_output" "delete_status=deleted"
+assert_contains "$(<"$update_tmp/update-remote.sh")" "huggingface-cli download \"\$new_repo\" \"\$selected_file\""
+assert_contains "$(<"$update_tmp/update-remote.sh")" "rm -f"
 replace_tmp="$(mktemp -d)"
 mkdir -p "$replace_tmp/bin" "$replace_tmp/runs"
 cat >"$replace_tmp/tree.json" <<'JSON'

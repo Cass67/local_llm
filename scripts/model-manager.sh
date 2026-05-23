@@ -660,6 +660,7 @@ cmd_list() {
 cmd_update() {
   local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
   local dry_run=false
+  local yes=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -673,6 +674,10 @@ cmd_update() {
         ;;
       --dry-run)
         dry_run=true
+        shift
+        ;;
+      --yes)
+        yes=true
         shift
         ;;
       -h | --help)
@@ -690,8 +695,8 @@ cmd_update() {
     esac
   done
 
-  if [[ "$dry_run" != true ]]; then
-    printf '%s\n' 'update currently requires --dry-run' >&2
+  if [[ "$dry_run" == "$yes" ]]; then
+    printf '%s\n' 'update requires exactly one of --dry-run or --yes' >&2
     return 2
   fi
 
@@ -714,27 +719,66 @@ cmd_update() {
   esac
 
   ensure_runs_dirs
-  printf 'Recommended Updates\n'
+  if [[ "$dry_run" == true ]]; then
+    printf 'Recommended Updates\n'
+  else
+    printf 'Update result\n'
+  fi
   [[ "$target" == remote:* ]] || return 0
 
-  local inventory line repo_file repo file cached_basename dynamic_choice latest_quant latest_file latest_basename
+  local inventory line repo_file repo file cached_basename dynamic_choice latest_quant latest_file latest_basename lower_file
+  local remote_output delete_status deleted_file download_status key value audit_file
   inventory="$(remote_cache_inventory "$target")"
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     repo_file="$(cache_inventory_repo_file "$line")"
     IFS=$'\t' read -r repo file <<<"$repo_file"
     [[ -n "$repo" && -n "$file" && "$repo" != unknown ]] || continue
+    lower_file="$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')"
+    case "$lower_file" in
+      mmproj* | *mmproj* | *projector*) continue ;;
+    esac
     dynamic_choice="$(resolve_dynamic_quant_file "$repo" "$target")"
     latest_quant="$(printf '%s\n' "$dynamic_choice" | sed -n '1p')"
     latest_file="$(printf '%s\n' "$dynamic_choice" | sed -n '2p')"
     cached_basename="${file##*/}"
     latest_basename="${latest_file##*/}"
     [[ -n "$latest_file" && "$latest_basename" != "$cached_basename" ]] || continue
-    printf 'recommendation repo=%s current=%s latest-fitting=%s' "$repo" "$file" "$latest_file"
-    if [[ -n "$latest_quant" ]]; then
-      printf ' quant=%s' "$latest_quant"
+    if [[ "$dry_run" == true ]]; then
+      printf 'recommendation repo=%s current=%s latest-fitting=%s' "$repo" "$file" "$latest_file"
+      if [[ -n "$latest_quant" ]]; then
+        printf ' quant=%s' "$latest_quant"
+      fi
+      printf ' target=%s' "$target"
+      printf ' would_download_repo=%s would_download_file=%s would_delete_remote_basename=%s\n' "$repo" "$latest_file" "$cached_basename"
+      continue
     fi
-    printf ' target=%s\n' "$target"
+
+    if ! remote_output="$(run_remote_replace "${target#remote:}" "$cached_basename" "$repo" "$latest_file" "$latest_quant")"; then
+      printf 'remote update failed for %s current=%s\n' "$repo" "$cached_basename" >&2
+      return 1
+    fi
+    delete_status='unknown'
+    deleted_file='none'
+    download_status='unknown'
+    while IFS= read -r line; do
+      key="${line%%=*}"
+      value="${line#*=}"
+      case "$key" in
+        deleted) deleted_file="$value" ;;
+        delete_status) delete_status="$value" ;;
+        download_status) download_status="$value" ;;
+      esac
+    done <<<"$remote_output"
+    audit_file="$(write_replacement_audit "$cached_basename" "$repo" "$latest_quant" "$latest_file" "$target" update "$delete_status" "$deleted_file" "$download_status")"
+    printf 'updated repo=%s old=%s new=%s target=%s\n' "$repo" "$cached_basename" "$latest_file" "$target"
+    printf 'download_status=%s\n' "$download_status"
+    printf 'delete_status=%s\n' "$delete_status"
+    printf 'deleted=%s\n' "$deleted_file"
+    printf 'audit_file=%s\n' "$audit_file"
+    if [[ "$delete_status" != deleted || "$download_status" != success ]]; then
+      return 1
+    fi
   done <<<"$inventory"
 }
 

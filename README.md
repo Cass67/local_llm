@@ -583,6 +583,7 @@ Find candidates:
 ```bash
 model-manager list --target "remote:$MODEL_HOST"
 model-manager update --target "remote:$MODEL_HOST" --dry-run
+model-manager update --target "remote:$MODEL_HOST" --yes
 model-manager replace <old-file> <new-repo> --target "remote:$MODEL_HOST" --dry-run
 model-manager delete <hf-repo> --target "remote:$MODEL_HOST" --dry-run
 model-manager delete --profile 'gemma-vision:*' --target "remote:$MODEL_HOST" --dry-run
@@ -590,7 +591,7 @@ model-discovery --query "qwen coder gguf" --limit 10
 model-manager discover --target "remote:$MODEL_HOST" --query "qwen coder gguf"
 ```
 
-`model-manager update --dry-run` only reports cached GGUF files whose basename differs from the recommended largest target-VRAM-fitting Hugging Face file; it does not delete or download models.
+`model-manager update --dry-run` scans cached remote model GGUFs, ignores projector files such as `mmproj-BF16.gguf`, checks Hugging Face for the recommended fitting GGUF, and prints the exact download/delete plan. Use `model-manager update --yes` only after reviewing the dry-run; it downloads the selected new file first and deletes the old cached basename only after the download succeeds.
 Use `model-manager replace ... --yes` only after reviewing the dry-run; it deletes by basename under known remote model cache directories and records an audit JSON under `runs/replacements/`.
 
 Use `model-manager delete <hf-repo> --yes` only after reviewing the dry-run. Delete removes matching local selections, removes the model from the Open WebUI switcher allowlist, and deletes matching remote cached GGUF files for that Hugging Face repo.
