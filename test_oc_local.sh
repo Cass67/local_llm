@@ -293,6 +293,7 @@ assert_contains "$list_output" "launcher family=qwen-hauhau repo=HauhauCS/Qwen3.
 assert_contains "$list_output" "launcher family=qwen-heretic repo=llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-GGUF"
 assert_contains "$list_output" "launcher family=qwen-opus repo=noctrex/Qwopus3.6-27B-v1-preview-MTP-GGUF"
 assert_contains "$list_output" "launcher family=qwen-coder-next repo=unsloth/Qwen3-Coder-Next-GGUF"
+assert_not_contains "$list_output" "selection repo=unsloth/Qwen3-Coder-Next-GGUF"
 update_tmp="$(mktemp -d)"
 mkdir -p "$update_tmp/bin"
 cat >"$update_tmp/tree.json" <<'JSON'

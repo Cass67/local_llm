@@ -115,7 +115,20 @@ print_selection_inventory() {
   ((${#selection_files[@]} > 0)) || return 0
   python3 - "${selection_files[@]}" <<'PY'
 import json
+import os
 import sys
+
+promoted = set()
+for line in os.environ.get("LOCAL_LLM_PROMOTED_LAUNCHERS", "").splitlines():
+    fields = {}
+    for part in line.split():
+        key, sep, value = part.partition("=")
+        if sep:
+            fields[key] = value
+    repo = fields.get("repo")
+    alias = fields.get("alias")
+    if repo and alias:
+        promoted.add((repo, alias))
 
 for path in sys.argv[1:]:
     try:
@@ -129,6 +142,8 @@ for path in sys.argv[1:]:
     family = selection.get("family")
     alias = selection.get("alias")
     if not all(isinstance(value, str) and value for value in (repo, family, alias)):
+        continue
+    if (repo, alias) in promoted:
         continue
     parts = [f"selection repo={repo}", f"family={family}", f"alias={alias}"]
     target = selection.get("target")
@@ -377,10 +392,14 @@ cmd_list() {
   esac
 
   ensure_runs_dirs
+  local launcher_inventory
+  launcher_inventory="$(print_launcher_inventory)"
   printf 'Installed / Cached Models\n'
   print_profile_inventory
-  print_launcher_inventory
-  print_selection_inventory
+  if [[ -n "$launcher_inventory" ]]; then
+    printf '%s\n' "$launcher_inventory"
+  fi
+  LOCAL_LLM_PROMOTED_LAUNCHERS="$launcher_inventory" print_selection_inventory
   if [[ "$target" == remote:* ]]; then
     print_remote_cache_inventory "$target"
   fi
