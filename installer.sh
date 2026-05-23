@@ -140,7 +140,7 @@ done
 
 # Family-profile wrappers: oc-qwen-reliable, etc.
 # Skip if the resulting name would be "oc-local"
-for family in qwen qwen-hauhau qwen-27b-hauhau gemma-hauhau qwen-27b qwen-opus qwen-heretic qwen-coder qwen-coder-next gemma gemma-vision gpt-oss deepseek-r1; do
+for family in qwen qwen-hauhau qwen-27b-hauhau gemma-hauhau qwen-27b qwen-opus qwen-heretic qwen-coder qwen-coder-next gemma gpt-oss deepseek-r1; do
   for profile in speed fastlong balanced reliable tiny; do
     local_name="oc-${family}-${profile}"
     if [[ "$local_name" != "oc-local" ]]; then

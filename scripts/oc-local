@@ -69,7 +69,6 @@ case "$(basename "$0")" in
   oc-qwen-coder-next|oc-coder-next) default_family=qwen-coder-next; default_profile=reliable ;;
   oc-qwen-coder|oc-coder|oc-code) default_family=qwen-coder ;;
   oc-gemma) default_family=gemma ;;
-  oc-gemma-vision) default_family=gemma-vision ;;
   oc-gpt-oss) default_family=gpt-oss ;;
   oc-deepseek-r1|oc-deepseek) default_family=deepseek-r1 ;;
   oc-speed) default_profile=speed ;;
@@ -127,11 +126,6 @@ case "$(basename "$0")" in
   oc-gemma-balanced) default_family=gemma; default_profile=balanced ;;
   oc-gemma-reliable) default_family=gemma; default_profile=reliable ;;
   oc-gemma-tiny) default_family=gemma; default_profile=tiny ;;
-  oc-gemma-vision-speed) default_family=gemma-vision; default_profile=speed ;;
-  oc-gemma-vision-fastlong) default_family=gemma-vision; default_profile=fastlong ;;
-  oc-gemma-vision-balanced) default_family=gemma-vision; default_profile=balanced ;;
-  oc-gemma-vision-reliable) default_family=gemma-vision; default_profile=reliable ;;
-  oc-gemma-vision-tiny) default_family=gemma-vision; default_profile=tiny ;;
   oc-gpt-oss-speed) default_family=gpt-oss; default_profile=speed ;;
   oc-gpt-oss-fastlong) default_family=gpt-oss; default_profile=fastlong ;;
   oc-gpt-oss-balanced) default_family=gpt-oss; default_profile=balanced ;;
@@ -147,7 +141,7 @@ esac
 family="${default_family:-qwen}"
 if [[ $# -gt 0 ]]; then
   case "$1" in
-    qwen|qwen-hauhau|qwen-27b-hauhau|gemma-hauhau|qwen-27b|qwen-opus|qwen-heretic|qwen-coder|qwen-coder-next|gemma|gemma-vision|gpt-oss|deepseek-r1)
+    qwen|qwen-hauhau|qwen-27b-hauhau|gemma-hauhau|qwen-27b|qwen-opus|qwen-heretic|qwen-coder|qwen-coder-next|gemma|gpt-oss|deepseek-r1)
       family="$1"
       shift
       ;;
@@ -334,19 +328,6 @@ case "$family" in
       balanced) context=49152; ngl=999; batch=128; ubatch=128; quant="UD-Q2_K_XL" ;;
       reliable) context=65536; ngl=999; batch=128; ubatch=128; quant="UD-Q2_K_XL" ;;
       tiny) context=40960; ngl=999; batch=512; ubatch=512; quant="UD-Q2_K_XL" ;;
-    esac
-    ;;
-  gemma-vision)
-    remote_script=./start5.sh
-    model_name="gemma-4-31b-it-vision"
-    hf_repo="unsloth/gemma-4-31B-it-GGUF"
-    mmproj_mode=enabled
-    case "$profile" in
-      speed) context=32768; ngl=999; batch=128; ubatch=128; quant="UD-Q2_K_XL" ;;
-      fastlong) context=40960; ngl=999; batch=64; ubatch=64; quant="UD-Q2_K_XL" ;;
-      balanced) context=32768; ngl=999; batch=64; ubatch=64; quant="UD-Q2_K_XL" ;;
-      reliable) context=32768; ngl=999; batch=64; ubatch=64; quant="UD-Q2_K_XL" ;;
-      tiny) context=32768; ngl=999; batch=64; ubatch=64; quant="UD-IQ2_M" ;;
     esac
     ;;
   gpt-oss)

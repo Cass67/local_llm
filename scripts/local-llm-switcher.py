@@ -108,12 +108,6 @@ MODELS = [
     ),
     Model("qwen-coder-next", "./start15.sh", "qwen3-coder-next", "Qwen Coder Next"),
     Model("gemma", "./start4.sh", "gemma-4-31b-it", "Gemma 4 31B IT"),
-    Model(
-        "gemma-vision",
-        "./start5.sh",
-        "gemma-4-31b-it-vision",
-        "Gemma 4 31B Vision",
-    ),
     Model("gpt-oss", "./start6.sh", "gpt-oss-20b", "GPT OSS 20B"),
     Model(
         "deepseek-r1",

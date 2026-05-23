@@ -374,7 +374,6 @@ oc-gemma-reliable --lean
 Use Gemma vision when image input matters:
 
 ```bash
-oc-gemma-vision-reliable --lean
 ```
 
 Remote usage (SSH):
@@ -391,7 +390,6 @@ Inspect exact settings without starting anything:
 
 ```bash
 oc-qwen-coder-reliable --lean --info
-oc-gemma-vision-reliable --lean --info
 ```
 
 ## Helper Tools
@@ -706,7 +704,6 @@ Families:
 | `qwen-coder` | Code-specialized Qwen Coder | `localllm/qwen3-coder-30b-a3b-instruct` |
 | `qwen-coder-next` | Accepted Qwen3-Coder-Next full-sweep result | `localllm/qwen3-coder-next` |
 | `gemma` | Gemma text-only | `localllm/gemma-4-31b-it` |
-| `gemma-vision` | Gemma with vision projector | `localllm/gemma-4-31b-it-vision` |
 | `gpt-oss` | OpenAI gpt-oss 20B reasoning model | `localllm/gpt-oss-20b` |
 | `deepseek-r1` | DeepSeek R1 Distill Qwen 32B reasoning model | `localllm/deepseek-r1-distill-qwen-32b` |
 | `qwen-opus` | Qwen3.5 27B Opus reasoning distill; benchmark candidate, not yet promoted | `localllm/qwen3.5-27b-opus-reasoning` |
@@ -756,7 +753,6 @@ Quant, KV Q4/Q5, and MMQ changes remain future benchmark/promotion work. The 202
 | Coder Next accepted model | `oc-qwen-coder-next-reliable --lean` | Accepted full-sweep config from `scripts/start15.sh`, 65k context, UD-TQ1_0. |
 | Fast Coder test | `oc-qwen-coder-fastlong --lean` | Coder model with smaller 40k context. |
 | Gemma text comparison | `oc-gemma-reliable --lean` | Text-only, disables vision projector for VRAM headroom. |
-| Gemma vision | `oc-gemma-vision-reliable --lean` | Loads mmproj and uses smaller context/batch. |
 | gpt-oss 131k reasoning | `oc-gpt-oss-speed --lean` | Full 131k context, Q8 quant, and high reasoning with the largest tested batch on RX 7900 XT. |
 | DeepSeek small-context reasoning | `oc-deepseek-r1-reliable --lean` | Q3 32B reasoning model; fully offloads at 16k but uses almost all VRAM. |
 | Benchmark Qwen Opus reasoning | `oc-qwen-opus-reliable --lean` | Candidate from model-discovery; verify fit/perf before trusting. |
@@ -781,7 +777,7 @@ for profile in speed fastlong balanced reliable tiny; do
   ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-${profile}
 done
 
-for family in qwen qwen-27b qwen-coder qwen-coder-next gemma gemma-vision gpt-oss deepseek-r1 qwen-opus qwen-heretic; do
+for family in qwen qwen-27b qwen-coder qwen-coder-next gemma gpt-oss deepseek-r1 qwen-opus qwen-heretic; do
   for profile in speed fastlong balanced reliable tiny; do
     ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-${family}-${profile}
   done
@@ -857,7 +853,6 @@ oc-qwen-reliable --lean --info
 oc-qwen-27b-reliable --lean --info
 oc-qwen-coder-reliable --lean --info
 oc-gemma-reliable --lean --info
-oc-gemma-vision-reliable --lean --info
 oc-gpt-oss-reliable --lean --info
 ```
 
@@ -897,7 +892,6 @@ for script in scripts/oc-local scripts/model-manager.sh scripts/update-manager.s
 shellcheck scripts/oc-local scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/start15.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh
 ssh "$MODEL_HOST" 'systemctl --user is-active local-llm-switcher.service llama-server.service; docker ps --filter name=local-llm-caddy --format "{{.Names}} {{.Status}}"; curl -fsS http://127.0.0.1:3001/api/local-llm/current; curl -fsS http://127.0.0.1:3001/ >/dev/null; curl -fsS http://127.0.0.1:3002/ >/dev/null; curl -fsS http://127.0.0.1:3003/api/local-llm/current >/dev/null'
 oc-qwen-coder-reliable --lean --info
-oc-gemma-vision-reliable --lean --info
 oc-gpt-oss-reliable --lean --info
 ```
 
@@ -930,7 +924,6 @@ oc-gemma-tiny --lean
 
 ### Gemma Vision OOM
 
-Vision loads mmproj and costs extra VRAM. Use the `gemma-vision` profiles for image tasks, and keep normal Gemma text on `gemma` because it passes `--no-mmproj`.
 
 ### Model Mismatch
 

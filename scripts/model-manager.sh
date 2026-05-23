@@ -356,6 +356,79 @@ print(removed)
 PY
 }
 
+remove_switcher_family_entries() {
+  local family="$1"
+  local switcher="$repo_root/scripts/local-llm-switcher.py"
+  [[ -f "$switcher" ]] || {
+    printf '0\n'
+    return 0
+  }
+  python3 - "$switcher" "$family" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+family = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+removed = 0
+
+single = rf'^    Model\("{re.escape(family)}", [^\n]+\),\n'
+text, count = re.subn(single, "", text, flags=re.MULTILINE)
+removed += count
+
+block = r'^    Model\(\n(?:(?:        .+\n)+?)    \),\n'
+
+def keep_or_remove(match: re.Match[str]) -> str:
+    global removed
+    value = match.group(0)
+    if f'"{family}"' in value:
+        removed += 1
+        return ""
+    return value
+
+text = re.sub(block, keep_or_remove, text, flags=re.MULTILINE)
+if removed:
+    path.write_text(text, encoding="utf-8")
+print(removed)
+PY
+}
+
+remove_oc_local_family_entries() {
+  local family="$1"
+  local oc_local="$repo_root/scripts/oc-local"
+  [[ -f "$oc_local" ]] || {
+    printf '0\n'
+    return 0
+  }
+  python3 - "$oc_local" "$family" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+family = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+original = text
+
+lines = []
+for line in text.splitlines(keepends=True):
+    if line.lstrip().startswith("oc-") and family in line:
+        continue
+    if "|" in line and family in line and "case \"$1\"" not in line:
+        line = line.replace(f"|{family}", "").replace(f"{family}|", "")
+    lines.append(line)
+text = "".join(lines)
+
+pattern = rf'^  {re.escape(family)}\)\n.*?^    ;;\n'
+text, block_count = re.subn(pattern, "", text, flags=re.MULTILINE | re.DOTALL)
+
+if text != original:
+    path.write_text(text, encoding="utf-8")
+print(1 if text != original else 0)
+PY
+}
+
 remove_selection_repo_entries() {
   local repo="$1"
   local selection_dir="$runs_dir/selections"
@@ -1144,6 +1217,8 @@ cmd_delete_profile() {
   }
 
   local mode
+  local family="${profile_pattern%%:*}"
+  local wanted_profile="${profile_pattern#*:}"
   mode=plan
   if [[ "$yes" == true && "$dry_run" != true ]]; then
     mode=delete
@@ -1195,6 +1270,13 @@ if mode == "delete":
     path.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n", encoding="utf-8")
     print(f"removed_profile_count={len(matched)}")
 PY
+  if [[ "$mode" == delete && "$wanted_profile" == '*' ]]; then
+    local removed_switcher_count removed_oc_local_count
+    removed_switcher_count="$(remove_switcher_family_entries "$family")"
+    removed_oc_local_count="$(remove_oc_local_family_entries "$family")"
+    printf 'removed_switcher_count=%s\n' "$removed_switcher_count"
+    printf 'removed_launcher_family_count=%s\n' "$removed_oc_local_count"
+  fi
 }
 
 infer_family() {

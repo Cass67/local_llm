@@ -31,7 +31,9 @@
       "ubatch": 1024,
       "mmproj": "none",
       "reasoning_effort": "none",
-      "extra_flags": ["--mlock"],
+      "extra_flags": [
+        "--mlock"
+      ],
       "output_limit": 4096
     },
     "qwen:fastlong": {
@@ -45,7 +47,9 @@
       "ubatch": 1024,
       "mmproj": "none",
       "reasoning_effort": "none",
-      "extra_flags": ["--mlock"],
+      "extra_flags": [
+        "--mlock"
+      ],
       "output_limit": 4096
     },
     "qwen:balanced": {
@@ -59,7 +63,9 @@
       "ubatch": 1024,
       "mmproj": "none",
       "reasoning_effort": "none",
-      "extra_flags": ["--mlock"],
+      "extra_flags": [
+        "--mlock"
+      ],
       "output_limit": 4096
     },
     "qwen:reliable": {
@@ -73,7 +79,9 @@
       "ubatch": 256,
       "mmproj": "none",
       "reasoning_effort": "none",
-      "extra_flags": ["--mlock"],
+      "extra_flags": [
+        "--mlock"
+      ],
       "output_limit": 4096
     },
     "qwen:tiny": {
@@ -87,7 +95,9 @@
       "ubatch": 1024,
       "mmproj": "none",
       "reasoning_effort": "none",
-      "extra_flags": ["--mlock"],
+      "extra_flags": [
+        "--mlock"
+      ],
       "output_limit": 4096
     },
     "qwen-coder:speed": {
@@ -226,76 +236,6 @@
       "batch": 512,
       "ubatch": 512,
       "mmproj": "disabled",
-      "reasoning_effort": "none",
-      "extra_flags": [],
-      "output_limit": 4096
-    },
-    "gemma-vision:speed": {
-      "family": "gemma-vision",
-      "model_name": "gemma-4-31b-it-vision",
-      "hf_repo": "unsloth/gemma-4-31B-it-GGUF",
-      "quant": "UD-Q2_K_XL",
-      "context": 32768,
-      "ngl": 999,
-      "batch": 128,
-      "ubatch": 128,
-      "mmproj": "enabled",
-      "reasoning_effort": "none",
-      "extra_flags": [],
-      "output_limit": 4096
-    },
-    "gemma-vision:fastlong": {
-      "family": "gemma-vision",
-      "model_name": "gemma-4-31b-it-vision",
-      "hf_repo": "unsloth/gemma-4-31B-it-GGUF",
-      "quant": "UD-Q2_K_XL",
-      "context": 40960,
-      "ngl": 999,
-      "batch": 64,
-      "ubatch": 64,
-      "mmproj": "enabled",
-      "reasoning_effort": "none",
-      "extra_flags": [],
-      "output_limit": 4096
-    },
-    "gemma-vision:balanced": {
-      "family": "gemma-vision",
-      "model_name": "gemma-4-31b-it-vision",
-      "hf_repo": "unsloth/gemma-4-31B-it-GGUF",
-      "quant": "UD-Q2_K_XL",
-      "context": 32768,
-      "ngl": 999,
-      "batch": 64,
-      "ubatch": 64,
-      "mmproj": "enabled",
-      "reasoning_effort": "none",
-      "extra_flags": [],
-      "output_limit": 4096
-    },
-    "gemma-vision:reliable": {
-      "family": "gemma-vision",
-      "model_name": "gemma-4-31b-it-vision",
-      "hf_repo": "unsloth/gemma-4-31B-it-GGUF",
-      "quant": "UD-Q2_K_XL",
-      "context": 32768,
-      "ngl": 999,
-      "batch": 64,
-      "ubatch": 64,
-      "mmproj": "enabled",
-      "reasoning_effort": "none",
-      "extra_flags": [],
-      "output_limit": 4096
-    },
-    "gemma-vision:tiny": {
-      "family": "gemma-vision",
-      "model_name": "gemma-4-31b-it-vision",
-      "hf_repo": "unsloth/gemma-4-31B-it-GGUF",
-      "quant": "UD-IQ2_M",
-      "context": 32768,
-      "ngl": 999,
-      "batch": 64,
-      "ubatch": 64,
-      "mmproj": "enabled",
       "reasoning_effort": "none",
       "extra_flags": [],
       "output_limit": 4096
