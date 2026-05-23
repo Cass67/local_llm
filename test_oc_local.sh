@@ -292,6 +292,7 @@ assert_contains "$list_output" "launcher family=qwen repo=unsloth/Qwen3.6-35B-A3
 assert_contains "$list_output" "launcher family=qwen-hauhau repo=HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive"
 assert_contains "$list_output" "launcher family=qwen-heretic repo=llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-GGUF"
 assert_contains "$list_output" "launcher family=qwen-opus repo=noctrex/Qwopus3.6-27B-v1-preview-MTP-GGUF"
+assert_contains "$list_output" "launcher family=qwen-coder-next repo=unsloth/Qwen3-Coder-Next-GGUF"
 update_tmp="$(mktemp -d)"
 mkdir -p "$update_tmp/bin"
 cat >"$update_tmp/tree.json" <<'JSON'
@@ -980,6 +981,13 @@ assert_contains "$(<"$accept_full_start")" 'ctx=65536'
 assert_contains "$(<"$accept_full_start")" 'batch=128'
 assert_contains "$(<"$accept_full_start")" 'ubatch=64'
 rm -f "$accept_full_start"
+cat >"$accept_tmp/qwen-coder-next-full.json" <<'EOF'
+{"mode":"full","target":"remote:bench-host","repo":"unsloth/Qwen3-Coder-Next-GGUF","family":"qwen-coder","alias":"qwen3-coder-next","quant":"UD-TQ1_0","hf_file":"Qwen3-Coder-Next-UD-TQ1_0.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":64,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
+EOF
+accept_existing_output="$("$repo_root/scripts/model-manager.sh" accept "$accept_tmp/qwen-coder-next-full.json")"
+assert_contains "$accept_existing_output" "Accepted benchmark already has launcher"
+assert_contains "$accept_existing_output" "start_script=./start15.sh"
+assert_not_contains "$accept_existing_output" "scripts/start98.sh"
 cp "$repo_root/scripts/oc-local" "$accept_tmp/oc-local.before"
 cp "$repo_root/installer.sh" "$accept_tmp/installer.before"
 cp "$repo_root/README.md" "$accept_tmp/README.before"

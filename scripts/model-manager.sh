@@ -151,6 +151,12 @@ print_launcher_inventory() {
     qwen-27b
     qwen-opus
     qwen-heretic
+    qwen-coder
+    qwen-coder-next
+    gemma
+    gemma-vision
+    gpt-oss
+    deepseek-r1
   )
   local family
   local info
@@ -179,6 +185,50 @@ for key in ("quant", "alias", "remote_start"):
 print(" ".join(parts))
 PY
   done
+}
+
+find_existing_launcher() {
+  local repo="$1"
+  local alias="$2"
+  local oc_local="$repo_root/scripts/oc-local"
+  if [[ ! -x "$oc_local" ]]; then
+    oc_local="$SCRIPT_DIR/oc-local"
+  fi
+  local -a families=(
+    qwen
+    qwen-hauhau
+    qwen-27b-hauhau
+    gemma-hauhau
+    qwen-27b
+    qwen-opus
+    qwen-heretic
+    qwen-coder
+    qwen-coder-next
+    gemma
+    gemma-vision
+    gpt-oss
+    deepseek-r1
+  )
+  local family
+  local info
+
+  [[ -x "$oc_local" ]] || return 1
+  for family in "${families[@]}"; do
+    info="$("$oc_local" "$family" reliable --info --lean 2>/dev/null || true)"
+    [[ -n "$info" ]] || continue
+    python3 - "$repo" "$alias" "$info" <<'PY'
+import sys
+
+repo, alias, info = sys.argv[1:]
+fields = {}
+for line in info.splitlines():
+    key, sep, value = line.partition("=")
+    if sep:
+        fields[key] = value
+if fields.get("hf_repo") == repo and fields.get("alias") == alias:
+    print(fields.get("remote_start", ""))
+PY
+  done | head -1
 }
 
 remote_cache_inventory() {
@@ -1970,6 +2020,19 @@ PY
 
   local ctx batch ubatch ngl quant hf_file
   IFS=$'\t' read -r repo family alias target profile ctx batch ubatch ngl quant hf_file <<<"$json_fields"
+
+  local existing_launcher
+  existing_launcher="$(find_existing_launcher "$repo" "$alias")"
+  if [[ -n "$existing_launcher" ]]; then
+    printf 'Accepted benchmark already has launcher\n'
+    printf 'repo=%s\n' "$repo"
+    printf 'family=%s\n' "$family"
+    printf 'alias=%s\n' "$alias"
+    printf 'target=%s\n' "$target"
+    printf 'profile=%s\n' "$profile"
+    printf 'start_script=%s\n' "${existing_launcher%% *}"
+    return 0
+  fi
 
   shopt -s nullglob
   for start_path in "$repo_root"/scripts/start*.sh; do
