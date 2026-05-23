@@ -586,12 +586,15 @@ Find candidates:
 model-manager list --target "remote:$MODEL_HOST"
 model-manager update --target "remote:$MODEL_HOST" --dry-run
 model-manager replace <old-file> <new-repo> --target "remote:$MODEL_HOST" --dry-run
+model-manager delete <hf-repo> --target "remote:$MODEL_HOST" --dry-run
 model-discovery --query "qwen coder gguf" --limit 10
 model-manager discover --target "remote:$MODEL_HOST" --query "qwen coder gguf"
 ```
 
 `model-manager update --dry-run` only reports cached GGUF files whose basename differs from the recommended largest target-VRAM-fitting Hugging Face file; it does not delete or download models.
 Use `model-manager replace ... --yes` only after reviewing the dry-run; it deletes by basename under known remote model cache directories and records an audit JSON under `runs/replacements/`.
+
+Use `model-manager delete <hf-repo> --yes` only after reviewing the dry-run. Delete removes matching local selections, removes the model from the Open WebUI switcher allowlist, and deletes matching remote cached GGUF files for that Hugging Face repo.
 
 Select a candidate for lifecycle tracking:
 
@@ -609,13 +612,12 @@ scripts/bench-installed-kv-remote.sh
 
 Promote a model only after a benchmark justifies it:
 
-1. Add or update the matching `scripts/startN.sh` launcher.
-2. Add the family/profile mapping in `scripts/oc-local`.
-3. Add the model to `scripts/local-llm-switcher.py` if it should appear in Open WebUI.
-4. Update the family table and recommendations in this README.
-5. Add/update assertions in `test_oc_local.sh`.
-6. Deploy the launcher to `$REMOTE_DIR` on the GPU host.
-7. Verify the launcher `--alias` exactly matches `/v1/models` and the switcher allowlist.
+1. Run `model-manager benchmark <hf-repo> --target "remote:$MODEL_HOST" --full`.
+2. Run `./scripts/model-manager.sh accept ~/.local/share/local_llm/runs/benchmarks/<full-result>.json` from the source checkout.
+3. Accept creates or reuses `scripts/startN.sh`, removes matching pending selections, and adds the model to the Open WebUI switcher allowlist.
+4. Run `./installer.sh` after source changes.
+5. Deploy changed launcher/switcher files to `$REMOTE_DIR` on the GPU host and restart `local-llm-switcher.service` when the switcher changed.
+6. Verify the launcher `--alias` exactly matches `/v1/models` and the switcher allowlist.
 
 Keep benchmark result reports in `docs/benchmarks/`. Do not keep one-off implementation plans or agent notes in git.
 

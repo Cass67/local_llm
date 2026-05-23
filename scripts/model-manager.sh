@@ -25,6 +25,7 @@ Commands:
   list      Show installed and cached models
   update    Show cached model update suggestions
   replace   Replace a cached remote GGUF basename safely
+  delete    Delete a repo from local metadata and remote GGUF cache
   discover   Find candidate models
   select     Select a candidate model
   benchmark  Benchmark a selected model
@@ -276,6 +277,151 @@ for path in selection_dir.glob("*.json"):
         path.unlink()
         removed += 1
 print(removed)
+PY
+}
+
+ensure_switcher_model() {
+  local family="$1"
+  local start_script="$2"
+  local alias="$3"
+  local label="$4"
+  local switcher="$repo_root/scripts/local-llm-switcher.py"
+
+  [[ -f "$switcher" ]] || {
+    printf 'missing\n'
+    return 0
+  }
+
+  python3 - "$switcher" "$family" "$start_script" "$alias" "$label" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+family, start_script, alias, label = sys.argv[2:]
+remote_script = "./" + pathlib.PurePosixPath(start_script).name
+text = path.read_text(encoding="utf-8")
+needle = f'Model("{family}", "{remote_script}", "{alias}", '
+if needle in text:
+    print("existing")
+    raise SystemExit(0)
+entry = f'    Model("{family}", "{remote_script}", "{alias}", "{label}"),\n'
+marker = "]\nMODELS_BY_ID"
+if marker not in text:
+    raise SystemExit("could not find switcher MODELS block")
+text = text.replace(marker, entry + marker, 1)
+path.write_text(text, encoding="utf-8")
+print("added")
+PY
+}
+
+remove_switcher_repo_entries() {
+  local repo="$1"
+  local alias="$2"
+  local switcher="$repo_root/scripts/local-llm-switcher.py"
+  [[ -f "$switcher" ]] || {
+    printf '0\n'
+    return 0
+  }
+  python3 - "$switcher" "$repo" "$alias" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+repo = sys.argv[2]
+alias = sys.argv[3]
+text = path.read_text(encoding="utf-8")
+patterns = [
+    rf'^    Model\([^\n]*"{re.escape(alias)}"[^\n]*\),\n',
+    rf'^    Model\(\n(?:(?:        .+\n)+?)    \),\n',
+]
+removed = 0
+for pattern in patterns:
+    if pattern.endswith(r'    \),\n'):
+        def keep_or_remove(match: re.Match[str]) -> str:
+            global removed
+            block = match.group(0)
+            if f'"{alias}"' in block:
+                removed += 1
+                return ""
+            return block
+
+        text = re.sub(pattern, keep_or_remove, text, flags=re.MULTILINE)
+    else:
+        text, count = re.subn(pattern, "", text, flags=re.MULTILINE)
+        removed += count
+if removed:
+    path.write_text(text, encoding="utf-8")
+print(removed)
+PY
+}
+
+remove_selection_repo_entries() {
+  local repo="$1"
+  local selection_dir="$runs_dir/selections"
+  [[ -d "$selection_dir" ]] || {
+    printf '0\n'
+    return 0
+  }
+  python3 - "$selection_dir" "$repo" <<'PY'
+import json
+import pathlib
+import sys
+
+selection_dir = pathlib.Path(sys.argv[1])
+repo = sys.argv[2]
+removed = 0
+for path in selection_dir.glob("*.json"):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        continue
+    if isinstance(data, dict) and data.get("repo") == repo:
+        path.unlink()
+        removed += 1
+print(removed)
+PY
+}
+
+run_remote_delete_repo_cache() {
+  local host="$1"
+  local repo="$2"
+  local mode="$3"
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" python3 - "$repo" "$mode" <<'PY'
+import json
+import os
+import sys
+
+repo, mode = sys.argv[1:]
+home = os.path.expanduser("~")
+roots = [
+    os.path.join(home, ".cache", "huggingface", "hub"),
+    os.path.join(home, ".cache", "local_llm", "models"),
+    os.path.join(home, ".cache", "llama.cpp"),
+]
+deleted = 0
+planned = 0
+for root in roots:
+    if not os.path.isdir(root):
+        continue
+    for current_root, _, files in os.walk(root):
+        for name in files:
+            if not name.lower().endswith(".gguf"):
+                continue
+            path = os.path.join(current_root, name)
+            found_repo = "unknown"
+            marker = "models--"
+            if marker in path and "/snapshots/" in path:
+                repo_part = path.split(marker, 1)[1].split("/snapshots/", 1)[0]
+                found_repo = repo_part.replace("--", "/", 1)
+            if found_repo != repo:
+                continue
+            planned += 1
+            print(json.dumps({"repo": found_repo, "file": name, "path": path, "action": mode}, separators=(",", ":")))
+            if mode == "delete":
+                os.remove(path)
+                deleted += 1
+print(json.dumps({"planned": planned, "deleted": deleted, "status": "success"}, separators=(",", ":")))
 PY
 }
 
@@ -876,12 +1022,102 @@ cmd_replace() {
   printf 'audit_file=%s\n' "$audit_file"
 }
 
+cmd_delete() {
+  local repo=''
+  local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
+  local dry_run=true
+  local yes=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target)
+        [[ $# -ge 2 && "$2" != --* ]] || {
+          printf '%s\n' '--target requires remote:<host>' >&2
+          return 2
+        }
+        target="$2"
+        shift 2
+        ;;
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      --yes)
+        yes=true
+        dry_run=false
+        shift
+        ;;
+      -h | --help)
+        printf '%s\n' 'Usage: model-manager delete <repo> --target remote:<host> [--dry-run|--yes]'
+        return 0
+        ;;
+      --*)
+        printf 'Unknown delete option: %s\n' "$1" >&2
+        return 2
+        ;;
+      *)
+        if [[ -n "$repo" ]]; then
+          printf 'delete accepts one repo, got extra argument: %s\n' "$1" >&2
+          return 2
+        fi
+        repo="$1"
+        shift
+        ;;
+    esac
+  done
+
+  [[ -n "$repo" ]] || {
+    printf '%s\n' 'delete requires a repo' >&2
+    return 2
+  }
+  case "$target" in
+    remote:*) ;;
+    *)
+      printf '%s\n' 'delete requires --target remote:<host>' >&2
+      return 2
+      ;;
+  esac
+  if [[ -z "${target#remote:}" || "${target#remote:}" == -* ]]; then
+    printf 'invalid remote target: %s\n' "$target" >&2
+    return 2
+  fi
+
+  ensure_runs_dirs
+  local alias
+  alias="$(infer_alias "$repo")"
+  printf 'Delete %s\n' "$([[ "$yes" == true ]] && printf 'result' || printf 'dry-run')"
+  printf 'repo=%s\n' "$repo"
+  printf 'target=%s\n' "$target"
+
+  if [[ "$dry_run" == true ]]; then
+    printf 'would_remove_selections_for_repo=%s\n' "$repo"
+    printf 'would_remove_switcher_entries_for_repo=%s\n' "$repo"
+    printf 'remote_cache_plan:\n'
+    run_remote_delete_repo_cache "${target#remote:}" "$repo" plan || true
+    return 0
+  fi
+
+  local removed_selections removed_switcher
+  removed_selections="$(remove_selection_repo_entries "$repo")"
+  removed_switcher="$(remove_switcher_repo_entries "$repo" "$alias")"
+  printf 'removed_selection_count=%s\n' "$removed_selections"
+  printf 'removed_switcher_count=%s\n' "$removed_switcher"
+  printf 'remote_cache_delete:\n'
+  run_remote_delete_repo_cache "${target#remote:}" "$repo" delete
+}
+
 infer_family() {
   local repo_lower
   repo_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$repo_lower" in
+    *qwen3-coder-next*)
+      printf '%s\n' 'qwen-coder-next'
+      ;;
     *qwen*coder*)
       printf '%s\n' 'qwen-coder'
+      ;;
+    *deepseek*)
+      printf '%s\n' 'deepseek-r1'
       ;;
     *qwen*)
       printf '%s\n' 'qwen'
@@ -2078,6 +2314,8 @@ PY
   if [[ -n "$existing_launcher" ]]; then
     local removed_selection_count
     removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
+    local switcher_status
+    switcher_status="$(ensure_switcher_model "$(infer_family "$repo")" "${existing_launcher%% *}" "$alias" "${alias//-/ }")"
     printf 'Accepted benchmark already has launcher\n'
     printf 'repo=%s\n' "$repo"
     printf 'family=%s\n' "$family"
@@ -2086,6 +2324,7 @@ PY
     printf 'profile=%s\n' "$profile"
     printf 'start_script=%s\n' "${existing_launcher%% *}"
     printf 'removed_selection_count=%s\n' "$removed_selection_count"
+    printf 'switcher_status=%s\n' "$switcher_status"
     return 0
   fi
 
@@ -2179,6 +2418,8 @@ PY
   chmod +x "$repo_root/$start_script"
   local removed_selection_count
   removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
+  local switcher_status
+  switcher_status="$(ensure_switcher_model "$(infer_family "$repo")" "$start_script" "$alias" "${alias//-/ }")"
 
   printf 'Accepted benchmark\n'
   printf 'repo=%s\n' "$repo"
@@ -2192,6 +2433,7 @@ PY
   printf 'ngl=%s\n' "$ngl"
   printf 'start_script=%s\n' "$start_script"
   printf 'removed_selection_count=%s\n' "$removed_selection_count"
+  printf 'switcher_status=%s\n' "$switcher_status"
 }
 
 main() {
@@ -2212,6 +2454,9 @@ main() {
       ;;
     replace)
       cmd_replace "${@:2}"
+      ;;
+    delete)
+      cmd_delete "${@:2}"
       ;;
     discover)
       cmd_discover "${@:2}"
