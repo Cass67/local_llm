@@ -246,6 +246,39 @@ PY
   done | head -1
 }
 
+remove_matching_selections() {
+  local repo="$1"
+  local alias="$2"
+  local selection_dir="$runs_dir/selections"
+
+  [[ -d "$selection_dir" ]] || {
+    printf '0\n'
+    return 0
+  }
+
+  python3 - "$selection_dir" "$repo" "$alias" <<'PY'
+import json
+import pathlib
+import sys
+
+selection_dir = pathlib.Path(sys.argv[1])
+repo = sys.argv[2]
+alias = sys.argv[3]
+removed = 0
+for path in selection_dir.glob("*.json"):
+    try:
+        selection = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        continue
+    if not isinstance(selection, dict):
+        continue
+    if selection.get("repo") == repo and selection.get("alias") == alias:
+        path.unlink()
+        removed += 1
+print(removed)
+PY
+}
+
 remote_cache_inventory() {
   local target="$1"
   local host="${target#remote:}"
@@ -2043,6 +2076,8 @@ PY
   local existing_launcher
   existing_launcher="$(find_existing_launcher "$repo" "$alias")"
   if [[ -n "$existing_launcher" ]]; then
+    local removed_selection_count
+    removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
     printf 'Accepted benchmark already has launcher\n'
     printf 'repo=%s\n' "$repo"
     printf 'family=%s\n' "$family"
@@ -2050,6 +2085,7 @@ PY
     printf 'target=%s\n' "$target"
     printf 'profile=%s\n' "$profile"
     printf 'start_script=%s\n' "${existing_launcher%% *}"
+    printf 'removed_selection_count=%s\n' "$removed_selection_count"
     return 0
   fi
 
@@ -2141,6 +2177,8 @@ with open(path, "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
   chmod +x "$repo_root/$start_script"
+  local removed_selection_count
+  removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
 
   printf 'Accepted benchmark\n'
   printf 'repo=%s\n' "$repo"
@@ -2153,6 +2191,7 @@ PY
   printf 'ubatch=%s\n' "$ubatch"
   printf 'ngl=%s\n' "$ngl"
   printf 'start_script=%s\n' "$start_script"
+  printf 'removed_selection_count=%s\n' "$removed_selection_count"
 }
 
 main() {

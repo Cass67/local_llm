@@ -106,6 +106,7 @@ MODELS = [
         "qwen3-coder-30b-a3b-instruct",
         "Qwen Coder 30B A3B",
     ),
+    Model("qwen-coder-next", "./start15.sh", "qwen3-coder-next", "Qwen Coder Next"),
     Model("gemma", "./start4.sh", "gemma-4-31b-it", "Gemma 4 31B IT"),
     Model(
         "gemma-vision",

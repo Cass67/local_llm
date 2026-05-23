@@ -132,6 +132,7 @@ assert_contains "$switcher_contents" "@media (max-width: 640px)"
 assert_contains "$switcher_contents" "@media (hover: none), (pointer: coarse), (max-width: 900px)"
 assert_contains "$switcher_contents" "local-llm-switcher-toggle"
 assert_contains "$switcher_contents" "local-llm-switcher-panel"
+assert_contains "$switcher_contents" 'Model("qwen-coder-next", "./start15.sh", "qwen3-coder-next", "Qwen Coder Next")'
 assert_contains "$switcher_contents" "bottom: max(96px, env(safe-area-inset-bottom))"
 assert_contains "$switcher_contents" "border-radius: 999px"
 assert_contains "$switcher_contents" "position: absolute"
@@ -985,10 +986,18 @@ rm -f "$accept_full_start"
 cat >"$accept_tmp/qwen-coder-next-full.json" <<'EOF'
 {"mode":"full","target":"remote:bench-host","repo":"unsloth/Qwen3-Coder-Next-GGUF","family":"qwen-coder","alias":"qwen3-coder-next","quant":"UD-TQ1_0","hf_file":"Qwen3-Coder-Next-UD-TQ1_0.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":64,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
 EOF
-accept_existing_output="$("$repo_root/scripts/model-manager.sh" accept "$accept_tmp/qwen-coder-next-full.json")"
+accept_existing_runs="$accept_tmp/existing-runs"
+mkdir -p "$accept_existing_runs/selections"
+printf '{"repo":"unsloth/Qwen3-Coder-Next-GGUF","family":"qwen-coder","alias":"qwen3-coder-next","target":"remote:ubt26"}\n' >"$accept_existing_runs/selections/qcn.json"
+accept_existing_output="$(LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/qwen-coder-next-full.json")"
 assert_contains "$accept_existing_output" "Accepted benchmark already has launcher"
 assert_contains "$accept_existing_output" "start_script=./start15.sh"
+assert_contains "$accept_existing_output" "removed_selection_count=1"
 assert_not_contains "$accept_existing_output" "scripts/start98.sh"
+if [[ -e "$accept_existing_runs/selections/qcn.json" ]]; then
+  printf 'expected accept to remove matching selection file\n' >&2
+  exit 1
+fi
 cp "$repo_root/scripts/oc-local" "$accept_tmp/oc-local.before"
 cp "$repo_root/installer.sh" "$accept_tmp/installer.before"
 cp "$repo_root/README.md" "$accept_tmp/README.before"
