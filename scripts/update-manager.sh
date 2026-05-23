@@ -12,11 +12,19 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_SH_SCRIPT_DIR="$SCRIPT_DIR" source "$SCRIPT_DIR/lib.sh"
 
 MODEL_MANAGER="$SCRIPT_DIR/model-manager.sh"
+if [[ ! -f "$MODEL_MANAGER" ]]; then
+  MODEL_MANAGER="$SCRIPT_DIR/model-manager"
+fi
 
-ensure_dirs
+runs_dir="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
+mkdir -p "$runs_dir/candidates" "$runs_dir/selections" "$runs_dir/benchmarks"
+
+die() {
+  printf '%s\n' "$*" >&2
+  exit 1
+}
 
 usage() {
   echo "Usage: update-manager.sh [options]"
@@ -44,12 +52,17 @@ check_updates() {
 
   echo ""
   echo "Model lifecycle (via model-manager):"
+  echo "  model-manager update --dry-run"
+  echo "  model-manager status"
+  echo "  model-manager discover <family>"
+  echo "  model-manager benchmark <selection>"
   bash "$MODEL_MANAGER" status
 }
 
 case "${1:-}" in
   --candidates)
-    bash "$MODEL_MANAGER" list-candidates
+    echo "Delegating to: model-manager list"
+    bash "$MODEL_MANAGER" list
     ;;
   --discover)
     if [[ -z "${2:-}" ]]; then
@@ -60,7 +73,7 @@ case "${1:-}" in
   --status)
     bash "$MODEL_MANAGER" status
     ;;
-  --help|-h)
+  --help | -h)
     usage
     ;;
   "")

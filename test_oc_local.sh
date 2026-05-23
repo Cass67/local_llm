@@ -87,16 +87,20 @@ assert_contains "$readme_contents" "## Helper Tools"
 assert_contains "$readme_contents" "hardware-analyzer reports the machine it runs on"
 assert_contains "$readme_contents" "model-discovery --detailed"
 assert_contains "$readme_contents" "model-manager discover"
+assert_contains "$readme_contents" "oc-qwen-coder-next-reliable --lean"
+assert_contains "$readme_contents" "model-manager update --target \"remote:\$MODEL_HOST\" --dry-run"
+assert_contains "$readme_contents" "model-manager replace <old-file> <new-repo> --target \"remote:\$MODEL_HOST\" --dry-run"
 assert_contains "$readme_contents" "update-manager is a compatibility helper"
-assert_contains "$readme_contents" "update-manager --config"
-assert_contains "$readme_contents" "for family in qwen qwen-27b qwen-coder gemma gemma-vision gpt-oss deepseek-r1 qwen-opus qwen-heretic; do"
-assert_contains "$readme_contents" "for script in scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh; do bash -n \"\$script\" || exit 1; done"
-assert_contains "$readme_contents" "shellcheck scripts/oc-local scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh"
+assert_contains "$readme_contents" "update-manager --candidates"
+assert_contains "$readme_contents" "for family in qwen qwen-27b qwen-coder qwen-coder-next gemma gemma-vision gpt-oss deepseek-r1 qwen-opus qwen-heretic; do"
+assert_contains "$readme_contents" "scripts/start14.sh scripts/start15.sh scripts/run-current-model.sh"
+assert_contains "$readme_contents" "shellcheck scripts/oc-local scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/start15.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh"
 assert_contains "$readme_contents" "systemctl --user restart llama-server.service"
 assert_contains "$readme_contents" "run-current-model.sh"
 assert_contains "$readme_contents" "REMOTE_SCRIPT=./start11.sh"
 assert_contains "$readme_contents" 'localllm/qwen3.6-35b-a3b-mtp'
-assert_contains "$readme_contents" "scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh"
+assert_contains "$readme_contents" "scripts/start11.sh scripts/start12.sh scripts/start14.sh"
+assert_contains "$readme_contents" "scripts/start15.sh scripts/run-current-model.sh"
 assert_contains "$readme_contents" "journalctl --user -u llama-server.service"
 assert_contains "$readme_contents" "Open WebUI listens on http://127.0.0.1:3002"
 assert_contains "$readme_contents" "Caddy listens on http://127.0.0.1:3001"
@@ -189,6 +193,39 @@ if ((qwen_target_line >= tiny_small_line || tiny_small_line >= huge_line)); then
   printf 'expected ranked order qwen target before tiny small before huge\noutput was:\n%s\n' "$model_discovery_output" >&2
   exit 1
 fi
+fit_files_tmp="$(mktemp -d)"
+cat >"$fit_files_tmp/candidates.json" <<'JSON'
+[
+  {
+    "id": "unsloth/Qwen3-Coder-Next-GGUF",
+    "downloads": 10,
+    "likes": 2,
+    "tags": ["gguf", "code"],
+    "siblings": [
+      {"rfilename": "Qwen3-Coder-Next-Q3_K_M.gguf", "size": 38322487328},
+      {"rfilename": "Qwen3-Coder-Next-UD-IQ1_S.gguf", "size": 21508749344},
+      {"rfilename": "Qwen3-Coder-Next-UD-TQ1_0.gguf", "size": 18941835296}
+    ]
+  }
+]
+JSON
+python3 "$repo_root/scripts/model-fit.py" --hardware-json '{"gpu_name":"RX 7900 XT","vram_gb":20,"ram_gb":64,"cpu_cores":16}' --limit 1 --json <"$fit_files_tmp/candidates.json" >"$fit_files_tmp/ranked.json"
+python3 - "$fit_files_tmp/ranked.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    candidate = json.load(handle)["candidates"][0]
+if candidate["best_file"] != "Qwen3-Coder-Next-UD-TQ1_0.gguf":
+    raise SystemExit(f"expected TQ1_0 file to fit 20GB VRAM: {candidate!r}")
+if candidate["best_quant"] != "UD-TQ1_0":
+    raise SystemExit(f"expected quant from file name: {candidate!r}")
+if candidate["fit_level"] == "too_tight":
+    raise SystemExit(f"expected selected file to fit: {candidate!r}")
+PY
+discovery_dynamic_output="$(OC_LOCAL_HF_FIXTURE="$fit_files_tmp/candidates.json" LOCAL_LLM_HF_TREE_FIXTURE="$fit_files_tmp/candidates.json" OC_LOCAL_REMOTE_HOST=__none__ "$repo_root/scripts/model-discovery.sh" --limit 1)"
+assert_contains "$discovery_dynamic_output" "quant=UD-TQ1_0"
+assert_contains "$discovery_dynamic_output" "file=Qwen3-Coder-Next-UD-TQ1_0.gguf"
 
 model_discovery_installed_output="$(OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" OC_LOCAL_REMOTE_HOST=__none__ "$repo_root/scripts/model-discovery.sh" --installed-only)"
 assert_contains "$model_discovery_installed_output" "Already Tuned Profiles"
@@ -213,18 +250,24 @@ assert_contains "$model_manager_help_output" "select"
 assert_contains "$model_manager_help_output" "benchmark"
 assert_contains "$model_manager_help_output" "accept"
 assert_contains "$model_manager_help_output" "status"
+assert_contains "$model_manager_help_output" "list"
+assert_contains "$model_manager_help_output" "update"
+assert_contains "$model_manager_help_output" "replace"
 update_manager_output="$("$repo_root/scripts/update-manager.sh" 2>&1)"
 assert_contains "$update_manager_output" "model-manager status"
 assert_contains "$update_manager_output" "model-manager discover"
 assert_contains "$update_manager_output" "model-manager benchmark"
+assert_contains "$update_manager_output" "model-manager update --dry-run"
+update_manager_list_output="$("$repo_root/scripts/update-manager.sh" --candidates 2>&1)"
+assert_not_contains "$update_manager_list_output" "list-candidates"
+assert_contains "$update_manager_list_output" "model-manager list"
 update_manager_usage_status=0
 update_manager_usage_output="$("$repo_root/scripts/update-manager.sh" --unknown 2>&1)" || update_manager_usage_status=$?
-if [[ "$update_manager_usage_status" != 2 ]]; then
-  printf 'expected update-manager unknown option to exit 2, got %s\noutput was:\n%s\n' "$update_manager_usage_status" "$update_manager_usage_output" >&2
+if [[ "$update_manager_usage_status" != 1 ]]; then
+  printf 'expected update-manager unknown option to exit 1, got %s\noutput was:\n%s\n' "$update_manager_usage_status" "$update_manager_usage_output" >&2
   exit 1
 fi
-assert_contains "$update_manager_usage_output" "Usage: update-manager [options]"
-assert_not_contains "$update_manager_usage_output" "Usage: update-manager.sh"
+assert_contains "$update_manager_usage_output" "Usage: update-manager.sh [options]"
 manager_tmp="$(mktemp -d)"
 mkdir -p "$manager_tmp/candidates" "$manager_tmp/selections" "$manager_tmp/benchmarks"
 printf '{}\n' >"$manager_tmp/candidates/sample.json"
@@ -233,11 +276,292 @@ assert_contains "$status_output" "Model Manager Status"
 assert_contains "$status_output" "Candidates: 1"
 assert_contains "$status_output" "Selections: 0"
 assert_contains "$status_output" "Benchmarks: 0"
+list_tmp="$(mktemp -d)"
+mkdir -p "$list_tmp/runs/selections" "$list_tmp/runs/benchmarks" "$list_tmp/bin"
+printf '{"repo":"Example/Old-GGUF","family":"qwen-coder","alias":"old","target":"remote:bench-host"}\n' >"$list_tmp/runs/selections/old.json"
+cat >"$list_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+printf '{"repo":"Example/Old-GGUF","file":"Old-Q4_K_M.gguf","size_gb":"12.3","cache":"remote"}\n'
+EOF
+chmod +x "$list_tmp/bin/ssh"
+list_output="$(PATH="$list_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$list_tmp/runs" "$repo_root/scripts/model-manager.sh" list --target remote:bench-host)"
+assert_contains "$list_output" "Installed / Cached Models"
+assert_contains "$list_output" "selection repo=Example/Old-GGUF family=qwen-coder alias=old"
+assert_contains "$list_output" "cache=remote repo=Example/Old-GGUF file=Old-Q4_K_M.gguf size_gb=12.3"
+assert_contains "$list_output" "launcher family=qwen repo=unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
+assert_contains "$list_output" "launcher family=qwen-hauhau repo=HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive"
+assert_contains "$list_output" "launcher family=qwen-heretic repo=llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-GGUF"
+assert_contains "$list_output" "launcher family=qwen-opus repo=noctrex/Qwopus3.6-27B-v1-preview-MTP-GGUF"
+update_tmp="$(mktemp -d)"
+mkdir -p "$update_tmp/bin"
+cat >"$update_tmp/tree.json" <<'JSON'
+[
+  {"type":"file","path":"Model-Q3_K_M.gguf","size":22000000000},
+  {"type":"file","path":"Model-Q4_K_M.gguf","size":17000000000}
+]
+JSON
+cat >"$update_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+printf '{"repo":"Example/Model-GGUF","file":"Model-Q2_K.gguf","size_gb":"8","cache":"remote"}\n'
+EOF
+chmod +x "$update_tmp/bin/ssh"
+update_missing_dry_run_output="$update_tmp/missing-dry-run.out"
+if PATH="$update_tmp/bin:$PATH" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host >"$update_missing_dry_run_output" 2>&1; then
+  printf 'expected update without --dry-run to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$update_missing_dry_run_output")" "update currently requires --dry-run"
+update_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$update_tmp/tree.json" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host --dry-run)"
+assert_contains "$update_output" "Updates"
+assert_contains "$update_output" "current=Model-Q2_K.gguf"
+assert_contains "$update_output" "latest-fitting=Model-Q4_K_M.gguf"
+cat >"$update_tmp/tree-matching-basename.json" <<'JSON'
+[
+  {"type":"file","path":"Q4/Model-Q4_K_M.gguf","size":17000000000}
+]
+JSON
+cat >"$update_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+printf '{"repo":"Example/Model-GGUF","file":"Model-Q4_K_M.gguf","size_gb":"17","cache":"remote"}\n'
+EOF
+chmod +x "$update_tmp/bin/ssh"
+update_same_basename_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$update_tmp/tree-matching-basename.json" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host --dry-run)"
+assert_contains "$update_same_basename_output" "Recommended Updates"
+assert_not_contains "$update_same_basename_output" "current=Model-Q4_K_M.gguf"
+assert_not_contains "$update_same_basename_output" "latest-fitting=Q4/Model-Q4_K_M.gguf"
+replace_tmp="$(mktemp -d)"
+mkdir -p "$replace_tmp/bin" "$replace_tmp/runs"
+cat >"$replace_tmp/tree.json" <<'JSON'
+[
+  {"type":"file","path":"New-Q3_K_M.gguf","size":22000000000},
+  {"type":"file","path":"New-Q4_K_M.gguf","size":17000000000}
+]
+JSON
+cat >"$replace_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"bash -s"* ]]; then
+  script_input="$(cat)"
+  printf '%s\n' "$script_input" >"$LOCAL_LLM_FAKE_REPLACE_SCRIPT"
+  printf 'secret-from-ssh\n' >&2
+  printf 'deleted=Old-Q2_K.gguf\n'
+  printf 'delete_status=deleted\n'
+  printf 'download_status=success\n'
+else
+  printf 'not-a-vram-number\n'
+fi
+EOF
+chmod +x "$replace_tmp/bin/ssh"
+replace_dry_run_output="$(PATH="$replace_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$replace_tmp/runs" LOCAL_LLM_HF_TREE_FIXTURE="$replace_tmp/tree.json" "$repo_root/scripts/model-manager.sh" replace Old-Q2_K.gguf Example/New-GGUF --target remote:bench-host --dry-run)"
+assert_contains "$replace_dry_run_output" "Replacement dry-run"
+assert_contains "$replace_dry_run_output" "old_file=Old-Q2_K.gguf"
+assert_contains "$replace_dry_run_output" "new_repo=Example/New-GGUF"
+assert_contains "$replace_dry_run_output" "selected_quant=Q4_K_M"
+assert_contains "$replace_dry_run_output" "selected_file=New-Q4_K_M.gguf"
+assert_contains "$replace_dry_run_output" "target=remote:bench-host"
+assert_contains "$replace_dry_run_output" "would_delete_remote_basename=Old-Q2_K.gguf"
+assert_contains "$replace_dry_run_output" "would_download_repo=Example/New-GGUF"
+replace_no_mode_output="$replace_tmp/no-mode.out"
+if LOCAL_LLM_RUNS_DIR="$replace_tmp/runs" LOCAL_LLM_HF_TREE_FIXTURE="$replace_tmp/tree.json" "$repo_root/scripts/model-manager.sh" replace Old-Q2_K.gguf Example/New-GGUF --target remote:bench-host >"$replace_no_mode_output" 2>&1; then
+  printf 'expected replace without --dry-run or --yes to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$replace_no_mode_output")" "replace requires exactly one of --dry-run or --yes"
+replace_both_modes_output="$replace_tmp/both-modes.out"
+if LOCAL_LLM_RUNS_DIR="$replace_tmp/runs" LOCAL_LLM_HF_TREE_FIXTURE="$replace_tmp/tree.json" "$repo_root/scripts/model-manager.sh" replace Old-Q2_K.gguf Example/New-GGUF --target remote:bench-host --dry-run --yes >"$replace_both_modes_output" 2>&1; then
+  printf 'expected replace with both modes to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$replace_both_modes_output")" "replace requires exactly one of --dry-run or --yes"
+replace_bad_old_output="$replace_tmp/bad-old.out"
+if LOCAL_LLM_RUNS_DIR="$replace_tmp/runs" "$repo_root/scripts/model-manager.sh" replace path/Old-Q2_K.gguf Example/New-GGUF --target remote:bench-host --dry-run >"$replace_bad_old_output" 2>&1; then
+  printf 'expected replace with unsafe old file to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$replace_bad_old_output")" "old-file must be a basename"
+replace_metachar_old_output="$replace_tmp/metachar-old.out"
+if PATH="$replace_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$replace_tmp/runs" LOCAL_LLM_HF_TREE_FIXTURE="$replace_tmp/tree.json" "$repo_root/scripts/model-manager.sh" replace 'bad;touch-pwn.gguf' Example/New-GGUF --target remote:bench-host --yes >"$replace_metachar_old_output" 2>&1; then
+  printf 'expected replace with shell metacharacter old file to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$replace_metachar_old_output")" "old-file must be a safe GGUF basename"
+if [[ -e "$replace_tmp/script.sh" ]]; then
+  printf 'expected metacharacter old file to be rejected before ssh\n' >&2
+  exit 1
+fi
+replace_bad_target_output="$replace_tmp/bad-target.out"
+if LOCAL_LLM_RUNS_DIR="$replace_tmp/runs" "$repo_root/scripts/model-manager.sh" replace Old-Q2_K.gguf Example/New-GGUF --target remote:-bad --dry-run >"$replace_bad_target_output" 2>&1; then
+  printf 'expected replace with unsafe target to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$replace_bad_target_output")" "remote target host must not start with '-'"
+replace_output="$(PATH="$replace_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$replace_tmp/runs" LOCAL_LLM_HF_TREE_FIXTURE="$replace_tmp/tree.json" LOCAL_LLM_FAKE_REPLACE_SCRIPT="$replace_tmp/script.sh" "$repo_root/scripts/model-manager.sh" replace Old-Q2_K.gguf Example/New-GGUF --target remote:bench-host --yes 2>"$replace_tmp/yes.stderr")"
+assert_contains "$replace_output" "Replacement complete"
+assert_contains "$replace_output" "old_file=Old-Q2_K.gguf"
+assert_contains "$replace_output" "new_repo=Example/New-GGUF"
+assert_contains "$replace_output" "selected_quant=Q4_K_M"
+assert_contains "$replace_output" "selected_file=New-Q4_K_M.gguf"
+assert_contains "$replace_output" "delete_status=deleted"
+assert_contains "$replace_output" "download_status=success"
+assert_contains "$(<"$replace_tmp/script.sh")" "basename"
+assert_contains "$(<"$replace_tmp/script.sh")" "old_file_b64="
+assert_not_contains "$(<"$replace_tmp/script.sh")" "bash -s --"
+assert_not_contains "$(<"$replace_tmp/script.sh")" "HF_HOME"
+assert_not_contains "$(<"$replace_tmp/yes.stderr")" "secret-from-ssh"
+cat >"$replace_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"bash -s"* ]]; then
+  cat >"$LOCAL_LLM_FAKE_REPLACE_FAIL_SCRIPT"
+  printf 'deleted=none\n'
+  printf 'delete_status=not_attempted\n'
+  printf 'download_status=failed\n'
+else
+  printf 'not-a-vram-number\n'
+fi
+EOF
+chmod +x "$replace_tmp/bin/ssh"
+replace_fail_output="$replace_tmp/download-failed.out"
+if PATH="$replace_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$replace_tmp/runs" LOCAL_LLM_HF_TREE_FIXTURE="$replace_tmp/tree.json" LOCAL_LLM_FAKE_REPLACE_FAIL_SCRIPT="$replace_tmp/fail-script.sh" "$repo_root/scripts/model-manager.sh" replace Old-Q2_K.gguf Example/New-GGUF --target remote:bench-host --yes >"$replace_fail_output" 2>&1; then
+  printf 'expected replace with failed download to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$replace_fail_output")" "Replacement did not complete"
+assert_contains "$(<"$replace_fail_output")" "download_status=failed"
+assert_contains "$(<"$replace_fail_output")" "delete_status=not_attempted"
+assert_not_contains "$(<"$replace_fail_output")" "Replacement complete"
+cat >"$replace_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"bash -s"* ]]; then
+  cat >"$LOCAL_LLM_FAKE_REPLACE_AMBIGUOUS_SCRIPT"
+  printf 'deleted=none\n'
+  printf 'delete_status=ambiguous\n'
+  printf 'download_status=success\n'
+else
+  printf 'not-a-vram-number\n'
+fi
+EOF
+chmod +x "$replace_tmp/bin/ssh"
+replace_ambiguous_output="$replace_tmp/ambiguous-delete.out"
+if PATH="$replace_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$replace_tmp/runs" LOCAL_LLM_HF_TREE_FIXTURE="$replace_tmp/tree.json" LOCAL_LLM_FAKE_REPLACE_AMBIGUOUS_SCRIPT="$replace_tmp/ambiguous-script.sh" "$repo_root/scripts/model-manager.sh" replace Old-Q2_K.gguf Example/New-GGUF --target remote:bench-host --yes >"$replace_ambiguous_output" 2>&1; then
+  printf 'expected replace with duplicate old-file matches to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$replace_ambiguous_output")" "Replacement did not complete"
+assert_contains "$(<"$replace_ambiguous_output")" "delete_status=ambiguous"
+assert_contains "$(<"$replace_ambiguous_output")" "download_status=success"
+assert_not_contains "$(<"$replace_ambiguous_output")" "Replacement complete"
+replace_remote_logic_tmp="$(mktemp -d)"
+mkdir -p "$replace_remote_logic_tmp/bin" "$replace_remote_logic_tmp/runs" "$replace_remote_logic_tmp/home/.cache/huggingface/hub/a" "$replace_remote_logic_tmp/home/.cache/local_llm/models/b"
+cp "$replace_tmp/tree.json" "$replace_remote_logic_tmp/tree.json"
+cat >"$replace_remote_logic_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"bash -s"* ]]; then
+  HOME="$LOCAL_LLM_FAKE_REMOTE_HOME" PATH="$LOCAL_LLM_FAKE_REMOTE_BIN:$PATH" bash -s
+else
+  printf 'not-a-vram-number\n'
+fi
+EOF
+chmod +x "$replace_remote_logic_tmp/bin/ssh"
+cat >"$replace_remote_logic_tmp/bin/huggingface-cli" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$replace_remote_logic_tmp/bin/huggingface-cli"
+printf 'old\n' >"$replace_remote_logic_tmp/home/.cache/huggingface/hub/a/Old-Q2_K.gguf"
+replace_real_fail_output="$replace_remote_logic_tmp/real-failed-download.out"
+if PATH="$replace_remote_logic_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$replace_remote_logic_tmp/runs" LOCAL_LLM_HF_TREE_FIXTURE="$replace_remote_logic_tmp/tree.json" LOCAL_LLM_FAKE_REMOTE_HOME="$replace_remote_logic_tmp/home" LOCAL_LLM_FAKE_REMOTE_BIN="$replace_remote_logic_tmp/bin" "$repo_root/scripts/model-manager.sh" replace Old-Q2_K.gguf Example/New-GGUF --target remote:bench-host --yes >"$replace_real_fail_output" 2>&1; then
+  printf 'expected real remote replace logic with failed download to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$replace_real_fail_output")" "delete_status=not_attempted"
+assert_contains "$(<"$replace_real_fail_output")" "download_status=failed"
+if [[ ! -e "$replace_remote_logic_tmp/home/.cache/huggingface/hub/a/Old-Q2_K.gguf" ]]; then
+  printf 'expected failed download to leave old file in place\n' >&2
+  exit 1
+fi
+cat >"$replace_remote_logic_tmp/bin/huggingface-cli" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$replace_remote_logic_tmp/bin/huggingface-cli"
+printf 'old\n' >"$replace_remote_logic_tmp/home/.cache/local_llm/models/b/Old-Q2_K.gguf"
+replace_real_ambiguous_output="$replace_remote_logic_tmp/real-ambiguous.out"
+if PATH="$replace_remote_logic_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$replace_remote_logic_tmp/runs" LOCAL_LLM_HF_TREE_FIXTURE="$replace_remote_logic_tmp/tree.json" LOCAL_LLM_FAKE_REMOTE_HOME="$replace_remote_logic_tmp/home" LOCAL_LLM_FAKE_REMOTE_BIN="$replace_remote_logic_tmp/bin" "$repo_root/scripts/model-manager.sh" replace Old-Q2_K.gguf Example/New-GGUF --target remote:bench-host --yes >"$replace_real_ambiguous_output" 2>&1; then
+  printf 'expected real remote replace logic with duplicate matches to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$replace_real_ambiguous_output")" "delete_status=ambiguous"
+assert_contains "$(<"$replace_real_ambiguous_output")" "download_status=success"
+if [[ ! -e "$replace_remote_logic_tmp/home/.cache/huggingface/hub/a/Old-Q2_K.gguf" || ! -e "$replace_remote_logic_tmp/home/.cache/local_llm/models/b/Old-Q2_K.gguf" ]]; then
+  printf 'expected ambiguous matches to leave all old files in place\n' >&2
+  exit 1
+fi
+replace_audit_file_count="$(find "$replace_tmp/runs/replacements" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')"
+if [[ "$replace_audit_file_count" != 4 ]]; then
+  printf 'expected dry-run, yes, failed download, and ambiguous replacement audit JSON files, got %s\n' "$replace_audit_file_count" >&2
+  exit 1
+fi
+python3 - "$replace_tmp/runs/replacements" <<'PY'
+import json
+import pathlib
+import sys
+
+records = []
+for path in pathlib.Path(sys.argv[1]).glob("*.json"):
+    with path.open(encoding="utf-8") as handle:
+        records.append(json.load(handle))
+actions = sorted(record.get("action") for record in records)
+if actions != ["dry-run", "replace", "replace", "replace"]:
+    raise SystemExit(f"unexpected actions: {actions!r}")
+download_statuses = sorted(record.get("download_status") for record in records)
+if download_statuses != ["failed", "planned", "success", "success"]:
+    raise SystemExit(f"unexpected download statuses: {download_statuses!r}")
+delete_statuses = sorted(record.get("delete_status") for record in records)
+if delete_statuses != ["ambiguous", "deleted", "not_attempted", "planned"]:
+    raise SystemExit(f"unexpected delete statuses: {delete_statuses!r}")
+for record in records:
+    expected = {
+        "old_file": "Old-Q2_K.gguf",
+        "new_repo": "Example/New-GGUF",
+        "selected_quant": "Q4_K_M",
+        "selected_file": "New-Q4_K_M.gguf",
+        "target": "remote:bench-host",
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise SystemExit(f"unexpected {key}: {record!r}")
+    if not isinstance(record.get("timestamp"), str) or not record["timestamp"]:
+        raise SystemExit(f"missing timestamp: {record!r}")
+PY
+list_invalid_target_output="$list_tmp/invalid-target.out"
+if LOCAL_LLM_RUNS_DIR="$list_tmp/runs" "$repo_root/scripts/model-manager.sh" list --target remote:-bad >"$list_invalid_target_output" 2>&1; then
+  printf 'expected list with unsafe remote target to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$list_invalid_target_output")" "remote target host must not start with '-'"
+cat >"$list_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+exit 42
+EOF
+chmod +x "$list_tmp/bin/ssh"
+list_ssh_fail_stdout="$list_tmp/ssh-fail.stdout"
+list_ssh_fail_stderr="$list_tmp/ssh-fail.stderr"
+PATH="$list_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$list_tmp/runs" "$repo_root/scripts/model-manager.sh" list --target remote:bench-host >"$list_ssh_fail_stdout" 2>"$list_ssh_fail_stderr"
+assert_contains "$(<"$list_ssh_fail_stdout")" "Installed / Cached Models"
+assert_contains "$(<"$list_ssh_fail_stdout")" "selection repo=Example/Old-GGUF family=qwen-coder alias=old"
+assert_contains "$(<"$list_ssh_fail_stderr")" "Warning: remote cache inventory failed for remote:bench-host"
 discover_tmp="$(mktemp -d)"
 discover_output="$(LOCAL_LLM_RUNS_DIR="$discover_tmp" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-manager.sh" discover --target local --query "qwen coder gguf" --limit 3)"
 assert_contains "$discover_output" "Model Discovery Results:"
 assert_contains "$discover_output" "Hardware source: local"
 assert_contains "$discover_output" "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
+discover_positional_output="$(LOCAL_LLM_RUNS_DIR="$discover_tmp" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-manager.sh" discover qwen --target local --limit 3)"
+assert_contains "$discover_positional_output" "Model Discovery Results:"
+assert_contains "$discover_positional_output" "Hardware source: local"
+assert_not_contains "$discover_positional_output" "Unknown discover option: qwen"
 discover_missing_target_output="$discover_tmp/missing-target.out"
 if "$repo_root/scripts/model-manager.sh" discover --target >"$discover_missing_target_output" 2>&1; then
   printf 'expected discover --target without value to fail\n' >&2
@@ -281,6 +605,25 @@ expected = {
 }
 if selection != expected:
     raise SystemExit(f"unexpected selection JSON: {selection!r}")
+PY
+select_positional_tmp="$(mktemp -d)"
+select_positional_output="$(LOCAL_LLM_RUNS_DIR="$select_positional_tmp" "$repo_root/scripts/model-manager.sh" select unsloth/Qwen3-Coder-Next-GGUF)"
+assert_contains "$select_positional_output" "Selected unsloth/Qwen3-Coder-Next-GGUF"
+select_positional_file="$(find "$select_positional_tmp/selections" -maxdepth 1 -type f -name '*.json' -print -quit)"
+python3 - "$select_positional_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    selection = json.load(handle)
+expected = {
+    "repo": "unsloth/Qwen3-Coder-Next-GGUF",
+    "family": "qwen-coder",
+    "alias": "qwen3-coder-next",
+    "target": "remote:ubt26",
+}
+if selection != expected:
+    raise SystemExit(f"unexpected positional selection JSON: {selection!r}")
 PY
 select_collision_tmp="$(mktemp -d)"
 mkdir -p "$select_collision_tmp/bin"
@@ -336,6 +679,149 @@ assert_contains "$benchmark_output" "profiles=reliable"
 benchmark_default_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" OC_LOCAL_REMOTE_HOST=bench-host "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --dry-run)"
 assert_contains "$benchmark_default_output" "profiles=reliable"
 assert_contains "$benchmark_default_output" "target=remote:bench-host"
+benchmark_positional_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --dry-run)"
+assert_contains "$benchmark_positional_output" "Benchmark plan"
+assert_contains "$benchmark_positional_output" "repo=unsloth/Qwen3-Coder-Next-GGUF"
+assert_contains "$benchmark_positional_output" "family=qwen-coder"
+assert_contains "$benchmark_positional_output" "alias=qwen3-coder-next"
+benchmark_dynamic_tree="$benchmark_tmp/dynamic-tree.json"
+cat >"$benchmark_dynamic_tree" <<'JSON'
+[
+  {"type":"file","path":"Dynamic-Q5_K_M.gguf","size":23622320128},
+  {"type":"file","path":"Dynamic-Q4_K_M.gguf","size":17179869184},
+  {"type":"file","path":"Dynamic-Q2_K.gguf","size":8589934592}
+]
+JSON
+benchmark_dynamic_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" LOCAL_LLM_HF_TREE_FIXTURE="$benchmark_dynamic_tree" "$repo_root/scripts/model-manager.sh" benchmark Example/Dynamic-GGUF --dry-run --target remote:bench-host)"
+assert_contains "$benchmark_dynamic_output" "repo=Example/Dynamic-GGUF"
+assert_contains "$benchmark_dynamic_output" "quant=Q4_K_M"
+assert_contains "$benchmark_dynamic_output" "hf_file=Dynamic-Q4_K_M.gguf"
+benchmark_run_tmp="$(mktemp -d)"
+mkdir -p "$benchmark_run_tmp/bin"
+cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+script_input="$(cat)"
+printf '%s\n' "$script_input" >"$LOCAL_LLM_FAKE_SSH_SCRIPT"
+printf 'load_status=success\n'
+printf 'prompt_tok_s=321.5\n'
+printf 'decode_tok_s=45.25\n'
+printf 'prompt_tokens=128\n'
+printf 'decode_tokens=256\n'
+printf 'ctx=65536\n'
+printf 'batch=128\n'
+printf 'ubatch=128\n'
+printf 'ngl=999\n'
+printf 'command=./build/bin/llama-server -hf unsloth/Qwen3-Coder-Next-GGUF:Q3_K_M --alias qwen3-coder-next\n'
+EOF
+chmod +x "$benchmark_run_tmp/bin/ssh"
+benchmark_run_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host)"
+assert_contains "$benchmark_run_output" "Benchmark result"
+assert_contains "$benchmark_run_output" "load_status=success"
+assert_contains "$benchmark_run_output" "prompt_tok_s=321.5"
+assert_contains "$benchmark_run_output" "decode_tok_s=45.25"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "llama-server"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "current-model.env"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "systemctl --user restart llama-server.service"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "http://127.0.0.1:8080/v1/chat/completions"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "printf -v command_text_part '%q'"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "(^|:)[[:space:]]+eval time"
+assert_not_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "eval.*tokens per second"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" '"max_tokens":512'
+assert_not_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "Reply with exactly: ok"
+benchmark_run_file="$(find "$benchmark_run_tmp/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
+python3 - "$benchmark_run_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    result = json.load(handle)
+expected = {
+    "target": "remote:bench-host",
+    "repo": "unsloth/Qwen3-Coder-Next-GGUF",
+    "family": "qwen-coder",
+    "alias": "qwen3-coder-next",
+    "profile": "reliable",
+    "ctx": 65536,
+    "batch": 128,
+    "ubatch": 128,
+    "ngl": 999,
+    "load_status": "success",
+    "prompt_tok_s": 321.5,
+    "decode_tok_s": 45.25,
+    "prompt_tokens": 128,
+    "decode_tokens": 256,
+}
+for key, value in expected.items():
+    if result[key] != value:
+        raise SystemExit(f"unexpected {key}: {result[key]!r}")
+if "llama-server" not in result["command"]:
+    raise SystemExit(f"missing command: {result!r}")
+PY
+cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat >>"$LOCAL_LLM_FAKE_SSH_SCRIPT"
+printf 'load_status=success\n'
+printf 'prompt_tok_s=100.0\n'
+printf 'decode_tok_s=50.0\n'
+printf 'prompt_tokens=128\n'
+printf 'decode_tokens=256\n'
+printf 'ctx=65536\n'
+printf 'batch=128\n'
+printf 'ubatch=128\n'
+printf 'ngl=999\n'
+printf 'command=./build/bin/llama-server -hf Example/Dynamic-GGUF --hf-file Dynamic-Q4_K_M.gguf --alias dynamic\n'
+EOF
+chmod +x "$benchmark_run_tmp/bin/ssh"
+benchmark_full_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp/full-runs" LOCAL_LLM_HF_TREE_FIXTURE="$benchmark_dynamic_tree" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/full-remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark Example/Dynamic-GGUF --full --target remote:bench-host)"
+assert_contains "$benchmark_full_output" "Full benchmark result"
+assert_contains "$benchmark_full_output" "Full benchmark start"
+assert_contains "$benchmark_full_output" "trials=7"
+assert_contains "$benchmark_full_output" "running trial=1/7 profile=speed ctx=32768 batch=256 ubatch=256"
+assert_contains "$benchmark_full_output" "trial=1 profile=speed"
+assert_contains "$benchmark_full_output" "recommendation=best-overall"
+assert_contains "$benchmark_full_output" "decode_tokens=256"
+assert_contains "$(<"$benchmark_run_tmp/full-remote-script.sh")" "current-model.env"
+assert_contains "$(<"$benchmark_run_tmp/full-remote-script.sh")" "systemctl --user restart llama-server.service"
+benchmark_full_file="$(find "$benchmark_run_tmp/full-runs/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
+python3 - "$benchmark_full_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    result = json.load(handle)
+if result.get("mode") != "full":
+    raise SystemExit(f"expected full mode: {result!r}")
+trials = result.get("trials")
+if not isinstance(trials, list) or len(trials) < 5:
+    raise SystemExit(f"expected multiple trials: {result!r}")
+for trial in trials:
+    for key in ("profile", "ctx", "batch", "ubatch", "prompt_tokens", "decode_tokens", "decode_tok_s"):
+        if key not in trial:
+            raise SystemExit(f"missing {key}: {trial!r}")
+recommendations = result.get("recommendations")
+if not isinstance(recommendations, dict) or "best-overall" not in recommendations:
+    raise SystemExit(f"missing recommendations: {result!r}")
+PY
+cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat >/dev/null
+printf 'load_status=timeout\n'
+printf 'prompt_tok_s=\n'
+printf 'decode_tok_s=\n'
+printf 'ctx=65536\n'
+printf 'batch=128\n'
+printf 'ubatch=128\n'
+printf 'ngl=999\n'
+printf 'command=./build/bin/llama-server -hf unsloth/Qwen3-Coder-Next-GGUF --alias qwen3-coder-next\n'
+EOF
+chmod +x "$benchmark_run_tmp/bin/ssh"
+benchmark_timeout_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host)"
+assert_contains "$benchmark_timeout_output" "Benchmark did not complete"
+assert_contains "$benchmark_timeout_output" "load_status=timeout"
+assert_contains "$benchmark_timeout_output" "reason=model did not become ready or did not emit throughput metrics"
 benchmark_record_tmp="$(mktemp -d)"
 record_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_record_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --profiles reliable --target local --record-only)"
 assert_contains "$record_output" "Wrote benchmark result"
@@ -477,6 +963,23 @@ assert_contains "$accept_output" "alias=foo-30b"
 assert_contains "$accept_output" "would update scripts/oc-local"
 assert_contains "$accept_output" "would create scripts/start"
 assert_contains "$accept_output" "would create scripts/start11.sh"
+cat >"$accept_tmp/full.json" <<'EOF'
+{"mode":"full","target":"remote:bench-host","repo":"Example/Full-GGUF","family":"full","alias":"full-next","quant":"Q4_K_M","hf_file":"Full-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
+EOF
+accept_full_start="$repo_root/scripts/start98.sh"
+rm -f "$accept_full_start"
+accept_full_output="$(LOCAL_LLM_ACCEPT_START_SCRIPT="scripts/start98.sh" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json")"
+assert_contains "$accept_full_output" "Accepted benchmark"
+assert_contains "$accept_full_output" "start_script=scripts/start98.sh"
+assert_contains "$accept_full_output" "profile=reliable"
+assert_not_contains "$accept_full_output" "Dry-run actions"
+assert_not_contains "$accept_full_output" "would update scripts/oc-local"
+assert_contains "$(<"$accept_full_start")" '--hf-file "Full-Q4_K_M.gguf"'
+assert_contains "$(<"$accept_full_start")" "-c \"\$ctx\""
+assert_contains "$(<"$accept_full_start")" 'ctx=65536'
+assert_contains "$(<"$accept_full_start")" 'batch=128'
+assert_contains "$(<"$accept_full_start")" 'ubatch=64'
+rm -f "$accept_full_start"
 cp "$repo_root/scripts/oc-local" "$accept_tmp/oc-local.before"
 cp "$repo_root/installer.sh" "$accept_tmp/installer.before"
 cp "$repo_root/README.md" "$accept_tmp/README.before"
@@ -596,6 +1099,8 @@ assert_contains "$installer_contents" "oc-qwen-27b-mtp"
 assert_contains "$installer_contents" "oc-qwen-opus-mtp"
 assert_contains "$installer_contents" "oc-qwen-heretic-mtp"
 assert_contains "$installer_contents" "oc-qwen-27b-long"
+assert_contains "$installer_contents" "qwen-coder-next"
+assert_contains "$installer_contents" "oc-coder-next"
 assert_contains "$installer_contents" "scripts/model-manager.sh"
 
 probe_tmp="$(mktemp -d)"
@@ -645,6 +1150,8 @@ EOF
 chmod +x "$probe_tmp/ssh"
 remote_fallback_output="$(PATH="$probe_tmp:$PATH" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-discovery.sh" --host fake-host --installed-only)"
 assert_contains "$remote_fallback_output" "Hardware source: remote:fake-host"
+assert_contains "$remote_fallback_output" "CPU Cores: 16"
+assert_contains "$remote_fallback_output" "RAM: 64 GB"
 assert_contains "$remote_fallback_output" "GPU: llama-server device 0: AMD Radeon RX 7900 XT"
 
 cat >"$probe_tmp/ssh" <<'EOF'
@@ -1053,6 +1560,25 @@ assert_contains "$qwen_coder_info_output" "ubatch=128"
 assert_contains "$qwen_coder_info_output" "ngl=999"
 assert_contains "$qwen_coder_info_output" "alias=qwen3-coder-30b-a3b-instruct"
 assert_contains "$qwen_coder_info_output" "command=./build/bin/llama-server -hf unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL"
+
+qwen_coder_next_reliable_output="$(run_dry qwen-coder-next reliable --lean)"
+assert_contains "$qwen_coder_next_reliable_output" "family=qwen-coder-next"
+assert_contains "$qwen_coder_next_reliable_output" "profile=reliable"
+assert_contains "$qwen_coder_next_reliable_output" "context=65536"
+assert_contains "$qwen_coder_next_reliable_output" "remote_start=./start15.sh reliable"
+assert_contains "$qwen_coder_next_reliable_output" "model=localllm/qwen3-coder-next"
+
+qwen_coder_next_info_output="$(run_info qwen-coder-next reliable --lean)"
+assert_contains "$qwen_coder_next_info_output" "family=qwen-coder-next"
+assert_contains "$qwen_coder_next_info_output" "remote_start=./start15.sh reliable"
+assert_contains "$qwen_coder_next_info_output" "hf_repo=unsloth/Qwen3-Coder-Next-GGUF"
+assert_contains "$qwen_coder_next_info_output" "quant=Qwen3-Coder-Next-UD-TQ1_0.gguf"
+assert_contains "$qwen_coder_next_info_output" "ctx=65536"
+assert_contains "$qwen_coder_next_info_output" "batch=64"
+assert_contains "$qwen_coder_next_info_output" "ubatch=64"
+assert_contains "$qwen_coder_next_info_output" "ngl=999"
+assert_contains "$qwen_coder_next_info_output" "alias=qwen3-coder-next"
+assert_contains "$qwen_coder_next_info_output" "command=./build/bin/llama-server -hf unsloth/Qwen3-Coder-Next-GGUF --hf-file Qwen3-Coder-Next-UD-TQ1_0.gguf"
 
 gpt_oss_reliable_output="$(run_dry gpt-oss reliable --lean)"
 assert_contains "$gpt_oss_reliable_output" "family=gpt-oss"

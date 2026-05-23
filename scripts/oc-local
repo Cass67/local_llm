@@ -66,6 +66,7 @@ case "$(basename "$0")" in
   oc-qwen-27b|oc-qwen-27b-mtp|oc-qwen36-27b|oc-qwen36-27b-mtp) default_family=qwen-27b; default_profile=reliable ;;
   oc-qwen-opus|oc-qwen-opus-mtp) default_family=qwen-opus; default_profile=reliable ;;
   oc-qwen-heretic|oc-qwen-heretic-mtp) default_family=qwen-heretic; default_profile=reliable ;;
+  oc-qwen-coder-next|oc-coder-next) default_family=qwen-coder-next; default_profile=reliable ;;
   oc-qwen-coder|oc-coder|oc-code) default_family=qwen-coder ;;
   oc-gemma) default_family=gemma ;;
   oc-gemma-vision) default_family=gemma-vision ;;
@@ -116,6 +117,11 @@ case "$(basename "$0")" in
   oc-qwen-coder-balanced|oc-coder-balanced) default_family=qwen-coder; default_profile=balanced ;;
   oc-qwen-coder-reliable|oc-coder-reliable) default_family=qwen-coder; default_profile=reliable ;;
   oc-qwen-coder-tiny|oc-coder-tiny) default_family=qwen-coder; default_profile=tiny ;;
+  oc-qwen-coder-next-speed|oc-coder-next-speed) default_family=qwen-coder-next; default_profile=speed ;;
+  oc-qwen-coder-next-fastlong|oc-coder-next-fastlong) default_family=qwen-coder-next; default_profile=fastlong ;;
+  oc-qwen-coder-next-balanced|oc-coder-next-balanced) default_family=qwen-coder-next; default_profile=balanced ;;
+  oc-qwen-coder-next-reliable|oc-coder-next-reliable) default_family=qwen-coder-next; default_profile=reliable ;;
+  oc-qwen-coder-next-tiny|oc-coder-next-tiny) default_family=qwen-coder-next; default_profile=tiny ;;
   oc-gemma-speed) default_family=gemma; default_profile=speed ;;
   oc-gemma-fastlong) default_family=gemma; default_profile=fastlong ;;
   oc-gemma-balanced) default_family=gemma; default_profile=balanced ;;
@@ -141,7 +147,7 @@ esac
 family="${default_family:-qwen}"
 if [[ $# -gt 0 ]]; then
   case "$1" in
-    qwen|qwen-hauhau|qwen-27b-hauhau|gemma-hauhau|qwen-27b|qwen-opus|qwen-heretic|qwen-coder|gemma|gemma-vision|gpt-oss|deepseek-r1)
+    qwen|qwen-hauhau|qwen-27b-hauhau|gemma-hauhau|qwen-27b|qwen-opus|qwen-heretic|qwen-coder|qwen-coder-next|gemma|gemma-vision|gpt-oss|deepseek-r1)
       family="$1"
       shift
       ;;
@@ -224,6 +230,19 @@ case "$family" in
       balanced) context=49152; ngl=999; batch=256; ubatch=256; quant="UD-Q3_K_XL" ;;
       reliable) context=65536; ngl=999; batch=128; ubatch=128; quant="UD-Q3_K_XL" ;;
       tiny) context=65536; ngl=999; batch=256; ubatch=256; quant="UD-Q2_K_XL" ;;
+    esac
+    ;;
+  qwen-coder-next)
+    remote_script=./start15.sh
+    model_name="qwen3-coder-next"
+    hf_repo="unsloth/Qwen3-Coder-Next-GGUF"
+    mmproj_mode=none
+    case "$profile" in
+      speed) context=32768; ngl=999; batch=256; ubatch=256; quant="Qwen3-Coder-Next-UD-TQ1_0.gguf" ;;
+      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="Qwen3-Coder-Next-UD-TQ1_0.gguf" ;;
+      balanced) context=49152; ngl=999; batch=64; ubatch=64; quant="Qwen3-Coder-Next-UD-TQ1_0.gguf" ;;
+      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3-Coder-Next-UD-TQ1_0.gguf" ;;
+      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3-Coder-Next-UD-TQ1_0.gguf" ;;
     esac
     ;;
   qwen-hauhau)

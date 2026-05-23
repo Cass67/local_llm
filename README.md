@@ -120,6 +120,7 @@ Copy launchers, services, Caddy config, and the switcher to the GPU host:
 scp scripts/start2.sh scripts/start3.sh scripts/start4.sh scripts/start5.sh \
   scripts/start6.sh scripts/start7.sh scripts/start8.sh scripts/start9.sh \
   scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh \
+  scripts/start15.sh \
   scripts/run-current-model.sh scripts/local-llm-switcher.py \
   scripts/Caddyfile.local-llm scripts/run-local-llm-caddy-container.sh \
   "$MODEL_HOST:$REMOTE_DIR/"
@@ -417,7 +418,7 @@ Use this when deciding whether a model candidate is worth testing before pulling
 
 ### Model Discovery
 
-`model-discovery` queries Hugging Face live for GGUF candidates by default, detects the target model-server hardware, and prints already tuned local_llm profiles separately. Use the Hugging Face list as a starting point; final fit still comes from `llama-server` logs and `oc-*-* --info`.
+`model-discovery` queries Hugging Face live for GGUF candidates by default, detects the target model-server hardware, ranks candidates with the native scorer, and prints already tuned local_llm profiles separately. When Hugging Face exposes GGUF file sizes, discovery chooses the largest quant/file that fits target VRAM and shows it as `quant=... file=...`. Use the Hugging Face list as a starting point; final fit still comes from `llama-server` logs and `oc-*-* --info`.
 
 Default results are ranked for the RX 7900 XT: 14B-40B candidates first, unusual sizes next, tiny 1B-9B models demoted as small/test, and 70B+ models demoted as unlikely.
 
@@ -427,6 +428,9 @@ model-discovery
 
 # Search for a specific model family
 model-discovery --query "qwen coder gguf" --limit 10
+
+# Benchmark the selected dynamic quant/file on the remote target
+model-manager benchmark unsloth/Qwen3-Coder-Next-GGUF
 
 # Show only profiles already tuned in this repo
 model-discovery --installed-only
@@ -448,7 +452,7 @@ oc-qwen-27b-long --lean --info
 
 ### Model Manager
 
-`model-manager` is the planned workflow helper for model discovery, selection, benchmarking, and acceptance.
+`model-manager` is the workflow helper for model discovery, dynamic quant/file selection, service-backed benchmarking, full config sweeps, replacement, and benchmark acceptance.
 
 ```bash
 # Discover remote GGUF candidates
@@ -456,6 +460,41 @@ model-manager discover --target "remote:$MODEL_HOST" --query "qwen coder gguf"
 
 # Show current model-manager state
 model-manager status
+```
+
+Discovery-to-start flow for a new GGUF model:
+
+```bash
+# 1. Discover candidates on the target model server.
+model-manager discover qwen --target "remote:$MODEL_HOST"
+
+# 2. Inspect the selected dynamic quant/file and inferred family/alias.
+model-manager benchmark <hf-repo> --target "remote:$MODEL_HOST" --dry-run
+
+# 3. Run a quick real-service sanity benchmark on llama.cpp port 8080.
+model-manager benchmark <hf-repo> --target "remote:$MODEL_HOST"
+
+# 4. Run the full promotion sweep. This restarts llama-server.service once per trial.
+model-manager benchmark <hf-repo> --target "remote:$MODEL_HOST" --full
+
+# 5. Accept the full benchmark result from the best-overall recommendation.
+./scripts/model-manager.sh accept ~/.local/share/local_llm/runs/benchmarks/<full-result>.json
+```
+
+The quick benchmark proves the candidate loads and can produce a 512-token response through the real `llama-server.service`. The full benchmark sweeps practical profile-style configs, prints status before and after each trial, records prompt/decode throughput and token counts, and writes a JSON result with `fastest-usable`, `reliable-long-context`, and `best-overall` recommendations.
+
+`accept` must be run from a source checkout, not from the installed `~/.local/bin/model-manager`, because it creates a new `scripts/startN.sh` launcher in the repo. It currently creates the launcher only; wiring the new family/profile into `scripts/oc-local`, `installer.sh`, README tables, and switcher allowlists remains a manual promotion step.
+
+To load the accepted launcher on the remote service:
+
+```bash
+ssh "$MODEL_HOST" 'cd "$REMOTE_DIR" && cat > current-model.env <<EOF
+REMOTE_SCRIPT=./startN.sh
+REMOTE_PROFILE=reliable
+EOF
+systemctl --user restart llama-server.service'
+
+ssh "$MODEL_HOST" 'curl -fsS http://127.0.0.1:8080/v1/models'
 ```
 
 ### Update Manager
@@ -466,11 +505,8 @@ update-manager is a compatibility helper. It does not mutate files; use `model-m
 # Show model-manager workflow guidance
 update-manager
 
-# Compatibility alias for older local helper workflows
-update-manager --config
-
-# Compatibility alias for older model update workflows
-update-manager --models
+# List tracked selections and profiles
+update-manager --candidates
 
 # Inspect model workflow state
 model-manager status
@@ -547,9 +583,15 @@ The durable workflow for finding, adding, benchmarking, and promoting models bel
 Find candidates:
 
 ```bash
+model-manager list --target "remote:$MODEL_HOST"
+model-manager update --target "remote:$MODEL_HOST" --dry-run
+model-manager replace <old-file> <new-repo> --target "remote:$MODEL_HOST" --dry-run
 model-discovery --query "qwen coder gguf" --limit 10
 model-manager discover --target "remote:$MODEL_HOST" --query "qwen coder gguf"
 ```
+
+`model-manager update --dry-run` only reports cached GGUF files whose basename differs from the recommended largest target-VRAM-fitting Hugging Face file; it does not delete or download models.
+Use `model-manager replace ... --yes` only after reviewing the dry-run; it deletes by basename under known remote model cache directories and records an audit JSON under `runs/replacements/`.
 
 Select a candidate for lifecycle tracking:
 
@@ -657,6 +699,7 @@ Families:
 | `qwen-hauhau` | Hauhau Qwen3.6 35B vision-enabled candidate | `localllm/qwen3.6-35b-a3b-hauhau` |
 | `qwen-27b` | Qwen3.6 27B dense-thinking comparison; not the responsive daily driver | `localllm/qwen3.6-27b` |
 | `qwen-coder` | Code-specialized Qwen Coder | `localllm/qwen3-coder-30b-a3b-instruct` |
+| `qwen-coder-next` | Accepted Qwen3-Coder-Next full-sweep result | `localllm/qwen3-coder-next` |
 | `gemma` | Gemma text-only | `localllm/gemma-4-31b-it` |
 | `gemma-vision` | Gemma with vision projector | `localllm/gemma-4-31b-it-vision` |
 | `gpt-oss` | OpenAI gpt-oss 20B reasoning model | `localllm/gpt-oss-20b` |
@@ -705,6 +748,7 @@ Quant, KV Q4/Q5, and MMQ changes remain future benchmark/promotion work. The 202
 | Qwen dense reliable | `oc-qwen-27b-reliable --lean` | IQ4, 65k context; more room, but slower prompt eval. |
 | Qwen dense long context | `oc-qwen-27b-long --lean` | Q3 96k context; 100k loaded but crashed on generation, 128k OOMed. |
 | Code-specialized model | `oc-qwen-coder-reliable --lean` | Full GPU offload at 65k after Q3 profile tuning. |
+| Coder Next accepted model | `oc-qwen-coder-next-reliable --lean` | Accepted full-sweep config from `scripts/start15.sh`, 65k context, UD-TQ1_0. |
 | Fast Coder test | `oc-qwen-coder-fastlong --lean` | Coder model with smaller 40k context. |
 | Gemma text comparison | `oc-gemma-reliable --lean` | Text-only, disables vision projector for VRAM headroom. |
 | Gemma vision | `oc-gemma-vision-reliable --lean` | Loads mmproj and uses smaller context/batch. |
@@ -732,7 +776,7 @@ for profile in speed fastlong balanced reliable tiny; do
   ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-${profile}
 done
 
-for family in qwen qwen-27b qwen-coder gemma gemma-vision gpt-oss deepseek-r1 qwen-opus qwen-heretic; do
+for family in qwen qwen-27b qwen-coder qwen-coder-next gemma gemma-vision gpt-oss deepseek-r1 qwen-opus qwen-heretic; do
   for profile in speed fastlong balanced reliable tiny; do
     ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-${family}-${profile}
   done
@@ -740,9 +784,12 @@ done
 
 for profile in speed fastlong balanced reliable tiny; do
   ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-coder-${profile}
+  ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-coder-next-${profile}
 done
 
 ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-qwen-coder
+ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-qwen-coder-next
+ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-coder-next
 ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-qwen-27b-long
 ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-qwen-27b-96k
 ln -sf ~/.local/bin/oc-local ~/.local/bin/oc-qwen36-27b-long
@@ -772,6 +819,7 @@ scp scripts/start10.sh "$MODEL_HOST:$REMOTE_DIR/start10.sh"
 scp scripts/start11.sh "$MODEL_HOST:$REMOTE_DIR/start11.sh"
 scp scripts/start12.sh "$MODEL_HOST:$REMOTE_DIR/start12.sh"
 scp scripts/start14.sh "$MODEL_HOST:$REMOTE_DIR/start14.sh"
+scp scripts/start15.sh "$MODEL_HOST:$REMOTE_DIR/start15.sh"
 scp scripts/run-current-model.sh "$MODEL_HOST:$REMOTE_DIR/run-current-model.sh"
 scp scripts/local-llm-switcher.py "$MODEL_HOST:$REMOTE_DIR/local-llm-switcher.py"
 scp scripts/Caddyfile.local-llm "$MODEL_HOST:$REMOTE_DIR/Caddyfile.local-llm"
@@ -839,9 +887,9 @@ curl -fsS "$MODEL_API_BASE/chat/completions" \
 
 ```bash
 python3 -m py_compile scripts/local-llm-switcher.py
-for script in scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh; do bash -n "$script" || exit 1; done
+for script in scripts/oc-local scripts/model-manager.sh scripts/update-manager.sh scripts/model-discovery.sh scripts/hardware-analyzer.sh scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/start15.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh; do bash -n "$script" || exit 1; done
 ./test_oc_local.sh
-shellcheck scripts/oc-local scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh
+shellcheck scripts/oc-local scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/start15.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh
 ssh "$MODEL_HOST" 'systemctl --user is-active local-llm-switcher.service llama-server.service; docker ps --filter name=local-llm-caddy --format "{{.Names}} {{.Status}}"; curl -fsS http://127.0.0.1:3001/api/local-llm/current; curl -fsS http://127.0.0.1:3001/ >/dev/null; curl -fsS http://127.0.0.1:3002/ >/dev/null; curl -fsS http://127.0.0.1:3003/api/local-llm/current >/dev/null'
 oc-qwen-coder-reliable --lean --info
 oc-gemma-vision-reliable --lean --info
