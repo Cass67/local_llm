@@ -753,8 +753,9 @@ cmd_update() {
   fi
   [[ "$target" == remote:* ]] || return 0
 
-  local inventory line repo_file repo file cached_revision cached_basename dynamic_choice latest_quant latest_file latest_basename lower_file latest_revision reason
+  local inventory line repo_file repo file cached_revision cached_basename dynamic_choice latest_quant latest_file latest_basename lower_file latest_revision reason update_number
   local remote_output delete_status deleted_file download_status key value audit_file
+  update_number=0
   inventory="$(remote_cache_inventory "$target")"
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
@@ -781,16 +782,43 @@ cmd_update() {
       fi
     fi
     [[ -n "$latest_file" ]] || continue
+    update_number=$((update_number + 1))
     if [[ "$dry_run" == true ]]; then
-      printf 'recommendation repo=%s current=%s latest-fitting=%s' "$repo" "$file" "$latest_file"
-      if [[ -n "$latest_quant" ]]; then
-        printf ' quant=%s' "$latest_quant"
+      printf '\n%s. %s\n' "$update_number" "$repo"
+      printf '   Current cached file:\n'
+      printf '     %s\n' "$file"
+      if [[ -n "$cached_revision" ]]; then
+        printf '     cached_revision=%s\n' "$cached_revision"
       fi
-      printf ' target=%s reason=%s' "$target" "$reason"
+      printf '   Recommended file:\n'
+      printf '     %s\n' "$latest_file"
+      if [[ -n "$latest_quant" ]]; then
+        printf '     quant=%s\n' "$latest_quant"
+      fi
+      if [[ "$reason" == same-file-newer-snapshot ]]; then
+        printf '     latest_revision=%s\n' "$latest_revision"
+      fi
+      printf '   Why:\n'
+      case "$reason" in
+        same-file-newer-snapshot)
+          printf '     Same GGUF filename exists in a newer Hugging Face snapshot.\n'
+          ;;
+        *)
+          printf '     Hugging Face has a better-fitting GGUF for this target.\n'
+          ;;
+      esac
+      printf '     Projector files such as mmproj*.gguf were ignored.\n'
+      printf '   Action with --yes:\n'
+      printf '     1. Download %s\n' "$latest_file"
+      printf '     2. Delete cached %s only if download succeeds\n' "$cached_basename"
+      printf '   Target:\n'
+      printf '     %s\n' "$target"
+      printf '   Plan:\n'
+      printf '     repo=%s current=%s recommended=%s reason=%s would_download_repo=%s would_download_file=%s would_delete_remote_basename=%s' "$repo" "$file" "$latest_file" "$reason" "$repo" "$latest_file" "$cached_basename"
       if [[ "$reason" == same-file-newer-snapshot ]]; then
         printf ' cached_revision=%s latest_revision=%s' "$cached_revision" "$latest_revision"
       fi
-      printf ' would_download_repo=%s would_download_file=%s would_delete_remote_basename=%s\n' "$repo" "$latest_file" "$cached_basename"
+      printf '\n'
       continue
     fi
 
