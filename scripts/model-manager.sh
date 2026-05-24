@@ -74,32 +74,60 @@ cmd_status() {
 print_profile_inventory() {
   local profiles_json="$repo_root/configs/profiles.json"
 
-  [[ -f "$profiles_json" ]] || return 0
+  printf 'Profiles\n\n'
+  if [[ ! -f "$profiles_json" ]]; then
+    printf '  None\n'
+    return 0
+  fi
   python3 - "$profiles_json" <<'PY'
 import json
 import sys
+from collections import defaultdict
 
 path = sys.argv[1]
 try:
     with open(path, encoding="utf-8") as handle:
         data = json.load(handle)
 except (OSError, json.JSONDecodeError):
+    print("  None")
     raise SystemExit(0)
 
 profiles = data.get("profiles")
 if not isinstance(profiles, dict):
+    print("  None")
     raise SystemExit(0)
 
+order = {name: index for index, name in enumerate(["speed", "fastlong", "balanced", "reliable", "tiny"])}
+by_family = defaultdict(list)
 for key in sorted(profiles):
     profile = profiles[key]
     if not isinstance(profile, dict):
         continue
-    parts = [f"profile key={key}"]
-    for field in ("hf_repo", "family", "model_name", "quant"):
-        value = profile.get(field)
-        if isinstance(value, str) and value:
-            parts.append(f"{field}={value}")
-    print(" ".join(parts))
+    family = profile.get("family")
+    if not isinstance(family, str) or not family:
+        family = key.split(":", 1)[0]
+    profile_name = key.split(":", 1)[1] if ":" in key else key
+    by_family[family].append((profile_name, profile))
+
+if not by_family:
+    print("  None")
+    raise SystemExit(0)
+
+for family in sorted(by_family):
+    rows = sorted(by_family[family], key=lambda item: (order.get(item[0], 99), item[0]))
+    print(f"  {family}")
+    for profile_name, profile in rows:
+        model_name = profile.get("model_name") or "unknown"
+        quant = profile.get("quant") or "unknown"
+        print(f"    {profile_name:<10} {model_name:<38} {quant}")
+    repos = sorted({profile.get("hf_repo") for _, profile in rows if isinstance(profile.get("hf_repo"), str) and profile.get("hf_repo")})
+    if len(repos) == 1:
+        print(f"    source: {repos[0]}")
+    elif repos:
+        print("    repos:")
+        for repo in repos:
+            print(f"      {repo}")
+    print()
 PY
 }
 
@@ -113,7 +141,11 @@ print_selection_inventory() {
     shopt -u nullglob
   fi
 
-  ((${#selection_files[@]} > 0)) || return 0
+  printf 'Pending Selections\n\n'
+  if ((${#selection_files[@]} == 0)); then
+    printf '  None\n'
+    return 0
+  fi
   python3 - "${selection_files[@]}" <<'PY'
 import json
 import os
@@ -131,6 +163,7 @@ for line in os.environ.get("LOCAL_LLM_PROMOTED_LAUNCHERS", "").splitlines():
     if repo and alias:
         promoted.add((repo, alias))
 
+rows = []
 for path in sys.argv[1:]:
     try:
         with open(path, encoding="utf-8") as handle:
@@ -146,11 +179,23 @@ for path in sys.argv[1:]:
         continue
     if (repo, alias) in promoted:
         continue
-    parts = [f"selection repo={repo}", f"family={family}", f"alias={alias}"]
+    fields = {"repo": repo, "family": family, "alias": alias}
     target = selection.get("target")
     if isinstance(target, str) and target:
-        parts.append(f"target={target}")
-    print(" ".join(parts))
+        fields["target"] = target
+    rows.append(fields)
+
+if not rows:
+    print("  None")
+    raise SystemExit(0)
+
+for fields in sorted(rows, key=lambda item: (item["family"], item["alias"])):
+    print(f"  {fields['alias']}")
+    print(f"    family: {fields['family']}")
+    print(f"    source: {fields['repo']}")
+    if fields.get("target"):
+        print(f"    target: {fields['target']}")
+    print()
 PY
 }
 
@@ -201,6 +246,46 @@ for key in ("quant", "alias", "remote_start"):
 print(" ".join(parts))
 PY
   done
+}
+
+print_launcher_cards() {
+  local launcher_inventory="$1"
+
+  printf 'Launchers\n\n'
+  if [[ -z "$launcher_inventory" ]]; then
+    printf '  None\n'
+    return 0
+  fi
+  python3 - "$launcher_inventory" <<'PY'
+import sys
+
+rows = []
+for line in sys.argv[1].splitlines():
+    fields = {}
+    for part in line.split():
+        key, sep, value = part.partition("=")
+        if sep:
+            fields[key] = value
+    if fields:
+        rows.append(fields)
+
+if not rows:
+    print("  None")
+    raise SystemExit(0)
+
+for fields in sorted(rows, key=lambda item: (item.get("family", ""), item.get("alias", ""))):
+    alias = fields.get("alias") or fields.get("family") or "unknown"
+    print(f"  {alias}")
+    if fields.get("family"):
+        print(f"    family: {fields['family']}")
+    if fields.get("repo"):
+        print(f"    source: {fields['repo']}")
+    if fields.get("quant"):
+        print(f"    file:   {fields['quant']}")
+    if fields.get("remote_start"):
+        print(f"    start:  {fields['remote_start']} reliable")
+    print()
+PY
 }
 
 find_existing_launcher() {
@@ -564,22 +649,36 @@ PY
 print_remote_cache_inventory() {
   local inventory
   inventory="$(remote_cache_inventory "$1")"
+  printf 'Remote Cache\n\n'
+  if [[ -z "$inventory" ]]; then
+    printf '  None\n'
+    return 0
+  fi
   python3 - "$inventory" <<'PY'
 import json
 import sys
+from collections import defaultdict
 
+by_repo = defaultdict(list)
 for line in sys.argv[1].splitlines():
     try:
         fields = json.loads(line)
     except json.JSONDecodeError:
         continue
-    ordered = []
-    for key in ("cache", "repo", "file", "size_gb"):
-        value = fields.get(key)
-        if value:
-            ordered.append(f"{key}={value}")
-    if ordered:
-        print(" ".join(ordered))
+    repo = fields.get("repo") or "unknown"
+    file_name = fields.get("file") or "unknown"
+    size_gb = fields.get("size_gb") or "?"
+    by_repo[repo].append((file_name, size_gb))
+
+if not by_repo:
+    print("  None")
+    raise SystemExit(0)
+
+for repo in sorted(by_repo):
+    print(f"  {repo}")
+    for file_name, size_gb in sorted(by_repo[repo]):
+        print(f"    {file_name:<52} {size_gb} GB")
+    print()
 PY
 }
 
@@ -806,13 +905,18 @@ cmd_list() {
   ensure_runs_dirs
   local launcher_inventory
   launcher_inventory="$(print_launcher_inventory)"
-  printf 'Installed / Cached Models\n'
+  printf 'Models\n\n'
   print_profile_inventory
+  printf '\n'
   if [[ -n "$launcher_inventory" ]]; then
-    printf '%s\n' "$launcher_inventory"
+    print_launcher_cards "$launcher_inventory"
+  else
+    print_launcher_cards ''
   fi
+  printf '\n'
   LOCAL_LLM_PROMOTED_LAUNCHERS="$launcher_inventory" print_selection_inventory
   if [[ "$target" == remote:* ]]; then
+    printf '\n'
     print_remote_cache_inventory "$target"
   fi
 }

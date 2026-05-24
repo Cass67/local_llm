@@ -450,50 +450,42 @@ oc-qwen-27b-long --lean --info
 
 ### Model Manager
 
-`model-manager` is the workflow helper for model discovery, dynamic quant/file selection, service-backed benchmarking, full config sweeps, replacement, and benchmark acceptance.
+`model-manager` owns the GGUF lifecycle: Readable inventory, discovery, benchmark runs, promotion, updates, replacements, and deletes.
+
+Names in its human output use this convention:
+
+- source: Hugging Face repo or local profile source.
+- file: selected GGUF file or quant.
+- launcher: runnable `start*.sh` entry used by OpenCode and Open WebUI.
 
 ```bash
-# Discover remote GGUF candidates
-model-manager discover --target "remote:$MODEL_HOST" --query "qwen coder gguf"
-
-# Show current model-manager state
+model-manager list --target "remote:$MODEL_HOST"
 model-manager status
+model-manager discover qwen --target "remote:$MODEL_HOST"
 ```
 
-Discovery-to-start flow for a new GGUF model:
+New model flow:
 
 ```bash
-# 1. Discover candidates on the target model server.
+# 1. Find a source repo.
 model-manager discover qwen --target "remote:$MODEL_HOST"
 
-# 2. Inspect the selected dynamic quant/file and inferred family/alias.
+# 2. Check the selected file, inferred family, and alias.
 model-manager benchmark <hf-repo> --target "remote:$MODEL_HOST" --dry-run
 
-# 3. Run a quick real-service sanity benchmark on llama.cpp port 8080.
+# 3. Prove the model loads through the real llama-server.service.
 model-manager benchmark <hf-repo> --target "remote:$MODEL_HOST"
 
-# 4. Run the full promotion sweep. This restarts llama-server.service once per trial.
+# 4. Sweep practical profiles before promotion.
 model-manager benchmark <hf-repo> --target "remote:$MODEL_HOST" --full
 
-# 5. Accept the full benchmark result from the best-overall recommendation.
+# 5. Promote the best full-sweep result from the source checkout.
 ./scripts/model-manager.sh accept ~/.local/share/local_llm/runs/benchmarks/<full-result>.json
 ```
 
-The quick benchmark proves the candidate loads and can produce a 512-token response through the real `llama-server.service`. The full benchmark sweeps practical profile-style configs, prints status before and after each trial, records prompt/decode throughput and token counts, and writes a JSON result with `fastest-usable`, `reliable-long-context`, and `best-overall` recommendations.
+The quick benchmark starts the candidate through `llama-server.service` and asks for a 512-token response. The full benchmark records prompt/decode throughput and writes a JSON result with `fastest-usable`, `reliable-long-context`, and `best-overall` recommendations.
 
-`accept` must be run from a source checkout, not from the installed `~/.local/bin/model-manager`, because it creates a new `scripts/startN.sh` launcher in the repo. It currently creates the launcher only; wiring the new family/profile into `scripts/oc-local`, `installer.sh`, README tables, and switcher allowlists remains a manual promotion step.
-
-To load the accepted launcher on the remote service:
-
-```bash
-ssh "$MODEL_HOST" 'cd "$REMOTE_DIR" && cat > current-model.env <<EOF
-REMOTE_SCRIPT=./startN.sh
-REMOTE_PROFILE=reliable
-EOF
-systemctl --user restart llama-server.service'
-
-ssh "$MODEL_HOST" 'curl -fsS http://127.0.0.1:8080/v1/models'
-```
+Accepting a benchmark promotes the model: it creates or reuses a `scripts/startN.sh` launcher, removes matching pending selections, and updates the Open WebUI switcher allowlist. Run `./installer.sh` after accepting so local commands and deployed script lists stay current.
 
 ### Update Manager
 
@@ -576,29 +568,33 @@ Switcher endpoints:
 
 ## Model Workflow
 
-The durable workflow for finding, adding, benchmarking, and promoting models belongs here in the README. Scratch implementation plans under `docs/plans/` and agent workflow notes under `docs/superpowers/` are not durable project docs.
+Use this section for day-to-day model work. Scratch plans under `docs/plans/` and agent notes under `docs/superpowers/` are not operating docs.
 
-Find candidates:
+Inventory and discovery:
 
 ```bash
 model-manager list --target "remote:$MODEL_HOST"
+model-discovery --query "qwen coder gguf" --limit 10
+model-manager discover --target "remote:$MODEL_HOST" --query "qwen coder gguf"
+```
+
+`model-manager list` is meant for humans. It groups profiles, launchers, pending selections, and remote cache entries into readable sections.
+
+Safe maintenance commands:
+
+```bash
 model-manager update --target "remote:$MODEL_HOST" --dry-run
 model-manager update --target "remote:$MODEL_HOST" --yes
 model-manager replace <old-file> <new-repo> --target "remote:$MODEL_HOST" --dry-run
 model-manager delete <hf-repo> --target "remote:$MODEL_HOST" --dry-run
 model-manager delete --profile 'gemma-vision:*' --target "remote:$MODEL_HOST" --dry-run
-model-discovery --query "qwen coder gguf" --limit 10
-model-manager discover --target "remote:$MODEL_HOST" --query "qwen coder gguf"
 ```
 
-`model-manager update --dry-run` scans cached remote model GGUFs, ignores projector files such as `mmproj-BF16.gguf`, checks Hugging Face for the recommended fitting GGUF, and prints the exact download/delete plan. Use `model-manager update --yes` only after reviewing the dry-run; it downloads the selected new file first and deletes the old cached basename only after the download succeeds.
-Use `model-manager replace ... --yes` only after reviewing the dry-run; it deletes by basename under known remote model cache directories and records an audit JSON under `runs/replacements/`.
+`update --dry-run` scans cached remote GGUFs, ignores projector files such as `mmproj-BF16.gguf`, and prints the exact download/delete plan. `update --yes` downloads the new file before deleting anything. If the remote host lacks `hf` or `huggingface-cli`, it tries to bootstrap the CLI and then falls back to a Python stdlib downloader.
 
-Use `model-manager delete <hf-repo> --yes` only after reviewing the dry-run. Delete removes matching local selections, removes the model from the Open WebUI switcher allowlist, and deletes matching remote cached GGUF files for that Hugging Face repo.
+`replace ... --yes` and `delete ... --yes` are destructive. Review the dry-run first. Replacement records an audit JSON under `runs/replacements/`. Repo delete removes matching selections, removes switcher entries, and deletes matching remote cached GGUF files. Profile delete removes local profile/launcher/switcher references and keeps shared cache when another profile still uses the same source.
 
-Use `model-manager delete --profile 'family:*' --yes` to remove local profile entries without deleting a shared remote cache while another profile still references the same Hugging Face repo. For example, deleting `gemma-vision:*` keeps the shared `unsloth/gemma-4-31B-it-GGUF` cache if `gemma:*` still references it.
-
-Select a candidate for lifecycle tracking:
+Track a candidate explicitly when you want it to show as pending work:
 
 ```bash
 model-manager select --repo <hf-repo> --family <family> --alias <alias> --target "remote:$MODEL_HOST"
@@ -608,20 +604,20 @@ Benchmark before promotion:
 
 ```bash
 model-manager benchmark --repo <hf-repo> --family <family> --alias <alias> --target "remote:$MODEL_HOST" --dry-run
+model-manager benchmark <hf-repo> --target "remote:$MODEL_HOST" --full
 scripts/bench-mtp-remote.sh <family> <alias>
 scripts/bench-installed-kv-remote.sh
 ```
 
-Promote a model only after a benchmark justifies it:
+Promote only benchmark-backed models:
 
 1. Run `model-manager benchmark <hf-repo> --target "remote:$MODEL_HOST" --full`.
 2. Run `./scripts/model-manager.sh accept ~/.local/share/local_llm/runs/benchmarks/<full-result>.json` from the source checkout.
-3. Accept creates or reuses `scripts/startN.sh`, removes matching pending selections, and adds the model to the Open WebUI switcher allowlist.
-4. Run `./installer.sh` after source changes.
-5. Deploy changed launcher/switcher files to `$REMOTE_DIR` on the GPU host and restart `local-llm-switcher.service` when the switcher changed.
-6. Verify the launcher `--alias` exactly matches `/v1/models` and the switcher allowlist.
+3. Run `./installer.sh`.
+4. Deploy changed launcher/switcher files to `$REMOTE_DIR` and restart `local-llm-switcher.service` if the switcher changed.
+5. Verify the launcher `--alias` matches `/v1/models` and the Open WebUI switcher allowlist.
 
-Keep benchmark result reports in `docs/benchmarks/`. Do not keep one-off implementation plans or agent notes in git.
+Keep benchmark reports in `docs/benchmarks/`. Do not keep one-off implementation plans or agent notes in git.
 
 Inspect or restart the remote services and containers:
 
