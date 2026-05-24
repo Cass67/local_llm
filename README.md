@@ -4,7 +4,7 @@
 
 The normal setup is split across two machines. Replace the example hostnames with your own:
 
-- The Mac runs OpenCode and the `oc-*` convenience commands.
+- The client machine runs OpenCode and the `oc-*` convenience commands.
 - A GPU host runs `llama-server`; this deployment uses an Ubuntu 26 server named `ubt26` / `cass.lan` as the tested example.
 - Open WebUI is exposed through Cloudflare Access at the public hostname, with Caddy and a local model switcher in front of it.
 
@@ -16,7 +16,7 @@ The repo keeps the local OpenCode wrappers, remote `llama-server` launchers, Ope
 
 - One-command OpenCode launchers such as `oc-qwen-reliable --lean` and `oc-qwen-coder-reliable --lean`.
 - Model family/profile shortcuts for speed, long-context, reliable, and VRAM-constrained runs.
-- Remote `llama-server` startup over SSH, so the Mac can drive models hosted on your GPU box.
+- Remote `llama-server` startup over SSH, so the client machine can drive models hosted on your GPU box.
 - A user-systemd `llama-server.service` that switches models by reading `current-model.env` instead of rewriting unit files.
 - A browser model switcher injected into Open WebUI as a compact bottom-right `LLM` pill.
 - Caddy routing for Open WebUI WebSockets, static assets, switcher APIs, and HTML injection.
@@ -66,6 +66,9 @@ Client machine:
 - OpenCode installed.
 - SSH access to the model-server host.
 - `~/.local/bin` on `PATH`.
+- Bash, Python 3, `ssh`, and `scp` available.
+
+The client tools are tested from a macOS client and expected to work from Linux clients with the same prerequisites.
 
 Server machine:
 
@@ -98,7 +101,7 @@ PUBLIC_LLM_HOST=llm.example.com
 
 ### 2. Install Client Commands
 
-Run from this repo on the Mac:
+Run from this repo on the client machine:
 
 ```bash
 ./installer.sh
@@ -398,7 +401,7 @@ These scripts are installed locally by the manual install commands below. They i
 
 ### Hardware Analyzer
 
-hardware-analyzer reports the machine it runs on. On the Mac, it reports Mac CPU/RAM and usually cannot see the remote RX 7900 XT. To inspect the ROCm server, run it on the GPU host or use ROCm tools there.
+hardware-analyzer reports the machine it runs on. On a client machine, it reports local CPU/RAM and usually cannot see the remote RX 7900 XT. To inspect the ROCm server, run it on the GPU host or use ROCm tools there.
 
 ```bash
 # Local client hardware summary
