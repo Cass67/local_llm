@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-LLAMA_DIR = Path(os.environ.get("LLAMA_DIR", "/home/cass/llama.cpp"))
+LLAMA_DIR = Path(os.environ.get("LLAMA_DIR", "~/llama.cpp")).expanduser()
 CURRENT_MODEL_ENV = Path(
     os.environ.get("LLAMA_CURRENT_MODEL_ENV", str(LLAMA_DIR / "current-model.env"))
 )
@@ -79,55 +79,7 @@ class Model:
         }
 
 
-MODELS = [
-    Model("qwen", "./start3.sh", "qwen3.6-35b-a3b-mtp", "Qwen 3.6 35B A3B MTP"),
-    Model(
-        "qwen-hauhau",
-        "./start11.sh",
-        "qwen3.6-35b-a3b-hauhau",
-        "Qwen 3.6 35B Hauhau",
-    ),
-    Model(
-        "qwen-27b-hauhau",
-        "./start12.sh",
-        "qwen3.6-27b-hauhau",
-        "Qwen 3.6 27B Hauhau",
-    ),
-    Model(
-        "gemma-hauhau",
-        "./start14.sh",
-        "gemma4-26b-a4b-hauhau",
-        "Gemma 4 26B A4B Hauhau",
-    ),
-    Model("qwen-27b", "./start8.sh", "qwen3.6-27b-mtp", "Qwen 3.6 27B MTP"),
-    Model(
-        "qwen-coder",
-        "./start2.sh",
-        "qwen3-coder-30b-a3b-instruct",
-        "Qwen Coder 30B A3B",
-    ),
-    Model("qwen-coder-next", "./start15.sh", "qwen3-coder-next", "Qwen Coder Next"),
-    Model("gemma", "./start4.sh", "gemma-4-31b-it", "Gemma 4 31B IT"),
-    Model("gpt-oss", "./start6.sh", "gpt-oss-20b", "GPT OSS 20B"),
-    Model(
-        "deepseek-r1",
-        "./start7.sh",
-        "deepseek-r1-distill-qwen-32b",
-        "DeepSeek R1 Distill Qwen 32B",
-    ),
-    Model(
-        "qwen-opus",
-        "./start9.sh",
-        "qwen3.6-27b-opus-mtp",
-        "Qwen 3.6 27B Opus MTP",
-    ),
-    Model(
-        "qwen-heretic",
-        "./start10.sh",
-        "qwen3.6-27b-heretic-mtp",
-        "Qwen 3.6 27B Heretic MTP",
-    ),
-]
+MODELS: list[Model] = []
 MODELS_BY_ID = {model.id: model for model in MODELS}
 
 
@@ -614,6 +566,12 @@ def widget_snippet() -> str:
       if (!modelsRes.ok || !currentRes.ok) throw new Error('API unavailable');
       const modelsBody = await modelsRes.json();
       const currentBody = await currentRes.json();
+      if (!modelsBody.models.length) {
+        select.replaceChildren(new Option('No local models configured', ''));
+        select.disabled = true;
+        setStatus('no models');
+        return;
+      }
       select.replaceChildren(...modelsBody.models.map((model) => {
         const option = document.createElement('option');
         option.value = model.id;
@@ -655,10 +613,13 @@ def widget_snippet() -> str:
 
 
 def fallback_html() -> bytes:
-    options = "\n".join(
-        f'<option value="{html.escape(model.id)}">{html.escape(model.label)}</option>'
-        for model in MODELS
-    )
+    if MODELS:
+        options = "\n".join(
+            f'<option value="{html.escape(model.id)}">{html.escape(model.label)}</option>'
+            for model in MODELS
+        )
+    else:
+        options = '<option value="">No local models configured</option>'
     return f"""<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>Local LLM Switcher</title></head>

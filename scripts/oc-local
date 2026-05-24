@@ -21,6 +21,115 @@ EOF
 lean=false
 dry_run=false
 info=false
+remote_host="${OC_LOCAL_REMOTE_HOST:-}"
+remote_user="${OC_LOCAL_REMOTE_USER:-}"
+ssh_password_prompt=false
+
+is_safe_family_name() {
+  local value="$1"
+  [[ "$value" =~ ^[A-Za-z0-9_.-]+$ && "$value" != *..* && "$value" != -* ]]
+}
+
+is_safe_model_name() {
+  local value="$1"
+  [[ "$value" =~ ^[A-Za-z0-9_.-]+$ && "$value" != *..* && "$value" != -* ]]
+}
+
+has_control_chars() {
+  local value="$1"
+  [[ "$value" =~ [[:cntrl:]] ]]
+}
+
+is_digits() {
+  local value="$1"
+  [[ "$value" =~ ^[0-9]+$ ]]
+}
+
+is_safe_remote_script() {
+  local value="$1"
+  [[ "$value" =~ ^\./[A-Za-z0-9_.-]+\.sh$ ]]
+}
+
+is_profile_name() {
+  case "$1" in
+    speed|fastlong|balanced|reliable|tiny) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+fail_no_accepted_model() {
+  local lookup_family="$1"
+  printf 'no accepted model for family: %s\n' "$lookup_family" >&2
+  printf 'Run model-manager discover, model-manager benchmark, and model-manager accept to generate accepted metadata.\n' >&2
+  exit 1
+}
+
+fail_no_accepted_default_model() {
+  printf 'no accepted default model\n' >&2
+  printf 'Pass an explicit family, or create runs/accepted/default.json after accepting a benchmark.\n' >&2
+  printf 'Run model-manager discover, model-manager benchmark, and model-manager accept to generate accepted metadata.\n' >&2
+  exit 1
+}
+
+reject_unsafe_accepted_lookup() {
+  local lookup_family="$1"
+  local accepted_dir="$runs_dir/accepted"
+  local metadata_file="$accepted_dir/$lookup_family.json"
+
+  if [[ -L "$runs_dir" ]]; then
+    printf 'oc-local refuses symlinked runs dir: %s\n' "$runs_dir" >&2
+    return 1
+  fi
+  if [[ -L "$accepted_dir" ]]; then
+    printf 'oc-local refuses symlinked accepted dir: %s\n' "$accepted_dir" >&2
+    return 1
+  fi
+  if [[ -L "$metadata_file" ]]; then
+    printf 'oc-local refuses symlinked accepted metadata file: %s\n' "$metadata_file" >&2
+    return 1
+  fi
+}
+
+default_family_from_accepted_metadata() {
+  local accepted_dir="$runs_dir/accepted"
+  local default_file="$accepted_dir/default.json"
+
+  if [[ -L "$runs_dir" ]]; then
+    printf 'oc-local refuses symlinked runs dir: %s\n' "$runs_dir" >&2
+    return 1
+  fi
+  if [[ -L "$accepted_dir" ]]; then
+    printf 'oc-local refuses symlinked accepted dir: %s\n' "$accepted_dir" >&2
+    return 1
+  fi
+  if [[ -L "$default_file" ]]; then
+    printf 'oc-local refuses symlinked accepted metadata file: %s\n' "$default_file" >&2
+    return 1
+  fi
+  [[ -f "$default_file" ]] || return 2
+
+  python3 - "$default_file" <<'PY'
+import json
+import re
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, json.JSONDecodeError) as exc:
+    print(f"invalid accepted metadata {path}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+if not isinstance(data, dict):
+    print(f"invalid accepted metadata {path}: top-level JSON must be an object", file=sys.stderr)
+    raise SystemExit(1)
+family = data.get("family")
+if not isinstance(family, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", family) or ".." in family or family.startswith("-"):
+    print(f"invalid accepted metadata {path}: family contains unsafe characters", file=sys.stderr)
+    raise SystemExit(1)
+print(family)
+PY
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -34,6 +143,28 @@ while [[ $# -gt 0 ]]; do
       ;;
     --info)
       info=true
+      shift
+      ;;
+    --remote)
+      if [[ $# -lt 2 || "$2" == -* ]]; then
+        printf 'missing value for --remote\n' >&2
+        usage
+        exit 2
+      fi
+      remote_host="$2"
+      shift 2
+      ;;
+    --user)
+      if [[ $# -lt 2 || "$2" == -* ]]; then
+        printf 'missing value for --user\n' >&2
+        usage
+        exit 2
+      fi
+      remote_user="$2"
+      shift 2
+      ;;
+    -k)
+      ssh_password_prompt=true
       shift
       ;;
     --help|-h)
@@ -57,95 +188,53 @@ done
 
 default_profile=''
 default_family=''
-case "$(basename "$0")" in
-  oc-qwen) default_family=qwen ;;
-  oc-qwen-mtp) default_family=qwen; default_profile=reliable ;;
-  oc-qwen-hauhau|oc-qwen-hauhau-ses-2009) default_family=qwen-hauhau; default_profile=reliable ;;
-  oc-qwen-27b-hauhau) default_family=qwen-27b-hauhau; default_profile=reliable ;;
-  oc-gemma-hauhau) default_family=gemma-hauhau; default_profile=reliable ;;
-  oc-qwen-27b|oc-qwen-27b-mtp|oc-qwen36-27b|oc-qwen36-27b-mtp) default_family=qwen-27b; default_profile=reliable ;;
-  oc-qwen-opus|oc-qwen-opus-mtp) default_family=qwen-opus; default_profile=reliable ;;
-  oc-qwen-heretic|oc-qwen-heretic-mtp) default_family=qwen-heretic; default_profile=reliable ;;
-  oc-qwen-coder-next|oc-coder-next) default_family=qwen-coder-next; default_profile=reliable ;;
-  oc-qwen-coder|oc-coder|oc-code) default_family=qwen-coder ;;
-  oc-gemma) default_family=gemma ;;
-  oc-gpt-oss) default_family=gpt-oss ;;
-  oc-deepseek-r1|oc-deepseek) default_family=deepseek-r1 ;;
+script_name="$(basename "$0")"
+case "$script_name" in
   oc-speed) default_profile=speed ;;
   oc-fastlong) default_profile=fastlong ;;
   oc-balanced) default_profile=balanced ;;
   oc-reliable) default_profile=reliable ;;
   oc-tiny) default_profile=tiny ;;
-  oc-qwen-speed|oc-qwen-mtp-speed) default_family=qwen; default_profile=speed ;;
-  oc-qwen-fastlong|oc-qwen-mtp-fastlong) default_family=qwen; default_profile=fastlong ;;
-  oc-qwen-balanced|oc-qwen-mtp-balanced) default_family=qwen; default_profile=balanced ;;
-  oc-qwen-reliable|oc-qwen-mtp-reliable) default_family=qwen; default_profile=reliable ;;
-  oc-qwen-tiny|oc-qwen-mtp-tiny) default_family=qwen; default_profile=tiny ;;
-  oc-qwen-hauhau-speed) default_family=qwen-hauhau; default_profile=speed ;;
-  oc-qwen-hauhau-fastlong) default_family=qwen-hauhau; default_profile=fastlong ;;
-  oc-qwen-hauhau-balanced) default_family=qwen-hauhau; default_profile=balanced ;;
-  oc-qwen-hauhau-reliable) default_family=qwen-hauhau; default_profile=reliable ;;
-  oc-qwen-hauhau-tiny) default_family=qwen-hauhau; default_profile=tiny ;;
-  oc-qwen-27b-hauhau-speed) default_family=qwen-27b-hauhau; default_profile=speed ;;
-  oc-qwen-27b-hauhau-fastlong) default_family=qwen-27b-hauhau; default_profile=fastlong ;;
-  oc-qwen-27b-hauhau-balanced) default_family=qwen-27b-hauhau; default_profile=balanced ;;
-  oc-qwen-27b-hauhau-reliable) default_family=qwen-27b-hauhau; default_profile=reliable ;;
-  oc-qwen-27b-hauhau-tiny) default_family=qwen-27b-hauhau; default_profile=tiny ;;
-  oc-gemma-hauhau-speed) default_family=gemma-hauhau; default_profile=speed ;;
-  oc-gemma-hauhau-fastlong) default_family=gemma-hauhau; default_profile=fastlong ;;
-  oc-gemma-hauhau-balanced) default_family=gemma-hauhau; default_profile=balanced ;;
-  oc-gemma-hauhau-reliable) default_family=gemma-hauhau; default_profile=reliable ;;
-  oc-gemma-hauhau-tiny) default_family=gemma-hauhau; default_profile=tiny ;;
-  oc-qwen-27b-speed|oc-qwen-27b-mtp-speed|oc-qwen36-27b-speed|oc-qwen36-27b-mtp-speed) default_family=qwen-27b; default_profile=speed ;;
-  oc-qwen-27b-fastlong|oc-qwen-27b-mtp-fastlong|oc-qwen36-27b-fastlong|oc-qwen36-27b-mtp-fastlong) default_family=qwen-27b; default_profile=fastlong ;;
-  oc-qwen-27b-balanced|oc-qwen-27b-mtp-balanced|oc-qwen36-27b-balanced|oc-qwen36-27b-mtp-balanced) default_family=qwen-27b; default_profile=balanced ;;
-  oc-qwen-27b-reliable|oc-qwen-27b-mtp-reliable|oc-qwen36-27b-reliable|oc-qwen36-27b-mtp-reliable) default_family=qwen-27b; default_profile=reliable ;;
-  oc-qwen-27b-tiny|oc-qwen-27b-mtp-tiny|oc-qwen36-27b-tiny|oc-qwen36-27b-mtp-tiny) default_family=qwen-27b; default_profile=tiny ;;
-  oc-qwen-opus-speed|oc-qwen-opus-mtp-speed) default_family=qwen-opus; default_profile=speed ;;
-  oc-qwen-opus-fastlong|oc-qwen-opus-mtp-fastlong) default_family=qwen-opus; default_profile=fastlong ;;
-  oc-qwen-opus-balanced|oc-qwen-opus-mtp-balanced) default_family=qwen-opus; default_profile=balanced ;;
-  oc-qwen-opus-reliable|oc-qwen-opus-mtp-reliable) default_family=qwen-opus; default_profile=reliable ;;
-  oc-qwen-opus-tiny|oc-qwen-opus-mtp-tiny) default_family=qwen-opus; default_profile=tiny ;;
-  oc-qwen-heretic-speed|oc-qwen-heretic-mtp-speed) default_family=qwen-heretic; default_profile=speed ;;
-  oc-qwen-heretic-fastlong|oc-qwen-heretic-mtp-fastlong) default_family=qwen-heretic; default_profile=fastlong ;;
-  oc-qwen-heretic-balanced|oc-qwen-heretic-mtp-balanced) default_family=qwen-heretic; default_profile=balanced ;;
-  oc-qwen-heretic-reliable|oc-qwen-heretic-mtp-reliable) default_family=qwen-heretic; default_profile=reliable ;;
-  oc-qwen-heretic-tiny|oc-qwen-heretic-mtp-tiny) default_family=qwen-heretic; default_profile=tiny ;;
-  oc-qwen-coder-speed|oc-coder-speed) default_family=qwen-coder; default_profile=speed ;;
-  oc-qwen-coder-fastlong|oc-coder-fastlong) default_family=qwen-coder; default_profile=fastlong ;;
-  oc-qwen-coder-balanced|oc-coder-balanced) default_family=qwen-coder; default_profile=balanced ;;
-  oc-qwen-coder-reliable|oc-coder-reliable) default_family=qwen-coder; default_profile=reliable ;;
-  oc-qwen-coder-tiny|oc-coder-tiny) default_family=qwen-coder; default_profile=tiny ;;
-  oc-qwen-coder-next-speed|oc-coder-next-speed) default_family=qwen-coder-next; default_profile=speed ;;
-  oc-qwen-coder-next-fastlong|oc-coder-next-fastlong) default_family=qwen-coder-next; default_profile=fastlong ;;
-  oc-qwen-coder-next-balanced|oc-coder-next-balanced) default_family=qwen-coder-next; default_profile=balanced ;;
-  oc-qwen-coder-next-reliable|oc-coder-next-reliable) default_family=qwen-coder-next; default_profile=reliable ;;
-  oc-qwen-coder-next-tiny|oc-coder-next-tiny) default_family=qwen-coder-next; default_profile=tiny ;;
-  oc-gemma-speed) default_family=gemma; default_profile=speed ;;
-  oc-gemma-fastlong) default_family=gemma; default_profile=fastlong ;;
-  oc-gemma-balanced) default_family=gemma; default_profile=balanced ;;
-  oc-gemma-reliable) default_family=gemma; default_profile=reliable ;;
-  oc-gemma-tiny) default_family=gemma; default_profile=tiny ;;
-  oc-gpt-oss-speed) default_family=gpt-oss; default_profile=speed ;;
-  oc-gpt-oss-fastlong) default_family=gpt-oss; default_profile=fastlong ;;
-  oc-gpt-oss-balanced) default_family=gpt-oss; default_profile=balanced ;;
-  oc-gpt-oss-reliable) default_family=gpt-oss; default_profile=reliable ;;
-  oc-gpt-oss-tiny) default_family=gpt-oss; default_profile=tiny ;;
-  oc-deepseek-r1-speed|oc-deepseek-speed) default_family=deepseek-r1; default_profile=speed ;;
-  oc-deepseek-r1-fastlong|oc-deepseek-fastlong) default_family=deepseek-r1; default_profile=fastlong ;;
-  oc-deepseek-r1-balanced|oc-deepseek-balanced) default_family=deepseek-r1; default_profile=balanced ;;
-  oc-deepseek-r1-reliable|oc-deepseek-reliable) default_family=deepseek-r1; default_profile=reliable ;;
-  oc-deepseek-r1-tiny|oc-deepseek-tiny) default_family=deepseek-r1; default_profile=tiny ;;
+  oc-*-speed) default_profile=speed ;;
+  oc-*-fastlong) default_profile=fastlong ;;
+  oc-*-balanced) default_profile=balanced ;;
+  oc-*-reliable) default_profile=reliable ;;
+  oc-*-tiny) default_profile=tiny ;;
 esac
 
-family="${default_family:-qwen}"
+runs_dir="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
+family="$default_family"
 if [[ $# -gt 0 ]]; then
-  case "$1" in
-    qwen|qwen-hauhau|qwen-27b-hauhau|gemma-hauhau|qwen-27b|qwen-opus|qwen-heretic|qwen-coder|qwen-coder-next|gemma|gpt-oss|deepseek-r1)
+  if [[ -z "$family" ]]; then
+    if is_profile_name "$1"; then
+      :
+    else
+      if ! is_safe_family_name "$1"; then
+        printf 'invalid model family: %s\n' "$1" >&2
+        exit 2
+      fi
       family="$1"
       shift
-      ;;
-  esac
+    fi
+  fi
+fi
+
+if [[ -z "$family" ]]; then
+  if [[ -n "$default_profile" ]]; then
+    :
+  elif [[ $# -eq 0 ]]; then
+    usage
+    exit 2
+  else
+    if ! is_safe_family_name "$1"; then
+      printf 'invalid model family: %s\n' "$1" >&2
+      exit 2
+    fi
+    if ! is_profile_name "$1"; then
+      family="$1"
+      shift
+    fi
+  fi
 fi
 
 if [[ $# -lt 1 ]]; then
@@ -157,6 +246,19 @@ if [[ $# -lt 1 ]]; then
 else
   profile="$1"
   shift
+fi
+
+if [[ -z "$family" ]]; then
+  default_family_output=''
+  status=0
+  default_family_output="$(default_family_from_accepted_metadata)" || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    if [[ "$status" -eq 2 ]]; then
+      fail_no_accepted_default_model
+    fi
+    exit 1
+  fi
+  family="$default_family_output"
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -173,6 +275,28 @@ while [[ $# -gt 0 ]]; do
       info=true
       shift
       ;;
+    --remote)
+      if [[ $# -lt 2 || "$2" == -* ]]; then
+        printf 'missing value for --remote\n' >&2
+        usage
+        exit 2
+      fi
+      remote_host="$2"
+      shift 2
+      ;;
+    --user)
+      if [[ $# -lt 2 || "$2" == -* ]]; then
+        printf 'missing value for --user\n' >&2
+        usage
+        exit 2
+      fi
+      remote_user="$2"
+      shift 2
+      ;;
+    -k)
+      ssh_password_prompt=true
+      shift
+      ;;
     --)
       shift
       break
@@ -183,193 +307,195 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-case "$profile" in
-  speed) remote_profile=speed ;;
-  fastlong) remote_profile=fastlong ;;
-  balanced) remote_profile=balanced ;;
-  reliable) remote_profile=reliable ;;
-  tiny) remote_profile=tiny ;;
-  *)
-    printf 'unknown profile: %s\n' "$profile" >&2
-    usage
-    exit 2
-    ;;
-esac
-
-remote_host="${OC_LOCAL_REMOTE_HOST:-ubt26}"
-remote_dir="${OC_LOCAL_REMOTE_DIR:-/home/cass/llama.cpp}"
+remote_dir="${OC_LOCAL_REMOTE_DIR:-~/llama.cpp}"
 reasoning_effort=none
-case "$family" in
-  qwen)
-    remote_script=./start3.sh
-    model_name="qwen3.6-35b-a3b-mtp"
-    hf_repo="unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
-    mmproj_mode=enabled
-    case "$profile" in
-      speed) context=32768; ngl=999; batch=128; ubatch=128; quant="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf" ;;
-      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf" ;;
-      balanced) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf" ;;
-      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf" ;;
-      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-UD-IQ4_NL.gguf" ;;
-    esac
-    ;;
-  qwen-coder)
-    remote_script=./start2.sh
-    model_name="qwen3-coder-30b-a3b-instruct"
-    hf_repo="unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
-    mmproj_mode=none
-    case "$profile" in
-      speed) context=32768; ngl=999; batch=512; ubatch=512; quant="IQ4_XS" ;;
-      fastlong) context=40960; ngl=999; batch=512; ubatch=512; quant="IQ4_XS" ;;
-      balanced) context=49152; ngl=999; batch=256; ubatch=256; quant="UD-Q3_K_XL" ;;
-      reliable) context=65536; ngl=999; batch=128; ubatch=128; quant="UD-Q3_K_XL" ;;
-      tiny) context=65536; ngl=999; batch=256; ubatch=256; quant="UD-Q2_K_XL" ;;
-    esac
-    ;;
-  qwen-coder-next)
-    remote_script=./start15.sh
-    model_name="qwen3-coder-next"
-    hf_repo="unsloth/Qwen3-Coder-Next-GGUF"
-    mmproj_mode=none
-    case "$profile" in
-      speed) context=32768; ngl=999; batch=256; ubatch=256; quant="Qwen3-Coder-Next-UD-TQ1_0.gguf" ;;
-      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="Qwen3-Coder-Next-UD-TQ1_0.gguf" ;;
-      balanced) context=49152; ngl=999; batch=64; ubatch=64; quant="Qwen3-Coder-Next-UD-TQ1_0.gguf" ;;
-      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3-Coder-Next-UD-TQ1_0.gguf" ;;
-      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3-Coder-Next-UD-TQ1_0.gguf" ;;
-    esac
-    ;;
-  qwen-hauhau)
-    remote_script=./start11.sh
-    model_name="qwen3.6-35b-a3b-hauhau"
-    hf_repo="HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive"
-    mmproj_mode=enabled
-    case "$profile" in
-      speed) context=32768; ngl=999; batch=128; ubatch=128; quant="Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf" ;;
-      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf" ;;
-      balanced) context=49152; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf" ;;
-      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf" ;;
-      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf" ;;
-    esac
-    ;;
-  qwen-27b-hauhau)
-    remote_script=./start12.sh
-    model_name="qwen3.6-27b-hauhau"
-    hf_repo="HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive"
-    mmproj_mode=enabled
-    case "$profile" in
-      speed) context=32768; ngl=999; batch=128; ubatch=128; quant="IQ4_XS" ;;
-      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="IQ4_XS" ;;
-      balanced) context=49152; ngl=999; batch=64; ubatch=64; quant="IQ4_XS" ;;
-      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="IQ4_XS" ;;
-      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="IQ4_XS" ;;
-    esac
-    ;;
-  gemma-hauhau)
-    remote_script=./start14.sh
-    model_name="gemma4-26b-a4b-hauhau"
-    hf_repo="HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced"
-    mmproj_mode=enabled
-    case "$profile" in
-      speed) context=32768; ngl=999; batch=128; ubatch=128; quant="IQ4_XS" ;;
-      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="IQ4_XS" ;;
-      balanced) context=49152; ngl=999; batch=64; ubatch=64; quant="IQ4_XS" ;;
-      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="IQ4_XS" ;;
-      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="IQ4_XS" ;;
-    esac
-    ;;
-  qwen-27b)
-    remote_script=./start8.sh
-    model_name="qwen3.6-27b-mtp"
-    hf_repo="unsloth/Qwen3.6-27B-MTP-GGUF"
-    mmproj_mode=none
-    case "$profile" in
-      speed) context=49152; ngl=999; batch=128; ubatch=128; quant="Q3_K_M" ;;
-      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="Q3_K_M" ;;
-      balanced) context=49152; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-    esac
-    ;;
-  qwen-opus)
-    remote_script=./start9.sh
-    model_name="qwen3.6-27b-opus-mtp"
-    hf_repo="noctrex/Qwopus3.6-27B-v1-preview-MTP-GGUF"
-    mmproj_mode=none
-    case "$profile" in
-      speed) context=49152; ngl=999; batch=128; ubatch=128; quant="IQ3_M" ;;
-      fastlong) context=49152; ngl=999; batch=128; ubatch=128; quant="IQ3_M" ;;
-      balanced) context=49152; ngl=999; batch=64; ubatch=64; quant="IQ3_M" ;;
-      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="IQ3_M" ;;
-      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="IQ3_M" ;;
-    esac
-    ;;
-  qwen-heretic)
-    remote_script=./start10.sh
-    model_name="qwen3.6-27b-heretic-mtp"
-    hf_repo="llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-GGUF"
-    mmproj_mode=none
-    case "$profile" in
-      speed) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-      fastlong) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-      balanced) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-      reliable) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-      tiny) context=65536; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-    esac
-    ;;
-  gemma)
-    remote_script=./start4.sh
-    model_name="gemma-4-31b-it"
-    hf_repo="unsloth/gemma-4-31B-it-GGUF"
-    mmproj_mode=disabled
-    case "$profile" in
-      speed) context=32768; ngl=999; batch=512; ubatch=512; quant="IQ4_XS" ;;
-      fastlong) context=40960; ngl=999; batch=256; ubatch=256; quant="UD-Q2_K_XL" ;;
-      balanced) context=49152; ngl=999; batch=128; ubatch=128; quant="UD-Q2_K_XL" ;;
-      reliable) context=65536; ngl=999; batch=128; ubatch=128; quant="UD-Q2_K_XL" ;;
-      tiny) context=40960; ngl=999; batch=512; ubatch=512; quant="UD-Q2_K_XL" ;;
-    esac
-    ;;
-  gpt-oss)
-    remote_script=./start6.sh
-    model_name="gpt-oss-20b"
-    hf_repo="unsloth/gpt-oss-20b-GGUF"
-    mmproj_mode=none
-    case "$profile" in
-      speed) context=131072; ngl=999; batch=1024; ubatch=1024; quant="UD-Q8_K_XL"; reasoning_effort=medium ;;
-      fastlong) context=131072; ngl=999; batch=512; ubatch=512; quant="UD-Q8_K_XL"; reasoning_effort=medium ;;
-      balanced) context=131072; ngl=999; batch=256; ubatch=256; quant="UD-Q8_K_XL"; reasoning_effort=high ;;
-      reliable) context=131072; ngl=999; batch=128; ubatch=128; quant="UD-Q8_K_XL"; reasoning_effort=high ;;
-      tiny) context=131072; ngl=999; batch=256; ubatch=256; quant="UD-Q4_K_XL"; reasoning_effort=high ;;
-    esac
-    ;;
-  deepseek-r1)
-    remote_script=./start7.sh
-    model_name="deepseek-r1-distill-qwen-32b"
-    hf_repo="unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF"
-    mmproj_mode=none
-    case "$profile" in
-      speed) context=16384; ngl=999; batch=128; ubatch=128; quant="Q3_K_M" ;;
-      fastlong) context=16384; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-      balanced) context=16384; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-      reliable) context=16384; ngl=999; batch=64; ubatch=64; quant="Q3_K_M" ;;
-      tiny) context=32768; ngl=999; batch=64; ubatch=64; quant="Q2_K" ;;
-    esac
-    ;;
-  *)
-    printf 'unknown model family: %s\n' "$family" >&2
-    usage
-    exit 2
-    ;;
-esac
-remote_start="$remote_script $remote_profile"
-default_output_limit=4096
-if [[ "$family" == gpt-oss || "$family" == deepseek-r1 ]]; then
-  default_output_limit=16384
+generated_profile=false
+ssh_target="$remote_host"
+if [[ -n "$remote_user" ]]; then
+  ssh_target="$remote_user@$remote_host"
 fi
+ssh_options=(-o BatchMode=yes)
+if [[ "$ssh_password_prompt" == true ]]; then
+  ssh_options=()
+fi
+if ! is_safe_family_name "$family"; then
+  printf 'invalid model family: %s\n' "$family" >&2
+  exit 2
+fi
+reject_unsafe_accepted_lookup "$family" || exit 1
+accepted_model_file="$runs_dir/accepted/$family.json"
+if [[ -f "$accepted_model_file" ]]; then
+  if ! generated_profile_output="$(python3 - "$accepted_model_file" "$family" "$profile" <<'PY'
+import json
+import re
+import sys
+
+path, requested_family, requested_profile = sys.argv[1:]
+def fail(message):
+    print(f"invalid accepted metadata {path}: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+def safe_generated_name(value):
+    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", value) and ".." not in value and not value.startswith("-")
+
+def reject_control_chars(label, value):
+    if isinstance(value, str) and re.search(r"[\x00-\x1f\x7f]", value):
+        fail(f"{label} contains control characters")
+    return value
+
+def metadata_integer(container, key, *, minimum):
+    value = container.get(key)
+    if isinstance(value, bool):
+        fail(f"config.{key} must be an integer")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        parsed = int(value)
+    else:
+        fail(f"config.{key} must be an integer")
+    if parsed < minimum:
+        if minimum == 1:
+            fail(f"config.{key} must be a positive integer")
+        fail(f"config.{key} must be a non-negative integer")
+    return parsed
+
+def metadata_context(container):
+    if container.get("context") not in (None, ""):
+        return metadata_integer(container, "context", minimum=1)
+    return metadata_integer(container, "ctx", minimum=1)
+
+try:
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, json.JSONDecodeError) as exc:
+    fail(str(exc))
+
+if not isinstance(data, dict):
+    fail("top-level JSON must be an object")
+
+for key in (
+    "family",
+    "alias",
+    "model_name",
+    "repo",
+    "hf_repo",
+    "remote_start",
+    "launcher_file",
+    "quant",
+    "hf_file",
+    "mmproj",
+    "reasoning_effort",
+    "profile",
+):
+    reject_control_chars(key, data.get(key))
+
+accepted_family = data.get("family") or requested_family
+if not safe_generated_name(accepted_family):
+    fail("family contains unsafe characters")
+if accepted_family != requested_family:
+    fail(f"family {accepted_family} does not match requested family {requested_family}")
+
+for key in ("alias", "model_name"):
+    value = data.get(key)
+    if value is not None and not safe_generated_name(value):
+        fail(f"{key} contains unsafe characters")
+model_name = data.get("model_name") or data.get("alias") or requested_family
+if not safe_generated_name(model_name):
+    fail("model_name contains unsafe characters")
+
+profile = None
+config = data.get("config")
+if data.get("profile") == requested_profile and isinstance(config, dict):
+    profile = config
+else:
+    profiles = data.get("profiles")
+    if isinstance(profiles, dict):
+        candidate = profiles.get(requested_profile)
+        if isinstance(candidate, dict):
+            profile = candidate
+
+if profile is None:
+    fail(f"missing profile {requested_profile!r}")
+for key in ("mmproj", "reasoning_effort"):
+    reject_control_chars(f"config.{key}", profile.get(key))
+
+remote_start = data.get("remote_start")
+if remote_start is None:
+    launcher_file = data.get("launcher_file")
+    if isinstance(launcher_file, str) and launcher_file.startswith("./"):
+        remote_start = launcher_file
+if not isinstance(remote_start, str) or not re.fullmatch(r"\./[A-Za-z0-9_.-]+\.sh", remote_start):
+    fail("remote_start must be a relative ./start-script.sh path")
+
+if not re.fullmatch(r"[A-Za-z0-9_.-]+", requested_profile):
+    fail("profile contains unsafe characters")
+
+fields = [
+    reject_control_chars("family", accepted_family),
+    reject_control_chars("model_name", model_name),
+    reject_control_chars("hf_repo", data.get("hf_repo") or data.get("repo")),
+    reject_control_chars("remote_start", remote_start),
+    reject_control_chars("quant", data.get("quant") or data.get("hf_file")),
+    metadata_context(profile),
+    metadata_integer(profile, "batch", minimum=1),
+    metadata_integer(profile, "ubatch", minimum=1),
+    metadata_integer(profile, "ngl", minimum=0),
+    reject_control_chars("mmproj", profile.get("mmproj") or data.get("mmproj") or "none"),
+    reject_control_chars("reasoning_effort", profile.get("reasoning_effort") or data.get("reasoning_effort") or "none"),
+]
+if any(value is None or value == "" for value in fields):
+    fail("missing required fields")
+print("\n".join(str(value) for value in fields))
+PY
+)"; then
+    exit 1
+  fi
+  generated_profile=true
+fi
+
+if [[ "$generated_profile" == true ]]; then
+  {
+    IFS= read -r family
+    IFS= read -r model_name
+    IFS= read -r hf_repo
+    IFS= read -r remote_script
+    IFS= read -r quant
+    IFS= read -r context
+    IFS= read -r batch
+    IFS= read -r ubatch
+    IFS= read -r ngl
+    IFS= read -r mmproj_mode
+    IFS= read -r reasoning_effort
+  } <<<"$generated_profile_output"
+  if ! is_safe_remote_script "$remote_script"; then
+    printf 'invalid generated remote script: %s\n' "$remote_script" >&2
+    exit 1
+  fi
+  for numeric_field in context batch ubatch ngl; do
+    if ! is_digits "${!numeric_field}"; then
+      printf 'invalid generated numeric field %s: %s\n' "$numeric_field" "${!numeric_field}" >&2
+      exit 1
+    fi
+  done
+  for string_field in family model_name hf_repo quant mmproj_mode reasoning_effort; do
+    if has_control_chars "${!string_field}"; then
+      printf 'invalid generated string field %s contains control characters\n' "$string_field" >&2
+      exit 1
+    fi
+  done
+  remote_profile="$profile"
+else
+  fail_no_accepted_model "$family"
+fi
+remote_start="$remote_script $remote_profile"
+if ! is_safe_model_name "$model_name"; then
+  printf 'invalid model name: %s\n' "$model_name" >&2
+  exit 2
+fi
+default_output_limit=4096
 output_limit="${OC_LOCAL_OUTPUT_LIMIT:-$default_output_limit}"
 reserved="${OC_LOCAL_RESERVED:-4096}"
-base_url="${OC_LOCAL_BASE_URL:-http://cass.lan:8080/v1}"
+base_url="${OC_LOCAL_BASE_URL:-http://localhost:8080/v1}"
 api_key="${OC_LOCAL_API_KEY:-sk-dummy}"
 model="${OC_LOCAL_MODEL:-localllm/$model_name}"
 wait_seconds="${OC_LOCAL_WAIT_SECONDS:-180}"
@@ -399,18 +525,6 @@ elif [[ "$mmproj_mode" == disabled ]]; then
 fi
 server_command+=" --host 0.0.0.0 --port 8080 -ngl ${ngl} -c ${context} --flash-attn on -ub ${ubatch} -b ${batch} --threads \"\$(nproc)\" --prio 2"
 server_command+=" --no-warmup --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0.0"
-if [[ "$family" == qwen-heretic ]]; then
-  server_command+=" --chat-template-file ${remote_dir}/templates/qwen36-opencode.jinja --chat-template-kwargs '{\"enable_thinking\":false}'"
-elif [[ "$family" == qwen || "$family" == qwen-hauhau || "$family" == qwen-27b-hauhau ]]; then
-  if [[ "$family" == qwen-27b-hauhau ]]; then
-    server_command+=" --chat-template-file ${remote_dir}/templates/qwen36-opencode.jinja"
-  fi
-  server_command+=" --chat-template-kwargs '{\"enable_thinking\":false}'"
-elif [[ "$family" != gpt-oss && "$family" != deepseek-r1 ]]; then
-  server_command+=" --reasoning off"
-elif [[ "$family" == gpt-oss ]]; then
-  server_command+=" --chat-template-kwargs '{\"reasoning_effort\":\"${reasoning_effort}\"}'"
-fi
 server_command+=" --alias ${model_name}"
 
 if [[ "$info" == true ]]; then
@@ -419,6 +533,7 @@ if [[ "$info" == true ]]; then
   printf 'model=%s\n' "$model"
   printf 'model_name=%s\n' "$model_name"
   printf 'remote_host=%s\n' "$remote_host"
+  printf 'remote_user=%s\n' "$remote_user"
   printf 'remote_dir=%s\n' "$remote_dir"
   printf 'remote_start=%s\n' "$remote_start"
   printf 'hf_repo=%s\n' "$hf_repo"
@@ -431,6 +546,11 @@ if [[ "$info" == true ]]; then
   printf 'reasoning_effort=%s\n' "$reasoning_effort"
   printf 'alias=%s\n' "$model_name"
   printf 'plugin_mode=%s\n' "$plugin_mode"
+  if [[ "$ssh_password_prompt" == true ]]; then
+    printf 'ssh_password_prompt=enabled\n'
+  else
+    printf 'ssh_password_prompt=disabled\n'
+  fi
   printf 'output_limit=%s\n' "$output_limit"
   printf 'reserved=%s\n' "$reserved"
   printf 'base_url=%s\n' "$base_url"
@@ -446,35 +566,53 @@ if [[ "$dry_run" == true ]]; then
   printf 'context=%s\n' "$context"
   printf 'plugin_mode=%s\n' "$plugin_mode"
   printf 'remote_host=%s\n' "$remote_host"
+  printf 'remote_user=%s\n' "$remote_user"
   printf 'remote_start=%s\n' "$remote_start"
   printf 'model=%s\n' "$model"
+  if [[ "$ssh_password_prompt" == true ]]; then
+    printf 'ssh_password_prompt=enabled\n'
+  else
+    printf 'ssh_password_prompt=disabled\n'
+  fi
   printf 'wait_seconds=%s\n' "$wait_seconds"
   printf 'config=%s\n' "$config_content"
   exit 0
 fi
 
-printf 'Restarting remote llama.cpp %s profile %s (%s context) on %s...\n' "$family" "$profile" "$context" "$remote_host" >&2
-ssh "$remote_host" bash -s -- "$remote_dir" "$remote_script" "$remote_profile" <<'REMOTE_START'
+if [[ -z "$remote_host" ]]; then
+  printf '%s\n' 'remote host is required; pass --remote HOST or set OC_LOCAL_REMOTE_HOST' >&2
+  exit 2
+fi
+ssh_target="$remote_host"
+if [[ -n "$remote_user" ]]; then
+  ssh_target="$remote_user@$remote_host"
+fi
+
+printf 'Restarting remote llama.cpp %s profile %s (%s context) on %s...\n' "$family" "$profile" "$context" "$ssh_target" >&2
+ssh "${ssh_options[@]}" "$ssh_target" bash -s -- "$remote_dir" "$remote_script" "$remote_profile" <<'REMOTE_START'
 set -euo pipefail
 remote_dir="$1"
 remote_script="$2"
 remote_profile="$3"
+if [[ "$remote_dir" == "~" || "$remote_dir" == ~/* ]]; then
+  remote_dir="$HOME${remote_dir#\~}"
+fi
 cd "$remote_dir"
 tmp="current-model.env.tmp"
-cat >"$tmp" <<EOF
-REMOTE_SCRIPT=$remote_script
-REMOTE_PROFILE=$remote_profile
-EOF
+{
+  printf 'REMOTE_SCRIPT=%q\n' "$remote_script"
+  printf 'REMOTE_PROFILE=%q\n' "$remote_profile"
+} >"$tmp"
 mv "$tmp" current-model.env
 systemctl --user restart llama-server.service
 REMOTE_START
 
-printf 'Waiting for llama.cpp API on %s...\n' "$remote_host" >&2
+printf 'Waiting for llama.cpp API on %s...\n' "$ssh_target" >&2
 deadline=$((SECONDS + wait_seconds))
-until ssh "$remote_host" 'curl -fsS http://127.0.0.1:8080/v1/models >/dev/null 2>&1'; do
+until ssh "${ssh_options[@]}" "$ssh_target" 'curl -fsS http://127.0.0.1:8080/v1/models >/dev/null 2>&1'; do
   if (( SECONDS >= deadline )); then
     printf 'timed out waiting for remote llama.cpp API after %s seconds\n' "$wait_seconds" >&2
-    printf 'check remote log: ssh %s %q\n' "$remote_host" "tail -80 $remote_dir/llama-${remote_profile}.log" >&2
+    printf 'check remote log: ssh %s %q\n' "$ssh_target" "tail -80 $remote_dir/llama-${remote_profile}.log" >&2
     exit 1
   fi
   sleep 2

@@ -1,5 +1,7 @@
 # Heretic Context Benchmark
 
+This historical benchmark records an archived experiment from an earlier curated-default era. It is not an active curated default or fresh-checkout recommendation.
+
 ## Result
 
 `qwen-heretic` cannot reach 196k or 256k context on the RX 7900 XT with full GPU offload in the tested quants. The largest context that loaded and completed a small request was 131072 tokens with `IQ2_M`.

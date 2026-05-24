@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LLAMA_DIR="${LLAMA_DIR:-/home/cass/llama.cpp}"
+LLAMA_DIR="${LLAMA_DIR:-$HOME/llama.cpp}"
 CADDYFILE="${CADDYFILE:-$LLAMA_DIR/Caddyfile.local-llm}"
 NAME="${LOCAL_LLM_CADDY_CONTAINER:-local-llm-caddy}"
 

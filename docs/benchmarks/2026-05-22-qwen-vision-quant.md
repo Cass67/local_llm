@@ -1,5 +1,7 @@
 # Qwen Vision Quant Benchmark - 2026-05-22
 
+Historical benchmark record: hostnames and paths in this report describe the machine used for this dated run, not public defaults.
+
 ## Summary
 
 This benchmark kept the matrix intentionally small. Only already cached IQ4_XS model files were live-tested on `ubt26`; Q4_K_M and Q5_K_M candidates exist upstream but were not downloaded because each would require a large transfer and this task asked to avoid huge downloads when possible.

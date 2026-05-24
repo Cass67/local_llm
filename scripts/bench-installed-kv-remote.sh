@@ -1,12 +1,96 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (($# != 0)); then
-  printf 'usage: %s\n' "$0" >&2
+usage() {
+  cat >&2 <<'EOF'
+usage: bench-installed-kv-remote.sh --family FAMILY --repo REPO --quant-mode file|selector --quant QUANT --alias ALIAS [options]
+
+Options:
+  --ctx N
+  --batch N
+  --ubatch N
+  --mmproj enabled|disabled|none
+  --template none|qwen_thinking_off|qwen_template_file|qwen_template_thinking_off|reasoning_off|gpt_oss_high
+  --extra none|mtp
+EOF
+}
+
+family=''
+repo=''
+quant_mode=''
+quant=''
+alias=''
+ctx='65536'
+batch='64'
+ubatch='64'
+mmproj='none'
+template_mode='none'
+extra_mode='none'
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --family)
+      family="${2:-}"
+      shift 2
+      ;;
+    --repo)
+      repo="${2:-}"
+      shift 2
+      ;;
+    --quant-mode)
+      quant_mode="${2:-}"
+      shift 2
+      ;;
+    --quant)
+      quant="${2:-}"
+      shift 2
+      ;;
+    --alias)
+      alias="${2:-}"
+      shift 2
+      ;;
+    --ctx)
+      ctx="${2:-}"
+      shift 2
+      ;;
+    --batch)
+      batch="${2:-}"
+      shift 2
+      ;;
+    --ubatch)
+      ubatch="${2:-}"
+      shift 2
+      ;;
+    --mmproj)
+      mmproj="${2:-}"
+      shift 2
+      ;;
+    --template)
+      template_mode="${2:-}"
+      shift 2
+      ;;
+    --extra)
+      extra_mode="${2:-}"
+      shift 2
+      ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'unknown option: %s\n' "$1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -z "$family" || -z "$repo" || -z "$quant_mode" || -z "$quant" || -z "$alias" ]]; then
+  usage
   exit 2
 fi
 
-llama_cpp_dir="${LLAMA_CPP_DIR:-/home/cass/llama.cpp}"
+llama_cpp_dir="${LLAMA_CPP_DIR:-$HOME/llama.cpp}"
 port="${LLAMA_PORT:-8080}"
 host="127.0.0.1"
 listen_host="0.0.0.0"
@@ -27,20 +111,7 @@ case "${RUN_Q4:-0}" in
     ;;
 esac
 
-cases=(
-  'qwen|unsloth/Qwen3.6-35B-A3B-MTP-GGUF|file|Qwen3.6-35B-A3B-UD-IQ4_NL.gguf|qwen3.6-35b-a3b-mtp|65536|64|64|enabled|qwen_thinking_off|mtp'
-  'qwen-hauhau|HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive|file|Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf|qwen3.6-35b-a3b-hauhau|65536|64|64|enabled|qwen_thinking_off|none'
-  'qwen-27b-hauhau|HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive|file|Qwen3.6-27B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf|qwen3.6-27b-hauhau|65536|64|64|enabled|qwen_template_thinking_off|none'
-  'gemma-hauhau|HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced|file|Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf|gemma4-26b-a4b-hauhau|65536|64|64|enabled|none|none'
-  'qwen-27b|unsloth/Qwen3.6-27B-MTP-GGUF|file|Qwen3.6-27B-Q3_K_M.gguf|qwen3.6-27b-mtp|65536|64|64|none|none|mtp'
-  'qwen-coder|unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF|selector|UD-Q3_K_XL|qwen3-coder-30b-a3b-instruct|65536|128|128|none|reasoning_off|none'
-  'gemma|unsloth/gemma-4-31B-it-GGUF|selector|UD-Q2_K_XL|gemma-4-31b-it|65536|128|128|disabled|reasoning_off|none'
-  'gemma-vision|unsloth/gemma-4-31B-it-GGUF|selector|UD-Q2_K_XL|gemma-4-31b-it-vision|32768|64|64|enabled|reasoning_off|none'
-  'gpt-oss|unsloth/gpt-oss-20b-GGUF|selector|UD-Q8_K_XL|gpt-oss-20b|131072|128|128|none|gpt_oss_high|none'
-  'deepseek-r1|unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF|selector|Q3_K_M|deepseek-r1-distill-qwen-32b|16384|64|64|none|none|none'
-  'qwen-opus|noctrex/Qwopus3.6-27B-v1-preview-MTP-GGUF|file|Qwopus3.6-27B-v1-preview-MTP-IQ3_M.gguf|qwen3.6-27b-opus-mtp|65536|64|64|none|none|mtp'
-  'qwen-heretic|llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-GGUF|file|Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q3_K_M.gguf|qwen3.6-27b-heretic-mtp|65536|64|64|none|qwen_template_file|mtp'
-)
+cases=("$family|$repo|$quant_mode|$quant|$alias|$ctx|$batch|$ubatch|$mmproj|$template_mode|$extra_mode")
 
 stop_tracked_server() {
   if [[ -n "$server_pid" ]] && kill -0 "$server_pid" >/dev/null 2>&1; then

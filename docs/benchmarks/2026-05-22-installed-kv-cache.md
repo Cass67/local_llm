@@ -1,5 +1,7 @@
 # Installed KV Cache Benchmark - 2026-05-22
 
+Historical benchmark record: hostnames and paths in this report describe the machine used for this dated run, not public defaults.
+
 ## Summary
 
 This benchmark compared llama.cpp default KV cache behavior against explicit `q8_0/q8_0` and `q4_0/q4_0` KV cache modes across the installed reliable model families on `ubt26`. The earlier pass `/tmp/installed-kv-pass1.tsv` covered default and `q8_0`; `/tmp/installed-kv-q4.tsv` reran the matrix with `RUN_Q4=1` and is the most complete raw data used for the result table below.

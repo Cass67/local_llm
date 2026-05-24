@@ -300,10 +300,7 @@ print_tuned_profiles() {
 
 Already Tuned Profiles
 ----------------------
-- oc-qwen-reliable --lean
-- oc-qwen-coder-reliable --lean
-- oc-gemma-reliable --lean
-- oc-gpt-oss-speed --lean
+None
 EOF
 }
 
@@ -311,32 +308,16 @@ detailed_discovery() {
   cat <<'EOF'
 Detailed Model Information:
 ---------------------------
-Qwen3.6-35B-A3B:
-  - Context: 65k tokens
-  - Recommended quantization: UD-Q3_K_XL
-  - VRAM requirement: ~16GB (with full offload)
-
-Qwen3-Coder-30B-A3B-Instruct:
-  - Context: 65k tokens
-  - Recommended quantization: UD-Q3_K_XL
-  - VRAM requirement: ~16GB (with full offload)
-
-Gemma-4-31B-it:
-  - Context: 65k tokens
-  - Recommended quantization: UD-Q2_K_XL
-  - VRAM requirement: ~12GB (with full offload)
-
-gpt-oss-20B:
-  - Context: 131k tokens
-  - Recommended quantization: UD-Q8_K_XL
-  - VRAM requirement: ~20GB (with full offload)
+No curated installed-profile recommendations are shipped from a fresh checkout.
+Use model-manager list to inspect accepted local state, or model-manager discover
+to rank candidates for the current target hardware.
 EOF
 }
 
 main() {
   local query='GGUF'
   local limit=8
-  local host="${OC_LOCAL_REMOTE_HOST:-ubt26}"
+  local host="${OC_LOCAL_REMOTE_HOST:-}"
   local mode='auto'
   local installed_only=false
   local json=false

@@ -17,13 +17,13 @@ source "$config_file"
 case "$REMOTE_SCRIPT" in
   ./*) ;;
   *)
-    echo "REMOTE_SCRIPT must be a relative launcher path like ./start3.sh" >&2
+    echo "REMOTE_SCRIPT must be a relative launcher path such as ./start1.sh" >&2
     exit 1
     ;;
 esac
 
 case "$REMOTE_PROFILE" in
-  speed|fastlong|balanced|reliable|tiny) ;;
+  speed | fastlong | balanced | reliable | tiny) ;;
   *)
     echo "REMOTE_PROFILE must be one of speed, fastlong, balanced, reliable, tiny" >&2
     exit 1

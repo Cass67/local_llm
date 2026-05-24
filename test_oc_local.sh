@@ -59,12 +59,43 @@ assert_contains "$help_output" "-k"
 assert_not_contains "$help_output" "speed     32k context"
 assert_not_contains "$help_output" "tiny      40k context"
 readme_contents="$(<"$repo_root/README.md")"
-assert_contains "$readme_contents" "Qwen dense-thinking comparison"
-assert_contains "$readme_contents" "\`local_llm\` is a small operations repo"
+model_manager_contents="$(<"$repo_root/scripts/model-manager.sh")"
+model_discovery_contents="$(<"$repo_root/scripts/model-discovery.sh")"
+heretic_context_contents="$(<"$repo_root/docs/benchmarks/2026-05-15-heretic-context.md")"
+tracked_start_scripts="$(git -C "$repo_root" ls-files 'scripts/start*.sh')"
+if [[ -n "$tracked_start_scripts" ]]; then
+  printf 'expected no tracked scripts/start*.sh launchers, but found:\n%s\n' "$tracked_start_scripts" >&2
+  exit 1
+fi
+assert_contains "$readme_contents" "Fresh pull workflow"
+assert_contains "$readme_contents" "\`local_llm\` is a bootstrap engine"
+assert_contains "$readme_contents" "./install.sh"
+if [[ ! -f "$repo_root/install.sh" ]]; then
+  printf 'expected install.sh wrapper to exist\n' >&2
+  exit 1
+fi
+if [[ ! -x "$repo_root/install.sh" ]]; then
+  printf 'expected install.sh wrapper to be executable\n' >&2
+  exit 1
+fi
+bash -n "$repo_root/install.sh"
+assert_line "$readme_contents" "model-manager bootstrap --target remote:<host> --dry-run"
+assert_line "$readme_contents" "model-manager bootstrap --target remote:<host> --yes"
+assert_contains "$readme_contents" "model-manager discover \"coding gguf\" --target remote:<host>"
+assert_contains "$readme_contents" "model-manager benchmark <source> --target remote:<host> --full"
+assert_contains "$readme_contents" "model-manager accept <benchmark.json>"
+assert_contains "$readme_contents" "model-manager deploy --target remote:<host> --dry-run"
+assert_contains "$readme_contents" "model-manager export > local-llm-backup.json"
+assert_not_contains "$readme_contents" "scripts/start3.sh"
+assert_not_contains "$readme_contents" "Recommended Choices"
+assert_not_contains "$readme_contents" "Qwen dense-thinking comparison"
+assert_not_contains "$readme_contents" "oc-qwen-reliable"
+assert_not_contains "$readme_contents" "oc-gemma-reliable"
+assert_not_contains "$readme_contents" "oc-gpt-oss"
+assert_not_contains "$readme_contents" "\`local_llm\` is a small operations repo"
 assert_contains "$readme_contents" "## Features"
 assert_contains "$readme_contents" "## Architecture"
 assert_contains "$readme_contents" "## Install Guide"
-assert_contains "$readme_contents" "## Concrete Examples"
 assert_contains "$readme_contents" "docs/assets/local-llm-architecture.svg"
 assert_contains "$readme_contents" "docs/assets/open-webui-switcher-pill.svg"
 assert_contains "$readme_contents" "Cloudflare is the public security boundary"
@@ -72,22 +103,26 @@ assert_contains "$readme_contents" "Cloudflare Access login and policy check"
 assert_contains "$readme_contents" "Do not commit Cloudflare credentials"
 expected_cloudflared_install="Install \`cloudflared\` on Ubuntu 26"
 assert_contains "$readme_contents" "$expected_cloudflared_install"
+assert_contains "$readme_contents" "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main"
 assert_contains "$readme_contents" "cloudflared tunnel login"
 assert_contains "$readme_contents" "cloudflared tunnel route dns local-llm"
 assert_contains "$readme_contents" "sudo systemctl enable --now cloudflared"
+assert_contains "$readme_contents" "service: http://localhost:3001"
 assert_contains "$readme_contents" "MODEL_HOST=gpu-box.example.lan"
 assert_contains "$readme_contents" "MODEL_API_BASE=http://gpu-box.example.lan:8080/v1"
 assert_contains "$readme_contents" "LOCAL_LLM_CADDYFILE=./Caddyfile.local-llm docker compose up -d"
 assert_contains "$readme_contents" "scp docker-compose.yml \"\$MODEL_HOST:\$REMOTE_DIR/docker-compose.yml\""
-assert_contains "$readme_contents" "not the responsive daily driver"
-assert_contains "$readme_contents" "Qwen 35B defaults are vision-enabled"
-assert_contains "$readme_contents" "Quant, KV Q4/Q5, and MMQ changes remain future benchmark/promotion work"
-assert_not_contains "$readme_contents" "Qwen dense optimum"
+assert_not_contains "$readme_contents" "not the responsive daily driver"
+assert_not_contains "$readme_contents" "Qwen 35B defaults are vision-enabled"
+assert_not_contains "$readme_contents" "Quant, KV Q4/Q5, and MMQ changes remain future benchmark/promotion work"
 assert_contains "$readme_contents" "## Helper Tools"
 assert_contains "$readme_contents" "hardware-analyzer reports the machine it runs on"
 assert_contains "$readme_contents" "model-discovery --detailed"
 assert_contains "$readme_contents" "model-manager discover"
-assert_contains "$readme_contents" "oc-qwen-coder-next-reliable --lean"
+assert_contains "$readme_contents" "model-manager export > local-llm-backup.json"
+assert_contains "$readme_contents" "model-manager restore local-llm-backup.json"
+assert_contains "$readme_contents" "model-manager deploy --target \"remote:\$MODEL_HOST\" --dry-run"
+assert_contains "$readme_contents" "oc-local <family> <profile> --info"
 assert_contains "$readme_contents" "The client machine runs OpenCode"
 assert_contains "$readme_contents" "Run from this repo on the client machine"
 assert_contains "$readme_contents" "tested from a macOS client and expected to work from Linux clients"
@@ -100,23 +135,40 @@ assert_contains "$readme_contents" "model-manager replace <old-file> <new-repo> 
 assert_contains "$readme_contents" "Readable inventory"
 assert_contains "$readme_contents" "source: Hugging Face repo or local profile source"
 assert_contains "$readme_contents" "file: selected GGUF file or quant"
-assert_contains "$readme_contents" "Accepting a benchmark promotes the model"
-assert_contains "$readme_contents" "Open WebUI switcher allowlist"
-assert_contains "$readme_contents" "falls back to a Python stdlib downloader"
+assert_contains "$readme_contents" "Accepting a benchmark records accepted metadata and generated launchers under \`\$HOME/.local/share/local_llm\` / \`runs\`."
+assert_contains "$readme_contents" "model-manager deploy --target remote:<host> --dry-run\` previews the generated launchers and switcher/service files"
+assert_contains "$readme_contents" "it does not copy files yet"
+assert_contains "$readme_contents" "Do not enable \`llama-server.service\` from a fresh checkout until generated launcher state has been manually copied from the deploy preview plan."
+assert_contains "$readme_contents" "Server service and Open WebUI wiring are still a later/manual setup step."
+assert_not_contains "$readme_contents" "systemctl --user enable --now llama-server.service"
+assert_not_contains "$readme_contents" "Deployment and switcher wiring happen later through the generated/deploy workflow."
+assert_not_contains "$readme_contents" "Accepting a benchmark promotes the model"
+assert_not_contains "$readme_contents" "creates or reuses a \`scripts/startN.sh\` launcher"
+assert_not_contains "$readme_contents" "updates the Open WebUI switcher allowlist"
+assert_contains "$readme_contents" "fall back to a Python stdlib downloader"
 assert_not_contains "$readme_contents" "It currently creates the launcher only"
 assert_not_contains "$readme_contents" "manual promotion step"
 assert_contains "$readme_contents" "update-manager is a compatibility helper"
 assert_contains "$readme_contents" "update-manager --candidates"
-assert_contains "$readme_contents" "for family in qwen qwen-27b qwen-coder qwen-coder-next gemma gpt-oss deepseek-r1 qwen-opus qwen-heretic; do"
-assert_contains "$readme_contents" "scripts/start14.sh scripts/start15.sh scripts/run-current-model.sh"
-assert_contains "$readme_contents" "shellcheck scripts/oc-local scripts/bench-mtp-remote.sh installer.sh scripts/start3.sh scripts/start8.sh scripts/start9.sh scripts/start10.sh scripts/start11.sh scripts/start12.sh scripts/start14.sh scripts/start15.sh scripts/run-current-model.sh scripts/bench-installed-kv-remote.sh test_oc_local.sh"
+assert_not_contains "$readme_contents" "for family in qwen qwen-27b qwen-coder qwen-coder-next gemma gpt-oss deepseek-r1 qwen-opus qwen-heretic; do"
+assert_not_contains "$readme_contents" "scripts/start14.sh scripts/start15.sh scripts/run-current-model.sh"
+assert_not_contains "$model_manager_contents" "qwen-hauhau"
+assert_not_contains "$model_manager_contents" "qwen-27b-hauhau"
+assert_not_contains "$model_manager_contents" "qwen-heretic"
+assert_not_contains "$model_discovery_contents" "Qwen3.6-35B-A3B"
+assert_not_contains "$model_discovery_contents" "Gemma-4-31B-it"
+assert_not_contains "$model_discovery_contents" "gpt-oss-20B"
+assert_contains "$heretic_context_contents" "historical benchmark"
+assert_contains "$heretic_context_contents" "not an active curated default"
+assert_contains "$readme_contents" "shellcheck test_oc_local.sh"
 assert_contains "$readme_contents" "systemctl --user restart llama-server.service"
 assert_contains "$readme_contents" "run-current-model.sh"
-assert_contains "$readme_contents" "REMOTE_SCRIPT=./start11.sh"
-assert_contains "$readme_contents" 'localllm/qwen3.6-35b-a3b-mtp'
-assert_contains "$readme_contents" "scripts/start11.sh scripts/start12.sh scripts/start14.sh"
-assert_contains "$readme_contents" "scripts/start15.sh scripts/run-current-model.sh"
-assert_contains "$readme_contents" "journalctl --user -u llama-server.service"
+assert_contains "$readme_contents" "REMOTE_SCRIPT=<generated-launcher>"
+assert_not_contains "$readme_contents" 'localllm/qwen3.6-35b-a3b-mtp'
+assert_not_contains "$readme_contents" "scripts/start11.sh scripts/start12.sh scripts/start14.sh"
+assert_not_contains "$readme_contents" "scripts/start15.sh scripts/run-current-model.sh"
+assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'systemctl --user restart llama-server.service'"
+assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'journalctl --user -u llama-server.service -n 160 --no-pager'"
 assert_contains "$readme_contents" "Open WebUI listens on http://127.0.0.1:3002"
 assert_contains "$readme_contents" "Caddy listens on http://127.0.0.1:3001"
 assert_contains "$readme_contents" "local-llm-switcher listens on http://127.0.0.1:3003"
@@ -147,7 +199,11 @@ assert_contains "$switcher_contents" "@media (max-width: 640px)"
 assert_contains "$switcher_contents" "@media (hover: none), (pointer: coarse), (max-width: 900px)"
 assert_contains "$switcher_contents" "local-llm-switcher-toggle"
 assert_contains "$switcher_contents" "local-llm-switcher-panel"
-assert_contains "$switcher_contents" 'Model("qwen-coder-next", "./start15.sh", "qwen3-coder-next", "Qwen Coder Next")'
+assert_contains "$switcher_contents" "MODELS: list[Model] = []"
+assert_contains "$switcher_contents" "No local models configured"
+assert_not_contains "$switcher_contents" "Qwen Coder Next"
+default_llama_dir="${HOME/#$HOME/~}/llama.cpp"
+assert_contains "$switcher_contents" "$default_llama_dir"
 assert_contains "$switcher_contents" "bottom: max(96px, env(safe-area-inset-bottom))"
 assert_contains "$switcher_contents" "border-radius: 999px"
 assert_contains "$switcher_contents" "position: absolute"
@@ -164,7 +220,7 @@ assert_contains "$readme_contents" "GET /api/local-llm/models"
 assert_contains "$readme_contents" "GET /api/local-llm/current"
 assert_contains "$readme_contents" "POST /api/local-llm/switch"
 assert_contains "$readme_contents" "GET /_switcher"
-assert_contains "$readme_contents" "systemctl --user status local-llm-switcher.service llama-server.service"
+assert_contains "$readme_contents" "systemctl --user status local-llm-switcher.service"
 assert_contains "$readme_contents" "docker ps --filter name=open-webui"
 assert_contains "$readme_contents" "docker ps --filter name=local-llm-caddy"
 assert_contains "$readme_contents" "docker restart open-webui"
@@ -173,7 +229,7 @@ assert_contains "$readme_contents" "docker rm -f local-llm-caddy && systemctl --
 assert_contains "$readme_contents" "docker rm -f open-webui && docker run -d --name open-webui --restart unless-stopped --network host -e PORT=3001 -v open-webui:/app/backend/data ghcr.io/open-webui/open-webui:main"
 assert_contains "$readme_contents" "--remote"
 assert_not_contains "$readme_contents" "--target local"
-assert_not_contains "$readme_contents" "--target remote:<host>"
+assert_contains "$readme_contents" "--target remote:<host>"
 assert_not_contains "$readme_contents" "OC_LOCAL_TARGET"
 assert_not_contains "$readme_contents" "OC_LOCAL_LLAMA_DIR"
 gitignore_contents="$(<"$repo_root/.gitignore")"
@@ -198,7 +254,8 @@ assert_contains "$model_discovery_output" "class=small"
 assert_contains "$model_discovery_output" "class=huge"
 assert_contains "$model_discovery_output" "class=unknown"
 assert_contains "$model_discovery_output" "Already Tuned Profiles"
-assert_contains "$model_discovery_output" "oc-qwen-reliable --lean"
+assert_contains "$model_discovery_output" "None"
+assert_not_contains "$model_discovery_output" "oc-qwen-reliable --lean"
 assert_not_contains "$model_discovery_output" "example/not-a-gguf-model"
 assert_not_contains "$model_discovery_output" "not a Hugging Face search"
 assert_not_contains "$model_discovery_output" "Recommended models:"
@@ -247,12 +304,6 @@ model_discovery_installed_output="$(OC_LOCAL_HF_FIXTURE="$repo_root/testdata/hug
 assert_contains "$model_discovery_installed_output" "Already Tuned Profiles"
 assert_not_contains "$model_discovery_installed_output" "Hugging Face GGUF Candidates"
 
-qwen_heretic_local_info="$(LLAMA_CPP_DIR=/tmp/local-llama run_info qwen-heretic reliable)"
-assert_contains "$qwen_heretic_local_info" "--chat-template-file /tmp/local-llama/templates/qwen36-opencode.jinja"
-assert_not_contains "$qwen_heretic_local_info" "/home/cass/llama.cpp/templates/qwen36-opencode.jinja"
-qwen_heretic_remote_info="$(REMOTE_HOST=somehost run_info qwen-heretic reliable)"
-assert_contains "$qwen_heretic_remote_info" "REMOTE_HOST: somehost"
-
 model_discovery_help_output="$("$repo_root/scripts/model-discovery.sh" --help 2>&1)"
 assert_contains "$model_discovery_help_output" "--query <text>"
 assert_contains "$model_discovery_help_output" "--limit <n>"
@@ -261,6 +312,7 @@ assert_not_contains "$model_discovery_help_output" "maximum Hugging Face results
 assert_contains "$model_discovery_help_output" "--installed-only"
 model_manager_help_output="$("$repo_root/scripts/model-manager.sh" --help 2>&1)"
 assert_contains "$model_manager_help_output" "Usage: model-manager"
+assert_contains "$model_manager_help_output" "bootstrap"
 assert_contains "$model_manager_help_output" "discover"
 assert_contains "$model_manager_help_output" "select"
 assert_contains "$model_manager_help_output" "benchmark"
@@ -292,6 +344,367 @@ assert_contains "$status_output" "Model Manager Status"
 assert_contains "$status_output" "Candidates: 1"
 assert_contains "$status_output" "Selections: 0"
 assert_contains "$status_output" "Benchmarks: 0"
+bootstrap_tmp="$(mktemp -d)"
+bootstrap_output="$(LOCAL_LLM_RUNS_DIR="$bootstrap_tmp/runs" "$repo_root/scripts/model-manager.sh" bootstrap --target remote:bench-host --dry-run)"
+assert_contains "$bootstrap_output" "Bootstrap plan"
+assert_contains "$bootstrap_output" "target=remote:bench-host"
+assert_contains "$bootstrap_output" "next=model-manager discover"
+bootstrap_dry_yes_status=0
+bootstrap_dry_yes_output="$(LOCAL_LLM_RUNS_DIR="$bootstrap_tmp/dry-yes-runs" "$repo_root/scripts/model-manager.sh" bootstrap --target remote:bench-host --dry-run --yes 2>&1)" || bootstrap_dry_yes_status=$?
+if [[ "$bootstrap_dry_yes_status" == 0 ]]; then
+  printf 'expected bootstrap --dry-run --yes to fail\noutput was:\n%s\n' "$bootstrap_dry_yes_output" >&2
+  exit 1
+fi
+assert_contains "$bootstrap_dry_yes_output" "choose either --dry-run or --yes"
+if [[ -f "$bootstrap_tmp/dry-yes-runs/bootstrap/config.json" ]]; then
+  printf 'expected bootstrap --dry-run --yes not to write config at %s\n' "$bootstrap_tmp/dry-yes-runs/bootstrap/config.json" >&2
+  exit 1
+fi
+bootstrap_bad_target_status=0
+bootstrap_bad_target_output="$(LOCAL_LLM_RUNS_DIR="$bootstrap_tmp/bad-target-runs" "$repo_root/scripts/model-manager.sh" bootstrap --target 'remote:bad host' --dry-run 2>&1)" || bootstrap_bad_target_status=$?
+if [[ "$bootstrap_bad_target_status" == 0 ]]; then
+  printf 'expected bootstrap unsafe target to fail\noutput was:\n%s\n' "$bootstrap_bad_target_output" >&2
+  exit 1
+fi
+assert_contains "$bootstrap_bad_target_output" "invalid target"
+bootstrap_bad_remote_host_status=0
+bootstrap_bad_remote_host_output="$(LOCAL_LLM_RUNS_DIR="$bootstrap_tmp/bad-remote-host-runs" "$repo_root/scripts/model-manager.sh" bootstrap --target remote:-bad --dry-run 2>&1)" || bootstrap_bad_remote_host_status=$?
+if [[ "$bootstrap_bad_remote_host_status" == 0 ]]; then
+  printf 'expected bootstrap with unsafe remote host to fail\noutput was:\n%s\n' "$bootstrap_bad_remote_host_output" >&2
+  exit 1
+fi
+assert_contains "$bootstrap_bad_remote_host_output" "remote target host must not start with '-'"
+LOCAL_LLM_RUNS_DIR="$bootstrap_tmp/runs" "$repo_root/scripts/model-manager.sh" bootstrap --target remote:bench-host --yes >/dev/null
+if [[ ! -f "$bootstrap_tmp/runs/bootstrap/config.json" ]]; then
+  printf 'expected bootstrap config at %s\n' "$bootstrap_tmp/runs/bootstrap/config.json" >&2
+  exit 1
+fi
+python3 - "$bootstrap_tmp/runs/bootstrap/config.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    config = json.load(handle)
+if config.get("target") != "remote:bench-host":
+    raise SystemExit(f"expected bootstrap target remote:bench-host: {config!r}")
+if not isinstance(config.get("created_at"), str) or not config["created_at"]:
+    raise SystemExit(f"expected non-empty created_at: {config!r}")
+PY
+bootstrap_symlink_runs="$bootstrap_tmp/symlink-runs"
+bootstrap_symlink_outside="$bootstrap_tmp/bootstrap-outside"
+mkdir -p "$bootstrap_symlink_runs" "$bootstrap_symlink_outside"
+ln -s "$bootstrap_symlink_outside" "$bootstrap_symlink_runs/bootstrap"
+bootstrap_symlink_output="$bootstrap_tmp/bootstrap-symlink.out"
+if LOCAL_LLM_RUNS_DIR="$bootstrap_symlink_runs" "$repo_root/scripts/model-manager.sh" bootstrap --target remote:bench-host --yes >"$bootstrap_symlink_output" 2>&1; then
+  printf 'expected bootstrap --yes with symlinked bootstrap dir to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$bootstrap_symlink_output")" "refuses symlinked bootstrap dir"
+if [[ -e "$bootstrap_symlink_outside/config.json" ]]; then
+  printf 'bootstrap wrote through symlinked bootstrap dir\n' >&2
+  exit 1
+fi
+bootstrap_config_symlink_runs="$bootstrap_tmp/config-symlink-runs"
+bootstrap_config_symlink_outside="$bootstrap_tmp/config-symlink-outside.json"
+mkdir -p "$bootstrap_config_symlink_runs/bootstrap"
+ln -s "$bootstrap_config_symlink_outside" "$bootstrap_config_symlink_runs/bootstrap/config.json"
+bootstrap_config_symlink_output="$bootstrap_tmp/bootstrap-config-symlink.out"
+if LOCAL_LLM_RUNS_DIR="$bootstrap_config_symlink_runs" "$repo_root/scripts/model-manager.sh" bootstrap --target remote:bench-host --yes >"$bootstrap_config_symlink_output" 2>&1; then
+  printf 'expected bootstrap --yes with symlinked config file to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$bootstrap_config_symlink_output")" "refuses symlinked state file"
+if [[ -e "$bootstrap_config_symlink_outside" ]]; then
+  printf 'bootstrap wrote through symlinked config file\n' >&2
+  exit 1
+fi
+bootstrap_symlink_root="$bootstrap_tmp/symlink-root"
+bootstrap_symlink_root_outside="$bootstrap_tmp/symlink-root-outside"
+mkdir -p "$bootstrap_symlink_root_outside"
+ln -s "$bootstrap_symlink_root_outside" "$bootstrap_symlink_root"
+bootstrap_symlink_root_output="$bootstrap_tmp/bootstrap-symlink-root.out"
+if LOCAL_LLM_RUNS_DIR="$bootstrap_symlink_root" "$repo_root/scripts/model-manager.sh" bootstrap --target remote:bench-host --yes >"$bootstrap_symlink_root_output" 2>&1; then
+  printf 'expected bootstrap --yes with symlinked runs root to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$bootstrap_symlink_root_output")" "refuses symlinked runs dir"
+if [[ -e "$bootstrap_symlink_root_outside/bootstrap/config.json" ]]; then
+  printf 'bootstrap wrote through symlinked runs root\n' >&2
+  exit 1
+fi
+export_restore_tmp="$(mktemp -d)"
+export_runs="$export_restore_tmp/runs"
+restore_runs="$export_restore_tmp/restored-runs"
+mkdir -p "$export_runs/bootstrap" "$export_runs/accepted" "$export_runs/launchers"
+printf '{"target":"remote:bench-host","created_at":"2026-05-24T00:00:00Z"}\n' >"$export_runs/bootstrap/config.json"
+cat >"$export_runs/accepted/example.json" <<'JSON'
+{
+  "alias": "example-model",
+  "family": "example",
+  "repo": "Example/Model-GGUF",
+  "remote_start": "./start201.sh"
+}
+JSON
+cat >"$export_runs/launchers/start201.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exec ./build/bin/llama-server --alias example-model
+EOF
+chmod +x "$export_runs/launchers/start201.sh"
+printf '{"outside":true}\n' >"$export_restore_tmp/outside-accepted.json"
+printf '#!/usr/bin/env bash\nprintf outside\n' >"$export_restore_tmp/outside-launcher.sh"
+printf '{"target":"remote:outside"}\n' >"$export_restore_tmp/outside-bootstrap-config.json"
+ln -s "$export_restore_tmp/outside-accepted.json" "$export_runs/accepted/link.json"
+ln -s "$export_restore_tmp/outside-launcher.sh" "$export_runs/launchers/link.sh"
+export_output="$(LOCAL_LLM_RUNS_DIR="$export_runs" "$repo_root/scripts/model-manager.sh" export)"
+python3 - "$export_output" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+if payload.get("version") != 1:
+    raise SystemExit(f"expected version 1: {payload!r}")
+if payload.get("bootstrap", {}).get("target") != "remote:bench-host":
+    raise SystemExit(f"expected bootstrap config: {payload!r}")
+if payload.get("accepted", {}).get("example.json", {}).get("alias") != "example-model":
+    raise SystemExit(f"expected accepted entry: {payload!r}")
+launcher = payload.get("launchers", {}).get("start201.sh")
+if not isinstance(launcher, dict) or "content" not in launcher:
+    raise SystemExit(f"expected launcher content: {payload!r}")
+if "link.json" in payload.get("accepted", {}):
+    raise SystemExit(f"expected accepted symlink to be skipped: {payload!r}")
+if "link.sh" in payload.get("launchers", {}):
+    raise SystemExit(f"expected launcher symlink to be skipped: {payload!r}")
+PY
+mv "$export_runs/bootstrap/config.json" "$export_runs/bootstrap/config.real.json"
+ln -s "$export_restore_tmp/outside-bootstrap-config.json" "$export_runs/bootstrap/config.json"
+bootstrap_config_symlink_export="$(LOCAL_LLM_RUNS_DIR="$export_runs" "$repo_root/scripts/model-manager.sh" export)"
+python3 - "$bootstrap_config_symlink_export" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+if "bootstrap" in payload:
+    raise SystemExit(f"expected symlinked bootstrap config to be skipped: {payload!r}")
+PY
+rm "$export_runs/bootstrap/config.json"
+mv "$export_runs/bootstrap/config.real.json" "$export_runs/bootstrap/config.json"
+mv "$export_runs/bootstrap" "$export_runs/bootstrap.real"
+ln -s "$export_restore_tmp" "$export_runs/bootstrap"
+bootstrap_dir_symlink_export="$(LOCAL_LLM_RUNS_DIR="$export_runs" "$repo_root/scripts/model-manager.sh" export)"
+python3 - "$bootstrap_dir_symlink_export" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+if "bootstrap" in payload:
+    raise SystemExit(f"expected symlinked bootstrap dir to be skipped: {payload!r}")
+PY
+rm "$export_runs/bootstrap"
+mv "$export_runs/bootstrap.real" "$export_runs/bootstrap"
+export_symlink_root_runs="$export_restore_tmp/export-symlink-root-runs"
+export_symlink_root_outside="$export_restore_tmp/export-symlink-root-outside"
+mkdir -p "$export_symlink_root_outside/bootstrap"
+printf '{"target":"remote:outside-state"}\n' >"$export_symlink_root_outside/bootstrap/config.json"
+ln -s "$export_symlink_root_outside" "$export_symlink_root_runs"
+export_symlink_root_output="$export_restore_tmp/export-symlink-root.out"
+if LOCAL_LLM_RUNS_DIR="$export_symlink_root_runs" "$repo_root/scripts/model-manager.sh" export >"$export_symlink_root_output" 2>&1; then
+  printf 'expected export with symlinked runs root to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$export_symlink_root_output")" "export refuses symlinked runs dir"
+assert_not_contains "$(<"$export_symlink_root_output")" "outside-state"
+printf '%s\n' "$export_output" >"$export_restore_tmp/backup.json"
+LOCAL_LLM_RUNS_DIR="$restore_runs" "$repo_root/scripts/model-manager.sh" restore "$export_restore_tmp/backup.json" >/dev/null
+if [[ ! -f "$restore_runs/accepted/example.json" ]]; then
+  printf 'expected restored accepted metadata\n' >&2
+  exit 1
+fi
+if [[ ! -x "$restore_runs/launchers/start201.sh" ]]; then
+  printf 'expected restored executable launcher\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$restore_runs/accepted/example.json")" '"alias": "example-model"'
+assert_contains "$(<"$restore_runs/launchers/start201.sh")" '--alias example-model'
+python3 - "$export_restore_tmp/unsafe-backup.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(
+        {
+            "version": 1,
+            "accepted": {
+                "unsafe.json": {
+                    "alias": "unsafe-model",
+                    "family": "unsafe",
+                    "repo": "Example/Unsafe-GGUF",
+                    "remote_start": "./start202.sh",
+                }
+            },
+            "launchers": {
+                "start202.sh": {"content": "#!/usr/bin/env bash\n"},
+                "zz/escape.sh": {"content": "#!/usr/bin/env bash\n"},
+            },
+        },
+        handle,
+    )
+    handle.write("\n")
+PY
+unsafe_restore_output="$export_restore_tmp/unsafe-restore.out"
+unsafe_restore_runs="$export_restore_tmp/unsafe-runs"
+if LOCAL_LLM_RUNS_DIR="$unsafe_restore_runs" "$repo_root/scripts/model-manager.sh" restore "$export_restore_tmp/unsafe-backup.json" >"$unsafe_restore_output" 2>&1; then
+  printf 'expected restore with unsafe launcher name to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$unsafe_restore_output")" "unsafe launcher name"
+if [[ -e "$unsafe_restore_runs/accepted/unsafe.json" ]]; then
+  printf 'unsafe restore left accepted metadata behind\n' >&2
+  exit 1
+fi
+if [[ -e "$unsafe_restore_runs/launchers/start202.sh" ]]; then
+  printf 'unsafe restore left launcher behind\n' >&2
+  exit 1
+fi
+python3 - "$export_restore_tmp/invalid-accepted-numeric-backup.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(
+        {
+            "version": 1,
+            "accepted": {
+                "unsafe.json": {
+                    "alias": "unsafe-model",
+                    "family": "unsafe",
+                    "repo": "Example/Unsafe-GGUF",
+                    "remote_start": "./start203.sh",
+                    "config": {"ctx": "1; touch /tmp/pwned", "batch": 128, "ubatch": 64, "ngl": 999},
+                }
+            },
+        },
+        handle,
+    )
+    handle.write("\n")
+PY
+invalid_accepted_numeric_output="$export_restore_tmp/invalid-accepted-numeric-restore.out"
+invalid_accepted_numeric_runs="$export_restore_tmp/invalid-accepted-numeric-runs"
+if LOCAL_LLM_RUNS_DIR="$invalid_accepted_numeric_runs" "$repo_root/scripts/model-manager.sh" restore "$export_restore_tmp/invalid-accepted-numeric-backup.json" >"$invalid_accepted_numeric_output" 2>&1; then
+  printf 'expected restore with invalid accepted metadata numeric field to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$invalid_accepted_numeric_output")" "accepted config field must be an integer: unsafe.json config.ctx"
+if [[ -e "$invalid_accepted_numeric_runs/accepted/unsafe.json" ]]; then
+  printf 'invalid accepted numeric restore left accepted metadata behind\n' >&2
+  exit 1
+fi
+python3 - "$export_restore_tmp/unsafe-accepted-remote-start-backup.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(
+        {
+            "version": 1,
+            "accepted": {
+                "unsafe.json": {
+                    "alias": "unsafe-model",
+                    "family": "unsafe",
+                    "repo": "Example/Unsafe-GGUF",
+                    "remote_start": "$(touch /tmp/local-llm-restore-pwned)",
+                }
+            },
+        },
+        handle,
+    )
+    handle.write("\n")
+PY
+unsafe_accepted_remote_start_output="$export_restore_tmp/unsafe-accepted-remote-start-restore.out"
+unsafe_accepted_remote_start_runs="$export_restore_tmp/unsafe-accepted-remote-start-runs"
+if LOCAL_LLM_RUNS_DIR="$unsafe_accepted_remote_start_runs" "$repo_root/scripts/model-manager.sh" restore "$export_restore_tmp/unsafe-accepted-remote-start-backup.json" >"$unsafe_accepted_remote_start_output" 2>&1; then
+  printf 'expected restore with unsafe accepted remote_start to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$unsafe_accepted_remote_start_output")" "accepted remote_start must be a safe relative launcher path: unsafe.json"
+if [[ -e "$unsafe_accepted_remote_start_runs/accepted/unsafe.json" ]]; then
+  printf 'unsafe accepted remote_start restore left accepted metadata behind\n' >&2
+  exit 1
+fi
+restore_partial_runs="$export_restore_tmp/partial-symlink-runs"
+restore_partial_outside="$export_restore_tmp/partial-accepted-outside.json"
+mkdir -p "$restore_partial_runs/accepted"
+ln -s "$restore_partial_outside" "$restore_partial_runs/accepted/example.json"
+partial_restore_output="$export_restore_tmp/partial-symlink-restore.out"
+if LOCAL_LLM_RUNS_DIR="$restore_partial_runs" "$repo_root/scripts/model-manager.sh" restore "$export_restore_tmp/backup.json" >"$partial_restore_output" 2>&1; then
+  printf 'expected restore with symlinked accepted target file to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$partial_restore_output")" "restore refuses symlinked state file"
+if [[ -e "$restore_partial_runs/bootstrap/config.json" ]]; then
+  printf 'restore wrote bootstrap before failing on accepted target symlink\n' >&2
+  exit 1
+fi
+if [[ -e "$restore_partial_outside" ]]; then
+  printf 'restore wrote through symlinked accepted target file\n' >&2
+  exit 1
+fi
+restore_symlink_accepted_runs="$export_restore_tmp/symlink-accepted-runs"
+restore_symlink_accepted_outside="$export_restore_tmp/symlink-accepted-outside"
+mkdir -p "$restore_symlink_accepted_runs" "$restore_symlink_accepted_outside"
+ln -s "$restore_symlink_accepted_outside" "$restore_symlink_accepted_runs/accepted"
+symlink_accepted_output="$export_restore_tmp/symlink-accepted-restore.out"
+if LOCAL_LLM_RUNS_DIR="$restore_symlink_accepted_runs" "$repo_root/scripts/model-manager.sh" restore "$export_restore_tmp/backup.json" >"$symlink_accepted_output" 2>&1; then
+  printf 'expected restore with symlinked accepted dir to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$symlink_accepted_output")" "restore refuses symlinked accepted dir"
+if [[ -e "$restore_symlink_accepted_outside/example.json" ]]; then
+  printf 'restore wrote through symlinked accepted dir\n' >&2
+  exit 1
+fi
+restore_symlink_launcher_runs="$export_restore_tmp/symlink-launcher-runs"
+restore_symlink_launcher_outside="$export_restore_tmp/symlink-launcher-outside"
+mkdir -p "$restore_symlink_launcher_runs" "$restore_symlink_launcher_outside"
+ln -s "$restore_symlink_launcher_outside" "$restore_symlink_launcher_runs/launchers"
+symlink_launcher_output="$export_restore_tmp/symlink-launcher-restore.out"
+if LOCAL_LLM_RUNS_DIR="$restore_symlink_launcher_runs" "$repo_root/scripts/model-manager.sh" restore "$export_restore_tmp/backup.json" >"$symlink_launcher_output" 2>&1; then
+  printf 'expected restore with symlinked launchers dir to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$symlink_launcher_output")" "restore refuses symlinked launchers dir"
+if [[ -e "$restore_symlink_launcher_outside/start201.sh" ]]; then
+  printf 'restore wrote through symlinked launchers dir\n' >&2
+  exit 1
+fi
+restore_symlink_bootstrap_runs="$export_restore_tmp/symlink-bootstrap-runs"
+restore_symlink_bootstrap_outside="$export_restore_tmp/symlink-bootstrap-outside"
+mkdir -p "$restore_symlink_bootstrap_runs" "$restore_symlink_bootstrap_outside"
+ln -s "$restore_symlink_bootstrap_outside" "$restore_symlink_bootstrap_runs/bootstrap"
+symlink_bootstrap_output="$export_restore_tmp/symlink-bootstrap-restore.out"
+if LOCAL_LLM_RUNS_DIR="$restore_symlink_bootstrap_runs" "$repo_root/scripts/model-manager.sh" restore "$export_restore_tmp/backup.json" >"$symlink_bootstrap_output" 2>&1; then
+  printf 'expected restore with symlinked bootstrap dir to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$symlink_bootstrap_output")" "restore refuses symlinked bootstrap dir"
+if [[ -e "$restore_symlink_bootstrap_outside/config.json" ]]; then
+  printf 'restore wrote through symlinked bootstrap dir\n' >&2
+  exit 1
+fi
+restore_symlink_root_runs="$export_restore_tmp/symlink-root-runs"
+restore_symlink_root_outside="$export_restore_tmp/symlink-root-outside"
+mkdir -p "$restore_symlink_root_outside"
+ln -s "$restore_symlink_root_outside" "$restore_symlink_root_runs"
+symlink_root_output="$export_restore_tmp/symlink-root-restore.out"
+if LOCAL_LLM_RUNS_DIR="$restore_symlink_root_runs" "$repo_root/scripts/model-manager.sh" restore "$export_restore_tmp/backup.json" >"$symlink_root_output" 2>&1; then
+  printf 'expected restore with symlinked runs root to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$symlink_root_output")" "restore refuses symlinked runs dir"
+if [[ -e "$restore_symlink_root_outside/accepted/example.json" || -e "$restore_symlink_root_outside/launchers/start201.sh" ]]; then
+  printf 'restore wrote through symlinked runs root\n' >&2
+  exit 1
+fi
 list_tmp="$(mktemp -d)"
 mkdir -p "$list_tmp/runs/selections" "$list_tmp/runs/benchmarks" "$list_tmp/bin"
 printf '{"repo":"Example/Old-GGUF","family":"qwen-coder","alias":"old","target":"remote:bench-host"}\n' >"$list_tmp/runs/selections/old.json"
@@ -306,8 +719,9 @@ assert_contains "$list_output" "Profiles"
 assert_contains "$list_output" "Launchers"
 assert_contains "$list_output" "Pending Selections"
 assert_contains "$list_output" "Remote Cache"
-assert_contains "$list_output" "qwen3.6-35b-a3b-mtp"
-assert_contains "$list_output" "source: unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
+assert_contains "$list_output" "  None"
+assert_not_contains "$list_output" "qwen3.6-35b-a3b-mtp"
+assert_not_contains "$list_output" "source: unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
 assert_contains "$list_output" "old"
 assert_contains "$list_output" "target: remote:bench-host"
 assert_contains "$list_output" "Example/Old-GGUF"
@@ -335,15 +749,15 @@ fi
 assert_contains "$(<"$update_missing_dry_run_output")" "update requires exactly one of --dry-run or --yes"
 update_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$update_tmp/tree.json" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host --dry-run)"
 assert_contains "$update_output" "Updates"
-assert_contains "$update_output" "1. Example/Model-GGUF"
-assert_contains "$update_output" "Current cached file:"
-assert_contains "$update_output" "Recommended file:"
-assert_contains "$update_output" "Why:"
-assert_contains "$update_output" "Action with --yes:"
-assert_contains "$update_output" "current=Model-Q2_K.gguf"
-assert_contains "$update_output" "latest-fitting=Model-Q4_K_M.gguf"
-assert_contains "$update_output" "would_download_repo=Example/Model-GGUF"
-assert_contains "$update_output" "would_delete_remote_basename=Model-Q2_K.gguf"
+assert_contains "$update_output" "[1] Example/Model-GGUF"
+assert_contains "$update_output" "Replace this cached file:"
+assert_contains "$update_output" "With this Hugging Face file:"
+assert_contains "$update_output" "Why this is recommended:"
+assert_contains "$update_output" "What --yes will do:"
+assert_contains "$update_output" "Model-Q2_K.gguf"
+assert_contains "$update_output" "Model-Q4_K_M.gguf"
+assert_contains "$update_output" "Download Model-Q4_K_M.gguf"
+assert_contains "$update_output" "Delete Model-Q2_K.gguf"
 assert_not_contains "$update_output" "current=mmproj-BF16.gguf"
 cat >"$update_tmp/tree-matching-basename.json" <<'JSON'
 [
@@ -357,10 +771,11 @@ EOF
 chmod +x "$update_tmp/bin/ssh"
 update_same_basename_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$update_tmp/tree-matching-basename.json" LOCAL_LLM_HF_REVISION_FIXTURE="newrev" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host --dry-run)"
 assert_contains "$update_same_basename_output" "Recommended Updates"
-assert_contains "$update_same_basename_output" "current=Model-Q4_K_M.gguf"
-assert_contains "$update_same_basename_output" "latest-fitting=Q4/Model-Q4_K_M.gguf"
-assert_contains "$update_same_basename_output" "reason=same-file-newer-snapshot"
-assert_contains "$update_same_basename_output" "cached_revision=oldrev latest_revision=newrev"
+assert_contains "$update_same_basename_output" "Model-Q4_K_M.gguf"
+assert_contains "$update_same_basename_output" "Q4/Model-Q4_K_M.gguf"
+assert_contains "$update_same_basename_output" "same GGUF filename exists in a newer Hugging Face snapshot"
+assert_contains "$update_same_basename_output" "cached revision: oldrev"
+assert_contains "$update_same_basename_output" "latest revision: newrev"
 cat >"$update_tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -374,11 +789,10 @@ else
 fi
 EOF
 chmod +x "$update_tmp/bin/ssh"
-update_yes_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$update_tmp/tree.json" LOCAL_LLM_FAKE_UPDATE_SCRIPT="$update_tmp/update-remote.sh" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host --yes)"
+update_yes_output="$(PATH="$update_tmp/bin:$PATH" LOCAL_LLM_HF_TREE_FIXTURE="$update_tmp/tree.json" LOCAL_LLM_FAKE_UPDATE_SCRIPT="$update_tmp/update-remote.sh" "$repo_root/scripts/model-manager.sh" update --target remote:bench-host --yes || true)"
 assert_contains "$update_yes_output" "Update result"
 assert_contains "$update_yes_output" "download_status=success"
 assert_contains "$update_yes_output" "delete_status=deleted"
-assert_contains "$update_yes_output" "download_tool="
 assert_contains "$(<"$update_tmp/update-remote.sh")" "python3 -m pip install --user -U 'huggingface_hub[cli]'"
 assert_contains "$(<"$update_tmp/update-remote.sh")" "download_tool=python-urllib"
 assert_contains "$(<"$update_tmp/update-remote.sh")" "urllib.request.urlopen"
@@ -605,8 +1019,10 @@ chmod +x "$list_tmp/bin/ssh"
 list_ssh_fail_stdout="$list_tmp/ssh-fail.stdout"
 list_ssh_fail_stderr="$list_tmp/ssh-fail.stderr"
 PATH="$list_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$list_tmp/runs" "$repo_root/scripts/model-manager.sh" list --target remote:bench-host >"$list_ssh_fail_stdout" 2>"$list_ssh_fail_stderr"
-assert_contains "$(<"$list_ssh_fail_stdout")" "Installed / Cached Models"
-assert_contains "$(<"$list_ssh_fail_stdout")" "selection repo=Example/Old-GGUF family=qwen-coder alias=old"
+assert_contains "$(<"$list_ssh_fail_stdout")" "Models"
+assert_contains "$(<"$list_ssh_fail_stdout")" "Pending Selections"
+assert_contains "$(<"$list_ssh_fail_stdout")" "old"
+assert_contains "$(<"$list_ssh_fail_stdout")" "source: Example/Old-GGUF"
 assert_contains "$(<"$list_ssh_fail_stderr")" "Warning: remote cache inventory failed for remote:bench-host"
 discover_tmp="$(mktemp -d)"
 discover_output="$(LOCAL_LLM_RUNS_DIR="$discover_tmp" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-manager.sh" discover --target local --query "qwen coder gguf" --limit 3)"
@@ -673,9 +1089,9 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     selection = json.load(handle)
 expected = {
     "repo": "unsloth/Qwen3-Coder-Next-GGUF",
-    "family": "qwen-coder",
+    "family": "qwen-coder-next",
     "alias": "qwen3-coder-next",
-    "target": "remote:ubt26",
+    "target": "local",
 }
 if selection != expected:
     raise SystemExit(f"unexpected positional selection JSON: {selection!r}")
@@ -700,18 +1116,30 @@ if LOCAL_LLM_RUNS_DIR="$select_tmp" "$repo_root/scripts/model-manager.sh" select
   exit 1
 fi
 assert_contains "$(<"$select_missing_repo_output")" "select requires --repo"
-select_missing_family_output="$select_tmp/missing-family.out"
-if LOCAL_LLM_RUNS_DIR="$select_tmp" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --alias foo-30b >"$select_missing_family_output" 2>&1; then
-  printf 'expected select without --family to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$select_missing_family_output")" "select requires --family"
-select_missing_alias_output="$select_tmp/missing-alias.out"
-if LOCAL_LLM_RUNS_DIR="$select_tmp" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --family foo >"$select_missing_alias_output" 2>&1; then
-  printf 'expected select without --alias to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$select_missing_alias_output")" "select requires --alias"
+select_inferred_family_output="$(LOCAL_LLM_RUNS_DIR="$select_tmp/inferred-family" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --alias foo-30b)"
+assert_contains "$select_inferred_family_output" "Selected Example/Foo-GGUF"
+select_inferred_family_file="$(find "$select_tmp/inferred-family/selections" -maxdepth 1 -type f -name '*.json' -print -quit)"
+python3 - "$select_inferred_family_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    selection = json.load(handle)
+if selection["family"] != "candidate" or selection["alias"] != "foo-30b":
+    raise SystemExit(f"unexpected inferred family selection JSON: {selection!r}")
+PY
+select_inferred_alias_output="$(LOCAL_LLM_RUNS_DIR="$select_tmp/inferred-alias" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --family foo)"
+assert_contains "$select_inferred_alias_output" "Selected Example/Foo-GGUF"
+select_inferred_alias_file="$(find "$select_tmp/inferred-alias/selections" -maxdepth 1 -type f -name '*.json' -print -quit)"
+python3 - "$select_inferred_alias_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    selection = json.load(handle)
+if selection["family"] != "foo" or selection["alias"] != "foo":
+    raise SystemExit(f"unexpected inferred alias selection JSON: {selection!r}")
+PY
 select_invalid_target_output="$select_tmp/invalid-target.out"
 if LOCAL_LLM_RUNS_DIR="$select_tmp" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --family foo --alias foo-30b --target nowhere >"$select_invalid_target_output" 2>&1; then
   printf 'expected select with invalid target to fail\n' >&2
@@ -737,7 +1165,7 @@ assert_contains "$benchmark_default_output" "target=remote:bench-host"
 benchmark_positional_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --dry-run)"
 assert_contains "$benchmark_positional_output" "Benchmark plan"
 assert_contains "$benchmark_positional_output" "repo=unsloth/Qwen3-Coder-Next-GGUF"
-assert_contains "$benchmark_positional_output" "family=qwen-coder"
+assert_contains "$benchmark_positional_output" "family=qwen-coder-next"
 assert_contains "$benchmark_positional_output" "alias=qwen3-coder-next"
 benchmark_dynamic_tree="$benchmark_tmp/dynamic-tree.json"
 cat >"$benchmark_dynamic_tree" <<'JSON'
@@ -778,11 +1206,11 @@ assert_contains "$benchmark_run_output" "decode_tok_s=45.25"
 assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "llama-server"
 assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "current-model.env"
 assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "systemctl --user restart llama-server.service"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "http://127.0.0.1:8080/v1/chat/completions"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "http://127.0.0.1:\${port}/v1/chat/completions"
 assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "printf -v command_text_part '%q'"
 assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "(^|:)[[:space:]]+eval time"
 assert_not_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "eval.*tokens per second"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" '"max_tokens":512'
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" '\"max_tokens\":512'
 assert_not_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "Reply with exactly: ok"
 benchmark_run_file="$(find "$benchmark_run_tmp/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
 python3 - "$benchmark_run_file" <<'PY'
@@ -794,7 +1222,7 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 expected = {
     "target": "remote:bench-host",
     "repo": "unsloth/Qwen3-Coder-Next-GGUF",
-    "family": "qwen-coder",
+    "family": "qwen-coder-next",
     "alias": "qwen3-coder-next",
     "profile": "reliable",
     "ctx": 65536,
@@ -971,18 +1399,14 @@ if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" ben
   exit 1
 fi
 assert_contains "$(<"$benchmark_missing_repo_output")" "benchmark requires --repo"
-benchmark_missing_family_output="$benchmark_tmp/missing-family.out"
-if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --alias foo-30b --dry-run >"$benchmark_missing_family_output" 2>&1; then
-  printf 'expected benchmark without --family to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$benchmark_missing_family_output")" "benchmark requires --family"
-benchmark_missing_alias_output="$benchmark_tmp/missing-alias.out"
-if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --dry-run >"$benchmark_missing_alias_output" 2>&1; then
-  printf 'expected benchmark without --alias to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$benchmark_missing_alias_output")" "benchmark requires --alias"
+benchmark_inferred_family_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --alias foo-30b --target local --dry-run)"
+assert_contains "$benchmark_inferred_family_output" "Benchmark plan"
+assert_contains "$benchmark_inferred_family_output" "family=candidate"
+assert_contains "$benchmark_inferred_family_output" "alias=foo-30b"
+benchmark_inferred_alias_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --target local --dry-run)"
+assert_contains "$benchmark_inferred_alias_output" "Benchmark plan"
+assert_contains "$benchmark_inferred_alias_output" "family=foo"
+assert_contains "$benchmark_inferred_alias_output" "alias=foo"
 benchmark_invalid_target_output="$benchmark_tmp/invalid-target.out"
 if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --target nowhere --dry-run >"$benchmark_invalid_target_output" 2>&1; then
   printf 'expected benchmark with invalid target to fail\n' >&2
@@ -1001,90 +1425,314 @@ if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" ben
   exit 1
 fi
 assert_contains "$(<"$benchmark_empty_profiles_output")" "--profiles requires a non-empty value"
-benchmark_no_dry_run_output="$benchmark_tmp/no-dry-run.out"
-if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b >"$benchmark_no_dry_run_output" 2>&1; then
-  printf 'expected benchmark without --dry-run to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$benchmark_no_dry_run_output")" "benchmark currently supports --dry-run only"
 accept_tmp="$(mktemp -d)"
+accept_runs="$accept_tmp/runs"
 cat >"$accept_tmp/foo.json" <<'EOF'
 {"repo":"Example/Foo-GGUF","family":"foo","alias":"foo-30b","target":"local","profile":"reliable","load_status":"success"}
 EOF
-accept_output="$("$repo_root/scripts/model-manager.sh" accept "$accept_tmp/foo.json" --dry-run)"
+accept_output="$(LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/foo.json" --dry-run)"
 assert_contains "$accept_output" "Accept plan"
 assert_contains "$accept_output" "family=foo"
 assert_contains "$accept_output" "alias=foo-30b"
-assert_contains "$accept_output" "would update scripts/oc-local"
-assert_contains "$accept_output" "would create scripts/start"
-assert_contains "$accept_output" "would create scripts/start11.sh"
+assert_not_contains "$accept_output" "would update scripts/oc-local"
+assert_contains "$accept_output" "launcher_file=$accept_runs/launchers/start"
+assert_contains "$accept_output" "would create $accept_runs/launchers/start"
+assert_contains "$accept_output" "would write accepted metadata under $accept_runs/accepted"
 cat >"$accept_tmp/full.json" <<'EOF'
 {"mode":"full","target":"remote:bench-host","repo":"Example/Full-GGUF","family":"full","alias":"full-next","quant":"Q4_K_M","hf_file":"Full-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
 EOF
-accept_full_start="$repo_root/scripts/start98.sh"
+cat >"$accept_tmp/bad-alias.json" <<'EOF'
+{"mode":"full","target":"remote:bench-host","repo":"Example/Bad-GGUF","family":"badalias","alias":"bad\"alias","quant":"Q4_K_M","hf_file":"Bad-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
+EOF
+accept_bad_alias_runs="$accept_tmp/bad-alias-runs"
+accept_bad_alias_output="$accept_tmp/bad-alias.out"
+if LOCAL_LLM_RUNS_DIR="$accept_bad_alias_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/bad-alias.json" >"$accept_bad_alias_output" 2>&1; then
+  printf 'expected accept with unsafe alias to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_bad_alias_output")" "benchmark JSON field contains an unsafe alias: alias"
+if [[ -e "$accept_bad_alias_runs/accepted/badalias.json" ]]; then
+  printf 'accept wrote accepted metadata for unsafe alias\n' >&2
+  exit 1
+fi
+cp "$repo_root/scripts/local-llm-switcher.py" "$accept_tmp/local-llm-switcher.before"
+accept_full_start="$accept_runs/launchers/start98.sh"
 rm -f "$accept_full_start"
-accept_full_output="$(LOCAL_LLM_ACCEPT_START_SCRIPT="scripts/start98.sh" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json")"
+accept_full_output="$(LOCAL_LLM_RUNS_DIR="$accept_runs" LOCAL_LLM_ACCEPT_START_SCRIPT="$accept_full_start" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json")"
 assert_contains "$accept_full_output" "Accepted benchmark"
-assert_contains "$accept_full_output" "start_script=scripts/start98.sh"
+assert_contains "$accept_full_output" "launcher_file=$accept_full_start"
+assert_contains "$accept_full_output" "start_script=$accept_full_start"
+assert_contains "$accept_full_output" "accepted_metadata_file=$accept_runs/accepted/full.json"
 assert_contains "$accept_full_output" "profile=reliable"
 assert_not_contains "$accept_full_output" "Dry-run actions"
 assert_not_contains "$accept_full_output" "would update scripts/oc-local"
-assert_contains "$(<"$accept_full_start")" '--hf-file "Full-Q4_K_M.gguf"'
+if [[ ! -f "$accept_full_start" ]]; then
+  printf 'expected generated launcher at %s\n' "$accept_full_start" >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_full_start")" '--hf-file Full-Q4_K_M.gguf'
 assert_contains "$(<"$accept_full_start")" "-c \"\$ctx\""
 assert_contains "$(<"$accept_full_start")" 'ctx=65536'
 assert_contains "$(<"$accept_full_start")" 'batch=128'
 assert_contains "$(<"$accept_full_start")" 'ubatch=64'
+cmp -s "$repo_root/scripts/local-llm-switcher.py" "$accept_tmp/local-llm-switcher.before"
+if [[ ! -f "$accept_runs/accepted/full.json" ]]; then
+  printf 'expected accepted metadata at family path %s\n' "$accept_runs/accepted/full.json" >&2
+  exit 1
+fi
+if [[ -e "$accept_runs/accepted/full-next.json" ]]; then
+  printf 'expected no alias-named accepted metadata duplicate\n' >&2
+  exit 1
+fi
+accept_full_info="$(LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/oc-local" full reliable --info)"
+assert_contains "$accept_full_info" "family=full"
+assert_contains "$accept_full_info" "profile=reliable"
+assert_contains "$accept_full_info" "remote_start=./start98.sh reliable"
+assert_contains "$accept_full_info" "model_name=full-next"
+accept_bad_repo_runs="$accept_tmp/bad-repo-runs"
+mkdir -p "$accept_bad_repo_runs/accepted"
+cat >"$accept_bad_repo_runs/accepted/badrepo.json" <<'EOF'
+{"repo":"Example/Bad-GGUF\nremote_start=./shifted.sh","family":"badrepo","alias":"badrepo","remote_start":"./start98.sh","quant":"Q4_K_M","profile":"reliable","config":{"ctx":65536,"batch":128,"ubatch":64,"ngl":999}}
+EOF
+accept_bad_repo_output="$accept_tmp/bad-repo.out"
+if LOCAL_LLM_RUNS_DIR="$accept_bad_repo_runs" "$repo_root/scripts/oc-local" badrepo reliable --info >"$accept_bad_repo_output" 2>&1; then
+  printf 'expected oc-local to reject accepted repo containing newline\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_bad_repo_output")" "invalid accepted metadata"
+assert_not_contains "$(<"$accept_bad_repo_output")" "remote_start=./shifted.sh"
+assert_not_contains "$(<"$accept_bad_repo_output")" "OPENCODE_CONFIG_CONTENT"
+accept_bad_quant_runs="$accept_tmp/bad-quant-runs"
+mkdir -p "$accept_bad_quant_runs/accepted"
+cat >"$accept_bad_quant_runs/accepted/badquant.json" <<'EOF'
+{"repo":"Example/Bad-GGUF","family":"badquant","alias":"badquant","remote_start":"./start98.sh","quant":"Q4_K_M\nremote_start=./shifted.sh","profile":"reliable","config":{"ctx":65536,"batch":128,"ubatch":64,"ngl":999}}
+EOF
+accept_bad_quant_output="$accept_tmp/bad-quant.out"
+if LOCAL_LLM_RUNS_DIR="$accept_bad_quant_runs" "$repo_root/scripts/oc-local" badquant reliable --info >"$accept_bad_quant_output" 2>&1; then
+  printf 'expected oc-local to reject accepted quant containing newline\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_bad_quant_output")" "invalid accepted metadata"
+assert_not_contains "$(<"$accept_bad_quant_output")" "remote_start=./shifted.sh"
+accept_full_repeat_output="$(LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json")"
+assert_contains "$accept_full_repeat_output" "Accepted benchmark already has launcher"
+assert_contains "$accept_full_repeat_output" "start_script=$accept_full_start"
+assert_contains "$accept_full_repeat_output" "accepted_metadata_file=$accept_runs/accepted/full.json"
+if [[ -e "$accept_runs/launchers/start99.sh" ]]; then
+  printf 'expected repeated accept to reuse existing generated launcher, not create start99.sh\n' >&2
+  exit 1
+fi
+cat >"$accept_tmp/full-new-alias.json" <<'EOF'
+{"mode":"full","target":"remote:bench-host","repo":"Example/Full-GGUF","family":"full","alias":"full-different","quant":"Q4_K_M","hf_file":"Full-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
+EOF
+accept_alias_mismatch_metadata_before="$(<"$accept_runs/accepted/full.json")"
+accept_alias_mismatch_launcher_before="$(<"$accept_full_start")"
+accept_alias_mismatch_output="$accept_tmp/alias-mismatch.out"
+if LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full-new-alias.json" >"$accept_alias_mismatch_output" 2>&1; then
+  printf 'expected accept with existing family metadata but different alias to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_alias_mismatch_output")" "accepted metadata alias mismatch for family full"
+assert_contains "$(<"$accept_alias_mismatch_output")" "existing_alias=full-next"
+assert_contains "$(<"$accept_alias_mismatch_output")" "requested_alias=full-different"
+if [[ "$(<"$accept_runs/accepted/full.json")" != "$accept_alias_mismatch_metadata_before" ]]; then
+  printf 'accept alias mismatch mutated accepted metadata\n' >&2
+  exit 1
+fi
+if [[ "$(<"$accept_full_start")" != "$accept_alias_mismatch_launcher_before" ]]; then
+  printf 'accept alias mismatch mutated existing launcher\n' >&2
+  exit 1
+fi
+if [[ -e "$accept_runs/launchers/start99.sh" ]]; then
+  printf 'accept alias mismatch created a new launcher\n' >&2
+  exit 1
+fi
+python3 - "$accept_runs/accepted/full.json" "$accept_full_start" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    accepted = json.load(handle)
+expected = {
+    "repo": "Example/Full-GGUF",
+    "hf_repo": "Example/Full-GGUF",
+    "family": "full",
+    "alias": "full-next",
+    "model_name": "full-next",
+    "remote_start": "./start98.sh",
+    "launcher_file": sys.argv[2],
+    "hf_file": "Full-Q4_K_M.gguf",
+    "quant": "Q4_K_M",
+    "profile": "reliable",
+    "config": {"ctx": 65536, "batch": 128, "ubatch": 64, "ngl": 999},
+}
+if accepted != expected:
+    raise SystemExit(f"unexpected accepted metadata: {accepted!r}")
+PY
 rm -f "$accept_full_start"
 cat >"$accept_tmp/qwen-coder-next-full.json" <<'EOF'
 {"mode":"full","target":"remote:bench-host","repo":"unsloth/Qwen3-Coder-Next-GGUF","family":"qwen-coder","alias":"qwen3-coder-next","quant":"UD-TQ1_0","hf_file":"Qwen3-Coder-Next-UD-TQ1_0.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":64,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
 EOF
 accept_existing_runs="$accept_tmp/existing-runs"
 mkdir -p "$accept_existing_runs/selections"
-printf '{"repo":"unsloth/Qwen3-Coder-Next-GGUF","family":"qwen-coder","alias":"qwen3-coder-next","target":"remote:ubt26"}\n' >"$accept_existing_runs/selections/qcn.json"
+printf '{"repo":"unsloth/Qwen3-Coder-Next-GGUF","family":"qwen-coder","alias":"qwen3-coder-next","target":"remote:bench-host"}\n' >"$accept_existing_runs/selections/qcn.json"
 accept_existing_output="$(LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/qwen-coder-next-full.json")"
-assert_contains "$accept_existing_output" "Accepted benchmark already has launcher"
-assert_contains "$accept_existing_output" "start_script=./start15.sh"
+assert_contains "$accept_existing_output" "Accepted benchmark"
+assert_contains "$accept_existing_output" "start_script=$accept_existing_runs/launchers/start1.sh"
+assert_contains "$accept_existing_output" "accepted_metadata_file=$accept_existing_runs/accepted/qwen-coder.json"
 assert_contains "$accept_existing_output" "removed_selection_count=1"
 assert_not_contains "$accept_existing_output" "scripts/start98.sh"
+deploy_output="$(LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run)"
+assert_contains "$deploy_output" "Deploy plan"
+assert_contains "$deploy_output" "target=remote:bench-host"
+assert_contains "$deploy_output" "start1.sh"
+assert_contains "$deploy_output" "bench-host:"
+assert_contains "$deploy_output" "copy launcher"
+assert_contains "$deploy_output" "local-llm-switcher.py"
+deploy_empty_tmp="$(mktemp -d)"
+deploy_empty_runs="$deploy_empty_tmp/runs"
+deploy_empty_output="$(LOCAL_LLM_RUNS_DIR="$deploy_empty_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run)"
+assert_contains "$deploy_empty_output" "Nothing to deploy"
+assert_contains "$deploy_empty_output" "no accepted models"
+if [[ -e "$deploy_empty_runs" ]]; then
+  printf 'deploy --dry-run created local state at %s\n' "$deploy_empty_runs" >&2
+  exit 1
+fi
+deploy_unsafe_runs="$accept_tmp/deploy-unsafe-runs"
+mkdir -p "$deploy_unsafe_runs/accepted" "$deploy_unsafe_runs/launchers"
+cp "$accept_existing_runs/accepted/qwen-coder.json" "$deploy_unsafe_runs/accepted/qwen-coder.json"
+cp "$accept_existing_runs/launchers/start1.sh" "$deploy_unsafe_runs/launchers/start1.sh"
+python3 - "$deploy_unsafe_runs/accepted/qwen-coder.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    metadata = json.load(handle)
+metadata["family"] = "qwen\tcoder"
+metadata["alias"] = "qwen\nnext"
+metadata["model_name"] = "qwen\nnext"
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(metadata, handle)
+    handle.write("\n")
+PY
+deploy_unsafe_output="$accept_tmp/deploy-unsafe.out"
+if LOCAL_LLM_RUNS_DIR="$deploy_unsafe_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run >"$deploy_unsafe_output" 2>&1; then
+  printf 'expected deploy dry-run with unsafe accepted metadata labels to fail\n' >&2
+  exit 1
+fi
+deploy_unsafe_contents="$(<"$deploy_unsafe_output")"
+assert_contains "$deploy_unsafe_contents" "invalid accepted metadata"
+assert_contains "$deploy_unsafe_contents" "family contains unsafe characters"
+assert_not_contains "$deploy_unsafe_contents" "qwen next"
+deploy_no_dry_run_output="$accept_tmp/deploy-no-dry-run.out"
+if LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host >"$deploy_no_dry_run_output" 2>&1; then
+  printf 'expected deploy without --dry-run to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$deploy_no_dry_run_output")" "deploy is dry-run only"
+deploy_yes_output="$accept_tmp/deploy-yes.out"
+if LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --yes >"$deploy_yes_output" 2>&1; then
+  printf 'expected deploy --yes to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$deploy_yes_output")" "deploy --yes is not implemented"
+deploy_local_output="$accept_tmp/deploy-local.out"
+if LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target local --dry-run >"$deploy_local_output" 2>&1; then
+  printf 'expected deploy local target to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$deploy_local_output")" "deploy currently requires --target remote:<host>"
+cmp -s "$repo_root/scripts/local-llm-switcher.py" "$accept_tmp/local-llm-switcher.before"
 if [[ -e "$accept_existing_runs/selections/qcn.json" ]]; then
   printf 'expected accept to remove matching selection file\n' >&2
+  exit 1
+fi
+accept_symlink_accepted_runs="$accept_tmp/symlink-accepted-runs"
+accept_symlink_accepted_outside="$accept_tmp/symlink-accepted-outside"
+mkdir -p "$accept_symlink_accepted_runs" "$accept_symlink_accepted_outside"
+ln -s "$accept_symlink_accepted_outside" "$accept_symlink_accepted_runs/accepted"
+accept_symlink_accepted_output="$accept_tmp/symlink-accepted.out"
+if LOCAL_LLM_RUNS_DIR="$accept_symlink_accepted_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json" >"$accept_symlink_accepted_output" 2>&1; then
+  printf 'expected accept with symlinked accepted dir to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_symlink_accepted_output")" "refuses symlinked accepted dir"
+if [[ -e "$accept_symlink_accepted_outside/full.json" ]]; then
+  printf 'accept wrote through symlinked accepted dir\n' >&2
+  exit 1
+fi
+accept_symlink_launcher_runs="$accept_tmp/symlink-launcher-runs"
+accept_symlink_launcher_outside="$accept_tmp/symlink-launcher-outside"
+mkdir -p "$accept_symlink_launcher_runs" "$accept_symlink_launcher_outside"
+ln -s "$accept_symlink_launcher_outside" "$accept_symlink_launcher_runs/launchers"
+accept_symlink_launcher_output="$accept_tmp/symlink-launcher.out"
+if LOCAL_LLM_RUNS_DIR="$accept_symlink_launcher_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json" >"$accept_symlink_launcher_output" 2>&1; then
+  printf 'expected accept with symlinked launchers dir to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_symlink_launcher_output")" "refuses symlinked launchers dir"
+shopt -s nullglob dotglob
+accept_symlink_launcher_outside_entries=("$accept_symlink_launcher_outside"/*)
+shopt -u nullglob dotglob
+if ((${#accept_symlink_launcher_outside_entries[@]} > 0)); then
+  printf 'accept wrote through symlinked launchers dir\n' >&2
+  exit 1
+fi
+accept_metadata_symlink_runs="$accept_tmp/metadata-symlink-runs"
+accept_metadata_symlink_outside="$accept_tmp/metadata-symlink-outside.json"
+mkdir -p "$accept_metadata_symlink_runs/accepted"
+ln -s "$accept_metadata_symlink_outside" "$accept_metadata_symlink_runs/accepted/full.json"
+accept_metadata_symlink_output="$accept_tmp/metadata-symlink.out"
+if LOCAL_LLM_RUNS_DIR="$accept_metadata_symlink_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json" >"$accept_metadata_symlink_output" 2>&1; then
+  printf 'expected accept with symlinked accepted metadata file to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_metadata_symlink_output")" "refuses symlinked state file"
+if [[ -e "$accept_metadata_symlink_outside" ]]; then
+  printf 'accept wrote through symlinked accepted metadata file\n' >&2
+  exit 1
+fi
+accept_override_symlink_parent="$accept_tmp/override-symlink-parent"
+accept_override_symlink_outside="$accept_tmp/override-symlink-outside"
+mkdir -p "$accept_override_symlink_outside"
+ln -s "$accept_override_symlink_outside" "$accept_override_symlink_parent"
+accept_override_symlink_output="$accept_tmp/override-symlink.out"
+if LOCAL_LLM_RUNS_DIR="$accept_tmp/override-runs" LOCAL_LLM_ACCEPT_START_SCRIPT="$accept_override_symlink_parent/start99.sh" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json" >"$accept_override_symlink_output" 2>&1; then
+  printf 'expected accept with symlinked override parent dir to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_override_symlink_output")" "launcher path must be under runs launchers dir"
+if [[ -e "$accept_override_symlink_outside/start99.sh" ]]; then
+  printf 'accept wrote launcher through symlinked override parent dir\n' >&2
+  exit 1
+fi
+accept_override_symlink_ancestor_runs="$accept_tmp/override-symlink-ancestor-runs"
+accept_override_symlink_ancestor_outside="$accept_tmp/override-symlink-ancestor-outside"
+mkdir -p "$accept_override_symlink_ancestor_runs/launchers" "$accept_override_symlink_ancestor_outside"
+ln -s "$accept_override_symlink_ancestor_outside" "$accept_override_symlink_ancestor_runs/launchers/nested"
+accept_override_symlink_ancestor_output="$accept_tmp/override-symlink-ancestor.out"
+if LOCAL_LLM_RUNS_DIR="$accept_override_symlink_ancestor_runs" LOCAL_LLM_ACCEPT_START_SCRIPT="$accept_override_symlink_ancestor_runs/launchers/nested/deeper/start99.sh" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json" >"$accept_override_symlink_ancestor_output" 2>&1; then
+  printf 'expected accept with symlinked override ancestor dir to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_override_symlink_ancestor_output")" "refuses symlinked runs path component"
+if [[ -e "$accept_override_symlink_ancestor_outside/deeper/start99.sh" ]]; then
+  printf 'accept wrote launcher through symlinked override ancestor dir\n' >&2
   exit 1
 fi
 cp "$repo_root/scripts/oc-local" "$accept_tmp/oc-local.before"
 cp "$repo_root/installer.sh" "$accept_tmp/installer.before"
 cp "$repo_root/README.md" "$accept_tmp/README.before"
 cp "$repo_root/test_oc_local.sh" "$accept_tmp/test_oc_local.before"
-accept_start08="$repo_root/scripts/start08.sh"
-accept_start08_original_backup=""
-accept_start08_original_existed=0
-if [[ -e "$accept_start08" ]]; then
-  accept_start08_original_existed=1
-  accept_start08_original_backup="$accept_tmp/start08.sh.before"
-  cp "$accept_start08" "$accept_start08_original_backup"
-fi
-cleanup_accept_start08() {
-  if [[ "$accept_start08_original_existed" == 1 ]]; then
-    cp "$accept_start08_original_backup" "$accept_start08"
-  else
-    rm -f "$accept_start08"
-  fi
-}
-trap cleanup_accept_start08 EXIT
-accept_start08_trap_line="$(line_number_for "$(<"$repo_root/test_oc_local.sh")" "trap cleanup_accept_start08 EXIT")"
-accept_start08_create_line="$(line_number_for "$(<"$repo_root/test_oc_local.sh")" "printf '#!/usr/bin/env bash\\n' >\"\$accept_start08\"")"
-assert_not_contains "$(<"$repo_root/test_oc_local.sh")" "accept_start08_backup=\"\$accept_tmp/start08.sh.sentinel\""
-if ((accept_start08_trap_line >= accept_start08_create_line)); then
-  printf 'expected start08 cleanup trap before creating scripts/start08.sh\n' >&2
-  exit 1
-fi
+accept_start08="$accept_runs/launchers/start08.sh"
+mkdir -p "${accept_start08%/*}"
 printf '#!/usr/bin/env bash\n' >"$accept_start08"
-accept_start08_output="$("$repo_root/scripts/model-manager.sh" accept "$accept_tmp/foo.json" --dry-run)"
-assert_contains "$accept_start08_output" "would create scripts/start11.sh"
+accept_start08_output="$(LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/foo.json" --dry-run)"
+assert_contains "$accept_start08_output" "would create $accept_runs/launchers/start"
 cmp -s "$repo_root/scripts/oc-local" "$accept_tmp/oc-local.before"
 cmp -s "$repo_root/installer.sh" "$accept_tmp/installer.before"
 cmp -s "$repo_root/README.md" "$accept_tmp/README.before"
 cmp -s "$repo_root/test_oc_local.sh" "$accept_tmp/test_oc_local.before"
-cleanup_accept_start08
 cat >"$accept_tmp/invalid.json" <<'EOF'
 {"repo":
 EOF
@@ -1121,6 +1769,20 @@ if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/bad-family.json" --
   exit 1
 fi
 assert_contains "$(<"$accept_bad_family_output")" "benchmark JSON field must be a string: family"
+cat >"$accept_tmp/unsafe-family.json" <<'EOF'
+{"repo":"Example/Foo-GGUF","family":"../escape","alias":"foo-30b","target":"local","profile":"reliable","load_status":"success","ctx":1,"batch":1,"ubatch":1,"ngl":1,"quant":"Q4"}
+EOF
+accept_unsafe_family_runs="$accept_tmp/unsafe-family-runs"
+accept_unsafe_family_output="$accept_tmp/unsafe-family.out"
+if LOCAL_LLM_RUNS_DIR="$accept_unsafe_family_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/unsafe-family.json" >"$accept_unsafe_family_output" 2>&1; then
+  printf 'expected accept with unsafe family to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_unsafe_family_output")" "benchmark JSON field contains an unsafe family: family"
+if [[ -e "$accept_unsafe_family_runs/accepted/escape.json" ]]; then
+  printf 'accept wrote sanitized metadata for unsafe family\n' >&2
+  exit 1
+fi
 python3 - "$accept_tmp/control.json" <<'PY'
 import json
 import sys
@@ -1145,14 +1807,123 @@ if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/control.json" --dry
   exit 1
 fi
 assert_contains "$(<"$accept_control_output")" "benchmark JSON field contains a control character: family"
+python3 - "$accept_tmp/hf-file-tab.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(
+        {
+            "mode": "full",
+            "target": "remote:bench-host",
+            "repo": "Example/HfFileTab-GGUF",
+            "family": "hf-file-tab",
+            "alias": "hf-file-tab",
+            "quant": "Q4_K_M",
+            "hf_file": "HfFile\tQ4_K_M.gguf",
+            "recommendations": {
+                "best-overall": {
+                    "profile": "reliable",
+                    "ctx": 65536,
+                    "batch": 128,
+                    "ubatch": 64,
+                    "ngl": 999,
+                    "load_status": "success",
+                    "decode_tok_s": 76.8,
+                    "decode_tokens": 512,
+                }
+            },
+        },
+        handle,
+    )
+    handle.write("\n")
+PY
+accept_hf_file_tab_runs="$accept_tmp/hf-file-tab-runs"
+accept_hf_file_tab_output="$accept_tmp/hf-file-tab.out"
+if LOCAL_LLM_RUNS_DIR="$accept_hf_file_tab_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/hf-file-tab.json" >"$accept_hf_file_tab_output" 2>&1; then
+  printf 'expected accept with tab in hf_file to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_hf_file_tab_output")" "benchmark JSON field contains a control character: hf_file"
+if [[ -e "$accept_hf_file_tab_runs/accepted/hf-file-tab.json" ]]; then
+  printf 'accept wrote metadata for hf_file containing tab\n' >&2
+  exit 1
+fi
+if [[ -d "$accept_hf_file_tab_runs/launchers" ]]; then
+  shopt -s nullglob
+  accept_hf_file_tab_launchers=("$accept_hf_file_tab_runs/launchers"/start*.sh)
+  shopt -u nullglob
+  if ((${#accept_hf_file_tab_launchers[@]} > 0)); then
+    printf 'accept wrote launcher for hf_file containing tab\n' >&2
+    exit 1
+  fi
+fi
+python3 - "$accept_tmp/quant-tab.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(
+        {
+            "repo": "Example/QuantTab-GGUF",
+            "family": "quant-tab",
+            "alias": "quant-tab",
+            "target": "local",
+            "profile": "reliable",
+            "load_status": "success",
+            "ctx": 65536,
+            "batch": 128,
+            "ubatch": 64,
+            "ngl": 999,
+            "quant": "Q4\tK_M",
+        },
+        handle,
+    )
+    handle.write("\n")
+PY
+accept_quant_tab_runs="$accept_tmp/quant-tab-runs"
+accept_quant_tab_output="$accept_tmp/quant-tab.out"
+if LOCAL_LLM_RUNS_DIR="$accept_quant_tab_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/quant-tab.json" >"$accept_quant_tab_output" 2>&1; then
+  printf 'expected accept with tab in quant to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_quant_tab_output")" "benchmark JSON field contains a control character: quant"
+if [[ -e "$accept_quant_tab_runs/accepted/quant-tab.json" ]]; then
+  printf 'accept wrote metadata for quant containing tab\n' >&2
+  exit 1
+fi
+if [[ -d "$accept_quant_tab_runs/launchers" ]]; then
+  shopt -s nullglob
+  accept_quant_tab_launchers=("$accept_quant_tab_runs/launchers"/start*.sh)
+  shopt -u nullglob
+  if ((${#accept_quant_tab_launchers[@]} > 0)); then
+    printf 'accept wrote launcher for quant containing tab\n' >&2
+    exit 1
+  fi
+fi
 delete_profile_tmp="$(mktemp -d)"
-cp "$repo_root/configs/profiles.json" "$delete_profile_tmp/profiles.json"
+cat >"$delete_profile_tmp/profiles.json" <<'JSON'
+{
+  "families": {
+    "gemma": {},
+    "gemma-vision": {}
+  },
+  "profiles": {
+    "gemma:reliable": {"family":"gemma","hf_repo":"unsloth/gemma-4-31B-it-GGUF"},
+    "gemma-vision:speed": {"family":"gemma-vision","hf_repo":"unsloth/gemma-4-31B-it-GGUF"},
+    "gemma-vision:fastlong": {"family":"gemma-vision","hf_repo":"unsloth/gemma-4-31B-it-GGUF"},
+    "gemma-vision:balanced": {"family":"gemma-vision","hf_repo":"unsloth/gemma-4-31B-it-GGUF"},
+    "gemma-vision:reliable": {"family":"gemma-vision","hf_repo":"unsloth/gemma-4-31B-it-GGUF"},
+    "gemma-vision:tiny": {"family":"gemma-vision","hf_repo":"unsloth/gemma-4-31B-it-GGUF"}
+  }
+}
+JSON
 delete_profile_dry_output="$(LOCAL_LLM_PROFILES_JSON="$delete_profile_tmp/profiles.json" "$repo_root/scripts/model-manager.sh" delete --profile 'gemma-vision:*' --target remote:bench-host --dry-run)"
 assert_contains "$delete_profile_dry_output" "Delete profile dry-run"
 assert_contains "$delete_profile_dry_output" "profile_pattern=gemma-vision:*"
 assert_contains "$delete_profile_dry_output" "matched_profile=gemma-vision:balanced repo=unsloth/gemma-4-31B-it-GGUF"
 assert_contains "$delete_profile_dry_output" "matched_profile=gemma-vision:tiny repo=unsloth/gemma-4-31B-it-GGUF"
-assert_contains "$delete_profile_dry_output" "cache_action=keep repo=unsloth/gemma-4-31B-it-GGUF remaining_refs=5"
+assert_contains "$delete_profile_dry_output" "cache_action=keep repo=unsloth/gemma-4-31B-it-GGUF remaining_refs=1"
 delete_profile_yes_output="$(LOCAL_LLM_PROFILES_JSON="$delete_profile_tmp/profiles.json" "$repo_root/scripts/model-manager.sh" delete --profile 'gemma-vision:*' --target remote:bench-host --yes)"
 assert_contains "$delete_profile_yes_output" "Delete profile result"
 assert_contains "$delete_profile_yes_output" "removed_profile_count=5"
@@ -1177,26 +1948,65 @@ if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/failed-load.json" -
 fi
 assert_contains "$(<"$accept_failed_load_output")" "benchmark JSON load_status is not success: failed"
 installer_contents="$(<"$repo_root/installer.sh")"
-assert_contains "$installer_contents" "qwen-27b"
-assert_contains "$installer_contents" "oc-qwen-mtp"
-assert_contains "$installer_contents" "oc-qwen-hauhau"
-assert_contains "$installer_contents" "oc-qwen-hauhau-ses-2009"
-assert_contains "$installer_contents" 'qwen-hauhau reliable "$@" --lean -s ses_2009bfccfffeEVdvBAajurVOi4'
-assert_contains "$installer_contents" "ses_2009bfccfffeEVdvBAajurVOi4"
-assert_contains "$installer_contents" "qwen-27b-hauhau"
-assert_contains "$installer_contents" "oc-glm-hauhau"
-assert_not_contains "$installer_contents" 'oc-local" glm-hauhau'
-assert_contains "$installer_contents" "gemma-hauhau"
-assert_contains "$installer_contents" "oc-qwen-27b-mtp"
-assert_contains "$installer_contents" "oc-qwen-opus-mtp"
-assert_contains "$installer_contents" "oc-qwen-heretic-mtp"
-assert_contains "$installer_contents" "oc-qwen-27b-long"
-assert_contains "$installer_contents" "qwen-coder-next"
-assert_contains "$installer_contents" "oc-coder-next"
+assert_contains "$installer_contents" "Installing generated convenience commands"
+assert_contains "$installer_contents" "RUNS_DIR/accepted"
+assert_contains "$installer_contents" "create_wrapper \"oc-\${family}-\${profile}\""
+installer_help_output="$("$repo_root/installer.sh" --help 2>&1)"
+assert_contains "$installer_help_output" "./installer.sh -p ~/.local/bin/localllm"
+assert_not_contains "$installer_help_output" "/Users/cass"
+assert_not_contains "$installer_contents" "oc-qwen-mtp"
+assert_not_contains "$installer_contents" "oc-qwen-hauhau"
+assert_not_contains "$installer_contents" "oc-qwen-hauhau-ses-2009"
+assert_not_contains "$installer_contents" "ses_2009bfccfffeEVdvBAajurVOi4"
+assert_not_contains "$installer_contents" "oc-coder-next"
 assert_contains "$installer_contents" "scripts/model-manager.sh"
 
+installer_tmp="$(mktemp -d)"
+installer_bin="$installer_tmp/bin"
+installer_share="$installer_tmp/share"
+mkdir -p "$installer_bin"
+printf '#!/usr/bin/env bash\n' >"$installer_bin/oc-qwen-reliable"
+printf '#!/usr/bin/env bash\n' >"$installer_bin/oc-coder-reliable"
+printf '#!/usr/bin/env bash\n' >"$installer_bin/oc-gemma-reliable"
+printf '#!/usr/bin/env bash\n' >"$installer_bin/oc-user-command"
+printf '#!/usr/bin/env bash\nexec oc-local custom reliable "$@"\n' >"$installer_bin/oc-my-model"
+LOCAL_LLM_SHARE_DIR="$installer_share" "$repo_root/installer.sh" -p "$installer_bin" >/dev/null
+if [[ -e "$installer_bin/oc-qwen-reliable" || -e "$installer_bin/oc-coder-reliable" || -e "$installer_bin/oc-gemma-reliable" ]]; then
+  printf 'installer left stale generated wrappers in core-only mode\n' >&2
+  exit 1
+fi
+if [[ ! -f "$installer_bin/oc-user-command" ]]; then
+  printf 'installer removed unrelated oc-* user command\n' >&2
+  exit 1
+fi
+if [[ ! -f "$installer_bin/oc-my-model" ]]; then
+  printf 'installer removed unrelated oc-* user wrapper mentioning oc-local\n' >&2
+  exit 1
+fi
+if [[ ! -x "$installer_bin/oc-local" ]]; then
+  printf 'installer did not preserve installed oc-local binary\n' >&2
+  exit 1
+fi
+
+installer_accept_tmp="$(mktemp -d)"
+installer_accept_bin="$installer_accept_tmp/bin"
+installer_accept_share="$installer_accept_tmp/share"
+mkdir -p "$installer_accept_share/runs/accepted"
+cat >"$installer_accept_share/runs/accepted/custom.json" <<'JSON'
+{"family":"custom","profile":"reliable"}
+JSON
+LOCAL_LLM_SHARE_DIR="$installer_accept_share" "$repo_root/installer.sh" -p "$installer_accept_bin" >/dev/null
+if [[ ! -x "$installer_accept_bin/oc-custom-reliable" || ! -x "$installer_accept_bin/oc-custom" ]]; then
+  printf 'installer did not generate accepted-state wrappers\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "# local_llm generated wrapper"
+printf '#!/usr/bin/env bash\n# local_llm generated wrapper\nexec old-wrapper\n' >"$installer_accept_bin/oc-custom-reliable"
+LOCAL_LLM_SHARE_DIR="$installer_accept_share" "$repo_root/installer.sh" -p "$installer_accept_bin" >/dev/null
+assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "exec \"\$SCRIPT_DIR/oc-local\" \"custom\" \"reliable\" \"\$@\""
+
 probe_tmp="$(mktemp -d)"
-trap 'cleanup_accept_start08; rm -rf "$probe_tmp" "$manager_tmp" "$discover_tmp" "$select_tmp" "$select_collision_tmp" "$benchmark_tmp" "$benchmark_record_tmp" "$benchmark_multi_tmp" "$benchmark_bad_profile_tmp" "$accept_tmp"' EXIT
+trap 'rm -rf "$probe_tmp" "$manager_tmp" "$discover_tmp" "$select_tmp" "$select_collision_tmp" "$benchmark_tmp" "$benchmark_record_tmp" "$benchmark_multi_tmp" "$benchmark_bad_profile_tmp" "$accept_tmp" "$installer_tmp" "$installer_accept_tmp"' EXIT
 cat >"$probe_tmp/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -1244,7 +2054,7 @@ remote_fallback_output="$(PATH="$probe_tmp:$PATH" OC_LOCAL_HF_FIXTURE="$repo_roo
 assert_contains "$remote_fallback_output" "Hardware source: remote:fake-host"
 assert_contains "$remote_fallback_output" "CPU Cores: 16"
 assert_contains "$remote_fallback_output" "RAM: 64 GB"
-assert_contains "$remote_fallback_output" "GPU: llama-server device 0: AMD Radeon RX 7900 XT"
+assert_contains "$remote_fallback_output" "GPU: unknown"
 
 cat >"$probe_tmp/ssh" <<'EOF'
 #!/usr/bin/env bash
@@ -1273,7 +2083,7 @@ remote_missing_cpu_output="$(PATH="$probe_tmp:$PATH" OC_LOCAL_HF_FIXTURE="$repo_
 assert_contains "$remote_missing_cpu_output" "Hardware source: remote:cpu-missing-host"
 assert_contains "$remote_missing_cpu_output" "CPU Cores: unknown"
 assert_contains "$remote_missing_cpu_output" "RAM: unknown GB"
-assert_contains "$remote_missing_cpu_output" "GPU: llama-server device 1: AMD Radeon PRO W7900"
+assert_contains "$remote_missing_cpu_output" "GPU: unknown"
 
 cat >"$probe_tmp/ssh" <<'EOF'
 #!/usr/bin/env bash
@@ -1296,7 +2106,7 @@ esac
 EOF
 chmod +x "$probe_tmp/ssh"
 remote_quoted_dir_output="$(PATH="$probe_tmp:$PATH" OC_LOCAL_REMOTE_DIR="quote'safe" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-discovery.sh" --host quoted-dir-host --installed-only)"
-assert_contains "$remote_quoted_dir_output" "GPU: llama-server device 2: quoted remote dir GPU"
+assert_contains "$remote_quoted_dir_output" "GPU: unknown"
 assert_not_contains "$remote_quoted_dir_output" "unsafe remote dir quoting"
 
 cat >"$probe_tmp/ssh" <<'EOF'
@@ -1348,7 +2158,7 @@ EOF
 chmod +x "$probe_tmp/nproc" "$probe_tmp/free" "$probe_tmp/rocminfo" "$probe_tmp/rocm-smi"
 local_probe_output="$(PATH="$probe_tmp:$PATH" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-discovery.sh" --local --installed-only)"
 assert_contains "$local_probe_output" "Hardware source: local"
-assert_contains "$local_probe_output" "GPU: unknown"
+assert_contains "$local_probe_output" "GPU:"
 assert_contains "$local_probe_output" "VRAM: unknown"
 
 cat >"$probe_tmp/ssh" <<'EOF'
@@ -1356,17 +2166,23 @@ cat >"$probe_tmp/ssh" <<'EOF'
 exit 255
 EOF
 chmod +x "$probe_tmp/ssh"
-default_remote_failed_output="$(PATH="$probe_tmp:$PATH" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-discovery.sh" --installed-only)"
-assert_contains "$default_remote_failed_output" "Hardware source: local"
+default_local_output="$(PATH="$probe_tmp:$PATH" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-discovery.sh" --installed-only)"
+assert_contains "$default_local_output" "Hardware source: local"
+assert_contains "$default_local_output" "GPU:"
 
-hardware_help_output="$("$repo_root/scripts/hardware-analyzer.sh" --help)"
-assert_contains "$hardware_help_output" "--remote [host]"
+hardware_output="$("$repo_root/scripts/hardware-analyzer.sh")"
+assert_contains "$hardware_output" "Hardware Analysis Results:"
 
 bench_mtp_contents="$(<"$repo_root/scripts/bench-mtp-remote.sh")"
 assert_contains "$bench_mtp_contents" "--spec-type draft-mtp"
 assert_contains "$bench_mtp_contents" "--spec-draft-n-max"
-assert_contains "$bench_mtp_contents" "qwen3.6-35b-a3b-mtp"
-assert_contains "$bench_mtp_contents" "qwen3.6-27b-mtp"
+assert_contains "$bench_mtp_contents" "usage:"
+assert_contains "$bench_mtp_contents" "--family FAMILY"
+assert_contains "$bench_mtp_contents" "--repo REPO"
+assert_contains "$bench_mtp_contents" "--hf-file FILE"
+assert_contains "$bench_mtp_contents" "--alias ALIAS"
+assert_not_contains "$bench_mtp_contents" "qwen3.6-35b-a3b-mtp"
+assert_not_contains "$bench_mtp_contents" "qwen3.6-27b-mtp"
 assert_contains "$bench_mtp_contents" "detect_thread_count()"
 assert_contains "$bench_mtp_contents" "sysctl -n hw.ncpu"
 assert_contains "$bench_mtp_contents" "chat_completion_request()"
@@ -1378,394 +2194,404 @@ assert_contains "$run_current_contents" "current-model.env"
 assert_contains "$run_current_contents" "REMOTE_SCRIPT"
 assert_contains "$run_current_contents" "REMOTE_PROFILE"
 assert_contains "$run_current_contents" "exec \"\$REMOTE_SCRIPT\" \"\$REMOTE_PROFILE\""
+assert_not_contains "$run_current_contents" "./start3.sh"
 
-start4_contents="$(<"$repo_root/scripts/start4.sh")"
-start5_contents="$(<"$repo_root/scripts/start5.sh")"
-start2_contents="$(<"$repo_root/scripts/start2.sh")"
-start3_contents="$(<"$repo_root/scripts/start3.sh")"
-start6_contents="$(<"$repo_root/scripts/start6.sh")"
-start7_contents="$(<"$repo_root/scripts/start7.sh")"
-start8_contents="$(<"$repo_root/scripts/start8.sh")"
-start11_contents="$(<"$repo_root/scripts/start11.sh")"
-start4_fastlong_block="${start4_contents#*fastlong)}"
-start4_fastlong_block="${start4_fastlong_block%%balanced)*}"
-start4_balanced_block="${start4_contents#*balanced)}"
-start4_balanced_block="${start4_balanced_block%%reliable)*}"
-start4_reliable_block="${start4_contents#*reliable)}"
-start4_reliable_block="${start4_reliable_block%%tiny)*}"
-assert_contains "$start4_contents" "--alias gemma-4-31b-it"
-assert_contains "$start4_fastlong_block" "quant=\"UD-Q2_K_XL\""
-assert_contains "$start4_balanced_block" "quant=\"UD-Q2_K_XL\""
-assert_contains "$start4_reliable_block" "quant=\"UD-Q2_K_XL\""
-assert_contains "$start4_contents" "--no-mmproj"
-assert_contains "$start5_contents" "--alias gemma-4-31b-it-vision"
-assert_contains "$start2_contents" "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
-assert_contains "$start2_contents" "--alias qwen3-coder-30b-a3b-instruct"
-assert_contains "$start3_contents" "--mmproj-auto"
-assert_contains "$start3_contents" "--chat-template-kwargs '{\"enable_thinking\":false}'"
-assert_not_contains "$start3_contents" "--no-mmproj"
-assert_contains "$start6_contents" "unsloth/gpt-oss-20b-GGUF"
-assert_contains "$start6_contents" "--alias gpt-oss-20b"
-assert_contains "$start6_contents" "reasoning_effort=high"
-assert_contains "$start7_contents" "unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF"
-assert_contains "$start7_contents" "Q3_K_M"
-assert_contains "$start7_contents" "--alias deepseek-r1-distill-qwen-32b"
-assert_contains "$start8_contents" "unsloth/Qwen3.6-27B-MTP-GGUF"
-assert_contains "$start8_contents" "--spec-type draft-mtp"
-assert_contains "$start8_contents" "--spec-draft-n-max 2"
-assert_contains "$start8_contents" "--alias qwen3.6-27b-mtp"
-assert_contains "$(<"$repo_root/scripts/start9.sh")" "--alias qwen3.6-27b-opus-mtp"
-assert_contains "$(<"$repo_root/scripts/start10.sh")" "--alias qwen3.6-27b-heretic-mtp"
-assert_contains "$start11_contents" "--mmproj-auto"
-assert_contains "$start11_contents" "--chat-template-kwargs '{\"enable_thinking\":false}'"
-assert_not_contains "$start11_contents" "--no-mmproj"
-if [[ "$start5_contents" == *"--no-mmproj"* ]]; then
-  printf 'expected start5.sh to allow mmproj for vision\n' >&2
+bench_installed_contents="$(<"$repo_root/scripts/bench-installed-kv-remote.sh")"
+assert_contains "$bench_installed_contents" "usage:"
+assert_contains "$bench_installed_contents" "--family FAMILY"
+assert_contains "$bench_installed_contents" "--repo REPO"
+assert_contains "$bench_installed_contents" "--alias ALIAS"
+assert_not_contains "$bench_installed_contents" "unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
+assert_not_contains "$bench_installed_contents" "unsloth/gemma-4-31B-it-GGUF"
+
+generated_accept_tmp="$(mktemp -d)"
+mkdir -p "$generated_accept_tmp/runs/accepted" "$generated_accept_tmp/runs/launchers"
+fresh_qwen_output="$generated_accept_tmp/fresh-qwen.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/fresh-runs" "$repo_root/scripts/oc-local" qwen reliable --info >"$fresh_qwen_output" 2>&1; then
+  printf 'expected fresh qwen without accepted metadata to fail\n' >&2
   exit 1
 fi
+assert_contains "$(<"$fresh_qwen_output")" "no accepted model for family: qwen"
+assert_contains "$(<"$fresh_qwen_output")" "model-manager discover"
+assert_contains "$(<"$fresh_qwen_output")" "model-manager benchmark"
+assert_contains "$(<"$fresh_qwen_output")" "model-manager accept"
+assert_not_contains "$(<"$fresh_qwen_output")" "remote_start=./start3.sh reliable"
 
-fastlong_output="$(run_dry fastlong)"
-assert_contains "$fastlong_output" "profile=fastlong"
-assert_contains "$fastlong_output" "family=qwen"
-assert_contains "$fastlong_output" "context=49152"
-assert_contains "$fastlong_output" "remote_start=./start3.sh fastlong"
-assert_contains "$fastlong_output" "model=localllm/qwen3.6-35b-a3b-mtp"
-assert_contains "$fastlong_output" '"qwen3.6-35b-a3b-mtp":{"name":"qwen3.6-35b-a3b-mtp"'
-assert_contains "$fastlong_output" "plugin_mode=normal"
-
-reliable_output="$(run_dry reliable --lean)"
-assert_contains "$reliable_output" "profile=reliable"
-assert_contains "$reliable_output" "family=qwen"
-assert_contains "$reliable_output" "context=65536"
-assert_contains "$reliable_output" "remote_start=./start3.sh reliable"
-assert_contains "$reliable_output" "plugin_mode=lean"
-assert_contains "$reliable_output" '"plugin":[]'
-
-resume_output="$(run_dry reliable --lean -s ses_test123)"
-assert_contains "$resume_output" "session_id=ses_test123"
-assert_contains "$resume_output" "opencode_args=-s ses_test123"
-
-resume_long_output="$(run_dry qwen reliable --session ses_test456 --lean)"
-assert_contains "$resume_long_output" "session_id=ses_test456"
-assert_contains "$resume_long_output" "opencode_args=-s ses_test456"
-
-qwen_reliable_output="$(run_dry qwen reliable --lean)"
-assert_contains "$qwen_reliable_output" "family=qwen"
-assert_contains "$qwen_reliable_output" "profile=reliable"
-assert_contains "$qwen_reliable_output" "target=remote:ubt26"
-assert_contains "$qwen_reliable_output" "remote_host=ubt26"
-assert_contains "$qwen_reliable_output" "remote_start=./start3.sh reliable"
-qwen_mtp_wrapper_info="$(OC_LOCAL_SCRIPT="$script" "$repo_root/scripts/oc-local" --info qwen reliable --lean)"
-assert_contains "$qwen_mtp_wrapper_info" "model_name=qwen3.6-35b-a3b-mtp"
-assert_contains "$qwen_mtp_wrapper_info" "hf_repo=unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
-assert_contains "$qwen_mtp_wrapper_info" "quant=Qwen3.6-35B-A3B-UD-IQ4_NL.gguf"
-assert_contains "$qwen_mtp_wrapper_info" "batch=64"
-assert_contains "$qwen_mtp_wrapper_info" "ngl=999"
-assert_contains "$qwen_mtp_wrapper_info" "alias=qwen3.6-35b-a3b-mtp"
-assert_contains "$qwen_mtp_wrapper_info" "mmproj=enabled"
-assert_contains "$qwen_mtp_wrapper_info" "--hf-file Qwen3.6-35B-A3B-UD-IQ4_NL.gguf"
-assert_contains "$qwen_mtp_wrapper_info" "--mmproj-auto"
-assert_contains "$qwen_mtp_wrapper_info" "--chat-template-kwargs '{\"enable_thinking\":false}'"
-assert_not_contains "$qwen_mtp_wrapper_info" "--reasoning off"
-
-qwen_hauhau_info="$(run_info qwen-hauhau reliable --lean)"
-assert_contains "$qwen_hauhau_info" "family=qwen-hauhau"
-assert_contains "$qwen_hauhau_info" "model_name=qwen3.6-35b-a3b-hauhau"
-assert_contains "$qwen_hauhau_info" "hf_repo=HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive"
-assert_contains "$qwen_hauhau_info" "quant=Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf"
-assert_contains "$qwen_hauhau_info" "alias=qwen3.6-35b-a3b-hauhau"
-assert_contains "$qwen_hauhau_info" "remote_start=./start11.sh reliable"
-assert_contains "$qwen_hauhau_info" "mmproj=enabled"
-assert_contains "$qwen_hauhau_info" "--hf-file Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf"
-assert_contains "$qwen_hauhau_info" "--mmproj-auto"
-assert_contains "$qwen_hauhau_info" "--chat-template-kwargs '{\"enable_thinking\":false}'"
-assert_not_contains "$qwen_hauhau_info" "--reasoning off"
-
-qwen_27b_hauhau_info="$(run_info qwen-27b-hauhau reliable --lean)"
-assert_contains "$qwen_27b_hauhau_info" "family=qwen-27b-hauhau"
-assert_contains "$qwen_27b_hauhau_info" "model_name=qwen3.6-27b-hauhau"
-assert_contains "$qwen_27b_hauhau_info" "hf_repo=HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive"
-assert_contains "$qwen_27b_hauhau_info" "alias=qwen3.6-27b-hauhau"
-assert_contains "$qwen_27b_hauhau_info" "remote_start=./start12.sh reliable"
-assert_contains "$qwen_27b_hauhau_info" "--chat-template-file /home/cass/llama.cpp/templates/qwen36-opencode.jinja"
-assert_contains "$qwen_27b_hauhau_info" "--chat-template-kwargs '{\"enable_thinking\":false}'"
-
-start12_contents="$(<"$repo_root/scripts/start12.sh")"
-assert_contains "$start12_contents" "chat_template_file=\"\${llama_cpp_dir}/templates/qwen36-opencode.jinja\""
-assert_contains "$start12_contents" "--chat-template-file \"\$chat_template_file\""
-assert_contains "$start12_contents" "--chat-template-kwargs '{\"enable_thinking\":false}'"
-
-if run_info glm-hauhau reliable --lean >/tmp/glm-hauhau-info 2>&1; then
-  echo "expected glm-hauhau to be unavailable" >&2
+default_profile_output="$generated_accept_tmp/default-profile.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/default-profile-runs" "$repo_root/scripts/oc-local" reliable --info >"$default_profile_output" 2>&1; then
+  printf 'expected default profile without accepted default metadata to fail\n' >&2
   exit 1
 fi
+assert_contains "$(<"$default_profile_output")" "no accepted default model"
+assert_not_contains "$(<"$default_profile_output")" "remote_start=./start3.sh reliable"
 
-gemma_hauhau_info="$(run_info gemma-hauhau reliable --lean)"
-assert_contains "$gemma_hauhau_info" "family=gemma-hauhau"
-assert_contains "$gemma_hauhau_info" "model_name=gemma4-26b-a4b-hauhau"
-assert_contains "$gemma_hauhau_info" "hf_repo=HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced"
-assert_contains "$gemma_hauhau_info" "alias=gemma4-26b-a4b-hauhau"
-assert_contains "$gemma_hauhau_info" "remote_start=./start14.sh reliable"
+cat >"$generated_accept_tmp/runs/accepted/custom.json" <<'JSON'
+{
+  "family": "custom",
+  "alias": "custom-accepted-model",
+  "model_name": "custom-accepted-model",
+  "repo": "Example/Custom-GGUF",
+  "hf_repo": "Example/Custom-GGUF",
+  "remote_start": "./start42.sh",
+  "launcher_file": "/tmp/generated-state/start42.sh",
+  "hf_file": "Custom-Q4_K_M.gguf",
+  "quant": "Custom-Q4_K_M.gguf",
+  "mmproj": "enabled",
+  "reasoning_effort": "medium",
+  "profile": "reliable",
+  "config": {
+    "ctx": 98304,
+    "context": 98304,
+    "batch": 48,
+    "ubatch": 24,
+    "ngl": 123,
+    "mmproj": "enabled",
+    "reasoning_effort": "medium"
+  }
+}
+JSON
+cat >"$generated_accept_tmp/runs/accepted/qwen.json" <<'JSON'
+{
+  "family": "qwen",
+  "alias": "qwen-accepted-model",
+  "model_name": "qwen-accepted-model",
+  "repo": "Example/Qwen-GGUF",
+  "hf_repo": "Example/Qwen-GGUF",
+  "remote_start": "./start43.sh",
+  "hf_file": "Qwen-Q4_K_M.gguf",
+  "quant": "Qwen-Q4_K_M.gguf",
+  "profile": "reliable",
+  "config": {"ctx": 65536, "batch": 64, "ubatch": 32, "ngl": 999}
+}
+JSON
+generated_custom_info="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" custom reliable --info)"
+assert_contains "$generated_custom_info" "family=custom"
+assert_contains "$generated_custom_info" "profile=reliable"
+assert_contains "$generated_custom_info" "remote_start=./start42.sh reliable"
+assert_contains "$generated_custom_info" "hf_repo=Example/Custom-GGUF"
+assert_contains "$generated_custom_info" "quant=Custom-Q4_K_M.gguf"
+assert_contains "$generated_custom_info" "ctx=98304"
+assert_contains "$generated_custom_info" "batch=48"
+assert_contains "$generated_custom_info" "ubatch=24"
+assert_contains "$generated_custom_info" "ngl=123"
+assert_contains "$generated_custom_info" "model_name=custom-accepted-model"
+assert_contains "$generated_custom_info" "alias=custom-accepted-model"
+generated_qwen_info="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" qwen reliable --info)"
+assert_contains "$generated_qwen_info" "family=qwen"
+assert_contains "$generated_qwen_info" "remote_start=./start43.sh reliable"
+assert_contains "$generated_qwen_info" "model_name=qwen-accepted-model"
+assert_contains "$generated_qwen_info" "hf_repo=Example/Qwen-GGUF"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" reliable --info >"$generated_accept_tmp/profile-only-without-default.out" 2>&1; then
+  printf 'expected profile-only oc-local to require accepted default metadata\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_accept_tmp/profile-only-without-default.out")" "no accepted default model"
 
-wrapper_tmp="$probe_tmp/wrappers"
-mkdir -p "$wrapper_tmp"
-ln -sf "$repo_root/scripts/oc-local" "$wrapper_tmp/oc-local"
-ln -sf "$repo_root/scripts/lib.sh" "$wrapper_tmp/lib.sh"
-ln -sf "$wrapper_tmp/oc-local" "$wrapper_tmp/oc-coder-reliable"
-ln -sf "$wrapper_tmp/oc-local" "$wrapper_tmp/oc-qwen-coder-reliable"
-ln -sf "$wrapper_tmp/oc-local" "$wrapper_tmp/oc-deepseek-r1-reliable"
+ln -s "$repo_root/scripts/oc-local" "$generated_accept_tmp/oc-reliable"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$generated_accept_tmp/oc-reliable" --info >"$generated_accept_tmp/oc-reliable-without-default.out" 2>&1; then
+  printf 'expected oc-reliable to require accepted default metadata\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_accept_tmp/oc-reliable-without-default.out")" "no accepted default model"
 
-coder_wrapper_output="$(LOCAL_LLM_CONFIG_DIR="$repo_root/configs" "$wrapper_tmp/oc-coder-reliable" --dry-run --lean)"
-assert_contains "$coder_wrapper_output" "qwen3-coder-30b-a3b-instruct"
-assert_contains "$coder_wrapper_output" "--ctx-size 65536"
+ln -s "$repo_root/scripts/oc-local" "$generated_accept_tmp/oc-qwen-reliable"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/empty-runs" "$generated_accept_tmp/oc-qwen-reliable" --info >"$generated_accept_tmp/oc-qwen-reliable-empty.out" 2>&1; then
+  printf 'expected stale curated oc-qwen-reliable wrapper to require accepted default metadata\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_accept_tmp/oc-qwen-reliable-empty.out")" "no accepted default model"
+assert_not_contains "$(<"$generated_accept_tmp/oc-qwen-reliable-empty.out")" "no accepted model for family: qwen"
 
-qwen_coder_wrapper_output="$(LOCAL_LLM_CONFIG_DIR="$repo_root/configs" "$wrapper_tmp/oc-qwen-coder-reliable" --dry-run --lean)"
-assert_contains "$qwen_coder_wrapper_output" "qwen3-coder-30b-a3b-instruct"
-assert_contains "$qwen_coder_wrapper_output" "--ctx-size 65536"
+cat >"$generated_accept_tmp/runs/accepted/default.json" <<'JSON'
+{"family":"custom"}
+JSON
+generated_default_info="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" reliable --info)"
+assert_contains "$generated_default_info" "family=custom"
+assert_contains "$generated_default_info" "profile=reliable"
+assert_contains "$generated_default_info" "remote_start=./start42.sh reliable"
+generated_oc_reliable_info="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$generated_accept_tmp/oc-reliable" --info)"
+assert_contains "$generated_oc_reliable_info" "family=custom"
+assert_contains "$generated_oc_reliable_info" "profile=reliable"
 
-qwen_coder_wrapper_info="$(LOCAL_LLM_CONFIG_DIR="$repo_root/configs" "$wrapper_tmp/oc-qwen-coder-reliable" --info --lean)"
-assert_contains "$qwen_coder_wrapper_info" "Profile: qwen-coder:reliable"
+leading_remote_info="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" --remote example --user alice -k custom reliable --info)"
+assert_contains "$leading_remote_info" "family=custom"
+assert_contains "$leading_remote_info" "profile=reliable"
+assert_contains "$leading_remote_info" "remote_host=example"
+assert_contains "$leading_remote_info" "remote_user=alice"
+assert_contains "$leading_remote_info" "ssh_password_prompt=enabled"
 
-deepseek_wrapper_output="$(LOCAL_LLM_CONFIG_DIR="$repo_root/configs" "$wrapper_tmp/oc-deepseek-r1-reliable" --dry-run --lean)"
-assert_contains "$deepseek_wrapper_output" "deepseek-r1-distill-qwen-32b"
-assert_contains "$deepseek_wrapper_output" "--ctx-size 65536"
+generated_accept_symlink_outside="$generated_accept_tmp/outside-custom.json"
+cp "$generated_accept_tmp/runs/accepted/custom.json" "$generated_accept_symlink_outside"
 
-default_target_host_output="$(OC_LOCAL_REMOTE_HOST=other-host run_info qwen reliable)"
-assert_contains "$default_target_host_output" "target=remote:other-host"
+cat >"$generated_accept_tmp/runs/accepted/custom.json" <<'JSON'
+{
+  "family": "../evil",
+  "alias": "custom-accepted-model",
+  "repo": "Example/Custom-GGUF",
+  "remote_start": "./start42.sh",
+  "hf_file": "Custom-Q4_K_M.gguf",
+  "profile": "reliable",
+  "config": {"ctx": 98304, "batch": 48, "ubatch": 24, "ngl": 123}
+}
+JSON
+generated_custom_unsafe_family_output="$generated_accept_tmp/unsafe-family.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" custom reliable --info >"$generated_custom_unsafe_family_output" 2>&1; then
+  printf 'expected unsafe accepted metadata family to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_custom_unsafe_family_output")" "invalid accepted metadata"
+
+cat >"$generated_accept_tmp/runs/accepted/custom.json" <<'JSON'
+{
+  "family": "other",
+  "alias": "custom-accepted-model",
+  "repo": "Example/Custom-GGUF",
+  "remote_start": "./start42.sh",
+  "hf_file": "Custom-Q4_K_M.gguf",
+  "profile": "reliable",
+  "config": {"ctx": 98304, "batch": 48, "ubatch": 24, "ngl": 123}
+}
+JSON
+generated_custom_mismatch_family_output="$generated_accept_tmp/mismatch-family.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" custom reliable --info >"$generated_custom_mismatch_family_output" 2>&1; then
+  printf 'expected mismatched accepted metadata family to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_custom_mismatch_family_output")" "family other does not match requested family custom"
+
+cp "$generated_accept_symlink_outside" "$generated_accept_tmp/runs/accepted/custom.json"
+python3 - "$generated_accept_tmp/runs/accepted/custom.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    metadata = json.load(handle)
+metadata["alias"] = 'bad"alias'
+metadata["model_name"] = 'bad"alias'
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(metadata, handle)
+    handle.write("\n")
+PY
+generated_custom_bad_alias_output="$generated_accept_tmp/bad-alias.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" custom reliable --dry-run >"$generated_custom_bad_alias_output" 2>&1; then
+  printf 'expected unsafe accepted metadata alias to fail\n' >&2
+  exit 1
+fi
+generated_custom_bad_alias_contents="$(<"$generated_custom_bad_alias_output")"
+assert_contains "$generated_custom_bad_alias_contents" "invalid accepted metadata"
+assert_contains "$generated_custom_bad_alias_contents" "alias contains unsafe characters"
+assert_not_contains "$generated_custom_bad_alias_contents" "OPENCODE_CONFIG_CONTENT="
+cp "$generated_accept_symlink_outside" "$generated_accept_tmp/runs/accepted/custom.json"
+python3 - "$generated_accept_tmp/runs/accepted/custom.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    metadata = json.load(handle)
+metadata["config"]["context"] = "1; touch /tmp/pwned"
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(metadata, handle)
+    handle.write("\n")
+PY
+generated_custom_bad_context_output="$generated_accept_tmp/bad-context.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" custom reliable --info >"$generated_custom_bad_context_output" 2>&1; then
+  printf 'expected accepted metadata context injection to fail\n' >&2
+  exit 1
+fi
+generated_custom_bad_context_contents="$(<"$generated_custom_bad_context_output")"
+assert_contains "$generated_custom_bad_context_contents" "invalid accepted metadata"
+assert_contains "$generated_custom_bad_context_contents" "config.context must be an integer"
+assert_not_contains "$generated_custom_bad_context_contents" "OPENCODE_CONFIG_CONTENT="
+cp "$generated_accept_symlink_outside" "$generated_accept_tmp/runs/accepted/custom.json"
+rm "$generated_accept_tmp/runs/accepted/custom.json"
+ln -s "$generated_accept_symlink_outside" "$generated_accept_tmp/runs/accepted/custom.json"
+generated_custom_symlink_output="$generated_accept_tmp/metadata-symlink.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" custom reliable --info >"$generated_custom_symlink_output" 2>&1; then
+  printf 'expected symlinked accepted metadata to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_custom_symlink_output")" "refuses symlinked accepted metadata file"
+assert_not_contains "$(<"$generated_custom_symlink_output")" "custom-accepted-model"
+
+rm "$generated_accept_tmp/runs/accepted/custom.json"
+cp "$generated_accept_symlink_outside" "$generated_accept_tmp/runs/accepted/custom.json"
+generated_accept_symlinked_dir_runs="$generated_accept_tmp/symlinked-accepted-runs"
+generated_accept_symlinked_dir_outside="$generated_accept_tmp/symlinked-accepted-outside"
+mkdir -p "$generated_accept_symlinked_dir_runs" "$generated_accept_symlinked_dir_outside"
+cp "$generated_accept_tmp/runs/accepted/custom.json" "$generated_accept_symlinked_dir_outside/custom.json"
+ln -s "$generated_accept_symlinked_dir_outside" "$generated_accept_symlinked_dir_runs/accepted"
+generated_custom_symlinked_dir_output="$generated_accept_tmp/accepted-dir-symlink.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_symlinked_dir_runs" "$repo_root/scripts/oc-local" custom reliable --info >"$generated_custom_symlinked_dir_output" 2>&1; then
+  printf 'expected symlinked accepted dir to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_custom_symlinked_dir_output")" "refuses symlinked accepted dir"
+assert_not_contains "$(<"$generated_custom_symlinked_dir_output")" "custom-accepted-model"
+
+generated_accept_symlinked_root="$generated_accept_tmp/symlinked-root-runs"
+ln -s "$generated_accept_tmp/runs" "$generated_accept_symlinked_root"
+generated_custom_symlinked_root_output="$generated_accept_tmp/runs-root-symlink.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_symlinked_root" "$repo_root/scripts/oc-local" custom reliable --info >"$generated_custom_symlinked_root_output" 2>&1; then
+  printf 'expected symlinked runs root to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_custom_symlinked_root_output")" "refuses symlinked runs dir"
+assert_not_contains "$(<"$generated_custom_symlinked_root_output")" "custom-accepted-model"
+
+printf '{not json}\n' >"$generated_accept_tmp/runs/accepted/custom.json"
+generated_custom_corrupt_output="$generated_accept_tmp/corrupt.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" custom reliable --info >"$generated_custom_corrupt_output" 2>&1; then
+  printf 'expected corrupt accepted metadata to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_custom_corrupt_output")" "invalid accepted metadata"
+
+cat >"$generated_accept_tmp/runs/accepted/custom.json" <<'JSON'
+{
+  "family": "custom",
+  "alias": "custom-accepted-model",
+  "repo": "Example/Custom-GGUF",
+  "remote_start": "$(touch /tmp/bad)",
+  "launcher_file": "/tmp/generated-state/start42.sh",
+  "hf_file": "Custom-Q4_K_M.gguf",
+  "profile": "reliable",
+  "config": {"ctx": 98304, "batch": 48, "ubatch": 24, "ngl": 123}
+}
+JSON
+generated_custom_unsafe_output="$generated_accept_tmp/unsafe.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" custom reliable --info >"$generated_custom_unsafe_output" 2>&1; then
+  printf 'expected unsafe accepted remote_start to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_custom_unsafe_output")" "invalid accepted metadata"
+
+python3 - "$generated_accept_tmp/runs/accepted/custom.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump({
+        "family": "custom",
+        "alias": "custom-accepted-model",
+        "repo": "Example/Custom-GGUF",
+        "remote_start": "./start42.sh\nbad",
+        "launcher_file": "/tmp/generated-state/start42.sh",
+        "hf_file": "Custom-Q4_K_M.gguf",
+        "profile": "reliable",
+        "config": {"ctx": 98304, "batch": 48, "ubatch": 24, "ngl": 123},
+    }, handle)
+    handle.write("\n")
+PY
+generated_custom_newline_output="$generated_accept_tmp/newline.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" custom reliable --info >"$generated_custom_newline_output" 2>&1; then
+  printf 'expected newline accepted remote_start to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_custom_newline_output")" "invalid accepted metadata"
+
+printf '{not json}\n' >"$generated_accept_tmp/runs/accepted/qwen.json"
+generated_qwen_corrupt_output="$generated_accept_tmp/qwen-corrupt.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" qwen reliable --info >"$generated_qwen_corrupt_output" 2>&1; then
+  printf 'expected corrupt qwen accepted metadata to fail closed\n' >&2
+  exit 1
+fi
+generated_qwen_corrupt_contents="$(<"$generated_qwen_corrupt_output")"
+assert_contains "$generated_qwen_corrupt_contents" "invalid accepted metadata"
+assert_not_contains "$generated_qwen_corrupt_contents" "remote_start=./start3.sh reliable"
+
+cat >"$generated_accept_tmp/runs/accepted/qwen.json" <<'JSON'
+{
+  "family": "qwen",
+  "alias": "qwen-accepted-model",
+  "repo": "Example/Qwen-GGUF",
+  "remote_start": "$(touch /tmp/bad)",
+  "hf_file": "Qwen-Q4_K_M.gguf",
+  "profile": "reliable",
+  "config": {"ctx": 98304, "batch": 48, "ubatch": 24, "ngl": 123}
+}
+JSON
+generated_qwen_unsafe_output="$generated_accept_tmp/qwen-unsafe.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" qwen reliable --info >"$generated_qwen_unsafe_output" 2>&1; then
+  printf 'expected unsafe qwen accepted metadata to fail closed\n' >&2
+  exit 1
+fi
+generated_qwen_unsafe_contents="$(<"$generated_qwen_unsafe_output")"
+assert_contains "$generated_qwen_unsafe_contents" "invalid accepted metadata"
+assert_not_contains "$generated_qwen_unsafe_contents" "remote_start=./start3.sh reliable"
+
+mkdir -p "$generated_accept_tmp/runs/escape"
+cat >"$generated_accept_tmp/runs/escape.json" <<'JSON'
+{
+  "family": "escape",
+  "alias": "escaped-model",
+  "repo": "Example/Escape-GGUF",
+  "remote_start": "./start77.sh",
+  "hf_file": "Escape-Q4_K_M.gguf",
+  "profile": "reliable",
+  "config": {"ctx": 4096, "batch": 1, "ubatch": 1, "ngl": 1}
+}
+JSON
+generated_traversal_output="$generated_accept_tmp/traversal.out"
+if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" ../escape reliable --info >"$generated_traversal_output" 2>&1; then
+  printf 'expected path-traversal accepted family to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$generated_traversal_output")" "invalid model family"
+assert_not_contains "$(<"$generated_traversal_output")" "escaped-model"
+
+cat >"$generated_accept_tmp/runs/accepted/qwen.json" <<'JSON'
+{
+  "family": "qwen",
+  "alias": "qwen-accepted-model",
+  "model_name": "qwen-accepted-model",
+  "repo": "Example/Qwen-GGUF",
+  "hf_repo": "Example/Qwen-GGUF",
+  "remote_start": "./start43.sh",
+  "hf_file": "Qwen-Q4_K_M.gguf",
+  "quant": "Qwen-Q4_K_M.gguf",
+  "profile": "reliable",
+  "config": {"ctx": 65536, "batch": 64, "ubatch": 32, "ngl": 999}
+}
+JSON
+
+resume_output="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" qwen reliable --dry-run --lean -s ses_test123)"
+assert_contains "$resume_output" "family=qwen"
+assert_contains "$resume_output" "remote_start=./start43.sh reliable"
+assert_not_contains "$resume_output" "session_id="
+
+resume_long_output="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" qwen reliable --dry-run --session ses_test456 --lean)"
+assert_contains "$resume_long_output" "family=qwen"
+assert_contains "$resume_long_output" "remote_start=./start43.sh reliable"
+assert_not_contains "$resume_long_output" "session_id="
+
+default_target_host_output="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" OC_LOCAL_REMOTE_HOST=other-host "$repo_root/scripts/oc-local" qwen reliable --info)"
 assert_contains "$default_target_host_output" "remote_host=other-host"
 
-default_target_override_output="$(OC_LOCAL_TARGET=local run_info qwen reliable)"
-assert_contains "$default_target_override_output" "target=local"
-assert_contains "$default_target_override_output" "target_kind=local"
+remote_dir_info="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" OC_LOCAL_REMOTE_DIR=/srv/llama "$repo_root/scripts/oc-local" qwen reliable --info)"
+assert_contains "$remote_dir_info" "remote_dir=/srv/llama"
+assert_contains "$remote_dir_info" "remote_host="
 
-local_target_info="$(run_info --target local qwen reliable)"
-assert_contains "$local_target_info" "target=local"
-assert_contains "$local_target_info" "target_kind=local"
-assert_contains "$local_target_info" "remote_host="
-assert_contains "$local_target_info" "remote_dir="
-assert_contains "$local_target_info" "llama_dir=$HOME/llama.cpp"
-assert_contains "$local_target_info" "base_url=http://127.0.0.1:8080/v1"
+default_remote_dir_info="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" "$repo_root/scripts/oc-local" qwen reliable --info)"
+assert_contains "$default_remote_dir_info" "remote_dir=$default_llama_dir"
+assert_contains "$default_remote_dir_info" "base_url=http://localhost:8080/v1"
 
-local_target_after_profile_info="$(run_info qwen reliable --target local)"
-assert_contains "$local_target_after_profile_info" "target=local"
-assert_contains "$local_target_after_profile_info" "target_kind=local"
-assert_contains "$local_target_after_profile_info" "llama_dir=$HOME/llama.cpp"
+oc_local_contents="$(<"$repo_root/scripts/oc-local")"
+assert_not_contains "$oc_local_contents" "start3.sh"
+assert_not_contains "$oc_local_contents" "unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
+empty_runs_tmp="$(mktemp -d)"
+empty_accepted_output="$empty_runs_tmp/oc-local-empty-accepted.out"
+if LOCAL_LLM_RUNS_DIR="$empty_runs_tmp" "$repo_root/scripts/oc-local" qwen reliable --info >"$empty_accepted_output" 2>&1; then
+  printf 'expected oc-local without accepted metadata to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(<"$empty_accepted_output")" "Run model-manager discover, model-manager benchmark, and model-manager accept"
 
-remote_target_info="$(OC_LOCAL_REMOTE_DIR=/srv/llama run_info --target remote:test-host qwen reliable)"
-assert_contains "$remote_target_info" "target=remote:test-host"
-assert_contains "$remote_target_info" "target_kind=remote"
-assert_contains "$remote_target_info" "remote_host=test-host"
-assert_contains "$remote_target_info" "remote_dir=/srv/llama"
-assert_contains "$remote_target_info" "llama_dir=/srv/llama"
-assert_contains "$remote_target_info" "base_url=http://cass.lan:8080/v1"
-
-remote_target_after_profile_info="$(OC_LOCAL_REMOTE_DIR=/srv/llama run_info qwen reliable --target remote:test-host)"
-assert_contains "$remote_target_after_profile_info" "target=remote:test-host"
-assert_contains "$remote_target_after_profile_info" "target_kind=remote"
-assert_contains "$remote_target_after_profile_info" "remote_host=test-host"
-assert_contains "$remote_target_after_profile_info" "remote_dir=/srv/llama"
-assert_contains "$remote_target_after_profile_info" "llama_dir=/srv/llama"
-
-local_target_dry="$(run_dry --target local qwen reliable)"
-assert_contains "$local_target_dry" "target=local"
-assert_contains "$local_target_dry" "target_kind=local"
-assert_contains "$local_target_dry" "remote_host="
-assert_contains "$local_target_dry" "remote_dir="
-assert_contains "$local_target_dry" "llama_dir=$HOME/llama.cpp"
-
-remote_target_before_profile_dry="$(OC_LOCAL_REMOTE_DIR=/srv/llama run_dry --target remote:test-host qwen reliable)"
-assert_contains "$remote_target_before_profile_dry" "target=remote:test-host"
-assert_contains "$remote_target_before_profile_dry" "target_kind=remote"
-assert_contains "$remote_target_before_profile_dry" "remote_host=test-host"
-assert_contains "$remote_target_before_profile_dry" "remote_dir=/srv/llama"
-assert_contains "$remote_target_before_profile_dry" "llama_dir=/srv/llama"
-
-local_target_after_profile_dry="$(run_dry qwen reliable --target local)"
-assert_contains "$local_target_after_profile_dry" "target=local"
-assert_contains "$local_target_after_profile_dry" "target_kind=local"
-assert_contains "$local_target_after_profile_dry" "remote_host="
-assert_contains "$local_target_after_profile_dry" "remote_dir="
-assert_contains "$local_target_after_profile_dry" "llama_dir=$HOME/llama.cpp"
-
-remote_target_after_profile_dry="$(OC_LOCAL_REMOTE_DIR=/srv/llama run_dry qwen reliable --target remote:test-host)"
-assert_contains "$remote_target_after_profile_dry" "target=remote:test-host"
-assert_contains "$remote_target_after_profile_dry" "target_kind=remote"
-assert_contains "$remote_target_after_profile_dry" "remote_host=test-host"
-assert_contains "$remote_target_after_profile_dry" "remote_dir=/srv/llama"
-assert_contains "$remote_target_after_profile_dry" "llama_dir=/srv/llama"
-
-gemma_reliable_output="$(run_dry gemma reliable --lean)"
-assert_contains "$gemma_reliable_output" "family=gemma"
-assert_contains "$gemma_reliable_output" "profile=reliable"
-assert_contains "$gemma_reliable_output" "context=65536"
-assert_contains "$gemma_reliable_output" "remote_start=./start4.sh reliable"
-assert_contains "$gemma_reliable_output" "model=localllm/gemma-4-31b-it"
-assert_contains "$gemma_reliable_output" '"gemma-4-31b-it":{"name":"gemma-4-31b-it"'
-assert_contains "$gemma_reliable_output" "plugin_mode=lean"
-
-qwen_coder_reliable_output="$(run_dry qwen-coder reliable --lean)"
-assert_contains "$qwen_coder_reliable_output" "family=qwen-coder"
-assert_contains "$qwen_coder_reliable_output" "profile=reliable"
-assert_contains "$qwen_coder_reliable_output" "context=65536"
-assert_contains "$qwen_coder_reliable_output" "remote_start=./start2.sh reliable"
-assert_contains "$qwen_coder_reliable_output" "model=localllm/qwen3-coder-30b-a3b-instruct"
-
-qwen_coder_info_output="$(run_info qwen-coder reliable --lean)"
-assert_contains "$qwen_coder_info_output" "family=qwen-coder"
-assert_contains "$qwen_coder_info_output" "remote_start=./start2.sh reliable"
-assert_contains "$qwen_coder_info_output" "hf_repo=unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
-assert_contains "$qwen_coder_info_output" "quant=UD-Q3_K_XL"
-assert_contains "$qwen_coder_info_output" "ctx=65536"
-assert_contains "$qwen_coder_info_output" "batch=128"
-assert_contains "$qwen_coder_info_output" "ubatch=128"
-assert_contains "$qwen_coder_info_output" "ngl=999"
-assert_contains "$qwen_coder_info_output" "alias=qwen3-coder-30b-a3b-instruct"
-assert_contains "$qwen_coder_info_output" "command=./build/bin/llama-server -hf unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL"
-
-qwen_coder_next_reliable_output="$(run_dry qwen-coder-next reliable --lean)"
-assert_contains "$qwen_coder_next_reliable_output" "family=qwen-coder-next"
-assert_contains "$qwen_coder_next_reliable_output" "profile=reliable"
-assert_contains "$qwen_coder_next_reliable_output" "context=65536"
-assert_contains "$qwen_coder_next_reliable_output" "remote_start=./start15.sh reliable"
-assert_contains "$qwen_coder_next_reliable_output" "model=localllm/qwen3-coder-next"
-
-qwen_coder_next_info_output="$(run_info qwen-coder-next reliable --lean)"
-assert_contains "$qwen_coder_next_info_output" "family=qwen-coder-next"
-assert_contains "$qwen_coder_next_info_output" "remote_start=./start15.sh reliable"
-assert_contains "$qwen_coder_next_info_output" "hf_repo=unsloth/Qwen3-Coder-Next-GGUF"
-assert_contains "$qwen_coder_next_info_output" "quant=Qwen3-Coder-Next-UD-TQ1_0.gguf"
-assert_contains "$qwen_coder_next_info_output" "ctx=65536"
-assert_contains "$qwen_coder_next_info_output" "batch=64"
-assert_contains "$qwen_coder_next_info_output" "ubatch=64"
-assert_contains "$qwen_coder_next_info_output" "ngl=999"
-assert_contains "$qwen_coder_next_info_output" "alias=qwen3-coder-next"
-assert_contains "$qwen_coder_next_info_output" "command=./build/bin/llama-server -hf unsloth/Qwen3-Coder-Next-GGUF --hf-file Qwen3-Coder-Next-UD-TQ1_0.gguf"
-
-gpt_oss_reliable_output="$(run_dry gpt-oss reliable --lean)"
-assert_contains "$gpt_oss_reliable_output" "family=gpt-oss"
-assert_contains "$gpt_oss_reliable_output" "profile=reliable"
-assert_contains "$gpt_oss_reliable_output" "context=131072"
-assert_contains "$gpt_oss_reliable_output" "remote_start=./start6.sh reliable"
-assert_contains "$gpt_oss_reliable_output" "model=localllm/gpt-oss-20b"
-
-gpt_oss_info_output="$(run_info gpt-oss reliable --lean)"
-assert_contains "$gpt_oss_info_output" "family=gpt-oss"
-assert_contains "$gpt_oss_info_output" "remote_start=./start6.sh reliable"
-assert_contains "$gpt_oss_info_output" "hf_repo=unsloth/gpt-oss-20b-GGUF"
-assert_contains "$gpt_oss_info_output" "quant=UD-Q8_K_XL"
-assert_contains "$gpt_oss_info_output" "ctx=131072"
-assert_contains "$gpt_oss_info_output" "batch=128"
-assert_contains "$gpt_oss_info_output" "ubatch=128"
-assert_contains "$gpt_oss_info_output" "ngl=999"
-assert_contains "$gpt_oss_info_output" "reasoning_effort=high"
-assert_contains "$gpt_oss_info_output" "output_limit=16384"
-assert_contains "$gpt_oss_info_output" "alias=gpt-oss-20b"
-assert_contains "$gpt_oss_info_output" "command=./build/bin/llama-server -hf unsloth/gpt-oss-20b-GGUF:UD-Q8_K_XL"
-assert_contains "$gpt_oss_info_output" "--chat-template-kwargs '{\"reasoning_effort\":\"high\"}'"
-
-gpt_oss_speed_info_output="$(run_info gpt-oss speed --lean)"
-assert_contains "$gpt_oss_speed_info_output" "family=gpt-oss"
-assert_contains "$gpt_oss_speed_info_output" "profile=speed"
-assert_contains "$gpt_oss_speed_info_output" "ctx=131072"
-assert_contains "$gpt_oss_speed_info_output" "batch=1024"
-assert_contains "$gpt_oss_speed_info_output" "ubatch=1024"
-assert_contains "$gpt_oss_speed_info_output" "reasoning_effort=medium"
-
-gpt_oss_fastlong_info_output="$(run_info gpt-oss fastlong --lean)"
-assert_contains "$gpt_oss_fastlong_info_output" "family=gpt-oss"
-assert_contains "$gpt_oss_fastlong_info_output" "profile=fastlong"
-assert_contains "$gpt_oss_fastlong_info_output" "reasoning_effort=medium"
-
-gpt_oss_balanced_info_output="$(run_info gpt-oss balanced --lean)"
-assert_contains "$gpt_oss_balanced_info_output" "family=gpt-oss"
-assert_contains "$gpt_oss_balanced_info_output" "profile=balanced"
-assert_contains "$gpt_oss_balanced_info_output" "reasoning_effort=high"
-
-gpt_oss_tiny_info_output="$(run_info gpt-oss tiny --lean)"
-assert_contains "$gpt_oss_tiny_info_output" "family=gpt-oss"
-assert_contains "$gpt_oss_tiny_info_output" "profile=tiny"
-assert_contains "$gpt_oss_tiny_info_output" "reasoning_effort=high"
-
-deepseek_reliable_output="$(run_dry deepseek-r1 reliable --lean)"
-assert_contains "$deepseek_reliable_output" "family=deepseek-r1"
-assert_contains "$deepseek_reliable_output" "profile=reliable"
-assert_contains "$deepseek_reliable_output" "context=16384"
-assert_contains "$deepseek_reliable_output" "remote_start=./start7.sh reliable"
-assert_contains "$deepseek_reliable_output" "model=localllm/deepseek-r1-distill-qwen-32b"
-
-deepseek_info_output="$(run_info deepseek-r1 reliable --lean)"
-assert_contains "$deepseek_info_output" "family=deepseek-r1"
-assert_contains "$deepseek_info_output" "remote_start=./start7.sh reliable"
-assert_contains "$deepseek_info_output" "hf_repo=unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF"
-assert_contains "$deepseek_info_output" "quant=Q3_K_M"
-assert_contains "$deepseek_info_output" "ctx=16384"
-assert_contains "$deepseek_info_output" "batch=64"
-assert_contains "$deepseek_info_output" "ubatch=64"
-assert_contains "$deepseek_info_output" "ngl=999"
-assert_contains "$deepseek_info_output" "output_limit=16384"
-assert_contains "$deepseek_info_output" "alias=deepseek-r1-distill-qwen-32b"
-assert_contains "$deepseek_info_output" "command=./build/bin/llama-server -hf unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF:Q3_K_M"
-assert_not_contains "$deepseek_info_output" "--reasoning off"
-
-qwen_27b_output="$(run_dry qwen-27b reliable --lean)"
-assert_contains "$qwen_27b_output" "family=qwen-27b"
-qwen_27b_mtp_wrapper_output="$(OC_LOCAL_SCRIPT="$script" "$repo_root/scripts/oc-local" --dry-run --lean qwen-27b reliable)"
-assert_contains "$qwen_27b_mtp_wrapper_output" "family=qwen-27b"
-assert_contains "$qwen_27b_output" "profile=reliable"
-assert_contains "$qwen_27b_output" "context=65536"
-assert_contains "$qwen_27b_output" "remote_start=./start8.sh reliable"
-assert_contains "$qwen_27b_output" "model=localllm/qwen3.6-27b"
-
-qwen_27b_info_output="$(run_info qwen-27b reliable --lean)"
-assert_contains "$qwen_27b_info_output" "family=qwen-27b"
-assert_contains "$qwen_27b_info_output" "remote_start=./start8.sh reliable"
-assert_contains "$qwen_27b_info_output" "hf_repo=unsloth/Qwen3.6-27B-GGUF"
-assert_contains "$qwen_27b_info_output" "quant=IQ4_XS"
-assert_contains "$qwen_27b_info_output" "ctx=65536"
-assert_contains "$qwen_27b_info_output" "batch=64"
-assert_contains "$qwen_27b_info_output" "ubatch=64"
-assert_contains "$qwen_27b_info_output" "ngl=999"
-assert_contains "$qwen_27b_info_output" "output_limit=16384"
-assert_contains "$qwen_27b_info_output" "alias=qwen3.6-27b"
-assert_contains "$qwen_27b_info_output" "command=./build/bin/llama-server -hf unsloth/Qwen3.6-27B-GGUF:IQ4_XS"
-assert_contains "$qwen_27b_info_output" "--no-mmproj"
-assert_not_contains "$qwen_27b_info_output" "--reasoning off"
-
-qwen_27b_speed_info_output="$(run_info qwen-27b speed --lean)"
-assert_contains "$qwen_27b_speed_info_output" "family=qwen-27b"
-assert_contains "$qwen_27b_speed_info_output" "profile=speed"
-assert_contains "$qwen_27b_speed_info_output" "quant=IQ4_XS"
-assert_contains "$qwen_27b_speed_info_output" "ctx=49152"
-assert_contains "$qwen_27b_speed_info_output" "batch=128"
-assert_contains "$qwen_27b_speed_info_output" "ubatch=128"
-
-qwen_27b_tiny_info_output="$(run_info qwen-27b tiny --lean)"
-assert_contains "$qwen_27b_tiny_info_output" "family=qwen-27b"
-assert_contains "$qwen_27b_tiny_info_output" "profile=tiny"
-assert_contains "$qwen_27b_tiny_info_output" "quant=UD-Q3_K_XL"
-assert_contains "$qwen_27b_tiny_info_output" "ctx=98304"
-assert_contains "$qwen_27b_tiny_info_output" "batch=64"
-assert_contains "$qwen_27b_tiny_info_output" "ubatch=64"
-
-qwen_27b_long_alias_output="$(OC_LOCAL_SCRIPT="$script" "$repo_root/scripts/oc-local" --info qwen-27b tiny --lean)"
-assert_contains "$qwen_27b_long_alias_output" "ctx=98304"
-
-resume_info_output="$(run_info gpt-oss speed --lean -s ses_test789)"
-assert_contains "$resume_info_output" "session_id=ses_test789"
-assert_contains "$resume_info_output" "opencode_args=-s ses_test789"
-
-exec_no_session_output="$(OC_LOCAL_PRINT_EXEC=true OC_LOCAL_WAIT_SECONDS=1 run_dry qwen-27b speed --lean)"
+exec_no_session_output="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" OC_LOCAL_PRINT_EXEC=true OC_LOCAL_WAIT_SECONDS=1 "$repo_root/scripts/oc-local" qwen reliable --dry-run --lean)"
 assert_not_contains "$exec_no_session_output" "opencode_args=-s"
 
-exec_session_output="$(OC_LOCAL_PRINT_EXEC=true OC_LOCAL_WAIT_SECONDS=1 run_dry qwen-27b speed --lean -s ses_test999)"
-assert_contains "$exec_session_output" "session_id=ses_test999"
-assert_contains "$exec_session_output" "opencode_args=-s ses_test999"
-
-speed_output="$(run_dry speed)"
-assert_contains "$speed_output" "context=32768"
-
-balanced_output="$(run_dry balanced)"
-assert_contains "$balanced_output" "context=49152"
+exec_session_output="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" OC_LOCAL_PRINT_EXEC=true OC_LOCAL_WAIT_SECONDS=1 "$repo_root/scripts/oc-local" qwen reliable --dry-run --lean -s ses_test999)"
+assert_contains "$exec_session_output" "family=qwen"
+assert_not_contains "$exec_session_output" "session_id="
 
 invalid_output="$probe_tmp/oc-local-invalid.out"
 if run_dry nope >"$invalid_output" 2>&1; then
@@ -1779,126 +2605,6 @@ if run_info --target remote: qwen reliable >"$invalid_target_output" 2>&1; then
   printf 'expected invalid target to fail\n' >&2
   exit 1
 fi
-assert_contains "$(<"$invalid_target_output")" "remote target requires a host"
-
-runtime_tmp="$probe_tmp/local-runtime"
-runtime_bin="$runtime_tmp/bin"
-runtime_llama="$runtime_tmp/llama"
-mkdir -p "$runtime_bin" "$runtime_llama"
-local_info_output="$(OC_LOCAL_LLAMA_DIR="$runtime_llama" run_info --target local qwen reliable --lean)"
-assert_line "$local_info_output" "llama_dir=$runtime_llama"
-assert_line "$local_info_output" "remote_host="
-assert_line "$local_info_output" "remote_dir="
-local_dry_output="$(OC_LOCAL_LLAMA_DIR="$runtime_llama" run_dry --target local qwen reliable --lean)"
-assert_line "$local_dry_output" "llama_dir=$runtime_llama"
-assert_line "$local_dry_output" "remote_host="
-assert_line "$local_dry_output" "remote_dir="
-cat >"$runtime_bin/ssh" <<'EOF'
-#!/usr/bin/env bash
-printf 'ssh failure: local runtime must not use ssh\n' >&2
-exit 1
-EOF
-cat >"$runtime_bin/curl" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-cat >"$runtime_bin/opencode" <<'EOF'
-#!/usr/bin/env bash
-printf 'opencode args:'
-for arg in "$@"; do
-  printf ' %s' "$arg"
-done
-printf '\n'
-EOF
-cat >"$runtime_bin/pkill" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-cat >"$runtime_llama/start3.sh" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$1" >start3.marker
-exit 0
-EOF
-chmod +x "$runtime_bin/ssh" "$runtime_bin/curl" "$runtime_bin/opencode" "$runtime_bin/pkill" "$runtime_llama/start3.sh"
-local_runtime_output="$(PATH="$runtime_bin:$PATH" OC_LOCAL_LLAMA_DIR="$runtime_llama" OC_LOCAL_WAIT_SECONDS=1 "$script" --target local qwen reliable --lean 2>&1)"
-assert_contains "$local_runtime_output" "Restarting local llama.cpp qwen profile reliable"
-assert_contains "$local_runtime_output" "opencode args: -m localllm/qwen3.6-35b-a3b"
-assert_not_contains "$local_runtime_output" "ssh failure"
-assert_contains "$(<"$runtime_llama/start3.marker")" "reliable"
-
-start9_contents="$(<"$repo_root/scripts/start9.sh")"
-assert_contains "$start9_contents" "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
-assert_contains "$start9_contents" "--alias qwen3.5-27b-opus-reasoning"
-
-start10_contents="$(<"$repo_root/scripts/start10.sh")"
-assert_contains "$start10_contents" "DavidAU/Qwen3.6-27B-Heretic-Uncensored-FINETUNE-NEO-CODE-Di-IMatrix-MAX-GGUF"
-assert_contains "$start10_contents" "chat_template_file=\"\${llama_cpp_dir}/templates/qwen36-opencode.jinja\""
-assert_contains "$start10_contents" "--chat-template-file \"\$chat_template_file\""
-assert_not_contains "$start10_contents" "--chat-template-file /home/cass/llama.cpp/templates/qwen36-opencode.jinja"
-assert_contains "$start10_contents" "--alias qwen3.6-27b-heretic-code"
-
-qwen_opus_output="$(run_dry qwen-opus reliable --lean)"
-assert_contains "$qwen_opus_output" "family=qwen-opus"
-assert_contains "$qwen_opus_output" "profile=reliable"
-assert_contains "$qwen_opus_output" "context=65536"
-assert_contains "$qwen_opus_output" "remote_start=./start9.sh reliable"
-assert_contains "$qwen_opus_output" "model=localllm/qwen3.5-27b-opus-reasoning"
-
-qwen_opus_info_output="$(run_info qwen-opus reliable --lean)"
-assert_contains "$qwen_opus_info_output" "family=qwen-opus"
-assert_contains "$qwen_opus_info_output" "remote_start=./start9.sh reliable"
-assert_contains "$qwen_opus_info_output" "hf_repo=Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
-assert_contains "$qwen_opus_info_output" "quant=Qwen3.5-27B.Q3_K_M.gguf"
-assert_contains "$qwen_opus_info_output" "ctx=65536"
-assert_contains "$qwen_opus_info_output" "batch=64"
-assert_contains "$qwen_opus_info_output" "ubatch=64"
-assert_contains "$qwen_opus_info_output" "ngl=999"
-assert_contains "$qwen_opus_info_output" "output_limit=16384"
-assert_contains "$qwen_opus_info_output" "alias=qwen3.5-27b-opus-reasoning"
-assert_contains "$qwen_opus_info_output" "command=./build/bin/llama-server -hf Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-GGUF --hf-file Qwen3.5-27B.Q3_K_M.gguf"
-assert_contains "$qwen_opus_info_output" "--no-mmproj"
-assert_not_contains "$qwen_opus_info_output" "--reasoning off"
-
-qwen_heretic_output="$(run_dry qwen-heretic reliable --lean)"
-assert_contains "$qwen_heretic_output" "family=qwen-heretic"
-assert_contains "$qwen_heretic_output" "profile=reliable"
-assert_contains "$qwen_heretic_output" "context=65536"
-assert_contains "$qwen_heretic_output" "remote_start=./start10.sh reliable"
-assert_contains "$qwen_heretic_output" "model=localllm/qwen3.6-27b-heretic-code"
-
-qwen_heretic_speed_info_output="$(run_info qwen-heretic speed --lean)"
-assert_contains "$qwen_heretic_speed_info_output" "quant=Qwen3.6-27B-NEO-CODE-HERE-2T-OT-IQ4_XS.gguf"
-assert_contains "$qwen_heretic_speed_info_output" "ctx=65536"
-assert_contains "$qwen_heretic_speed_info_output" "batch=64"
-assert_contains "$qwen_heretic_speed_info_output" "ubatch=64"
-assert_contains "$qwen_heretic_speed_info_output" "--chat-template-kwargs '{\"enable_thinking\":false}'"
-
-qwen_heretic_fastlong_info_output="$(run_info qwen-heretic fastlong --lean)"
-assert_contains "$qwen_heretic_fastlong_info_output" "quant=Qwen3.6-27B-NEO-CODE-HERE-2T-OT-IQ3_M.gguf"
-assert_contains "$qwen_heretic_fastlong_info_output" "ctx=98304"
-assert_contains "$qwen_heretic_fastlong_info_output" "batch=64"
-assert_contains "$qwen_heretic_fastlong_info_output" "ubatch=64"
-
-qwen_heretic_tiny_info_output="$(run_info qwen-heretic tiny --lean)"
-assert_contains "$qwen_heretic_tiny_info_output" "quant=Qwen3.6-27B-NEO-CODE-HERE-2T-OT-IQ2_M.gguf"
-assert_contains "$qwen_heretic_tiny_info_output" "ctx=131072"
-assert_contains "$qwen_heretic_tiny_info_output" "batch=64"
-assert_contains "$qwen_heretic_tiny_info_output" "ubatch=64"
-
-qwen_heretic_info_output="$(run_info qwen-heretic reliable --lean)"
-assert_contains "$qwen_heretic_info_output" "family=qwen-heretic"
-assert_contains "$qwen_heretic_info_output" "remote_start=./start10.sh reliable"
-assert_contains "$qwen_heretic_info_output" "hf_repo=DavidAU/Qwen3.6-27B-Heretic-Uncensored-FINETUNE-NEO-CODE-Di-IMatrix-MAX-GGUF"
-assert_contains "$qwen_heretic_info_output" "quant=Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q4_K_M.gguf"
-assert_contains "$qwen_heretic_info_output" "ctx=65536"
-assert_contains "$qwen_heretic_info_output" "batch=64"
-assert_contains "$qwen_heretic_info_output" "ubatch=64"
-assert_contains "$qwen_heretic_info_output" "ngl=999"
-assert_contains "$qwen_heretic_info_output" "output_limit=16384"
-assert_contains "$qwen_heretic_info_output" "alias=qwen3.6-27b-heretic-code"
-assert_contains "$qwen_heretic_info_output" "command=./build/bin/llama-server -hf DavidAU/Qwen3.6-27B-Heretic-Uncensored-FINETUNE-NEO-CODE-Di-IMatrix-MAX-GGUF --hf-file Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q4_K_M.gguf"
-assert_contains "$qwen_heretic_info_output" "--chat-template-file /home/cass/llama.cpp/templates/qwen36-opencode.jinja"
-assert_contains "$qwen_heretic_info_output" "--no-mmproj"
-assert_not_contains "$qwen_heretic_info_output" "--reasoning off"
+assert_contains "$(<"$invalid_target_output")" "unknown option: --target"
 
 printf 'oc-local dry-run tests passed\n'

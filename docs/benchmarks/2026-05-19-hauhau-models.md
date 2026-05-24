@@ -1,5 +1,7 @@
 # Hauhau Models Benchmark
 
+Historical benchmark record: hostnames and paths in this report describe the machine used for this dated run, not public defaults.
+
 ## Environment
 
 - Host: `ubt26`

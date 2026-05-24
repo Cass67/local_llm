@@ -1,7 +1,73 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-llama_cpp_dir="${LLAMA_CPP_DIR:-/home/cass/llama.cpp}"
+llama_cpp_dir="${LLAMA_CPP_DIR:-$HOME/llama.cpp}"
+usage() {
+  cat >&2 <<'EOF'
+usage: bench-mtp-remote.sh --family FAMILY --repo REPO --hf-file FILE --alias ALIAS [options]
+
+Options:
+  --ctx N
+  --batch N
+  --ubatch N
+EOF
+}
+
+family=''
+repo=''
+hf_file=''
+alias=''
+ctx='65536'
+batch='64'
+ubatch='64'
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --family)
+      family="${2:-}"
+      shift 2
+      ;;
+    --repo)
+      repo="${2:-}"
+      shift 2
+      ;;
+    --hf-file)
+      hf_file="${2:-}"
+      shift 2
+      ;;
+    --alias)
+      alias="${2:-}"
+      shift 2
+      ;;
+    --ctx)
+      ctx="${2:-}"
+      shift 2
+      ;;
+    --batch)
+      batch="${2:-}"
+      shift 2
+      ;;
+    --ubatch)
+      ubatch="${2:-}"
+      shift 2
+      ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'unknown option: %s\n' "$1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -z "$family" || -z "$repo" || -z "$hf_file" || -z "$alias" ]]; then
+  usage
+  exit 2
+fi
+
 results_dir="bench-mtp"
 run_id="${LLAMA_MTP_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 logs_dir="$results_dir/logs/$run_id"
@@ -245,9 +311,5 @@ stop_server
 printf 'RUN run_id=%s results=%s logs=%s\n' "$run_id" "$results_csv" "$logs_dir"
 
 for spec_n in "${spec_values[@]}"; do
-  run_trial qwen-mtp 'unsloth/Qwen3.6-35B-A3B-MTP-GGUF' 'Qwen3.6-35B-A3B-UD-IQ4_NL.gguf' 65536 64 64 "$spec_n" qwen3.6-35b-a3b-mtp
-  run_trial qwen-27b-mtp 'unsloth/Qwen3.6-27B-MTP-GGUF' 'Qwen3.6-27B-Q3_K_M.gguf' 65536 64 64 "$spec_n" qwen3.6-27b-mtp
-  run_trial qwen-heretic-mtp 'llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-GGUF' 'Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q3_K_M.gguf' 65536 64 64 "$spec_n" qwen3.6-27b-heretic-mtp
-  # Nearest MTP-capable Qwopus candidate, not the original Jackrong Qwen3.5 Opus distill.
-  run_trial qwen-opus-mtp 'noctrex/Qwopus3.6-27B-v1-preview-MTP-GGUF' 'Qwopus3.6-27B-v1-preview-MTP-IQ3_M.gguf' 65536 64 64 "$spec_n" qwen3.6-27b-opus-mtp
+  run_trial "$family" "$repo" "$hf_file" "$ctx" "$batch" "$ubatch" "$spec_n" "$alias"
 done

@@ -17,6 +17,7 @@ MODEL_MANAGER="$SCRIPT_DIR/model-manager.sh"
 if [[ ! -f "$MODEL_MANAGER" ]]; then
   MODEL_MANAGER="$SCRIPT_DIR/model-manager"
 fi
+PROFILES_JSON="${LOCAL_LLM_PROFILES_JSON:-$SCRIPT_DIR/../configs/profiles.json}"
 
 runs_dir="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
 mkdir -p "$runs_dir/candidates" "$runs_dir/selections" "$runs_dir/benchmarks"

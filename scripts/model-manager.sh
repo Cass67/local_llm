@@ -16,12 +16,22 @@ if [[ ! -f "$MODEL_FIT_SCRIPT" ]]; then
 fi
 
 runs_dir="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
+generated_launcher_dir="$runs_dir/launchers"
+
+default_target() {
+  if [[ -n "${OC_LOCAL_REMOTE_HOST:-}" ]]; then
+    printf 'remote:%s\n' "$OC_LOCAL_REMOTE_HOST"
+  else
+    printf 'local\n'
+  fi
+}
 
 usage() {
   cat <<'EOF'
 Usage: model-manager <command> [options]
 
 Commands:
+  bootstrap Bootstrap first-run model-manager state
   list      Show installed and cached models
   update    Show cached model update suggestions
   replace   Replace a cached remote GGUF basename safely
@@ -30,6 +40,9 @@ Commands:
   select     Select a candidate model
   benchmark  Benchmark a selected model
   accept     Accept benchmark results
+  deploy     Preview generated state deployment
+  export     Export local model-manager state as JSON
+  restore    Restore local model-manager state from JSON
   status     Show model-manager status
 
 Options:
@@ -44,8 +57,99 @@ not_implemented() {
   return 1
 }
 
+ensure_state_dir() {
+  local dir="$1"
+  local label="$2"
+
+  if [[ -L "$dir" ]]; then
+    printf 'model-manager refuses symlinked %s dir: %s\n' "$label" "$dir" >&2
+    return 1
+  fi
+  if [[ -e "$dir" && ! -d "$dir" ]]; then
+    printf 'model-manager state path is not a directory: %s\n' "$dir" >&2
+    return 1
+  fi
+  mkdir -p "$dir"
+  if [[ -L "$dir" ]]; then
+    printf 'model-manager refuses symlinked %s dir: %s\n' "$label" "$dir" >&2
+    return 1
+  fi
+}
+
+reject_symlink_state_file() {
+  local path="$1"
+
+  if [[ -L "$path" ]]; then
+    printf 'model-manager refuses symlinked state file: %s\n' "$path" >&2
+    return 1
+  fi
+}
+
+validate_launcher_write_target() {
+  local path="$1"
+
+  python3 - "$runs_dir" "$generated_launcher_dir" "$path" <<'PY'
+import os
+import pathlib
+import sys
+
+runs_dir = pathlib.Path(sys.argv[1])
+launcher_dir = pathlib.Path(sys.argv[2])
+target = pathlib.Path(sys.argv[3])
+
+
+def fail(message):
+    raise SystemExit(message)
+
+
+if runs_dir.is_symlink():
+    fail(f"model-manager refuses symlinked runs dir: {runs_dir}")
+
+runs_abs = pathlib.Path(os.path.abspath(runs_dir))
+launcher_abs = pathlib.Path(os.path.abspath(launcher_dir))
+target_abs = pathlib.Path(os.path.abspath(target))
+parent_abs = target_abs.parent
+
+try:
+    if os.path.commonpath([str(launcher_abs), str(target_abs)]) != str(launcher_abs):
+        fail(f"model-manager launcher path must be under runs launchers dir: {target}")
+except ValueError:
+    fail(f"model-manager launcher path must be under runs launchers dir: {target}")
+
+try:
+    relative_parent = parent_abs.relative_to(runs_abs)
+except ValueError:
+    fail(f"model-manager launcher path must be under runs dir: {target}")
+
+current = runs_abs
+for component in relative_parent.parts:
+    current = current / component
+    if current.is_symlink():
+        fail(f"model-manager refuses symlinked runs path component: {current}")
+    if current.exists() and not current.is_dir():
+        fail(f"model-manager launcher parent path is not a directory: {current}")
+
+if target_abs.is_symlink():
+    fail(f"model-manager refuses symlinked launcher file: {target}")
+
+try:
+    real_launcher_dir = launcher_abs.resolve(strict=False)
+    real_target = target_abs.resolve(strict=False)
+    if os.path.commonpath([str(real_launcher_dir), str(real_target)]) != str(real_launcher_dir):
+        fail(f"model-manager launcher path escapes runs launchers dir: {target}")
+except OSError as exc:
+    fail(f"model-manager launcher path is invalid: {target}: {exc}")
+PY
+}
+
 ensure_runs_dirs() {
-  mkdir -p "$runs_dir/candidates" "$runs_dir/selections" "$runs_dir/benchmarks" "$runs_dir/replacements"
+  ensure_state_dir "$runs_dir" runs || return 1
+  ensure_state_dir "$runs_dir/candidates" candidates || return 1
+  ensure_state_dir "$runs_dir/selections" selections || return 1
+  ensure_state_dir "$runs_dir/benchmarks" benchmarks || return 1
+  ensure_state_dir "$runs_dir/replacements" replacements || return 1
+  ensure_state_dir "$runs_dir/accepted" accepted || return 1
+  ensure_state_dir "$generated_launcher_dir" launchers || return 1
 }
 
 count_json_files() {
@@ -61,6 +165,11 @@ count_json_files() {
   printf '%s\n' "${#files[@]}"
 }
 
+is_safe_generated_name() {
+  local value="$1"
+  [[ "$value" =~ ^[A-Za-z0-9_.-]+$ && "$value" != *..* && "$value" != -* ]]
+}
+
 cmd_status() {
   ensure_runs_dirs
   printf 'Model Manager Status\n'
@@ -69,6 +178,110 @@ cmd_status() {
   printf 'Candidates: %s\n' "$(count_json_files "$runs_dir/candidates")"
   printf 'Selections: %s\n' "$(count_json_files "$runs_dir/selections")"
   printf 'Benchmarks: %s\n' "$(count_json_files "$runs_dir/benchmarks")"
+}
+
+print_bootstrap_plan() {
+  local target="$1"
+
+  printf 'Bootstrap plan\n'
+  printf '==============\n'
+  printf 'target=%s\n' "$target"
+  printf 'runs_dir=%s\n' "$runs_dir"
+  printf 'config=%s\n' "$runs_dir/bootstrap/config.json"
+  printf 'next=model-manager discover --target %s\n' "$target"
+}
+
+cmd_bootstrap() {
+  local target
+  target="$(default_target)"
+  local dry_run=false
+  local yes=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target)
+        if [[ $# -lt 2 ]]; then
+          printf '%s\n' '--target requires local or remote:<host>' >&2
+          return 2
+        fi
+        target="$2"
+        shift 2
+        ;;
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      --yes)
+        yes=true
+        shift
+        ;;
+      -h | --help)
+        usage
+        return 0
+        ;;
+      --*)
+        printf 'Unknown bootstrap option: %s\n' "$1" >&2
+        return 2
+        ;;
+      *)
+        printf 'Unexpected bootstrap argument: %s\n' "$1" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ "$dry_run" == true && "$yes" == true ]]; then
+    printf '%s\n' 'choose either --dry-run or --yes, not both' >&2
+    return 2
+  fi
+
+  case "$target" in
+    local) ;;
+    remote:*)
+      if [[ -z "${target#remote:}" ]]; then
+        printf 'remote target requires a host: %s\n' "$target" >&2
+        return 2
+      fi
+      if [[ "${target#remote:}" == -* ]]; then
+        printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
+        return 2
+      fi
+      ;;
+    *)
+      printf 'invalid target: %s\n' "$target" >&2
+      printf 'expected local or remote:<host>\n' >&2
+      return 2
+      ;;
+  esac
+  if [[ ! "$target" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
+    printf '%s\n' 'invalid target: use only letters, digits, dot, underscore, colon, and hyphen' >&2
+    return 2
+  fi
+
+  print_bootstrap_plan "$target"
+
+  if [[ "$yes" == true ]]; then
+    ensure_state_dir "$runs_dir" runs || return 1
+    ensure_state_dir "$runs_dir/bootstrap" bootstrap || return 1
+    reject_symlink_state_file "$runs_dir/bootstrap/config.json" || return 1
+    python3 - "$runs_dir/bootstrap/config.json" "$target" <<'PY'
+import datetime
+import json
+import sys
+
+path, target = sys.argv[1], sys.argv[2]
+payload = {
+    "target": target,
+    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+    printf 'wrote=%s\n' "$runs_dir/bootstrap/config.json"
+  elif [[ "$dry_run" != true ]]; then
+    printf 'hint=rerun with --yes to write bootstrap config\n'
+  fi
 }
 
 print_profile_inventory() {
@@ -149,6 +362,7 @@ print_selection_inventory() {
   python3 - "${selection_files[@]}" <<'PY'
 import json
 import os
+import re
 import sys
 
 promoted = set()
@@ -200,52 +414,92 @@ PY
 }
 
 print_launcher_inventory() {
-  local oc_local="$repo_root/scripts/oc-local"
-  if [[ ! -x "$oc_local" ]]; then
-    oc_local="$SCRIPT_DIR/oc-local"
+  print_generated_launcher_inventory
+}
+
+print_generated_launcher_inventory() {
+  local -a launcher_files=()
+
+  if [[ -d "$generated_launcher_dir" ]]; then
+    shopt -s nullglob
+    launcher_files=("$generated_launcher_dir"/start*.sh)
+    shopt -u nullglob
   fi
-  local -a families=(
-    qwen
-    qwen-hauhau
-    qwen-27b-hauhau
-    gemma-hauhau
-    qwen-27b
-    qwen-opus
-    qwen-heretic
-    qwen-coder
-    qwen-coder-next
-    gemma
-    gemma-vision
-    gpt-oss
-    deepseek-r1
-  )
-  local family
-  local info
 
-  [[ -x "$oc_local" ]] || return 0
-  for family in "${families[@]}"; do
-    info="$("$oc_local" "$family" reliable --info --lean 2>/dev/null || true)"
-    [[ -n "$info" ]] || continue
-    python3 - "$info" <<'PY'
+  ((${#launcher_files[@]} > 0)) || return 0
+
+  python3 - "${launcher_files[@]}" <<'PY'
+import re
+import shlex
 import sys
+from pathlib import Path
 
-fields = {}
-for line in sys.argv[1].splitlines():
-    key, sep, value = line.partition("=")
-    if sep:
-        fields[key] = value
-family = fields.get("family")
-repo = fields.get("hf_repo")
-if not family or not repo:
-    raise SystemExit(0)
-parts = [f"launcher family={family}", f"repo={repo}"]
-for key in ("quant", "alias", "remote_start"):
-    value = fields.get(key)
-    if value:
-        parts.append(f"{key}={value}")
-print(" ".join(parts))
+
+def infer_family(repo):
+    name = repo.lower()
+    if "qwen" in name and "coder" in name:
+        return "qwen-coder"
+    if "qwen" in name:
+        return "qwen"
+    if "gemma" in name:
+        return "gemma"
+    if "gpt-oss" in name:
+        return "gpt-oss"
+    if "deepseek" in name:
+        return "deepseek-r1"
+    return "generated"
+
+
+for arg in sys.argv[1:]:
+    path = Path(arg)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        continue
+
+    metadata = {}
+    for line in text.splitlines():
+        if line.startswith("# local_llm_"):
+            key, sep, value = line[2:].partition("=")
+            if sep:
+                metadata[key.removeprefix("local_llm_")] = value
+
+    repo = metadata.get("repo") or ""
+    alias = metadata.get("alias") or ""
+    quant = metadata.get("hf_file") or metadata.get("quant") or ""
+    family = metadata.get("family") or ""
+
+    if not repo:
+        match = re.search(r"^\s*-hf\s+(.+?)\s+\\$", text, re.MULTILINE)
+        if match:
+            try:
+                tokens = shlex.split(match.group(1))
+            except ValueError:
+                tokens = []
+            if tokens:
+                repo = tokens[0]
+                if ":" in repo:
+                    repo, quant = repo.rsplit(":", 1)
+    if not alias:
+        match = re.search(r"^\s*--alias\s+(.+?)\s+\\$", text, re.MULTILINE)
+        if match:
+            try:
+                tokens = shlex.split(match.group(1))
+            except ValueError:
+                tokens = []
+            if tokens:
+                alias = tokens[0]
+
+    if not repo or not alias:
+        continue
+    if not family:
+        family = infer_family(repo)
+
+    parts = [f"launcher family={family}", f"repo={repo}", f"alias={alias}", f"remote_start={path}"]
+    if quant:
+        parts.append(f"quant={quant}")
+    print(" ".join(parts))
 PY
-  done
 }
 
 print_launcher_cards() {
@@ -289,47 +543,64 @@ PY
 }
 
 find_existing_launcher() {
-  local repo="$1"
-  local alias="$2"
-  local oc_local="$repo_root/scripts/oc-local"
-  if [[ ! -x "$oc_local" ]]; then
-    oc_local="$SCRIPT_DIR/oc-local"
-  fi
-  local -a families=(
-    qwen
-    qwen-hauhau
-    qwen-27b-hauhau
-    gemma-hauhau
-    qwen-27b
-    qwen-opus
-    qwen-heretic
-    qwen-coder
-    qwen-coder-next
-    gemma
-    gemma-vision
-    gpt-oss
-    deepseek-r1
-  )
-  local family
-  local info
+  : "$1" "$2"
+  return 0
+}
 
-  [[ -x "$oc_local" ]] || return 1
-  for family in "${families[@]}"; do
-    info="$("$oc_local" "$family" reliable --info --lean 2>/dev/null || true)"
-    [[ -n "$info" ]] || continue
-    python3 - "$repo" "$alias" "$info" <<'PY'
+find_existing_accepted_launcher() {
+  local repo="$1"
+  local family="$2"
+  local alias="$3"
+  local metadata_file="$runs_dir/accepted/$family.json"
+
+  [[ -f "$metadata_file" ]] || return 0
+  reject_symlink_state_file "$metadata_file" || return 1
+  python3 - "$metadata_file" "$repo" "$family" "$alias" "$generated_launcher_dir" <<'PY'
+import json
+import pathlib
+import re
 import sys
 
-repo, alias, info = sys.argv[1:]
-fields = {}
-for line in info.splitlines():
-    key, sep, value = line.partition("=")
-    if sep:
-        fields[key] = value
-if fields.get("hf_repo") == repo and fields.get("alias") == alias:
-    print(fields.get("remote_start", ""))
+path = pathlib.Path(sys.argv[1])
+repo, family, alias, launcher_dir = sys.argv[2:]
+
+try:
+    with path.open(encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, json.JSONDecodeError) as exc:
+    raise SystemExit(f"accepted metadata is invalid: {path}: {exc}") from exc
+
+if not isinstance(data, dict):
+    raise SystemExit(f"accepted metadata must be an object: {path}")
+
+metadata_family = data.get("family") or family
+if not isinstance(metadata_family, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", metadata_family) or ".." in metadata_family or metadata_family.startswith("-"):
+    raise SystemExit(f"accepted metadata contains unsafe family: {path}")
+if metadata_family != family:
+    raise SystemExit(0)
+
+metadata_repo = data.get("repo") or data.get("hf_repo")
+metadata_alias = data.get("alias") or data.get("model_name")
+if not isinstance(metadata_alias, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", metadata_alias) or ".." in metadata_alias or metadata_alias.startswith("-"):
+    raise SystemExit(f"accepted metadata contains unsafe alias: {path}")
+if metadata_repo != repo:
+    raise SystemExit(0)
+if metadata_alias != alias:
+    raise SystemExit(
+        f"accepted metadata alias mismatch for family {family}: "
+        f"existing_alias={metadata_alias!s} requested_alias={alias}. "
+        "Delete the existing accepted metadata before accepting a different alias."
+    )
+
+launcher_file = data.get("launcher_file")
+if isinstance(launcher_file, str) and launcher_file:
+    print(launcher_file)
+    raise SystemExit(0)
+
+remote_start = data.get("remote_start")
+if isinstance(remote_start, str) and re.fullmatch(r"\./[A-Za-z0-9_.-]+\.sh", remote_start):
+    print(str(pathlib.Path(launcher_dir) / pathlib.PurePosixPath(remote_start).name))
 PY
-  done | head -1
 }
 
 remove_matching_selections() {
@@ -396,6 +667,467 @@ if marker not in text:
 text = text.replace(marker, entry + marker, 1)
 path.write_text(text, encoding="utf-8")
 print("added")
+PY
+}
+
+write_accepted_metadata() {
+  local repo="$1"
+  local family="$2"
+  local alias="$3"
+  local launcher_file="$4"
+  local profile="$5"
+  local ctx="$6"
+  local batch="$7"
+  local ubatch="$8"
+  local ngl="$9"
+  local quant="${10}"
+  local hf_file="${11}"
+
+  ensure_state_dir "$runs_dir/accepted" accepted || return 1
+  python3 - "$runs_dir/accepted" "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" <<'PY'
+import json
+import os
+import pathlib
+import re
+import sys
+from pathlib import Path
+
+accepted_dir = Path(sys.argv[1])
+repo, family, alias, launcher_file, profile, ctx, batch, ubatch, ngl, quant, hf_file = sys.argv[2:]
+if not re.fullmatch(r"[A-Za-z0-9_.-]+", family) or ".." in family or family.startswith("-"):
+    raise SystemExit("model-manager refuses unsafe family")
+if not re.fullmatch(r"[A-Za-z0-9_.-]+", alias) or ".." in alias or alias.startswith("-"):
+    raise SystemExit("model-manager refuses unsafe alias")
+for name, value in (("repo", repo), ("launcher_file", launcher_file), ("profile", profile), ("quant", quant), ("hf_file", hf_file)):
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise SystemExit(f"accepted metadata field contains a control character: {name}")
+path = accepted_dir / f"{family}.json"
+remote_start = "./" + pathlib.PurePosixPath(launcher_file).name
+if path.is_symlink():
+    raise SystemExit(f"model-manager refuses symlinked state file: {path}")
+
+def accepted_integer(name, value, *, minimum):
+    if value == "":
+        return None
+    if not re.fullmatch(r"[0-9]+", value):
+        raise SystemExit(f"accepted metadata field must be numeric: {name}")
+    parsed = int(value)
+    if parsed < minimum:
+        if minimum == 1:
+            raise SystemExit(f"accepted metadata field must be positive: {name}")
+        raise SystemExit(f"accepted metadata field must be non-negative: {name}")
+    return parsed
+
+payload = {
+    "repo": repo,
+    "hf_repo": repo,
+    "family": family,
+    "alias": alias,
+    "model_name": alias,
+    "remote_start": remote_start,
+    "launcher_file": launcher_file,
+    "hf_file": hf_file,
+    "quant": quant,
+    "profile": profile,
+    "config": {},
+}
+for key, value, minimum in (("ctx", ctx, 1), ("batch", batch, 1), ("ubatch", ubatch, 1), ("ngl", ngl, 0)):
+    parsed = accepted_integer(key, value, minimum=minimum)
+    if parsed is not None:
+        payload["config"][key] = parsed
+
+with path.open("w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+print(path)
+PY
+}
+
+cmd_export() {
+  if (($# > 0)); then
+    printf 'export accepts no arguments\n' >&2
+    return 2
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' 'python3 is required to export model-manager state' >&2
+    return 1
+  fi
+  if [[ -L "$runs_dir" ]]; then
+    printf 'export refuses symlinked runs dir: %s\n' "$runs_dir" >&2
+    return 1
+  fi
+
+  python3 - "$runs_dir" <<'PY'
+import json
+import os
+import pathlib
+import re
+import stat
+import sys
+
+runs_dir = pathlib.Path(sys.argv[1])
+runs_dir_resolved = runs_dir.resolve()
+secret_re = re.compile(r"(token|secret|password|cookie|authorization|api[_-]?key|auth)", re.IGNORECASE)
+
+
+def scrub(value):
+    if isinstance(value, dict):
+        return {key: scrub(item) for key, item in value.items() if not secret_re.search(str(key))}
+    if isinstance(value, list):
+        return [scrub(item) for item in value]
+    return value
+
+
+def read_json(path):
+    try:
+        with path.open(encoding="utf-8") as handle:
+            value = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return scrub(value)
+
+
+def safe_file_name(path, suffix):
+    name = path.name
+    if name in {"", ".", ".."} or name != pathlib.PurePath(name).name:
+        return False
+    return bool(re.fullmatch(r"[A-Za-z0-9_.-]+" + re.escape(suffix), name))
+
+
+payload = {"version": 1}
+bootstrap_dir = runs_dir / "bootstrap"
+bootstrap_path = runs_dir / "bootstrap" / "config.json"
+if bootstrap_dir.is_dir() and not bootstrap_dir.is_symlink() and bootstrap_path.is_file() and not bootstrap_path.is_symlink():
+    try:
+        bootstrap_resolved = bootstrap_path.resolve()
+        bootstrap_within_runs = os.path.commonpath([str(runs_dir_resolved), str(bootstrap_resolved)]) == str(runs_dir_resolved)
+    except OSError:
+        bootstrap_within_runs = False
+    if bootstrap_within_runs:
+        bootstrap = read_json(bootstrap_path)
+        if isinstance(bootstrap, dict):
+            payload["bootstrap"] = bootstrap
+
+accepted = {}
+accepted_dir = runs_dir / "accepted"
+if accepted_dir.is_dir() and not accepted_dir.is_symlink():
+    for path in sorted(accepted_dir.glob("*.json")):
+        if path.is_symlink():
+            continue
+        if not safe_file_name(path, ".json"):
+            continue
+        value = read_json(path)
+        if isinstance(value, dict):
+            accepted[path.name] = value
+payload["accepted"] = accepted
+
+launchers = {}
+launcher_dir = runs_dir / "launchers"
+if launcher_dir.is_dir() and not launcher_dir.is_symlink():
+    for path in sorted(launcher_dir.glob("*.sh")):
+        if path.is_symlink():
+            continue
+        if not safe_file_name(path, ".sh"):
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+            mode = path.stat().st_mode
+        except OSError:
+            continue
+        if secret_re.search(content):
+            launchers[path.name] = {"omitted": "secret-like content"}
+            continue
+        launchers[path.name] = {
+            "content": content,
+            "executable": bool(mode & stat.S_IXUSR),
+        }
+payload["launchers"] = launchers
+
+json.dump(payload, sys.stdout, indent=2, sort_keys=True)
+sys.stdout.write("\n")
+PY
+}
+
+cmd_restore() {
+  local backup_file="${1:-}"
+  if [[ -z "$backup_file" || $# -ne 1 ]]; then
+    printf 'restore requires one backup JSON file\n' >&2
+    return 2
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' 'python3 is required to restore model-manager state' >&2
+    return 1
+  fi
+
+  python3 - "$runs_dir" "$backup_file" <<'PY'
+import json
+import os
+import pathlib
+import re
+import sys
+
+runs_dir_input = pathlib.Path(sys.argv[1])
+backup_file = pathlib.Path(sys.argv[2])
+secret_re = re.compile(r"(token|secret|password|cookie|authorization|api[_-]?key|auth)", re.IGNORECASE)
+
+
+def fail(message):
+    raise SystemExit(message)
+
+
+if runs_dir_input.is_symlink():
+    fail(f"restore refuses symlinked runs dir: {runs_dir_input}")
+runs_dir = pathlib.Path(os.path.abspath(runs_dir_input))
+
+
+def safe_name(name, suffix, label):
+    if not isinstance(name, str):
+        fail(f"unsafe {label} name")
+    if name in {"", ".", ".."} or pathlib.PurePosixPath(name).name != name or pathlib.PurePath(name).name != name:
+        fail(f"unsafe {label} name: {name!r}")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+" + re.escape(suffix), name):
+        fail(f"unsafe {label} name: {name!r}")
+    return name
+
+
+def target_path(parent, name):
+    path = runs_dir / parent / name
+    allowed = runs_dir / parent
+    try:
+        if os.path.commonpath([str(allowed), str(path)]) != str(allowed):
+            fail(f"restore path escapes runs dir: {name!r}")
+    except ValueError:
+        fail(f"restore path escapes runs dir: {name!r}")
+    return path
+
+
+def validate_runs_write_target(path, file_label):
+    path = pathlib.Path(os.path.abspath(path))
+    try:
+        relative_parent = path.parent.relative_to(runs_dir)
+    except ValueError:
+        fail(f"restore path escapes runs dir: {path}")
+
+    current = runs_dir
+    for component in relative_parent.parts:
+        current = current / component
+        if current.is_symlink():
+            fail(f"restore refuses symlinked runs path component: {current}")
+        if current.exists() and not current.is_dir():
+            fail(f"restore target parent is not a directory: {current}")
+    if path.is_symlink():
+        fail(f"restore refuses symlinked {file_label} file: {path}")
+
+    try:
+        real_runs = runs_dir.resolve(strict=False)
+        real_path = path.resolve(strict=False)
+        if os.path.commonpath([str(real_runs), str(real_path)]) != str(real_runs):
+            fail(f"restore path escapes runs dir: {path}")
+    except OSError as exc:
+        fail(f"restore path is invalid: {path}: {exc}")
+
+
+def validate_restore_dir(parent):
+    path = runs_dir / parent
+    if path.is_symlink():
+        fail(f"restore refuses symlinked {parent} dir")
+    if path.exists() and not path.is_dir():
+        fail(f"restore target is not a directory: {parent}")
+    real_runs = runs_dir.resolve(strict=False)
+    resolved = path.resolve()
+    if os.path.commonpath([str(real_runs), str(resolved)]) != str(real_runs):
+        fail(f"restore dir escapes runs dir: {parent}")
+
+
+def validate_no_secret_keys(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if secret_re.search(str(key)):
+                fail("backup contains secret-like key")
+            validate_no_secret_keys(item)
+    elif isinstance(value, list):
+        for item in value:
+            validate_no_secret_keys(item)
+
+
+def normalize_accepted_integer(value, label, *, minimum):
+    if isinstance(value, bool):
+        fail(f"accepted config field must be an integer: {label}")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        parsed = int(value)
+    else:
+        fail(f"accepted config field must be an integer: {label}")
+    if parsed < minimum:
+        if minimum == 1:
+            fail(f"accepted config field must be a positive integer: {label}")
+        fail(f"accepted config field must be a non-negative integer: {label}")
+    return parsed
+
+
+def normalize_accepted_numeric_fields(entry, entry_name, container_name, container):
+    if not isinstance(container, dict):
+        fail(f"accepted {container_name} must be an object: {entry_name}")
+    for key in ("ctx", "context", "batch", "ubatch"):
+        if key in container:
+            container[key] = normalize_accepted_integer(container[key], f"{entry_name} {container_name}.{key}", minimum=1)
+    if "ngl" in container:
+        container["ngl"] = normalize_accepted_integer(container["ngl"], f"{entry_name} {container_name}.ngl", minimum=0)
+
+
+def has_control_chars(value):
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def safe_generated_basename(value):
+    return bool(re.fullmatch(r"[A-Za-z0-9_.-]+", value)) and ".." not in value and not value.startswith("-")
+
+
+def validate_safe_identifier(value, label, entry_name):
+    if not isinstance(value, str) or not safe_generated_basename(value):
+        fail(f"accepted {label} must be safe: {entry_name}")
+
+
+def validate_no_control_chars(value, label, entry_name, *, require_nonempty=False):
+    if not isinstance(value, str):
+        fail(f"accepted {label} must be a string: {entry_name}")
+    if require_nonempty and not value:
+        fail(f"accepted {label} must be nonempty: {entry_name}")
+    if has_control_chars(value):
+        fail(f"accepted {label} must not contain control characters: {entry_name}")
+
+
+def validate_remote_start(value, entry_name):
+    if not isinstance(value, str):
+        fail(f"accepted remote_start must be a safe relative launcher path: {entry_name}")
+    match = re.fullmatch(r"\./([A-Za-z0-9_.-]+\.sh)", value)
+    if not match or not safe_generated_basename(match.group(1)):
+        fail(f"accepted remote_start must be a safe relative launcher path: {entry_name}")
+    return match.group(1)
+
+
+def validate_accepted_entry(entry_name, value):
+    launcher_basename = None
+    if "family" in value:
+        validate_safe_identifier(value["family"], "family", entry_name)
+    for key in ("alias", "model_name"):
+        if key in value:
+            validate_safe_identifier(value[key], key, entry_name)
+    if "repo" not in value:
+        fail(f"accepted repo must be nonempty: {entry_name}")
+    for key in ("repo", "hf_repo"):
+        if key in value:
+            validate_no_control_chars(value[key], key, entry_name, require_nonempty=True)
+    for key in ("hf_file", "quant"):
+        if key in value:
+            validate_no_control_chars(value[key], key, entry_name)
+    if "remote_start" in value:
+        launcher_basename = validate_remote_start(value["remote_start"], entry_name)
+    if "launcher_file" in value:
+        launcher_file = value["launcher_file"]
+        validate_no_control_chars(launcher_file, "launcher_file", entry_name, require_nonempty=True)
+        launcher_file_basename = pathlib.PurePath(launcher_file).name
+        if not launcher_basename:
+            launcher_basename = validate_remote_start("./" + launcher_file_basename, entry_name)
+        if launcher_file_basename != launcher_basename:
+            fail(f"accepted launcher_file must match remote_start basename: {entry_name}")
+        value["launcher_file"] = str(runs_dir / "launchers" / launcher_basename)
+    config = value.get("config")
+    if config is not None:
+        normalize_accepted_numeric_fields(value, entry_name, "config", config)
+    profiles = value.get("profiles")
+    if profiles is not None:
+        if not isinstance(profiles, dict):
+            fail(f"accepted profiles must be an object: {entry_name}")
+        for profile_name, profile_config in profiles.items():
+            if not isinstance(profile_name, str):
+                fail(f"accepted profile name must be a string: {entry_name}")
+            normalize_accepted_numeric_fields(value, entry_name, f"profiles.{profile_name}", profile_config)
+
+
+try:
+    with backup_file.open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+except OSError as exc:
+    fail(f"backup JSON is unreadable: {exc}")
+except json.JSONDecodeError as exc:
+    fail(f"backup JSON is invalid: {exc}")
+
+if not isinstance(payload, dict):
+    fail("backup JSON must be an object")
+if payload.get("version") != 1:
+    fail("backup JSON has unsupported version")
+validate_no_secret_keys(payload)
+validate_restore_dir("bootstrap")
+validate_restore_dir("accepted")
+validate_restore_dir("launchers")
+
+bootstrap = payload.get("bootstrap")
+bootstrap_write = None
+if bootstrap is not None:
+    if not isinstance(bootstrap, dict):
+        fail("bootstrap must be an object")
+    bootstrap_write = (target_path("bootstrap", "config.json"), bootstrap)
+
+accepted = payload.get("accepted", {})
+if not isinstance(accepted, dict):
+    fail("accepted must be an object")
+accepted_writes = []
+for name, value in sorted(accepted.items()):
+    name = safe_name(name, ".json", "accepted")
+    if not isinstance(value, dict):
+        fail(f"accepted entry must be an object: {name}")
+    validate_accepted_entry(name, value)
+    accepted_writes.append((target_path("accepted", name), value))
+
+launchers = payload.get("launchers", {})
+if not isinstance(launchers, dict):
+    fail("launchers must be an object")
+launcher_writes = []
+for name, value in sorted(launchers.items()):
+    name = safe_name(name, ".sh", "launcher")
+    if not isinstance(value, dict):
+        fail(f"launcher entry must be an object: {name}")
+    content = value.get("content")
+    if content is None:
+        continue
+    if not isinstance(content, str):
+        fail(f"launcher content must be a string: {name}")
+    if secret_re.search(content):
+        fail(f"launcher contains secret-like content: {name}")
+    executable = value.get("executable", True)
+    if not isinstance(executable, bool):
+        fail(f"launcher executable must be a boolean: {name}")
+    launcher_writes.append((target_path("launchers", name), content, executable))
+
+if bootstrap_write is not None:
+    validate_runs_write_target(bootstrap_write[0], "state")
+for path, _value in accepted_writes:
+    validate_runs_write_target(path, "state")
+for path, _content, _executable in launcher_writes:
+    validate_runs_write_target(path, "launcher")
+
+if bootstrap_write is not None:
+    path, value = bootstrap_write
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(value, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+for path, value in accepted_writes:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(value, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+for path, content, executable in launcher_writes:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(content)
+    path.chmod(0o755 if executable else 0o644)
+
+print(f"restored={runs_dir}")
 PY
 }
 
@@ -548,6 +1280,7 @@ run_remote_delete_repo_cache() {
   ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" python3 - "$repo" "$mode" <<'PY'
 import json
 import os
+import re
 import sys
 
 repo, mode = sys.argv[1:]
@@ -922,7 +1655,8 @@ cmd_list() {
 }
 
 cmd_update() {
-  local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
+  local target
+  target="$(default_target)"
   local dry_run=false
   local yes=false
 
@@ -1157,6 +1891,7 @@ write_replacement_audit() {
     unique_suffix="${unique_suffix}x"
     output_file="$runs_dir/replacements/${timestamp}-${safe_old}-${unique_suffix}.json"
   done
+  reject_symlink_state_file "$output_file" || return 1
 
   python3 - "$output_file" "$old_file" "$new_repo" "$selected_quant" "$selected_file" "$target" "$action" "$delete_status" "$deleted_file" "$download_status" "$result_timestamp" <<'PY'
 import json
@@ -1566,7 +2301,8 @@ cmd_replace() {
 cmd_delete() {
   local repo=''
   local profile_pattern=''
-  local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
+  local target
+  target="$(default_target)"
   local dry_run=true
   local yes=false
 
@@ -1904,7 +2640,7 @@ run_remote_benchmark() {
   local profile="$5"
   local quant="$6"
   local hf_file="$7"
-  local remote_dir="${OC_LOCAL_REMOTE_DIR:-/home/cass/llama.cpp}"
+  local remote_dir="${OC_LOCAL_REMOTE_DIR:-~/llama.cpp}"
   local port=8080
   local ctx="${8:-65536}"
   local batch="${9:-128}"
@@ -1927,6 +2663,9 @@ ubatch="${11}"
 ngl=999
 server_pid=""
 service_was_active=false
+if [[ "$remote_dir" == "~" || "$remote_dir" == ~/* ]]; then
+  remote_dir="$HOME${remote_dir#\~}"
+fi
 log_file="${TMPDIR:-/tmp}/local-llm-benchmark-${alias}-${profile}-$$.log"
 response_file="${TMPDIR:-/tmp}/local-llm-benchmark-${alias}-${profile}-$$.json"
 start_script=".local-llm-benchmark-${alias}.sh"
@@ -2009,10 +2748,11 @@ command_text="${command_text% }"
   printf '\n'
 } >"$start_script"
 chmod +x "$start_script"
-cat >current-model.env.tmp <<EOF
-REMOTE_SCRIPT=./$start_script
-REMOTE_PROFILE=$profile
-EOF
+remote_script="./$start_script"
+{
+  printf 'REMOTE_SCRIPT=%q\n' "$remote_script"
+  printf 'REMOTE_PROFILE=%q\n' "$profile"
+} >current-model.env.tmp
 mv current-model.env.tmp current-model.env
 : >"$log_file"
 restart_started="$(date -Is)"
@@ -2066,7 +2806,8 @@ REMOTE_BENCH
 }
 
 cmd_discover() {
-  local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
+  local target
+  target="$(default_target)"
   local query='GGUF'
   local limit=8
   local json=false
@@ -2173,7 +2914,8 @@ PY
 }
 
 cmd_select() {
-  local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
+  local target
+  target="$(default_target)"
   local repo=''
   local family=''
   local alias=''
@@ -2280,6 +3022,7 @@ cmd_select() {
     unique_suffix="${unique_suffix}x"
     output_file="$runs_dir/selections/${timestamp}-${safe_family}-${unique_suffix}.json"
   done
+  reject_symlink_state_file "$output_file" || return 1
 
   python3 - "$output_file" "$repo" "$family" "$alias" "$target" "$purpose" <<'PY'
 import json
@@ -2299,7 +3042,8 @@ PY
 }
 
 cmd_benchmark() {
-  local target="remote:${OC_LOCAL_REMOTE_HOST:-ubt26}"
+  local target
+  target="$(default_target)"
   local repo=''
   local family=''
   local alias=''
@@ -2480,6 +3224,7 @@ cmd_benchmark() {
         unique_suffix="${unique_suffix}x"
         output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
       done
+      reject_symlink_state_file "$output_file" || return 1
 
       python3 - "$output_file" "$target" "$repo" "$family" "$alias" "$profile" "$result_timestamp" <<'PY'
 import json
@@ -2596,6 +3341,7 @@ PY
         unique_suffix="${unique_suffix}x"
         output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-full-${unique_suffix}.json"
       done
+      reject_symlink_state_file "$output_file" || return 1
 
       recommendations_output="$(
         TRIALS_TSV="$trials_tsv" python3 - "$output_file" "$target" "$repo" "$family" "$alias" "$quant" "$hf_file" "$result_timestamp" <<'PY'
@@ -2751,6 +3497,7 @@ PY
       unique_suffix="${unique_suffix}x"
       output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
     done
+    reject_symlink_state_file "$output_file" || return 1
 
     python3 - "$output_file" "$target" "$repo" "$family" "$alias" "${profile_list[0]}" "$ctx" "$batch" "$ubatch" "$ngl" "$load_status" "$prompt_tok_s" "$decode_tok_s" "$prompt_tokens" "$decode_tokens" "$command_text" "$result_timestamp" <<'PY'
 import json
@@ -2850,11 +3597,13 @@ cmd_accept() {
   local target
   local profile
   local start_script
+  local launcher_file
   local max_start=0
   local start_path
   local start_name
   local start_number
   local start_value
+  local accepted_metadata_file
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2895,6 +3644,7 @@ cmd_accept() {
     python3 - "$benchmark_file" <<'PY'
 import json
 import os
+import re
 import sys
 
 path = sys.argv[1]
@@ -2931,14 +3681,32 @@ for key in required:
     if any(ord(char) < 32 or ord(char) == 127 for char in result[key]):
         raise SystemExit(f"benchmark JSON field contains a control character: {key}")
 
+family = result["family"]
+if not re.fullmatch(r"[A-Za-z0-9_.-]+", family) or ".." in family or family.startswith("-"):
+    raise SystemExit("benchmark JSON field contains an unsafe family: family")
+alias = result["alias"]
+if not re.fullmatch(r"[A-Za-z0-9_.-]+", alias) or ".." in alias or alias.startswith("-"):
+    raise SystemExit("benchmark JSON field contains an unsafe alias: alias")
+
+def has_control_chars(value):
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
 if result.get("load_status") != "success":
     raise SystemExit(f"benchmark JSON load_status is not success: {result.get('load_status')}")
-for key in ("ctx", "batch", "ubatch", "ngl"):
+for key, minimum in (("ctx", 1), ("batch", 1), ("ubatch", 1), ("ngl", 0)):
     if key in result and not isinstance(result[key], int):
         raise SystemExit(f"benchmark JSON field must be an integer: {key}")
+    if key in result and isinstance(result[key], bool):
+        raise SystemExit(f"benchmark JSON field must be an integer: {key}")
+    if key in result and result[key] < minimum:
+        if minimum == 1:
+            raise SystemExit(f"benchmark JSON field must be a positive integer: {key}")
+        raise SystemExit(f"benchmark JSON field must be a non-negative integer: {key}")
 for key in ("quant", "hf_file"):
     if key in result and result[key] is not None and not isinstance(result[key], str):
         raise SystemExit(f"benchmark JSON field must be a string: {key}")
+    if key in result and isinstance(result[key], str) and has_control_chars(result[key]):
+        raise SystemExit(f"benchmark JSON field contains a control character: {key}")
 values = [result[key] for key in required]
 values.extend(str(result.get(key) or "") for key in ("ctx", "batch", "ubatch", "ngl", "quant", "hf_file"))
 print("\t".join(values))
@@ -2950,13 +3718,14 @@ PY
   local ctx batch ubatch ngl quant hf_file
   IFS=$'\t' read -r repo family alias target profile ctx batch ubatch ngl quant hf_file <<<"$json_fields"
 
+  ensure_runs_dirs
+
   local existing_launcher
-  existing_launcher="$(find_existing_launcher "$repo" "$alias")"
+  existing_launcher="$(find_existing_accepted_launcher "$repo" "$family" "$alias")"
   if [[ -n "$existing_launcher" ]]; then
     local removed_selection_count
     removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
-    local switcher_status
-    switcher_status="$(ensure_switcher_model "$(infer_family "$repo")" "${existing_launcher%% *}" "$alias" "${alias//-/ }")"
+    accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file")"
     printf 'Accepted benchmark already has launcher\n'
     printf 'repo=%s\n' "$repo"
     printf 'family=%s\n' "$family"
@@ -2964,13 +3733,13 @@ PY
     printf 'target=%s\n' "$target"
     printf 'profile=%s\n' "$profile"
     printf 'start_script=%s\n' "${existing_launcher%% *}"
+    printf 'accepted_metadata_file=%s\n' "$accepted_metadata_file"
     printf 'removed_selection_count=%s\n' "$removed_selection_count"
-    printf 'switcher_status=%s\n' "$switcher_status"
     return 0
   fi
 
   shopt -s nullglob
-  for start_path in "$repo_root"/scripts/start*.sh; do
+  for start_path in "$repo_root"/scripts/start*.sh "$generated_launcher_dir"/start*.sh; do
     start_name="${start_path##*/}"
     start_number="${start_name#start}"
     start_number="${start_number%.sh}"
@@ -2982,7 +3751,8 @@ PY
     fi
   done
   shopt -u nullglob
-  start_script="${LOCAL_LLM_ACCEPT_START_SCRIPT:-scripts/start$((max_start + 1)).sh}"
+  launcher_file="${LOCAL_LLM_ACCEPT_START_SCRIPT:-$generated_launcher_dir/start$((max_start + 1)).sh}"
+  start_script="$launcher_file"
 
   if [[ "$dry_run" == true ]]; then
     printf 'Accept plan\n'
@@ -2991,34 +3761,42 @@ PY
     printf 'alias=%s\n' "$alias"
     printf 'target=%s\n' "$target"
     printf 'profile=%s\n' "$profile"
+    printf 'launcher_file=%s\n' "$launcher_file"
     printf 'Dry-run actions:\n'
-    printf 'would create %s\n' "$start_script"
-    printf 'would update scripts/oc-local\n'
-    printf 'would update installer.sh\n'
-    printf 'would update README.md\n'
-    printf 'would update test_oc_local.sh\n'
+    printf 'would create %s\n' "$launcher_file"
+    printf 'would write accepted metadata under %s\n' "$runs_dir/accepted"
     return 0
   fi
 
-  if [[ -e "$repo_root/$start_script" ]]; then
-    printf 'accept start script already exists: %s\n' "$start_script" >&2
+  validate_launcher_write_target "$launcher_file" || return 1
+  if [[ -e "$launcher_file" ]]; then
+    printf 'accept launcher already exists: %s\n' "$launcher_file" >&2
     return 1
   fi
-  if [[ ! -d "$repo_root/scripts" ]]; then
-    printf '%s\n' 'accept must be run from a local_llm source checkout so it can create scripts/start*.sh' >&2
-    return 1
-  fi
+  mkdir -p "${launcher_file%/*}"
 
-  python3 - "$repo_root/$start_script" "$repo" "$alias" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" <<'PY'
+  python3 - "$launcher_file" "$repo" "$family" "$alias" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" <<'PY'
 import shlex
 import sys
 
-path, repo, alias, ctx, batch, ubatch, ngl, quant, hf_file = sys.argv[1:]
-for name, value in {"ctx": ctx, "batch": batch, "ubatch": ubatch, "ngl": ngl}.items():
+path, repo, family, alias, ctx, batch, ubatch, ngl, quant, hf_file = sys.argv[1:]
+for name, value in (("repo", repo), ("family", family), ("alias", alias), ("quant", quant), ("hf_file", hf_file)):
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise SystemExit(f"launcher field contains a control character: {name}")
+for name, value, minimum in (("ctx", ctx, 1), ("batch", batch, 1), ("ubatch", ubatch, 1), ("ngl", ngl, 0)):
     if not value.isdigit():
         raise SystemExit(f"missing numeric {name}")
+    if int(value) < minimum:
+        if minimum == 1:
+            raise SystemExit(f"missing positive numeric {name}")
+        raise SystemExit(f"missing non-negative numeric {name}")
 lines = [
     "#!/usr/bin/env bash",
+    f"# local_llm_repo={repo}",
+    f"# local_llm_family={family}",
+    f"# local_llm_alias={alias}",
+    f"# local_llm_quant={quant}",
+    f"# local_llm_hf_file={hf_file}",
     "set -euo pipefail",
     'profile="${1:-reliable}"',
     'case "$profile" in speed|fastlong|balanced|reliable|tiny) ;; *) echo "Usage: $0 {speed|fastlong|balanced|reliable|tiny}" >&2; exit 2 ;; esac',
@@ -3056,11 +3834,10 @@ with open(path, "w", encoding="utf-8") as handle:
     handle.write("\n".join(lines))
     handle.write("\n")
 PY
-  chmod +x "$repo_root/$start_script"
+  chmod +x "$launcher_file"
   local removed_selection_count
   removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
-  local switcher_status
-  switcher_status="$(ensure_switcher_model "$(infer_family "$repo")" "$start_script" "$alias" "${alias//-/ }")"
+  accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file")"
 
   printf 'Accepted benchmark\n'
   printf 'repo=%s\n' "$repo"
@@ -3072,9 +3849,210 @@ PY
   printf 'batch=%s\n' "$batch"
   printf 'ubatch=%s\n' "$ubatch"
   printf 'ngl=%s\n' "$ngl"
+  printf 'launcher_file=%s\n' "$launcher_file"
   printf 'start_script=%s\n' "$start_script"
+  printf 'accepted_metadata_file=%s\n' "$accepted_metadata_file"
   printf 'removed_selection_count=%s\n' "$removed_selection_count"
-  printf 'switcher_status=%s\n' "$switcher_status"
+}
+
+cmd_deploy() {
+  local target=''
+  local dry_run=false
+  local yes=false
+  local remote_dir="${OC_LOCAL_REMOTE_DIR:-~/llama.cpp}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target)
+        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+          printf '%s\n' '--target requires remote:<host>' >&2
+          return 2
+        fi
+        target="$2"
+        shift 2
+        ;;
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      --yes)
+        yes=true
+        shift
+        ;;
+      -h | --help)
+        printf '%s\n' 'Usage: model-manager deploy --target remote:<host> --dry-run'
+        return 0
+        ;;
+      --*)
+        printf 'Unknown deploy option: %s\n' "$1" >&2
+        return 2
+        ;;
+      *)
+        printf 'deploy accepts options only, got: %s\n' "$1" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ "$yes" == true ]]; then
+    printf '%s\n' 'deploy --yes is not implemented; first pass is dry-run only' >&2
+    return 2
+  fi
+  if [[ "$dry_run" != true ]]; then
+    printf '%s\n' 'deploy is dry-run only; rerun with --dry-run' >&2
+    return 2
+  fi
+  case "$target" in
+    remote:*)
+      if [[ -z "${target#remote:}" ]]; then
+        printf 'remote target requires a host: %s\n' "$target" >&2
+        return 2
+      fi
+      if [[ "${target#remote:}" == -* ]]; then
+        printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
+        return 2
+      fi
+      ;;
+    '')
+      printf '%s\n' 'deploy requires --target remote:<host>' >&2
+      return 2
+      ;;
+    *)
+      printf '%s\n' 'deploy currently requires --target remote:<host>' >&2
+      return 2
+      ;;
+  esac
+  if [[ ! "$target" =~ ^remote:[A-Za-z0-9_.:-]+$ ]]; then
+    printf '%s\n' 'invalid target: use remote:<host> with letters, digits, dot, underscore, colon, and hyphen' >&2
+    return 2
+  fi
+
+  local -a accepted_files=()
+  if [[ -L "$runs_dir" ]]; then
+    printf 'model-manager refuses symlinked runs dir: %s\n' "$runs_dir" >&2
+    return 1
+  fi
+  if [[ -e "$runs_dir" && ! -d "$runs_dir" ]]; then
+    printf 'model-manager state path is not a directory: %s\n' "$runs_dir" >&2
+    return 1
+  fi
+  if [[ -L "$runs_dir/accepted" ]]; then
+    printf 'model-manager refuses symlinked accepted dir: %s\n' "$runs_dir/accepted" >&2
+    return 1
+  fi
+  if [[ -L "$generated_launcher_dir" ]]; then
+    printf 'model-manager refuses symlinked launchers dir: %s\n' "$generated_launcher_dir" >&2
+    return 1
+  fi
+  if [[ -d "$runs_dir/accepted" ]]; then
+    shopt -s nullglob
+    accepted_files=("$runs_dir"/accepted/*.json)
+    shopt -u nullglob
+  fi
+
+  if ((${#accepted_files[@]} == 0)); then
+    printf '%s\n' 'Nothing to deploy: no accepted models or generated launcher state found.'
+    return 0
+  fi
+
+  local plan_rows
+  if ! plan_rows="$(
+    python3 - "$runs_dir" "$remote_dir" "${accepted_files[@]}" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+runs_dir = pathlib.Path(sys.argv[1])
+remote_dir = sys.argv[2].rstrip("/")
+launcher_dir = runs_dir / "launchers"
+
+def safe_basename(value, suffix):
+    return (
+        isinstance(value, str)
+        and pathlib.PurePath(value).name == value
+        and re.fullmatch(r"[A-Za-z0-9_.-]+" + re.escape(suffix), value)
+        and ".." not in value
+        and not value.startswith("-")
+    )
+
+
+def safe_label(value):
+    return (
+        isinstance(value, str)
+        and re.fullmatch(r"[A-Za-z0-9_.-]+", value)
+        and ".." not in value
+        and not value.startswith("-")
+    )
+
+
+def require_safe_label(accepted_file, field, value):
+    if not safe_label(value):
+        raise SystemExit(
+            f"invalid accepted metadata: {accepted_file} {field} contains unsafe characters"
+        )
+
+for raw_path in sys.argv[3:]:
+    path = pathlib.Path(raw_path)
+    if path.is_symlink() or not safe_basename(path.name, ".json"):
+        continue
+    try:
+        with path.open(encoding="utf-8") as handle:
+            accepted = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        continue
+    if not isinstance(accepted, dict):
+        continue
+    remote_start = accepted.get("remote_start")
+    launcher_name = None
+    if isinstance(remote_start, str):
+        match = re.fullmatch(r"\./([A-Za-z0-9_.-]+\.sh)", remote_start)
+        if match and safe_basename(match.group(1), ".sh"):
+            launcher_name = match.group(1)
+    launcher_file = accepted.get("launcher_file")
+    if not launcher_name and isinstance(launcher_file, str):
+        candidate = pathlib.PurePath(launcher_file).name
+        if safe_basename(candidate, ".sh"):
+            launcher_name = candidate
+    if not launcher_name:
+        continue
+    launcher_path = launcher_dir / launcher_name
+    if launcher_path.is_symlink() or not launcher_path.is_file():
+        continue
+    family = accepted.get("family") or path.stem
+    alias = accepted.get("alias") or accepted.get("model_name") or "unknown"
+    require_safe_label(path.name, "family", family)
+    require_safe_label(path.name, "alias", alias)
+    if "model_name" in accepted:
+        require_safe_label(path.name, "model_name", accepted.get("model_name"))
+    print(f"accepted={path.name}\tfamily={family}\talias={alias}\tlauncher={launcher_path}\tremote={remote_dir}/{launcher_name}")
+PY
+  )"; then
+    printf '%s\n' 'deploy plan generation failed' >&2
+    return 1
+  fi
+
+  if [[ -z "$plan_rows" ]]; then
+    printf '%s\n' 'Nothing to deploy: no accepted models with generated launcher files found.'
+    return 0
+  fi
+
+  local host="${target#remote:}"
+  printf 'Deploy plan\n'
+  printf 'target=%s\n' "$target"
+  printf 'remote_dir=%s\n' "$remote_dir"
+  printf 'Generated launchers:\n'
+  while IFS=$'\t' read -r accepted family alias launcher remote_path; do
+    printf '  %s %s %s\n' "$family" "$alias" "$accepted"
+    printf '    copy launcher: %s -> %s:%s\n' "${launcher#launcher=}" "$host" "${remote_path#remote=}"
+  done <<<"$plan_rows"
+  printf 'Switcher/service files:\n'
+  printf '  copy support: %s/scripts/run-current-model.sh -> %s:%s/run-current-model.sh\n' "$repo_root" "$host" "$remote_dir"
+  printf '  copy support: %s/scripts/local-llm-switcher.py -> %s:%s/local-llm-switcher.py\n' "$repo_root" "$host" "$remote_dir"
+  printf '  copy support: %s/scripts/Caddyfile.local-llm -> %s:%s/Caddyfile.local-llm\n' "$repo_root" "$host" "$remote_dir"
+  printf '  copy support: %s/scripts/run-local-llm-caddy-container.sh -> %s:%s/run-local-llm-caddy-container.sh\n' "$repo_root" "$host" "$remote_dir"
+  printf '  copy service: %s/scripts/local-llm-switcher.service -> %s:~/.config/systemd/user/local-llm-switcher.service\n' "$repo_root" "$host"
+  printf '%s\n' 'Dry-run only: no files copied.'
 }
 
 main() {
@@ -3083,6 +4061,9 @@ main() {
   case "$command_name" in
     -h | --help | '')
       usage
+      ;;
+    bootstrap)
+      cmd_bootstrap "${@:2}"
       ;;
     status)
       cmd_status
@@ -3110,6 +4091,15 @@ main() {
       ;;
     accept)
       cmd_accept "${@:2}"
+      ;;
+    deploy)
+      cmd_deploy "${@:2}"
+      ;;
+    export)
+      cmd_export "${@:2}"
+      ;;
+    restore)
+      cmd_restore "${@:2}"
       ;;
     *)
       printf 'Unknown command: %s\n\n' "$command_name" >&2

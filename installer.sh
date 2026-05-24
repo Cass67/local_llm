@@ -32,6 +32,47 @@ BIN_DIR="${PREFIX:-${LOCAL_LLM_BIN_DIR:-$HOME/.local/bin}}"
 SHARE_DIR="${LOCAL_LLM_SHARE_DIR:-$HOME/.local/share/local_llm}"
 CONFIG_DIR="$SHARE_DIR/config"
 RUNS_DIR="$SHARE_DIR/runs"
+WRAPPER_MARKER="# local_llm generated wrapper"
+
+is_legacy_local_llm_wrapper() {
+  case "$1" in
+    oc-speed | oc-fastlong | oc-balanced | oc-reliable | oc-tiny | \
+      oc-qwen-speed | oc-qwen-fastlong | oc-qwen-balanced | oc-qwen-reliable | oc-qwen-tiny | \
+      oc-qwen-coder-speed | oc-qwen-coder-fastlong | oc-qwen-coder-balanced | oc-qwen-coder-reliable | oc-qwen-coder-tiny | \
+      oc-gemma-speed | oc-gemma-fastlong | oc-gemma-balanced | oc-gemma-reliable | oc-gemma-tiny | \
+      oc-gpt-oss-speed | oc-gpt-oss-fastlong | oc-gpt-oss-balanced | oc-gpt-oss-reliable | oc-gpt-oss-tiny | \
+      oc-deepseek-r1-speed | oc-deepseek-r1-fastlong | oc-deepseek-r1-balanced | oc-deepseek-r1-reliable | oc-deepseek-r1-tiny | \
+      oc-coder-speed | oc-coder-fastlong | oc-coder-balanced | oc-coder-reliable | oc-coder-tiny)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+remove_generated_wrappers() {
+  local wrapper
+  local wrapper_name
+  local symlink_target
+
+  [[ -d "$BIN_DIR" ]] || return 0
+
+  # Remove legacy generated/convenience wrappers before rebuilding from accepted state.
+  for wrapper in "$BIN_DIR"/oc-*; do
+    [[ -e "$wrapper" && "${wrapper##*/}" != "oc-local" ]] || continue
+    wrapper_name="${wrapper##*/}"
+    if [[ -L "$wrapper" ]]; then
+      symlink_target="$(readlink "$wrapper")"
+      [[ "${symlink_target##*/}" == "oc-local" ]] || continue
+      rm -f "$wrapper"
+    elif [[ -f "$wrapper" ]] && grep -qxF "$WRAPPER_MARKER" "$wrapper"; then
+      rm -f "$wrapper"
+    elif is_legacy_local_llm_wrapper "$wrapper_name"; then
+      rm -f "$wrapper"
+    fi
+  done
+}
 
 if [[ "$UNINSTALL" == true ]]; then
   echo "Uninstalling local_llm..."
@@ -48,7 +89,7 @@ if [[ "$UNINSTALL" == true ]]; then
     "$BIN_DIR"/oc-code
 
   # Remove convenience wrappers by pattern
-  find "$BIN_DIR" -maxdepth 1 \( -name "oc-speed" -o -name "oc-fastlong" -o -name "oc-balanced" -o -name "oc-reliable" -o -name "oc-tiny" -o -name "oc-qwen-*" -o -name "oc-qwen-coder-*" -o -name "oc-gemma-*" -o -name "oc-gpt-oss-*" -o -name "oc-deepseek-r1-*" -o -name "oc-coder-*" \) -exec rm -f {} + 2>/dev/null || true
+  remove_generated_wrappers
 
   # Remove share directory
   rm -rf "$SHARE_DIR"
@@ -74,7 +115,7 @@ Options:
 
 Examples:
   ./installer.sh
-  ./installer.sh -p /Users/cass/.local/bin/localllm
+  ./installer.sh -p ~/.local/bin/localllm
 HELP
   exit 0
 fi
@@ -110,158 +151,61 @@ if [[ -f "$REPO_ROOT/configs/candidates.json" ]]; then
   cp -f "$REPO_ROOT/configs/candidates.json" "$CONFIG_DIR/candidates.json"
 fi
 
-# Create convenience wrapper scripts (no symlinks)
-echo "Installing convenience commands..."
+# Create convenience wrapper scripts only for accepted generated state.
+echo "Installing generated convenience commands..."
+remove_generated_wrappers
 
-# Remove wrappers for families that were removed after benchmarking.
-rm -f "$BIN_DIR"/oc-glm-hauhau \
-  "$BIN_DIR"/oc-glm-hauhau-speed \
-  "$BIN_DIR"/oc-glm-hauhau-fastlong \
-  "$BIN_DIR"/oc-glm-hauhau-balanced \
-  "$BIN_DIR"/oc-glm-hauhau-reliable \
-  "$BIN_DIR"/oc-glm-hauhau-tiny
+create_wrapper() {
+  local name="$1"
+  local family="$2"
+  local profile="$3"
 
-# Basic profile wrappers: oc-speed, etc.
-for profile in speed fastlong balanced reliable tiny; do
-  local_name="oc-${profile}"
-  # Never overwrite the main oc-local binary
-  if [[ "$local_name" == "oc-local" ]]; then
-    continue
-  fi
-
-  rm -f "$BIN_DIR/$local_name"
-  cat >"$BIN_DIR/$local_name" <<EOF
+  [[ "$name" != "oc-local" ]] || return 0
+  rm -f "$BIN_DIR/$name"
+  cat >"$BIN_DIR/$name" <<EOF
 #!/usr/bin/env bash
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-exec "\$SCRIPT_DIR/oc-local" qwen "$profile" "\$@"
-EOF
-  chmod +x "$BIN_DIR/$local_name"
-done
-
-# Family-profile wrappers: oc-qwen-reliable, etc.
-# Skip if the resulting name would be "oc-local"
-for family in qwen qwen-hauhau qwen-27b-hauhau gemma-hauhau qwen-27b qwen-opus qwen-heretic qwen-coder qwen-coder-next gemma gpt-oss deepseek-r1; do
-  for profile in speed fastlong balanced reliable tiny; do
-    local_name="oc-${family}-${profile}"
-    if [[ "$local_name" != "oc-local" ]]; then
-      rm -f "$BIN_DIR/$local_name"
-      cat >"$BIN_DIR/$local_name" <<EOF
-#!/usr/bin/env bash
+$WRAPPER_MARKER
 SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 exec "\$SCRIPT_DIR/oc-local" "$family" "$profile" "\$@"
 EOF
-      chmod +x "$BIN_DIR/$local_name"
+  chmod +x "$BIN_DIR/$name"
+}
+
+if [[ -d "$RUNS_DIR/accepted" ]]; then
+  while IFS=$'\t' read -r family profile; do
+    [[ -n "$family" && -n "$profile" ]] || continue
+    create_wrapper "oc-${family}-${profile}" "$family" "$profile"
+    if [[ "$profile" == "reliable" ]]; then
+      create_wrapper "oc-${family}" "$family" "$profile"
     fi
-  done
-done
+  done < <(
+    python3 - "$RUNS_DIR/accepted" <<'PY'
+import json
+import pathlib
+import re
+import sys
 
-local_name="oc-qwen-hauhau"
-rm -f "$BIN_DIR/$local_name"
-cat >"$BIN_DIR/$local_name" <<EOF
-#!/usr/bin/env bash
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-exec "\$SCRIPT_DIR/oc-local" qwen-hauhau reliable "\$@"
-EOF
-chmod +x "$BIN_DIR/$local_name"
-
-for family in qwen-27b-hauhau gemma-hauhau; do
-  local_name="oc-${family}"
-  rm -f "$BIN_DIR/$local_name"
-  cat >"$BIN_DIR/$local_name" <<EOF
-#!/usr/bin/env bash
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-exec "\$SCRIPT_DIR/oc-local" "$family" reliable "\$@"
-EOF
-  chmod +x "$BIN_DIR/$local_name"
-done
-
-# Session-resume shortcut for the HauhauCS aggressive model.
-local_name="oc-qwen-hauhau-ses-2009"
-rm -f "$BIN_DIR/$local_name"
-cat >"$BIN_DIR/$local_name" <<EOF
-#!/usr/bin/env bash
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-exec "\$SCRIPT_DIR/oc-local" qwen-hauhau reliable "\$@" --lean -s ses_2009bfccfffeEVdvBAajurVOi4
-EOF
-chmod +x "$BIN_DIR/$local_name"
-
-# MTP-visible wrappers: oc-qwen-mtp, oc-qwen-27b-mtp, oc-qwen-opus-mtp, oc-qwen-heretic-mtp.
-for family in qwen qwen-27b qwen-opus qwen-heretic; do
-  for profile in speed fastlong balanced reliable tiny; do
-    local_name="oc-${family}-mtp-${profile}"
-    rm -f "$BIN_DIR/$local_name"
-    cat >"$BIN_DIR/$local_name" <<EOF
-#!/usr/bin/env bash
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-exec "\$SCRIPT_DIR/oc-local" "$family" "$profile" "\$@"
-EOF
-    chmod +x "$BIN_DIR/$local_name"
-  done
-
-  local_name="oc-${family}-mtp"
-  rm -f "$BIN_DIR/$local_name"
-  cat >"$BIN_DIR/$local_name" <<EOF
-#!/usr/bin/env bash
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-exec "\$SCRIPT_DIR/oc-local" "$family" reliable "\$@"
-EOF
-  chmod +x "$BIN_DIR/$local_name"
-done
-
-# Coder convenience wrappers
-for profile in speed fastlong balanced reliable tiny; do
-  local_name="oc-coder-${profile}"
-  # Safety: never overwrite main oc-local binary
-  if [[ "$local_name" == "oc-local" ]]; then
-    continue
-  fi
-
-  rm -f "$BIN_DIR/$local_name"
-  cat >"$BIN_DIR/$local_name" <<EOF
-#!/usr/bin/env bash
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-exec "\$SCRIPT_DIR/oc-local" qwen-coder "$profile" "\$@"
-EOF
-  chmod +x "$BIN_DIR/$local_name"
-done
-
-# Coder Next convenience wrappers
-for profile in speed fastlong balanced reliable tiny; do
-  local_name="oc-coder-next-${profile}"
-  rm -f "$BIN_DIR/$local_name"
-  cat >"$BIN_DIR/$local_name" <<EOF
-#!/usr/bin/env bash
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-exec "\$SCRIPT_DIR/oc-local" qwen-coder-next "$profile" "\$@"
-EOF
-  chmod +x "$BIN_DIR/$local_name"
-done
-
-# Family-specific convenience wrappers (avoid overwriting oc-local)
-for name in oc-qwen-coder oc-coder oc-code; do
-  # Safety: never overwrite main oc-local binary
-  if [[ "$name" == "oc-local" ]]; then
-    continue
-  fi
-
-  rm -f "$BIN_DIR/$name"
-  cat >"$BIN_DIR/$name" <<EOF
-#!/usr/bin/env bash
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-exec "\$SCRIPT_DIR/oc-local" qwen-coder reliable "\$@"
-EOF
-  chmod +x "$BIN_DIR/$name"
-done
-
-for name in oc-qwen-coder-next oc-coder-next; do
-  rm -f "$BIN_DIR/$name"
-  cat >"$BIN_DIR/$name" <<EOF
-#!/usr/bin/env bash
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-exec "\$SCRIPT_DIR/oc-local" qwen-coder-next reliable "\$@"
-EOF
-  chmod +x "$BIN_DIR/$name"
-done
+accepted_dir = pathlib.Path(sys.argv[1])
+safe = re.compile(r"^[A-Za-z0-9_.-]+$")
+for path in sorted(accepted_dir.glob("*.json")):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        continue
+    if not isinstance(data, dict):
+        continue
+    family = data.get("family") or path.stem
+    profiles = []
+    if isinstance(data.get("profile"), str):
+        profiles.append(data["profile"])
+    if isinstance(data.get("profiles"), dict):
+        profiles.extend(key for key in data["profiles"] if isinstance(key, str))
+    for profile in sorted(set(profiles)):
+        if safe.fullmatch(family) and safe.fullmatch(profile) and ".." not in family + profile:
+            print(f"{family}\t{profile}")
+PY
+  )
+fi
 
 echo "Installation complete!"
 echo ""
@@ -274,8 +218,7 @@ echo "To use commands, ensure ~/.local/bin is in your PATH:"
 echo "  export PATH=~/.local/bin:\$PATH"
 echo ""
 echo "Examples:"
-echo "  oc-local qwen reliable --lean"
-echo "  oc-qwen-reliable --lean"
+echo "  oc-local <family> <profile> --lean"
 echo "  hardware-analyzer"
 echo "  model-discovery"
 echo "  update-manager"

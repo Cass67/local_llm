@@ -1,5 +1,7 @@
 # MTP Benchmark - 2026-05-18
 
+Historical benchmark record: hostnames and paths in this report describe the machine used for this dated run, not public defaults.
+
 ## Summary
 
 Clean MTP benchmarking identifies Qwen-family promotion candidates that completed a short MTP throughput run at `spec_draft_n_max=2`. These should only be promoted after quality smoke testing and baseline comparison, unless Task 5 separately validates those checks. The safest selected setting is `spec_n=2` for every successful family: it had the best decode TPS for all successful candidates, while `qwen-mtp` and `qwen-27b-mtp` loaded at `spec_n=4` but decoded slower. `spec_n>=8` OOMed for every tested candidate.
