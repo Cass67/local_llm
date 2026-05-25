@@ -42,6 +42,44 @@ Use placeholders literally as placeholders: replace `<host>`, `<source>`, and `<
 
 Use this repo when you want an operator workflow for finding, benchmarking, accepting, backing up, and restoring models that are specific to your hardware.
 
+## Test A Fresh Checkout
+
+Run the smoke test first:
+
+```bash
+./test_oc_local.sh
+```
+
+Test install and empty-state behavior without touching your real state:
+
+```bash
+tmp="$(mktemp -d)"
+LOCAL_LLM_BIN_DIR="$tmp/bin" LOCAL_LLM_SHARE_DIR="$tmp/share" ./install.sh
+PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager list
+PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager bootstrap --target remote:example-host --dry-run
+PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager deploy --target remote:example-host --dry-run
+```
+
+Expected: `model-manager list` shows no accepted profiles or launchers, `bootstrap --dry-run` prints a plan, and `deploy --dry-run` says there is nothing to deploy.
+
+Verify the repo has no committed model launchers:
+
+```bash
+git ls-files 'scripts/start*.sh'
+```
+
+Expected: no output.
+
+After a real install, `oc-local` should fail closed until you accept a model:
+
+```bash
+./install.sh
+model-manager list
+oc-local qwen reliable --info
+```
+
+Expected: fails with guidance until you accept a model.
+
 ## Architecture
 
 Runtime services on the GPU host:
