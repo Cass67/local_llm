@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenCode web frontend
+
+[Service]
+Environment=OPENCODE_WEB_HOST=127.0.0.1
+Environment=OPENCODE_WEB_PORT=3002
+EnvironmentFile=%h/.config/local_llm/opencode-web.env
+ExecStart=/bin/sh -lc 'exec $${OPENCODE_WEB_COMMAND:?set OPENCODE_WEB_COMMAND in ~/.config/local_llm/opencode-web.env}'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

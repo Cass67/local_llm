@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Proxy Open WebUI and expose a safe local LLM model switcher."""
+"""Proxy the browser UI and expose a safe local LLM model switcher."""
 
 from __future__ import annotations
 
@@ -23,7 +23,13 @@ CURRENT_MODEL_ENV = Path(
     os.environ.get("LLAMA_CURRENT_MODEL_ENV", str(LLAMA_DIR / "current-model.env"))
 )
 LLAMA_API_BASE = os.environ.get("LLAMA_API_BASE", "http://127.0.0.1:8080").rstrip("/")
-OPENWEBUI_BASE_URL = os.environ.get("OPENWEBUI_BASE_URL", "http://127.0.0.1:3002").rstrip("/")
+WEB_UPSTREAM = (
+    os.environ.get("LOCAL_LLM_WEB_UPSTREAM")
+    or os.environ.get("OPENWEBUI_BASE_URL")
+    or "http://127.0.0.1:3002"
+).rstrip("/")
+VALID_INJECT_TARGETS = {"opencode", "none"}
+SYNC_OPENWEBUI = os.environ.get("LOCAL_LLM_SYNC_OPENWEBUI", "false").lower() == "true"
 SWITCH_TIMEOUT_SECONDS = int(os.environ.get("SWITCH_TIMEOUT_SECONDS", "180"))
 SWITCHER_HOST = os.environ.get("SWITCHER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -55,6 +61,17 @@ CACHE_VALIDATION_HEADERS = {
 PROXY_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
 
 switch_lock = threading.Lock()
+
+
+def validate_inject_target(target: str) -> str:
+    normalized = target.strip().lower()
+    if normalized not in VALID_INJECT_TARGETS:
+        allowed = ", ".join(sorted(VALID_INJECT_TARGETS))
+        raise ValueError(f"LOCAL_LLM_INJECT_TARGET must be one of: {allowed}")
+    return normalized
+
+
+INJECT_TARGET = validate_inject_target(os.environ.get("LOCAL_LLM_INJECT_TARGET", "opencode"))
 
 
 @dataclass(frozen=True)
@@ -355,13 +372,15 @@ def switch_to_model(model_id: object) -> dict[str, Any]:
             raise ApiError(502, f"restart failed: {detail}") from exc
         if not wait_for_alias(model.alias, SWITCH_TIMEOUT_SECONDS):
             raise ApiError(504, f"timed out waiting for llama-server alias {model.alias}")
-        openwebui_sync = sync_openwebui_selected_model(model.alias)
-    return {
+        openwebui_sync = sync_openwebui_selected_model(model.alias) if SYNC_OPENWEBUI else None
+    payload = {
         "ok": True,
         "model": model.as_dict(),
-        "openwebui": openwebui_sync,
         "reload_recommended": True,
     }
+    if openwebui_sync is not None:
+        payload["openwebui"] = openwebui_sync
+    return payload
 
 
 def current_model_payload() -> dict[str, Any]:
@@ -418,7 +437,18 @@ def injected_html_headers(headers: list[tuple[str, str]]) -> list[tuple[str, str
     return [(name, value) for name, value in headers if header_name(name) not in blocked]
 
 
-def inject_widget(body: bytes, content_type: str) -> bytes:
+def should_rewrite_html_response(method: str, content_type: str, target: str) -> bool:
+    return (
+        method != "HEAD"
+        and validate_inject_target(target) == "opencode"
+        and "text/html" in content_type.lower()
+    )
+
+
+def inject_switcher_widget(body: bytes, content_type: str, target: str) -> bytes:
+    if validate_inject_target(target) == "none" or "text/html" not in content_type.lower():
+        return body
+
     charset = "utf-8"
     for part in content_type.split(";"):
         part = part.strip()
@@ -432,12 +462,18 @@ def inject_widget(body: bytes, content_type: str) -> bytes:
 
     snippet = widget_snippet()
     lower_text = text.lower()
+    if "local-llm-switcher" in lower_text:
+        return body
     if "</body>" in lower_text:
         index = lower_text.rfind("</body>")
         text = text[:index] + snippet + text[index:]
     else:
         text += snippet
     return text.encode(charset)
+
+
+def inject_widget(body: bytes, content_type: str) -> bytes:
+    return inject_switcher_widget(body, content_type, INJECT_TARGET)
 
 
 def widget_snippet() -> str:
@@ -625,7 +661,7 @@ def fallback_html() -> bytes:
 <head><meta charset="utf-8"><title>Local LLM Switcher</title></head>
 <body>
   <h1>Local LLM Switcher</h1>
-  <p>This fallback page uses the same local switcher APIs as the Open WebUI widget.</p>
+  <p>This fallback page uses the same local switcher APIs as the browser UI widget.</p>
   <select id="fallback-model">{options}</select>
   <button id="fallback-switch">Switch</button>
   <pre id="fallback-status">loading</pre>
@@ -700,7 +736,7 @@ class SwitcherHandler(BaseHTTPRequestHandler):
             elif self.command == "GET" and path == "/_switcher":
                 self.send_bytes(200, fallback_html(), "text/html; charset=utf-8")
             elif self.command in PROXY_METHODS:
-                self.proxy_openwebui()
+                self.proxy_web_upstream()
             else:
                 self.send_json(405, {"detail": "method not allowed"})
         except ApiError as exc:
@@ -727,10 +763,10 @@ class SwitcherHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         self.close_connection = True
 
-    def proxy_openwebui(self) -> None:
-        upstream = urlsplit(OPENWEBUI_BASE_URL)
+    def proxy_web_upstream(self) -> None:
+        upstream = urlsplit(WEB_UPSTREAM)
         if upstream.scheme not in {"http", "https"}:
-            self.send_json(502, {"detail": "OPENWEBUI_BASE_URL must be http or https"})
+            self.send_json(502, {"detail": "LOCAL_LLM_WEB_UPSTREAM must be http or https"})
             return
 
         path = self.path if self.path.startswith("/") else f"/{self.path}"
@@ -747,7 +783,7 @@ class SwitcherHandler(BaseHTTPRequestHandler):
             response = connection.getresponse()
             self.send_proxied_response(response)
         except OSError as exc:
-            self.send_json(502, {"detail": f"Open WebUI proxy failed: {exc}"})
+            self.send_json(502, {"detail": f"web upstream proxy failed: {exc}"})
         finally:
             connection.close()
 
@@ -773,7 +809,7 @@ class SwitcherHandler(BaseHTTPRequestHandler):
     def send_proxied_response(self, response: http.client.HTTPResponse) -> None:
         headers = response.getheaders()
         content_type = response.getheader("Content-Type", "") or ""
-        is_html = self.command != "HEAD" and "text/html" in content_type.lower()
+        is_html = should_rewrite_html_response(self.command, content_type, INJECT_TARGET)
 
         if is_html:
             body = inject_widget(response.read(), content_type)

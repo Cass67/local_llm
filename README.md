@@ -1,12 +1,12 @@
 # local_llm
 
-`local_llm` is a bootstrap engine for building your own local GGUF model workflow. A fresh pull contains the installer, discovery, benchmark, acceptance, export/restore, OpenCode wrapper, and support files for planned Open WebUI switcher workflows; it does not define a public default model collection.
+`local_llm` is a bootstrap engine for building your own local GGUF model workflow. A fresh pull contains the installer, discovery, benchmark, acceptance, export/restore, OpenCode wrapper, and support files for planned OpenCode web switcher workflows; it does not define a public default model collection.
 
 The normal setup is split across two machines. Replace the example hostnames with your own:
 
 - The client machine runs OpenCode and the `oc-local` wrapper.
-- A GPU host runs `llama-server`, generated launchers, Open WebUI, Caddy, and the local switcher.
-- Cloudflare Access can protect the public Open WebUI hostname while local services stay bound to private interfaces.
+- A GPU host runs `llama-server`, generated launchers, OpenCode web, Caddy, and the local switcher.
+- Cloudflare Access can protect the public browser hostname while local services stay bound to private interfaces.
 
 ![local_llm architecture](docs/assets/local-llm-architecture.svg)
 
@@ -36,8 +36,8 @@ Use placeholders literally as placeholders: replace `<host>`, `<source>`, and `<
 - Export/restore for moving accepted model state between machines.
 - OpenCode wrapper support through `oc-local <family> <profile> --info` and `--remote`.
 - User-systemd `llama-server.service` support through `run-current-model.sh`.
-- Planned Open WebUI switcher API and injected bottom-right `LLM` pill support.
-- Caddy routing for Open WebUI, WebSockets, switcher APIs, and HTML injection.
+- Planned OpenCode web switcher API and injected bottom-right `LLM` pill support.
+- Caddy routing for OpenCode web, WebSockets, switcher APIs, and HTML injection.
 - Guardrails for shell syntax, shellcheck, and smoke tests.
 
 Use this repo when you want an operator workflow for finding, benchmarking, accepting, backing up, and restoring models that are specific to your hardware.
@@ -84,26 +84,40 @@ Expected: fails with guidance until you accept a model.
 
 Runtime services on the GPU host:
 
+Default browser architecture:
+
+```text
+Cloudflare Access -> Caddy :3001 -> local-llm-switcher :3003 -> OpenCode web :3002 -> llama-server :8080
+```
+
 | Component | Type | Address | Purpose |
 | --- | --- | --- | --- |
 | `llama-server.service` | user systemd | `127.0.0.1:8080` | Runs the accepted generated launcher selected by `current-model.env`. |
-| `local-llm-switcher.service` | user systemd | `127.0.0.1:3003` | Serves switcher APIs and injects the Open WebUI pill. |
-| `open-webui` | Docker container | `127.0.0.1:3002` | Open WebUI application and SQLite data volume. |
-| `local-llm-caddy` | Docker container | `127.0.0.1:3001` | Front proxy for Open WebUI, WebSockets, and switcher routes. |
+| `local-llm-switcher.service` | user systemd | `127.0.0.1:3003` | Serves switcher APIs and injects the OpenCode web pill. |
+| `opencode-web` | web service | `127.0.0.1:3002` | OpenCode web is the primary browser UI. |
+| `local-llm-caddy` | Docker container | `127.0.0.1:3001` | Public local front proxy to the switcher service. |
 | Cloudflare tunnel | external service | `llm.example.com -> http://localhost:3001` | Public entrypoint protected by Cloudflare Access. |
 
-Cloudflare is the public security boundary. The tunnel publishes only Caddy on `localhost:3001`; Open WebUI, the switcher, and `llama-server` stay bound to local/private addresses. Cloudflare Access should enforce identity before a browser reaches Open WebUI.
+Cloudflare is the public security boundary. The tunnel publishes only Caddy on `localhost:3001`; OpenCode web, the switcher, and `llama-server` stay bound to local/private addresses. Cloudflare Access should enforce identity before a browser reaches OpenCode web.
 
-![Open WebUI switcher pill](docs/assets/open-webui-switcher-pill.svg)
+Primary browser UI defaults:
+
+```bash
+LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002
+LOCAL_LLM_INJECT_TARGET=opencode
+```
+
+`OPENWEBUI_BASE_URL` is deprecated and kept only as a temporary switcher fallback. If both variables are set, `LOCAL_LLM_WEB_UPSTREAM` wins.
 
 Request flow:
 
 1. Browser opens the Cloudflare hostname.
 2. Cloudflare Access login and policy check complete.
 3. Cloudflare forwards to Caddy on `:3001`.
-4. Caddy sends API/assets/WebSockets to Open WebUI on `:3002`.
-5. Caddy sends page HTML and `/api/local-llm/*` to the switcher on `:3003`.
-6. `llama-server` serves the active accepted model on `:8080`.
+4. Caddy sends `/api/local-llm/*`, `/_switcher`, and injectable OpenCode web browser routes to the switcher on `:3003`.
+5. WebSocket upgrade routes such as `/ws/*`, `/socket.io/*`, and `/pty/*/connect` bypass injection and go directly to the OpenCode web upstream on `:3002`.
+6. The switcher proxies OpenCode web upstream on `:3002` and injects the browser pill into HTML.
+7. `llama-server` serves the active accepted model on `:8080`.
 
 ## Install Guide
 
@@ -123,7 +137,7 @@ Server machine:
 - Linux host with user systemd.
 - `llama.cpp` built under the chosen `$REMOTE_DIR`.
 - GPU runtime configured for your hardware.
-- Docker installed for Open WebUI and Caddy.
+- Docker installed for Caddy.
 - Cloudflare tunnel routing the public hostname to `http://localhost:3001` if public browser access is wanted.
 
 Set these shell variables while following the examples:
@@ -171,7 +185,7 @@ Names in human output use this convention:
 
 - source: Hugging Face repo or local profile source.
 - file: selected GGUF file or quant.
-- launcher: generated runnable entry used by OpenCode and Open WebUI.
+- launcher: generated runnable entry used by OpenCode.
 
 Accepting a benchmark records accepted metadata and generated launchers under `$HOME/.local/share/local_llm` / `runs`. `model-manager deploy --target remote:<host> --dry-run` previews the generated launchers and switcher/service files that would need to be copied to the GPU host; it does not copy files yet.
 
@@ -179,17 +193,16 @@ Accepting a benchmark records accepted metadata and generated launchers under `$
 
 At this stage, the fresh checkout has installed client tools and recorded accepted launcher state locally. It has not deployed that generated state to the GPU host.
 
-Server service and Open WebUI wiring are still a later/manual setup step. Do not enable `llama-server.service` from a fresh checkout until generated launcher state has been manually copied from the deploy preview plan.
+Server service and OpenCode web wiring are still a later/manual setup step. Do not enable `llama-server.service` from a fresh checkout until generated launcher state has been manually copied from the deploy preview plan.
 
 The repo-managed support files are templates/helpers for that later step:
 
 ```bash
-scp docker-compose.yml "$MODEL_HOST:$REMOTE_DIR/docker-compose.yml"
 scp scripts/run-current-model.sh scripts/local-llm-switcher.py \
   scripts/Caddyfile.local-llm scripts/run-local-llm-caddy-container.sh \
   "$MODEL_HOST:$REMOTE_DIR/"
-scp scripts/local-llm-switcher.service \
-  "$MODEL_HOST:/home/$MODEL_USER/.config/systemd/user/local-llm-switcher.service"
+scp scripts/local-llm-switcher.service scripts/opencode-web.service \
+  "$MODEL_HOST:/home/$MODEL_USER/.config/systemd/user/"
 ssh "$MODEL_HOST" "chmod +x '$REMOTE_DIR'/run-current-model.sh '$REMOTE_DIR'/run-local-llm-caddy-container.sh"
 ```
 
@@ -212,19 +225,39 @@ Inspect logs when startup fails:
 ssh "$MODEL_HOST" 'journalctl --user -u llama-server.service -n 160 --no-pager'
 ```
 
-### 5. Manual WebUI Support Files
+### 5. Manual Web Support Files
 
-Open WebUI, Caddy, and the switcher also require manual template setup until deploy support exists. Start only the services whose unit files, containers, and config have been copied and reviewed on the GPU host.
+OpenCode web, Caddy, and the switcher also require manual template setup until deploy support exists. Start only the services whose unit files, containers, and config have been copied and reviewed on the GPU host.
+
+The exact OpenCode web command may vary by installation. Configure the user service with an environment file at `%h/.config/local_llm/opencode-web.env` before starting it:
+
+```bash
+ssh "$MODEL_HOST" 'mkdir -p ~/.config/local_llm'
+ssh "$MODEL_HOST" "cat >~/.config/local_llm/opencode-web.env" <<'EOF'
+OPENCODE_WEB_COMMAND='<replace-with-your-opencode-web-command> --host 127.0.0.1 --port 3002'
+EOF
+```
+
+Adapt the example command to your OpenCode web installation, but keep an explicit bind address of 127.0.0.1 and port 3002 in OPENCODE_WEB_COMMAND.
+
+The `scripts/opencode-web.service` template runs `OPENCODE_WEB_COMMAND` from the environment file and fails closed if it is unset or empty. The environment file is required; create it before enabling `opencode-web.service`.
+
+Configure the switcher service with the same remote directory used by the deploy preview, plus the OpenCode web upstream and injection target:
+
+```bash
+ssh "$MODEL_HOST" "cat >~/.config/local_llm/local-llm-switcher.env" <<EOF
+LLAMA_DIR=$REMOTE_DIR
+LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002
+LOCAL_LLM_INJECT_TARGET=opencode
+EOF
+```
+
+The `scripts/local-llm-switcher.service` template reads `%h/.config/local_llm/local-llm-switcher.env`; set `LLAMA_DIR` to the deployed support-file directory before enabling `local-llm-switcher.service`.
 
 ```bash
 ssh "$MODEL_HOST" 'systemctl --user daemon-reload'
+ssh "$MODEL_HOST" 'systemctl --user enable --now opencode-web.service'
 ssh "$MODEL_HOST" 'systemctl --user enable --now local-llm-switcher.service'
-ssh "$MODEL_HOST" "cd '$REMOTE_DIR' && LOCAL_LLM_CADDYFILE=./Caddyfile.local-llm docker compose up -d"
-```
-
-If Compose is unavailable, start Caddy with the helper:
-
-```bash
 ssh "$MODEL_HOST" "'$REMOTE_DIR'/run-local-llm-caddy-container.sh"
 ```
 
@@ -248,7 +281,7 @@ ssh "$MODEL_HOST" 'cloudflared tunnel create local-llm'
 ssh "$MODEL_HOST" "cloudflared tunnel route dns local-llm '$PUBLIC_LLM_HOST'"
 ```
 
-Create or review the tunnel config before installing the system service so the service reads the intended user config. The public hostname should point at Caddy, not directly at Open WebUI. Use placeholders for Cloudflare values and keep this file off git-tracked paths:
+Create or review the tunnel config before installing the system service so the service reads the intended user config. The public hostname should point at Caddy, which proxies OpenCode web and switcher APIs. Use placeholders for Cloudflare values and keep this file off git-tracked paths:
 
 ```bash
 ssh "$MODEL_HOST" 'mkdir -p ~/.cloudflared'
@@ -274,13 +307,15 @@ The effective mapping is `$PUBLIC_LLM_HOST -> service: http://localhost:3001`.
 ### 7. Verify Manual Wiring
 
 ```bash
-ssh "$MODEL_HOST" 'systemctl --user status local-llm-switcher.service'
-ssh "$MODEL_HOST" 'docker ps --filter name=open-webui'
+ssh "$MODEL_HOST" 'systemctl --user status opencode-web.service local-llm-switcher.service'
 ssh "$MODEL_HOST" 'docker ps --filter name=local-llm-caddy'
-ssh "$MODEL_HOST" 'curl -fsS http://127.0.0.1:3001/api/local-llm/current'
+ssh "$MODEL_HOST" 'curl -fsS http://127.0.0.1:3001/_switcher'
+ssh "$MODEL_HOST" 'curl -fsS http://127.0.0.1:3001/api/local-llm/models'
 ```
 
-Open WebUI listens on http://127.0.0.1:3002. Caddy listens on http://127.0.0.1:3001. local-llm-switcher listens on http://127.0.0.1:3003. Cloudflare stays pointed at port 3001.
+If available on the GPU host, `caddy validate` and `systemd-analyze verify` are optional extra checks for the Caddyfile and user service templates.
+
+OpenCode web listens on http://127.0.0.1:3002. Caddy listens on http://127.0.0.1:3001. local-llm-switcher listens on http://127.0.0.1:3003. Cloudflare stays pointed at port 3001.
 
 ## Helper Tools
 
@@ -329,15 +364,16 @@ update-manager --candidates
 
 ## Web Switcher
 
-The public Open WebUI path uses three local services on the GPU host:
+The public browser path defaults to OpenCode web and uses three local services on the GPU host:
 
 - Caddy listens on http://127.0.0.1:3001.
-- Open WebUI listens on http://127.0.0.1:3002.
+- OpenCode web listens on http://127.0.0.1:3002.
 - local-llm-switcher listens on http://127.0.0.1:3003.
 - Cloudflare stays pointed at port 3001, so the public tunnel does not need to change.
 - Caddy routes `/api/local-llm/*` and `/_switcher` to the switcher.
-- Caddy routes Open WebUI API, asset, and WebSocket traffic directly to Open WebUI.
-- Caddy routes page HTML through the switcher so it can inject the bottom-right `LLM` pill.
+- Caddy routes WebSocket upgrade paths such as `/ws/*`, `/socket.io/*`, and `/pty/*/connect` directly to OpenCode web on http://127.0.0.1:3002 so they bypass injection.
+- Caddy routes all other OpenCode web browser traffic to the switcher.
+- The switcher proxies OpenCode web upstream and injects the bottom-right `LLM` pill into HTML.
 
 Browser switch flow:
 
@@ -345,9 +381,7 @@ Browser switch flow:
 2. The switcher writes `$REMOTE_DIR/current-model.env`.
 3. The switcher restarts `llama-server.service`.
 4. The switcher waits until `/v1/models` reports the expected alias.
-5. The switcher updates Open WebUI's stored selected model.
-6. The switcher ensures an Open WebUI model row and read grants exist for that alias.
-7. The browser navigates to a fresh chat pane without prompting.
+5. The browser navigates to a fresh OpenCode web pane without prompting.
 
 Switcher endpoints:
 
@@ -356,16 +390,24 @@ Switcher endpoints:
 | `GET /api/local-llm/models` | List configured launcher/profile choices. |
 | `GET /api/local-llm/current` | Show the selected `current-model.env` entry and live model aliases. |
 | `POST /api/local-llm/switch` | Write `current-model.env`, restart `llama-server.service`, and wait for the requested alias. |
-| `GET /_switcher` | Fallback page using the same APIs when the injected Open WebUI widget is unavailable. |
+| `GET /_switcher` | Fallback page using the same APIs when the injected browser widget is unavailable. |
 
 Operational checks:
 
 ```bash
-ssh "$MODEL_HOST" 'docker restart open-webui'
-ssh "$MODEL_HOST" "systemctl --user restart local-llm-switcher.service llama-server.service && '$REMOTE_DIR'/run-local-llm-caddy-container.sh"
-ssh "$MODEL_HOST" 'docker rm -f local-llm-caddy && systemctl --user disable --now local-llm-switcher.service'
-ssh "$MODEL_HOST" 'docker rm -f open-webui && docker run -d --name open-webui --restart unless-stopped --network host -e PORT=3001 -v open-webui:/app/backend/data ghcr.io/open-webui/open-webui:main'
+ssh "$MODEL_HOST" 'systemctl --user restart opencode-web.service local-llm-switcher.service llama-server.service'
+ssh "$MODEL_HOST" "'$REMOTE_DIR'/run-local-llm-caddy-container.sh"
+ssh "$MODEL_HOST" 'systemctl --user status opencode-web.service local-llm-switcher.service llama-server.service'
+ssh "$MODEL_HOST" 'journalctl --user -u opencode-web.service -u local-llm-switcher.service -u llama-server.service -n 160 --no-pager'
 ```
+
+## Optional Legacy: Open WebUI
+
+Open WebUI is no longer the default browser UI. Use it only if you want its chat/RAG interface. The switcher pill target is OpenCode by default.
+
+Open WebUI is optional legacy only. It can still be wired as an optional legacy upstream by setting `LOCAL_LLM_WEB_UPSTREAM` to that service. Set `LOCAL_LLM_SYNC_OPENWEBUI=true` only if you need legacy SQLite selected-model sync for an `open-webui` container.
+
+The repo's `docker-compose.yml` is the legacy Open WebUI compose file. Do not copy or run it for the default OpenCode web setup because it starts `open-webui` and makes Caddy depend on that container.
 
 ## Model Workflow
 
@@ -395,9 +437,8 @@ model-manager export > local-llm-backup.json
 ## Verification
 
 ```bash
-bash -n test_oc_local.sh
-shellcheck test_oc_local.sh
+bash -n install.sh installer.sh scripts/model-discovery.sh scripts/model-manager.sh scripts/oc-local scripts/update-manager.sh test_oc_local.sh scripts/bench-installed-kv-remote.sh scripts/bench-mtp-remote.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh
+shellcheck install.sh installer.sh scripts/model-discovery.sh scripts/model-manager.sh scripts/oc-local scripts/update-manager.sh test_oc_local.sh scripts/bench-installed-kv-remote.sh scripts/bench-mtp-remote.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh
+python3 -m py_compile scripts/*.py
 ./test_oc_local.sh
 ```
-
-During the zero-model migration, the full smoke test may stop at the expected tracked-launcher check until launcher/profile state is removed in the next task.

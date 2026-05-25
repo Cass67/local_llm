@@ -4038,6 +4038,12 @@ PY
   fi
 
   local host="${target#remote:}"
+  local env_remote_dir="$remote_dir"
+  local env_remote_dir_warning=false
+  if [[ "$env_remote_dir" == "~" || "$env_remote_dir" == ~/* || "$env_remote_dir" != /* ]]; then
+    env_remote_dir='/home/<user>/llama.cpp'
+    env_remote_dir_warning=true
+  fi
   printf 'Deploy plan\n'
   printf 'target=%s\n' "$target"
   printf 'remote_dir=%s\n' "$remote_dir"
@@ -4046,12 +4052,22 @@ PY
     printf '  %s %s %s\n' "$family" "$alias" "$accepted"
     printf '    copy launcher: %s -> %s:%s\n' "${launcher#launcher=}" "$host" "${remote_path#remote=}"
   done <<<"$plan_rows"
-  printf 'Switcher/service files:\n'
+  printf 'OpenCode support files:\n'
+  printf '  required env file: ~/.config/local_llm/opencode-web.env\n'
+  printf "    OPENCODE_WEB_COMMAND='<replace-with-your-opencode-web-command> --host 127.0.0.1 --port 3002'\n"
+  printf '  required env file: ~/.config/local_llm/local-llm-switcher.env\n'
+  if [[ "$env_remote_dir_warning" == true ]]; then
+    printf '    warning: replace /home/<user>/llama.cpp with the absolute path on the GPU host\n'
+  fi
+  printf '    LLAMA_DIR=%s\n' "$env_remote_dir"
+  printf '    LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002\n'
+  printf '    LOCAL_LLM_INJECT_TARGET=opencode\n'
   printf '  copy support: %s/scripts/run-current-model.sh -> %s:%s/run-current-model.sh\n' "$repo_root" "$host" "$remote_dir"
   printf '  copy support: %s/scripts/local-llm-switcher.py -> %s:%s/local-llm-switcher.py\n' "$repo_root" "$host" "$remote_dir"
   printf '  copy support: %s/scripts/Caddyfile.local-llm -> %s:%s/Caddyfile.local-llm\n' "$repo_root" "$host" "$remote_dir"
   printf '  copy support: %s/scripts/run-local-llm-caddy-container.sh -> %s:%s/run-local-llm-caddy-container.sh\n' "$repo_root" "$host" "$remote_dir"
   printf '  copy service: %s/scripts/local-llm-switcher.service -> %s:~/.config/systemd/user/local-llm-switcher.service\n' "$repo_root" "$host"
+  printf '  copy service: %s/scripts/opencode-web.service -> %s:~/.config/systemd/user/opencode-web.service\n' "$repo_root" "$host"
   printf '%s\n' 'Dry-run only: no files copied.'
 }
 

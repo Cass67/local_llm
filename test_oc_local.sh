@@ -59,6 +59,10 @@ assert_contains "$help_output" "-k"
 assert_not_contains "$help_output" "speed     32k context"
 assert_not_contains "$help_output" "tiny      40k context"
 readme_contents="$(<"$repo_root/README.md")"
+readme_default_install_section="${readme_contents%%## Optional Legacy: Open WebUI*}"
+caddyfile_contents="$(<"$repo_root/scripts/Caddyfile.local-llm")"
+switcher_service_contents="$(<"$repo_root/scripts/local-llm-switcher.service")"
+opencode_web_service_contents="$(<"$repo_root/scripts/opencode-web.service")"
 model_manager_contents="$(<"$repo_root/scripts/model-manager.sh")"
 model_discovery_contents="$(<"$repo_root/scripts/model-discovery.sh")"
 heretic_context_contents="$(<"$repo_root/docs/benchmarks/2026-05-15-heretic-context.md")"
@@ -70,6 +74,61 @@ fi
 assert_contains "$readme_contents" "Fresh pull workflow"
 assert_contains "$readme_contents" "\`local_llm\` is a bootstrap engine"
 assert_contains "$readme_contents" "./install.sh"
+assert_contains "$readme_contents" "OpenCode web is the primary browser UI"
+assert_contains "$readme_contents" "Cloudflare Access -> Caddy :3001 -> local-llm-switcher :3003 -> OpenCode web :3002 -> llama-server :8080"
+assert_contains "$readme_contents" "## Optional Legacy: Open WebUI"
+assert_contains "$readme_contents" "Open WebUI is no longer the default browser UI. Use it only if you want its chat/RAG interface. The switcher pill target is OpenCode by default."
+assert_contains "$readme_contents" "injectable OpenCode web browser routes to the switcher on"
+assert_contains "$readme_contents" "WebSocket upgrade routes such as"
+assert_contains "$readme_contents" "bypass injection and go directly to the OpenCode web upstream"
+assert_contains "$readme_contents" "The switcher proxies OpenCode web upstream"
+assert_contains "$readme_contents" "LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002"
+assert_contains "$readme_contents" "\`OPENWEBUI_BASE_URL\` is deprecated"
+assert_contains "$readme_contents" "\`LOCAL_LLM_WEB_UPSTREAM\` wins"
+assert_contains "$readme_contents" "LOCAL_LLM_INJECT_TARGET=opencode"
+assert_contains "$readme_contents" "Open WebUI is optional legacy"
+assert_not_contains "$readme_default_install_section" "scp docker-compose.yml"
+assert_not_contains "$readme_default_install_section" "docker compose up -d"
+assert_contains "$readme_default_install_section" "run-local-llm-caddy-container.sh"
+assert_not_contains "$readme_contents" "The public Open WebUI path uses"
+assert_not_contains "$readme_contents" "Open WebUI application and SQLite data volume"
+assert_not_contains "$readme_contents" "public Open WebUI path"
+assert_not_contains "$readme_contents" "Caddy routes Open WebUI API/assets"
+assert_not_contains "$readme_contents" "Open WebUI listens"
+assert_not_contains "$readme_contents" "Open WebUI selected-model DB sync"
+assert_contains "$switcher_service_contents" "Description=Local LLM OpenCode Web Switcher Proxy"
+assert_contains "$switcher_service_contents" "EnvironmentFile=-%h/.config/local_llm/local-llm-switcher.env"
+assert_contains "$switcher_service_contents" "\$\${LLAMA_DIR:?set LLAMA_DIR in ~/.config/local_llm/local-llm-switcher.env}"
+assert_contains "$switcher_service_contents" "\$\$LLAMA_DIR/local-llm-switcher.py"
+assert_not_contains "$switcher_service_contents" "OPENWEBUI_BASE_URL"
+assert_contains "$opencode_web_service_contents" "Description=OpenCode web frontend"
+assert_contains "$opencode_web_service_contents" "127.0.0.1"
+assert_contains "$opencode_web_service_contents" "OPENCODE_WEB_COMMAND"
+assert_contains "$opencode_web_service_contents" "EnvironmentFile=%h/.config/local_llm/opencode-web.env"
+assert_contains "$opencode_web_service_contents" "ExecStart=/bin/sh -lc 'exec \$\${OPENCODE_WEB_COMMAND:?set OPENCODE_WEB_COMMAND in ~/.config/local_llm/opencode-web.env}'"
+assert_contains "$opencode_web_service_contents" "RestartSec=3"
+assert_contains "$caddyfile_contents" "OpenCode web upstream"
+assert_contains "$caddyfile_contents" ":3001"
+assert_contains "$caddyfile_contents" "handle /api/local-llm/*"
+assert_contains "$caddyfile_contents" "handle /_switcher"
+assert_contains "$caddyfile_contents" "reverse_proxy 127.0.0.1:3003"
+assert_contains "$caddyfile_contents" "OpenCode WebSocket upgrades bypass injection"
+assert_contains "$caddyfile_contents" "handle /ws/*"
+assert_contains "$caddyfile_contents" "handle /socket.io/*"
+assert_contains "$caddyfile_contents" "handle /pty/*/connect"
+assert_contains "$caddyfile_contents" $'handle /pty/*/connect {\n\t\treverse_proxy 127.0.0.1:3002'
+assert_contains "$caddyfile_contents" "reverse_proxy 127.0.0.1:3002"
+assert_not_contains "$caddyfile_contents" "open-webui"
+assert_not_contains "$caddyfile_contents" "handle /_app/*"
+assert_not_contains "$caddyfile_contents" "handle /ollama/*"
+ws_route_line="$(line_number_for "$caddyfile_contents" "handle /ws/*")"
+socketio_route_line="$(line_number_for "$caddyfile_contents" "handle /socket.io/*")"
+pty_route_line="$(line_number_for "$caddyfile_contents" "handle /pty/*/connect")"
+catch_all_route_line="$(line_number_for "$caddyfile_contents" "handle {")"
+if ((ws_route_line >= catch_all_route_line || socketio_route_line >= catch_all_route_line || pty_route_line >= catch_all_route_line)); then
+  printf 'expected OpenCode WebSocket routes to appear before catch-all route\n' >&2
+  exit 1
+fi
 if [[ ! -f "$repo_root/install.sh" ]]; then
   printf 'expected install.sh wrapper to exist\n' >&2
   exit 1
@@ -104,7 +163,7 @@ assert_contains "$readme_contents" "Expected: fails with guidance until you acce
 assert_contains "$readme_contents" "## Architecture"
 assert_contains "$readme_contents" "## Install Guide"
 assert_contains "$readme_contents" "docs/assets/local-llm-architecture.svg"
-assert_contains "$readme_contents" "docs/assets/open-webui-switcher-pill.svg"
+assert_not_contains "$readme_contents" "docs/assets/open-webui-switcher-pill.svg"
 assert_contains "$readme_contents" "Cloudflare is the public security boundary"
 assert_contains "$readme_contents" "Cloudflare Access login and policy check"
 assert_contains "$readme_contents" "Do not commit Cloudflare credentials"
@@ -117,8 +176,10 @@ assert_contains "$readme_contents" "sudo systemctl enable --now cloudflared"
 assert_contains "$readme_contents" "service: http://localhost:3001"
 assert_contains "$readme_contents" "MODEL_HOST=gpu-box.example.lan"
 assert_contains "$readme_contents" "MODEL_API_BASE=http://gpu-box.example.lan:8080/v1"
-assert_contains "$readme_contents" "LOCAL_LLM_CADDYFILE=./Caddyfile.local-llm docker compose up -d"
-assert_contains "$readme_contents" "scp docker-compose.yml \"\$MODEL_HOST:\$REMOTE_DIR/docker-compose.yml\""
+assert_not_contains "$readme_default_install_section" "LOCAL_LLM_CADDYFILE=./Caddyfile.local-llm docker compose up -d"
+assert_not_contains "$readme_default_install_section" "scp docker-compose.yml \"\$MODEL_HOST:\$REMOTE_DIR/docker-compose.yml\""
+assert_contains "$readme_contents" "The repo's \`docker-compose.yml\` is the legacy Open WebUI compose file."
+assert_contains "$readme_contents" "Do not copy or run it for the default OpenCode web setup"
 assert_not_contains "$readme_contents" "not the responsive daily driver"
 assert_not_contains "$readme_contents" "Qwen 35B defaults are vision-enabled"
 assert_not_contains "$readme_contents" "Quant, KV Q4/Q5, and MMQ changes remain future benchmark/promotion work"
@@ -146,7 +207,7 @@ assert_contains "$readme_contents" "Accepting a benchmark records accepted metad
 assert_contains "$readme_contents" "model-manager deploy --target remote:<host> --dry-run\` previews the generated launchers and switcher/service files"
 assert_contains "$readme_contents" "it does not copy files yet"
 assert_contains "$readme_contents" "Do not enable \`llama-server.service\` from a fresh checkout until generated launcher state has been manually copied from the deploy preview plan."
-assert_contains "$readme_contents" "Server service and Open WebUI wiring are still a later/manual setup step."
+assert_contains "$readme_contents" "Server service and OpenCode web wiring are still a later/manual setup step."
 assert_not_contains "$readme_contents" "systemctl --user enable --now llama-server.service"
 assert_not_contains "$readme_contents" "Deployment and switcher wiring happen later through the generated/deploy workflow."
 assert_not_contains "$readme_contents" "Accepting a benchmark promotes the model"
@@ -167,7 +228,7 @@ assert_not_contains "$model_discovery_contents" "Gemma-4-31B-it"
 assert_not_contains "$model_discovery_contents" "gpt-oss-20B"
 assert_contains "$heretic_context_contents" "historical benchmark"
 assert_contains "$heretic_context_contents" "not an active curated default"
-assert_contains "$readme_contents" "shellcheck test_oc_local.sh"
+assert_contains "$readme_contents" "shellcheck install.sh installer.sh scripts/model-discovery.sh scripts/model-manager.sh scripts/oc-local scripts/update-manager.sh test_oc_local.sh scripts/bench-installed-kv-remote.sh scripts/bench-mtp-remote.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh"
 assert_contains "$readme_contents" "systemctl --user restart llama-server.service"
 assert_contains "$readme_contents" "run-current-model.sh"
 assert_contains "$readme_contents" "REMOTE_SCRIPT=<generated-launcher>"
@@ -176,7 +237,12 @@ assert_not_contains "$readme_contents" "scripts/start11.sh scripts/start12.sh sc
 assert_not_contains "$readme_contents" "scripts/start15.sh scripts/run-current-model.sh"
 assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'systemctl --user restart llama-server.service'"
 assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'journalctl --user -u llama-server.service -n 160 --no-pager'"
-assert_contains "$readme_contents" "Open WebUI listens on http://127.0.0.1:3002"
+assert_contains "$readme_contents" "OpenCode web listens on http://127.0.0.1:3002"
+assert_contains "$readme_contents" "%h/.config/local_llm/opencode-web.env"
+assert_contains "$readme_contents" "OPENCODE_WEB_COMMAND='<replace-with-your-opencode-web-command> --host 127.0.0.1 --port 3002'"
+assert_contains "$readme_contents" "Adapt the example command to your OpenCode web installation, but keep an explicit bind address of 127.0.0.1 and port 3002 in OPENCODE_WEB_COMMAND."
+assert_contains "$readme_contents" "The environment file is required; create it before enabling \`opencode-web.service\`."
+assert_contains "$readme_contents" "The exact OpenCode web command may vary"
 assert_contains "$readme_contents" "Caddy listens on http://127.0.0.1:3001"
 assert_contains "$readme_contents" "local-llm-switcher listens on http://127.0.0.1:3003"
 assert_contains "$readme_contents" "Cloudflare stays pointed at port 3001"
@@ -184,10 +250,29 @@ assert_contains "$readme_contents" "local-llm-caddy"
 assert_contains "$readme_contents" "run-local-llm-caddy-container.sh"
 assert_contains "$readme_contents" "Caddyfile.local-llm"
 assert_contains "$readme_contents" "open-webui"
+assert_contains "$readme_contents" "Caddy routes all other OpenCode web browser traffic to the switcher."
+assert_contains "$readme_contents" "Caddy routes WebSocket upgrade paths such as"
+assert_contains "$readme_contents" "/pty/*/connect"
+assert_contains "$readme_contents" "directly to OpenCode web on http://127.0.0.1:3002 so they bypass injection."
+assert_contains "$readme_contents" "The switcher proxies OpenCode web upstream"
 assert_contains "$readme_contents" "local-llm-caddy"
-assert_contains "$readme_contents" "stored selected model"
-assert_contains "$readme_contents" "Open WebUI model row and read grants"
-assert_contains "$readme_contents" "fresh chat pane"
+assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'systemctl --user status opencode-web.service local-llm-switcher.service'"
+assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'curl -fsS http://127.0.0.1:3001/_switcher'"
+assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'curl -fsS http://127.0.0.1:3001/api/local-llm/models'"
+assert_contains "$readme_contents" "caddy validate"
+assert_contains "$readme_contents" "systemd-analyze"
+assert_not_contains "$readme_contents" "docker ps --filter name=open-webui"
+assert_not_contains "$readme_contents" "docker logs open-webui"
+assert_contains "$readme_contents" "systemctl --user restart opencode-web.service local-llm-switcher.service llama-server.service"
+assert_not_contains "$readme_contents" "docker restart open-webui"
+assert_not_contains "$readme_contents" "docker run -d --name open-webui"
+if grep -Eq 'docker[[:space:]]+run.*open-webui' <<<"$readme_contents"; then
+  printf 'expected README not to document docker run commands for Open WebUI\n' >&2
+  exit 1
+fi
+assert_contains "$readme_contents" "reports the expected alias"
+assert_contains "$readme_contents" "optional legacy upstream"
+assert_contains "$readme_contents" "fresh OpenCode web pane"
 assert_contains "$readme_contents" "Model Workflow"
 assert_contains "$readme_contents" "model-manager select"
 assert_contains "$readme_contents" "docs/benchmarks/"
@@ -202,6 +287,136 @@ if ! grep -qxF '/docs/superpowers/' "$repo_root/.gitignore"; then
   exit 1
 fi
 switcher_contents="$(<"$repo_root/scripts/local-llm-switcher.py")"
+assert_contains "$switcher_contents" "LOCAL_LLM_WEB_UPSTREAM"
+assert_contains "$switcher_contents" "LOCAL_LLM_INJECT_TARGET"
+assert_contains "$switcher_contents" "LOCAL_LLM_SYNC_OPENWEBUI"
+python3 - "$repo_root/scripts/local-llm-switcher.py" <<'PY'
+import importlib.util
+import os
+import sys
+
+script_path = sys.argv[1]
+
+
+def load_with_name(module_name):
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    if spec is None or spec.loader is None:
+        raise SystemExit("failed to load switcher module spec")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+os.environ["LOCAL_LLM_INJECT_TARGET"] = "unexpected"
+try:
+    load_with_name("local_llm_switcher_invalid_target")
+except ValueError as exc:
+    if "LOCAL_LLM_INJECT_TARGET" not in str(exc):
+        raise SystemExit(f"expected invalid target error to name env var: {exc}")
+else:
+    raise SystemExit("expected invalid LOCAL_LLM_INJECT_TARGET to fail at import")
+
+os.environ["LOCAL_LLM_WEB_UPSTREAM"] = "http://generic.example:3002/"
+os.environ["OPENWEBUI_BASE_URL"] = "http://deprecated.example:3002/"
+os.environ.pop("LOCAL_LLM_INJECT_TARGET", None)
+module = load_with_name("local_llm_switcher")
+if module.WEB_UPSTREAM != "http://generic.example:3002":
+    raise SystemExit(f"expected LOCAL_LLM_WEB_UPSTREAM to win: {module.WEB_UPSTREAM!r}")
+if module.INJECT_TARGET != "opencode":
+    raise SystemExit(f"expected default LOCAL_LLM_INJECT_TARGET opencode: {module.INJECT_TARGET!r}")
+if module.SYNC_OPENWEBUI:
+    raise SystemExit("expected LOCAL_LLM_SYNC_OPENWEBUI to default false")
+html_body = b"<html><body><main>app</main></body></html>"
+opencode_body = (
+    b'<!doctype html><html><head></head><body><div id="root"></div>'
+    b'<script src="/assets/app.js"></script></body></html>'
+)
+injected = module.inject_switcher_widget(opencode_body, "text/html; charset=utf-8", "opencode")
+if b'id="local-llm-switcher"' not in injected:
+    raise SystemExit("expected OpenCode-like HTML to add switcher widget")
+if injected.rfind(b'id="local-llm-switcher"') > injected.lower().rfind(b"</body>"):
+    raise SystemExit("expected switcher widget before closing body tag")
+already_injected = b'<html><body><div id="local-llm-switcher"></div></body></html>'
+if module.inject_switcher_widget(already_injected, "text/html", "opencode") != already_injected:
+    raise SystemExit("expected existing switcher marker to skip duplicate injection")
+if module.inject_switcher_widget(opencode_body, "text/html", "none") != opencode_body:
+    raise SystemExit("expected target none to skip widget injection")
+if module.should_rewrite_html_response("GET", "text/html", "none"):
+    raise SystemExit("expected target none to skip HTML rewrite path")
+if not module.should_rewrite_html_response("GET", "text/html", "opencode"):
+    raise SystemExit("expected opencode HTML GET to use rewrite path")
+if module.should_rewrite_html_response("HEAD", "text/html", "opencode"):
+    raise SystemExit("expected HEAD to skip HTML rewrite path")
+if module.should_rewrite_html_response("GET", "application/json", "opencode"):
+    raise SystemExit("expected non-HTML content to skip rewrite path")
+json_body = b'{"html":"<body></body>"}'
+if module.inject_switcher_widget(json_body, "application/json", "opencode") != json_body:
+    raise SystemExit("expected non-HTML content to remain unchanged")
+if b"local-llm-switcher" not in module.inject_widget(html_body, "text/html; charset=utf-8"):
+    raise SystemExit("expected default injection to add switcher widget")
+module.INJECT_TARGET = "none"
+if module.inject_widget(html_body, "text/html; charset=utf-8") != html_body:
+    raise SystemExit("expected LOCAL_LLM_INJECT_TARGET=none to skip widget injection")
+module.INJECT_TARGET = "opencode"
+if b"local-llm-switcher" not in module.inject_widget(html_body, "text/html; charset=utf-8"):
+    raise SystemExit("expected LOCAL_LLM_INJECT_TARGET=opencode to inject widget")
+PY
+python3 - "$repo_root/scripts/local-llm-switcher.py" <<'PY'
+import importlib.util
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+script_path = sys.argv[1]
+
+
+def load_switcher(sync_openwebui=None):
+    if sync_openwebui is None:
+        os.environ.pop("LOCAL_LLM_SYNC_OPENWEBUI", None)
+    else:
+        os.environ["LOCAL_LLM_SYNC_OPENWEBUI"] = sync_openwebui
+    spec = importlib.util.spec_from_file_location("local_llm_switcher", script_path)
+    if spec is None or spec.loader is None:
+        raise SystemExit("failed to load switcher module spec")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def exercise_switch(module):
+    with tempfile.TemporaryDirectory() as tmp:
+        launcher = Path(tmp) / "run-model.sh"
+        launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+        launcher.chmod(0o755)
+        module.LLAMA_DIR = Path(tmp)
+        module.CURRENT_MODEL_ENV = Path(tmp) / "current-model.env"
+        model = module.Model("qwen", "run-model.sh", "oc-qwen", "Qwen")
+        module.MODELS = [model]
+        module.MODELS_BY_ID = {model.id: model}
+        module.restart_llama_server = lambda: None
+        module.wait_for_alias = lambda alias, timeout: alias == model.alias
+        calls = []
+        module.sync_openwebui_selected_model = lambda alias: calls.append(alias) or {"alias": alias}
+        return module.switch_to_model(model.id), calls
+
+
+default_module = load_switcher()
+payload, calls = exercise_switch(default_module)
+if calls:
+    raise SystemExit(f"expected default switch to skip Open WebUI sync, got {calls!r}")
+if "openwebui" in payload:
+    raise SystemExit(f"expected default switch payload to omit openwebui: {payload!r}")
+
+enabled_module = load_switcher("true")
+payload, calls = exercise_switch(enabled_module)
+if calls != ["oc-qwen"]:
+    raise SystemExit(f"expected enabled switch to sync Open WebUI once, got {calls!r}")
+if payload.get("openwebui", {}).get("alias") != "oc-qwen":
+    raise SystemExit(f"expected enabled switch payload to include Open WebUI sync: {payload!r}")
+PY
 assert_contains "$switcher_contents" "@media (max-width: 640px)"
 assert_contains "$switcher_contents" "@media (hover: none), (pointer: coarse), (max-width: 900px)"
 assert_contains "$switcher_contents" "local-llm-switcher-toggle"
@@ -227,13 +442,17 @@ assert_contains "$readme_contents" "GET /api/local-llm/models"
 assert_contains "$readme_contents" "GET /api/local-llm/current"
 assert_contains "$readme_contents" "POST /api/local-llm/switch"
 assert_contains "$readme_contents" "GET /_switcher"
-assert_contains "$readme_contents" "systemctl --user status local-llm-switcher.service"
-assert_contains "$readme_contents" "docker ps --filter name=open-webui"
-assert_contains "$readme_contents" "docker ps --filter name=local-llm-caddy"
-assert_contains "$readme_contents" "docker restart open-webui"
-assert_contains "$readme_contents" "systemctl --user restart local-llm-switcher.service llama-server.service && '\$REMOTE_DIR'/run-local-llm-caddy-container.sh"
-assert_contains "$readme_contents" "docker rm -f local-llm-caddy && systemctl --user disable --now local-llm-switcher.service"
-assert_contains "$readme_contents" "docker rm -f open-webui && docker run -d --name open-webui --restart unless-stopped --network host -e PORT=3001 -v open-webui:/app/backend/data ghcr.io/open-webui/open-webui:main"
+assert_line "$readme_contents" "ssh \"\$MODEL_HOST\" 'systemctl --user status opencode-web.service local-llm-switcher.service'"
+assert_line "$readme_contents" "ssh \"\$MODEL_HOST\" 'curl -fsS http://127.0.0.1:3001/_switcher'"
+assert_line "$readme_contents" "ssh \"\$MODEL_HOST\" 'curl -fsS http://127.0.0.1:3001/api/local-llm/models'"
+assert_line "$readme_contents" "bash -n install.sh installer.sh scripts/model-discovery.sh scripts/model-manager.sh scripts/oc-local scripts/update-manager.sh test_oc_local.sh scripts/bench-installed-kv-remote.sh scripts/bench-mtp-remote.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh"
+assert_line "$readme_contents" "shellcheck install.sh installer.sh scripts/model-discovery.sh scripts/model-manager.sh scripts/oc-local scripts/update-manager.sh test_oc_local.sh scripts/bench-installed-kv-remote.sh scripts/bench-mtp-remote.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh"
+assert_line "$readme_contents" "python3 -m py_compile scripts/*.py"
+assert_line "$readme_contents" "./test_oc_local.sh"
+assert_contains "$readme_contents" "systemctl --user restart opencode-web.service local-llm-switcher.service llama-server.service"
+assert_contains "$readme_contents" "systemctl --user status opencode-web.service local-llm-switcher.service llama-server.service"
+assert_contains "$readme_contents" "journalctl --user -u opencode-web.service -u local-llm-switcher.service -u llama-server.service"
+assert_not_contains "$readme_contents" "docker ps --filter name=open-webui"
 assert_contains "$readme_contents" "--remote"
 assert_not_contains "$readme_contents" "--target local"
 assert_contains "$readme_contents" "--target remote:<host>"
@@ -1592,10 +1811,31 @@ assert_not_contains "$accept_existing_output" "scripts/start98.sh"
 deploy_output="$(LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run)"
 assert_contains "$deploy_output" "Deploy plan"
 assert_contains "$deploy_output" "target=remote:bench-host"
+assert_contains "$deploy_output" "remote_dir=~/llama.cpp"
+assert_contains "$deploy_output" "replace /home/<user>/llama.cpp with the absolute path on the GPU host"
 assert_contains "$deploy_output" "start1.sh"
 assert_contains "$deploy_output" "bench-host:"
 assert_contains "$deploy_output" "copy launcher"
 assert_contains "$deploy_output" "local-llm-switcher.py"
+assert_contains "$deploy_output" "local-llm-switcher.service"
+assert_contains "$deploy_output" "opencode-web.service"
+assert_contains "$deploy_output" "Caddyfile.local-llm"
+assert_contains "$deploy_output" "required env file: ~/.config/local_llm/opencode-web.env"
+assert_contains "$deploy_output" "OPENCODE_WEB_COMMAND='<replace-with-your-opencode-web-command> --host 127.0.0.1 --port 3002'"
+assert_contains "$deploy_output" "required env file: ~/.config/local_llm/local-llm-switcher.env"
+assert_contains "$deploy_output" "LLAMA_DIR=/home/<user>/llama.cpp"
+assert_not_contains "$deploy_output" "LLAMA_DIR=~/llama.cpp"
+assert_contains "$deploy_output" "LOCAL_LLM_WEB_UPSTREAM"
+assert_contains "$deploy_output" "LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002"
+assert_contains "$deploy_output" "LOCAL_LLM_INJECT_TARGET=opencode"
+assert_not_contains "$deploy_output" "open-webui"
+deploy_remote_dir_output="$(LOCAL_LLM_RUNS_DIR="$accept_existing_runs" OC_LOCAL_REMOTE_DIR=/srv/llama "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run)"
+assert_contains "$deploy_remote_dir_output" "remote_dir=/srv/llama"
+assert_contains "$deploy_remote_dir_output" "LLAMA_DIR=/srv/llama"
+assert_not_contains "$deploy_remote_dir_output" "replace /home/<user>/llama.cpp with the absolute path on the GPU host"
+assert_contains "$deploy_remote_dir_output" "LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002"
+assert_contains "$deploy_remote_dir_output" "required env file: ~/.config/local_llm/opencode-web.env"
+assert_contains "$deploy_remote_dir_output" "required env file: ~/.config/local_llm/local-llm-switcher.env"
 deploy_empty_tmp="$(mktemp -d)"
 deploy_empty_runs="$deploy_empty_tmp/runs"
 deploy_empty_output="$(LOCAL_LLM_RUNS_DIR="$deploy_empty_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run)"

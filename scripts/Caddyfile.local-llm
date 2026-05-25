@@ -3,6 +3,7 @@
 }
 
 :3001 {
+	# OpenCode web upstream is proxied by the switcher service for injection.
 	handle /api/local-llm/* {
 		reverse_proxy 127.0.0.1:3003
 	}
@@ -11,43 +12,16 @@
 		reverse_proxy 127.0.0.1:3003
 	}
 
+	# OpenCode WebSocket upgrades bypass injection and go directly upstream.
 	handle /ws/* {
 		reverse_proxy 127.0.0.1:3002
 	}
 
-	handle /_app/* {
+	handle /socket.io/* {
 		reverse_proxy 127.0.0.1:3002
 	}
 
-	handle /static/* {
-		reverse_proxy 127.0.0.1:3002
-	}
-
-	handle /assets/* {
-		reverse_proxy 127.0.0.1:3002
-	}
-
-	handle /api/* {
-		reverse_proxy 127.0.0.1:3002
-	}
-
-	handle /ollama/* {
-		reverse_proxy 127.0.0.1:3002
-	}
-
-	handle /oauth/* {
-		reverse_proxy 127.0.0.1:3002
-	}
-
-	handle /favicon* {
-		reverse_proxy 127.0.0.1:3002
-	}
-
-	handle /manifest.json {
-		reverse_proxy 127.0.0.1:3002
-	}
-
-	handle /robots.txt {
+	handle /pty/*/connect {
 		reverse_proxy 127.0.0.1:3002
 	}
 

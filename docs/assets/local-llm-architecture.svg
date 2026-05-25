@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520" role="img" aria-labelledby="title desc">
   <title id="title">local_llm runtime architecture</title>
-  <desc id="desc">Browser traffic reaches Cloudflare Access, then the Cloudflare tunnel, then Caddy on ubt26. Caddy routes to Open WebUI, local-llm-switcher, and llama-server.</desc>
+  <desc id="desc">Browser traffic reaches Cloudflare Access, then the Cloudflare tunnel, then Caddy. Caddy routes to the switcher proxy, OpenCode web, and llama-server.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
@@ -11,11 +11,11 @@
   </defs>
   <rect width="980" height="520" rx="28" fill="#f8fafc"/>
   <text x="42" y="56" font-family="Inter, system-ui, sans-serif" font-size="28" font-weight="700" fill="#0f172a">local_llm web and model-serving path</text>
-  <text x="42" y="86" font-family="Inter, system-ui, sans-serif" font-size="15" fill="#475569">Cloudflare Access is the public boundary; Caddy and user services handle local routing on ubt26.</text>
+  <text x="42" y="86" font-family="Inter, system-ui, sans-serif" font-size="15" fill="#475569">Cloudflare Access is the public boundary; Caddy and user services handle local routing on the GPU host.</text>
 
   <rect x="40" y="130" width="190" height="104" rx="18" fill="#dbeafe" stroke="#60a5fa" filter="url(#shadow)"/>
   <text x="135" y="168" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="18" font-weight="700" fill="#1e3a8a">Browser</text>
-  <text x="135" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#1e40af">Open WebUI URL</text>
+  <text x="135" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#1e40af">OpenCode web URL</text>
 
   <rect x="290" y="116" width="210" height="132" rx="18" fill="#ede9fe" stroke="#a78bfa" filter="url(#shadow)"/>
   <text x="395" y="154" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="18" font-weight="700" fill="#4c1d95">Cloudflare</text>
@@ -23,15 +23,15 @@
   <text x="395" y="205" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#5b21b6">Tunnel to localhost:3001</text>
 
   <rect x="570" y="104" width="360" height="316" rx="22" fill="#ecfeff" stroke="#22d3ee" filter="url(#shadow)"/>
-  <text x="750" y="140" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="700" fill="#164e63">ubt26</text>
+  <text x="750" y="140" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="700" fill="#164e63">GPU host</text>
 
   <rect x="610" y="166" width="280" height="72" rx="14" fill="#ffffff" stroke="#0891b2"/>
   <text x="750" y="194" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="16" font-weight="700" fill="#155e75">Caddy container</text>
   <text x="750" y="216" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#0e7490">127.0.0.1:3001</text>
 
   <rect x="604" y="286" width="150" height="74" rx="14" fill="#fff7ed" stroke="#fb923c"/>
-  <text x="679" y="314" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700" fill="#9a3412">Open WebUI</text>
-  <text x="679" y="337" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c2410c">container :3002</text>
+  <text x="679" y="314" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700" fill="#9a3412">OpenCode web</text>
+  <text x="679" y="337" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c2410c">systemd :3002</text>
 
   <rect x="774" y="286" width="150" height="74" rx="14" fill="#f0fdf4" stroke="#4ade80"/>
   <text x="849" y="314" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700" fill="#166534">Switcher</text>
