@@ -2239,6 +2239,46 @@ if any(key.startswith("gemma-vision:") for key in profiles):
 if not any(key.startswith("gemma:") for key in profiles):
     raise SystemExit("gemma profiles should remain")
 PY
+delete_repo_tmp="$(mktemp -d)"
+mkdir -p "$delete_repo_tmp/bin" "$delete_repo_tmp/home/.cache/huggingface/hub/models--Qwen--Qwen3-30B-A3B-GGUF/blobs" "$delete_repo_tmp/home/.cache/huggingface/hub/models--Qwen--Qwen3-30B-A3B-GGUF/snapshots/rev" "$delete_repo_tmp/home/.cache/huggingface/hub/models--Other--Keep-GGUF/snapshots/rev"
+cat >"$delete_repo_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+args=("$@")
+for i in "${!args[@]}"; do
+  if [[ "${args[$i]}" == python3 ]]; then
+    HOME="$LOCAL_LLM_FAKE_REMOTE_HOME" exec "${args[@]:$i}"
+  fi
+done
+printf 'unexpected fake ssh command: %s\n' "$*" >&2
+exit 1
+EOF
+chmod +x "$delete_repo_tmp/bin/ssh"
+printf 'blob-data\n' >"$delete_repo_tmp/home/.cache/huggingface/hub/models--Qwen--Qwen3-30B-A3B-GGUF/blobs/blob1"
+printf 'snapshot-data\n' >"$delete_repo_tmp/home/.cache/huggingface/hub/models--Qwen--Qwen3-30B-A3B-GGUF/snapshots/rev/Qwen3-30B-A3B-Q4_K_M.gguf"
+printf 'keep\n' >"$delete_repo_tmp/home/.cache/huggingface/hub/models--Other--Keep-GGUF/snapshots/rev/Keep.gguf"
+delete_repo_dry_output="$(PATH="$delete_repo_tmp/bin:$PATH" LOCAL_LLM_FAKE_REMOTE_HOME="$delete_repo_tmp/home" "$repo_root/scripts/model-manager.sh" delete Qwen/Qwen3-30B-A3B-GGUF --target remote:bench-host --dry-run)"
+assert_contains "$delete_repo_dry_output" '"action":"plan"'
+assert_contains "$delete_repo_dry_output" '"repo":"Qwen/Qwen3-30B-A3B-GGUF"'
+assert_contains "$delete_repo_dry_output" '"kind":"hf_repo_cache"'
+assert_contains "$delete_repo_dry_output" '"planned":1'
+if [[ ! -e "$delete_repo_tmp/home/.cache/huggingface/hub/models--Qwen--Qwen3-30B-A3B-GGUF/blobs/blob1" ]]; then
+  printf 'dry-run deleted Hugging Face blob cache\n' >&2
+  exit 1
+fi
+delete_repo_yes_output="$(PATH="$delete_repo_tmp/bin:$PATH" LOCAL_LLM_FAKE_REMOTE_HOME="$delete_repo_tmp/home" "$repo_root/scripts/model-manager.sh" delete Qwen/Qwen3-30B-A3B-GGUF --target remote:bench-host --yes)"
+assert_contains "$delete_repo_yes_output" '"action":"delete"'
+assert_contains "$delete_repo_yes_output" '"kind":"hf_repo_cache"'
+assert_contains "$delete_repo_yes_output" '"planned":1'
+assert_contains "$delete_repo_yes_output" '"deleted":1'
+if [[ -e "$delete_repo_tmp/home/.cache/huggingface/hub/models--Qwen--Qwen3-30B-A3B-GGUF" ]]; then
+  printf 'delete left Hugging Face repo cache directory in place\n' >&2
+  exit 1
+fi
+if [[ ! -e "$delete_repo_tmp/home/.cache/huggingface/hub/models--Other--Keep-GGUF/snapshots/rev/Keep.gguf" ]]; then
+  printf 'delete removed unrelated Hugging Face repo cache\n' >&2
+  exit 1
+fi
 cat >"$accept_tmp/failed-load.json" <<'EOF'
 {"repo":"Example/Foo-GGUF","family":"foo","alias":"foo-30b","target":"local","profile":"reliable","load_status":"failed"}
 EOF

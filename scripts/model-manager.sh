@@ -1300,18 +1300,39 @@ run_remote_delete_repo_cache() {
 import json
 import os
 import re
+import shutil
 import sys
 
 repo, mode = sys.argv[1:]
 home = os.path.expanduser("~")
-roots = [
-    os.path.join(home, ".cache", "huggingface", "hub"),
+hf_root = os.path.join(home, ".cache", "huggingface", "hub")
+file_roots = [
     os.path.join(home, ".cache", "local_llm", "models"),
     os.path.join(home, ".cache", "llama.cpp"),
 ]
 deleted = 0
 planned = 0
-for root in roots:
+if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", repo):
+    raise SystemExit("remote delete requires a Hugging Face repo id like owner/model")
+
+repo_cache_name = "models--" + repo.replace("/", "--")
+repo_cache_path = os.path.join(hf_root, repo_cache_name)
+if os.path.isdir(repo_cache_path):
+    hf_root_real = os.path.realpath(hf_root)
+    repo_cache_real = os.path.realpath(repo_cache_path)
+    if os.path.dirname(repo_cache_real) != hf_root_real:
+        raise SystemExit("refusing to delete cache path outside Hugging Face hub root")
+    if os.path.basename(repo_cache_real) != repo_cache_name:
+        raise SystemExit("refusing to delete unexpected Hugging Face cache basename")
+    if os.path.islink(repo_cache_path):
+        raise SystemExit("refusing to delete symlinked Hugging Face cache directory")
+    planned += 1
+    print(json.dumps({"repo": repo, "kind": "hf_repo_cache", "path": repo_cache_path, "action": mode}, separators=(",", ":")))
+    if mode == "delete":
+        shutil.rmtree(repo_cache_path)
+        deleted += 1
+
+for root in file_roots:
     if not os.path.isdir(root):
         continue
     for current_root, _, files in os.walk(root):
@@ -1327,7 +1348,7 @@ for root in roots:
             if found_repo != repo:
                 continue
             planned += 1
-            print(json.dumps({"repo": found_repo, "file": name, "path": path, "action": mode}, separators=(",", ":")))
+            print(json.dumps({"repo": found_repo, "kind": "gguf_file", "file": name, "path": path, "action": mode}, separators=(",", ":")))
             if mode == "delete":
                 os.remove(path)
                 deleted += 1

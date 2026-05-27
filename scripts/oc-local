@@ -377,7 +377,7 @@ def metadata_optional_vulkan_fields(container):
     ):
         reject_control_chars(label, value)
     if backend == "default":
-        return backend, "", "", ""
+        return backend, "none", "none", "none"
     if backend != "vulkan":
         fail("config.backend must be vulkan when set")
     if not isinstance(visible_devices, str) or not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
