@@ -648,7 +648,7 @@ set -euo pipefail
 remote_dir="$1"
 remote_script="$2"
 remote_profile="$3"
-if [[ "$remote_dir" == "~" || "$remote_dir" == ~/* ]]; then
+if [[ "$remote_dir" == "~" || "$remote_dir" == "~/"* ]]; then
   remote_dir="$HOME${remote_dir#\~}"
 fi
 cd "$remote_dir"
