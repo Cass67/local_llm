@@ -682,9 +682,13 @@ write_accepted_metadata() {
   local ngl="$9"
   local quant="${10}"
   local hf_file="${11}"
+  local backend="${12:-}"
+  local visible_devices="${13:-}"
+  local split_mode="${14:-}"
+  local tensor_split="${15:-}"
 
   ensure_state_dir "$runs_dir/accepted" accepted || return 1
-  python3 - "$runs_dir/accepted" "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" <<'PY'
+  python3 - "$runs_dir/accepted" "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" <<'PY'
 import json
 import os
 import pathlib
@@ -693,7 +697,7 @@ import sys
 from pathlib import Path
 
 accepted_dir = Path(sys.argv[1])
-repo, family, alias, launcher_file, profile, ctx, batch, ubatch, ngl, quant, hf_file = sys.argv[2:]
+repo, family, alias, launcher_file, profile, ctx, batch, ubatch, ngl, quant, hf_file, backend, visible_devices, split_mode, tensor_split = sys.argv[2:]
 if not re.fullmatch(r"[A-Za-z0-9_.-]+", family) or ".." in family or family.startswith("-"):
     raise SystemExit("model-manager refuses unsafe family")
 if not re.fullmatch(r"[A-Za-z0-9_.-]+", alias) or ".." in alias or alias.startswith("-"):
@@ -735,6 +739,21 @@ for key, value, minimum in (("ctx", ctx, 1), ("batch", batch, 1), ("ubatch", uba
     parsed = accepted_integer(key, value, minimum=minimum)
     if parsed is not None:
         payload["config"][key] = parsed
+if backend:
+    if backend != "vulkan":
+        raise SystemExit("accepted metadata backend must be vulkan when set")
+    if not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
+        raise SystemExit("accepted metadata visible_devices must be comma-separated device indexes")
+    if split_mode not in {"layer", "row"}:
+        raise SystemExit("accepted metadata split_mode must be layer or row")
+    if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
+        raise SystemExit("accepted metadata tensor_split must be comma-separated positive integers")
+    payload["config"].update({
+        "backend": backend,
+        "visible_devices": visible_devices,
+        "split_mode": split_mode,
+        "tensor_split": tensor_split,
+    })
 
 with path.open("w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)
@@ -3707,16 +3726,33 @@ for key in ("quant", "hf_file"):
         raise SystemExit(f"benchmark JSON field must be a string: {key}")
     if key in result and isinstance(result[key], str) and has_control_chars(result[key]):
         raise SystemExit(f"benchmark JSON field contains a control character: {key}")
+backend = result.get("backend") or ""
+visible_devices = result.get("visible_devices") or ""
+split_mode = result.get("split_mode") or ""
+tensor_split = result.get("tensor_split") or ""
+if backend:
+    if backend != "vulkan":
+        raise SystemExit("benchmark JSON backend must be vulkan when set")
+    for key, value in (("visible_devices", visible_devices), ("split_mode", split_mode), ("tensor_split", tensor_split)):
+        if not isinstance(value, str) or has_control_chars(value):
+            raise SystemExit(f"benchmark JSON field must be a safe string: {key}")
+    if not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
+        raise SystemExit("benchmark JSON visible_devices must be comma-separated device indexes")
+    if split_mode not in {"layer", "row"}:
+        raise SystemExit("benchmark JSON split_mode must be layer or row")
+    if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
+        raise SystemExit("benchmark JSON tensor_split must be comma-separated positive integers")
 values = [result[key] for key in required]
 values.extend(str(result.get(key) or "") for key in ("ctx", "batch", "ubatch", "ngl", "quant", "hf_file"))
+values.extend([backend, visible_devices, split_mode, tensor_split])
 print("\t".join(values))
 PY
   )"; then
     return 1
   fi
 
-  local ctx batch ubatch ngl quant hf_file
-  IFS=$'\t' read -r repo family alias target profile ctx batch ubatch ngl quant hf_file <<<"$json_fields"
+  local ctx batch ubatch ngl quant hf_file backend visible_devices split_mode tensor_split
+  IFS=$'\t' read -r repo family alias target profile ctx batch ubatch ngl quant hf_file backend visible_devices split_mode tensor_split <<<"$json_fields"
 
   ensure_runs_dirs
 
@@ -3725,7 +3761,7 @@ PY
   if [[ -n "$existing_launcher" ]]; then
     local removed_selection_count
     removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
-    accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file")"
+    accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split")"
     printf 'Accepted benchmark already has launcher\n'
     printf 'repo=%s\n' "$repo"
     printf 'family=%s\n' "$family"
@@ -3775,11 +3811,12 @@ PY
   fi
   mkdir -p "${launcher_file%/*}"
 
-  python3 - "$launcher_file" "$repo" "$family" "$alias" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" <<'PY'
+  python3 - "$launcher_file" "$repo" "$family" "$alias" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" <<'PY'
 import shlex
 import sys
+import re
 
-path, repo, family, alias, ctx, batch, ubatch, ngl, quant, hf_file = sys.argv[1:]
+path, repo, family, alias, ctx, batch, ubatch, ngl, quant, hf_file, backend, visible_devices, split_mode, tensor_split = sys.argv[1:]
 for name, value in (("repo", repo), ("family", family), ("alias", alias), ("quant", quant), ("hf_file", hf_file)):
     if any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise SystemExit(f"launcher field contains a control character: {name}")
@@ -3790,6 +3827,15 @@ for name, value, minimum in (("ctx", ctx, 1), ("batch", batch, 1), ("ubatch", ub
         if minimum == 1:
             raise SystemExit(f"missing positive numeric {name}")
         raise SystemExit(f"missing non-negative numeric {name}")
+if backend:
+    if backend != "vulkan":
+        raise SystemExit("backend must be vulkan when set")
+    if not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
+        raise SystemExit("visible_devices must be comma-separated device indexes")
+    if split_mode not in {"layer", "row"}:
+        raise SystemExit("split_mode must be layer or row")
+    if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
+        raise SystemExit("tensor_split must be comma-separated positive integers")
 lines = [
     "#!/usr/bin/env bash",
     f"# local_llm_repo={repo}",
@@ -3804,9 +3850,13 @@ lines = [
     f"batch={batch}",
     f"ubatch={ubatch}",
     f"ngl={ngl}",
+]
+if backend == "vulkan":
+    lines.append(f"export GGML_VK_VISIBLE_DEVICES={visible_devices}")
+lines.extend([
     "exec ./build/bin/llama-server \\",
     f"  -hf {shlex.quote(repo)} \\",
-]
+])
 if hf_file:
     lines.append(f"  --hf-file {shlex.quote(hf_file)} \\")
 else:
@@ -3815,6 +3865,13 @@ lines.extend([
     "  --host 0.0.0.0 \\",
     "  --port 8080 \\",
     '  -ngl "$ngl" \\',
+])
+if backend == "vulkan":
+    lines.extend([
+        f"  --split-mode {shlex.quote(split_mode)} \\",
+        f"  --tensor-split {shlex.quote(tensor_split)} \\",
+    ])
+lines.extend([
     '  -c "$ctx" \\',
     "  --flash-attn on \\",
     '  -ub "$ubatch" \\',
@@ -3837,7 +3894,7 @@ PY
   chmod +x "$launcher_file"
   local removed_selection_count
   removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
-  accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file")"
+  accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split")"
 
   printf 'Accepted benchmark\n'
   printf 'repo=%s\n' "$repo"

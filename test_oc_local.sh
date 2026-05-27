@@ -255,6 +255,16 @@ assert_contains "$readme_contents" "Caddy routes WebSocket upgrade paths such as
 assert_contains "$readme_contents" "/pty/*/connect"
 assert_contains "$readme_contents" "directly to OpenCode web on http://127.0.0.1:3002 so they bypass injection."
 assert_contains "$readme_contents" "The switcher proxies OpenCode web upstream"
+assert_contains "$readme_contents" "## Experimental Vulkan Split"
+assert_contains "$readme_contents" "GGML_VK_VISIBLE_DEVICES=0,1"
+assert_contains "$readme_contents" "--split-mode layer"
+assert_contains "$readme_contents" "--tensor-split 20,24"
+assert_contains "$readme_contents" "20,24"
+assert_contains "$readme_contents" "22,22"
+assert_contains "$readme_contents" "24,20"
+assert_contains "$readme_contents" "28,16"
+assert_contains "$readme_contents" "32,12"
+assert_contains "$readme_contents" "36,8"
 assert_contains "$readme_contents" "local-llm-caddy"
 assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'systemctl --user status opencode-web.service local-llm-switcher.service'"
 assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'curl -fsS http://127.0.0.1:3001/_switcher'"
@@ -1667,6 +1677,9 @@ assert_contains "$accept_output" "would write accepted metadata under $accept_ru
 cat >"$accept_tmp/full.json" <<'EOF'
 {"mode":"full","target":"remote:bench-host","repo":"Example/Full-GGUF","family":"full","alias":"full-next","quant":"Q4_K_M","hf_file":"Full-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
 EOF
+cat >"$accept_tmp/vulkan.json" <<'EOF'
+{"mode":"full","target":"remote:bench-host","repo":"Example/Vulkan-GGUF","family":"vulkan","alias":"vulkan-split","quant":"Q4_K_M","hf_file":"Vulkan-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"backend":"vulkan","visible_devices":"0,1","split_mode":"layer","tensor_split":"20,24","load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
+EOF
 cat >"$accept_tmp/bad-alias.json" <<'EOF'
 {"mode":"full","target":"remote:bench-host","repo":"Example/Bad-GGUF","family":"badalias","alias":"bad\"alias","quant":"Q4_K_M","hf_file":"Bad-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
 EOF
@@ -1715,6 +1728,47 @@ assert_contains "$accept_full_info" "family=full"
 assert_contains "$accept_full_info" "profile=reliable"
 assert_contains "$accept_full_info" "remote_start=./start98.sh reliable"
 assert_contains "$accept_full_info" "model_name=full-next"
+accept_vulkan_runs="$accept_tmp/vulkan-runs"
+accept_vulkan_start="$accept_vulkan_runs/launchers/start1.sh"
+accept_vulkan_output="$(LOCAL_LLM_RUNS_DIR="$accept_vulkan_runs" LOCAL_LLM_ACCEPT_START_SCRIPT="$accept_vulkan_start" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/vulkan.json")"
+assert_contains "$accept_vulkan_output" "Accepted benchmark"
+assert_contains "$accept_vulkan_output" "launcher_file=$accept_vulkan_start"
+if [[ ! -f "$accept_vulkan_start" ]]; then
+  printf 'expected generated Vulkan launcher at %s\n' "$accept_vulkan_start" >&2
+  exit 1
+fi
+assert_contains "$(<"$accept_vulkan_start")" 'export GGML_VK_VISIBLE_DEVICES=0,1'
+assert_contains "$(<"$accept_vulkan_start")" '--split-mode layer'
+assert_contains "$(<"$accept_vulkan_start")" '--tensor-split 20,24'
+python3 - "$accept_vulkan_runs/accepted/vulkan.json" "$accept_vulkan_start" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    accepted = json.load(handle)
+expected_config = {
+    "ctx": 65536,
+    "batch": 128,
+    "ubatch": 64,
+    "ngl": 999,
+    "backend": "vulkan",
+    "visible_devices": "0,1",
+    "split_mode": "layer",
+    "tensor_split": "20,24",
+}
+if accepted.get("config") != expected_config:
+    raise SystemExit(f"unexpected Vulkan config: {accepted.get('config')!r}")
+if accepted.get("launcher_file") != sys.argv[2]:
+    raise SystemExit(f"unexpected Vulkan launcher file: {accepted.get('launcher_file')!r}")
+PY
+accept_vulkan_info="$(LOCAL_LLM_RUNS_DIR="$accept_vulkan_runs" "$repo_root/scripts/oc-local" vulkan reliable --info)"
+assert_contains "$accept_vulkan_info" "backend=vulkan"
+assert_contains "$accept_vulkan_info" "visible_devices=0,1"
+assert_contains "$accept_vulkan_info" "split_mode=layer"
+assert_contains "$accept_vulkan_info" "tensor_split=20,24"
+assert_contains "$accept_vulkan_info" "GGML_VK_VISIBLE_DEVICES=0,1"
+assert_contains "$accept_vulkan_info" "--split-mode layer"
+assert_contains "$accept_vulkan_info" "--tensor-split 20,24"
 accept_bad_repo_runs="$accept_tmp/bad-repo-runs"
 mkdir -p "$accept_bad_repo_runs/accepted"
 cat >"$accept_bad_repo_runs/accepted/badrepo.json" <<'EOF'
@@ -2385,6 +2439,45 @@ chmod +x "$probe_tmp/ssh"
 remote_rocminfo_gpu_output="$(PATH="$probe_tmp:$PATH" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-discovery.sh" --host rocminfo-gpu-host --installed-only)"
 assert_contains "$remote_rocminfo_gpu_output" "GPU: AMD Radeon RX 7900 XT"
 assert_not_contains "$remote_rocminfo_gpu_output" "GPU: Intel"
+
+cat >"$probe_tmp/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+command_text="${*: -1}"
+case "$command_text" in
+  nproc)
+    printf '16\n'
+    ;;
+  *free*)
+    printf '60\n'
+    ;;
+  *rocminfo*Marketing*)
+    printf 'AMD Radeon RX 7900 XT\n'
+    ;;
+  *mem_info_vram_total*)
+    printf '21474836480\n'
+    ;;
+  *nvidia-smi*)
+    printf 'NVIDIA Tesla P40, 24576\n'
+    ;;
+  *vulkaninfo*)
+    printf 'GPU0:\n\tdeviceName = AMD Radeon RX 7900 XT\nGPU1:\n\tdeviceName = NVIDIA Tesla P40\n'
+    ;;
+  *)
+    printf 'unknown\n'
+    ;;
+esac
+EOF
+chmod +x "$probe_tmp/ssh"
+remote_multi_gpu_output="$(PATH="$probe_tmp:$PATH" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-discovery.sh" --host multi-gpu-host --installed-only)"
+assert_contains "$remote_multi_gpu_output" "Hardware source: remote:multi-gpu-host"
+assert_contains "$remote_multi_gpu_output" "GPU: AMD Radeon RX 7900 XT"
+assert_contains "$remote_multi_gpu_output" "VRAM: 20 GB"
+assert_contains "$remote_multi_gpu_output" "- GPUs: AMD Radeon RX 7900 XT (20 GB); NVIDIA Tesla P40 (24 GB)"
+assert_contains "$remote_multi_gpu_output" "- Total VRAM: 44 GB"
+assert_contains "$remote_multi_gpu_output" "ROCm target: yes"
+assert_contains "$remote_multi_gpu_output" "- CUDA target: yes"
+assert_contains "$remote_multi_gpu_output" "- Vulkan target: yes"
 
 cat >"$probe_tmp/nproc" <<'EOF'
 #!/usr/bin/env bash

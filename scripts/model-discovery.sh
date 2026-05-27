@@ -117,22 +117,82 @@ get_remote_vram() {
   printf 'unknown\n'
 }
 
+get_remote_nvidia_gpus() {
+  local host="$1"
+  ssh_probe "$host" "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>/dev/null"
+}
+
+get_remote_vulkan_gpus() {
+  local host="$1"
+  ssh_probe "$host" "vulkaninfo --summary 2>/dev/null | sed -n 's/.*deviceName[[:space:]]*=[[:space:]]*//p'"
+}
+
 hardware_json() {
   local source="$1"
   local cpu="$2"
   local ram="$3"
   local gpu="$4"
   local vram="$5"
-  python3 - "$source" "$cpu" "$ram" "$gpu" "$vram" <<'PY'
+  local nvidia_gpus="${6:-}"
+  local vulkan_gpus="${7:-}"
+  python3 - "$source" "$cpu" "$ram" "$gpu" "$vram" "$nvidia_gpus" "$vulkan_gpus" <<'PY'
 import json
 import re
 import sys
 
-source, cpu, ram, gpu, vram = sys.argv[1:]
+source, cpu, ram, gpu, vram, nvidia_gpus, vulkan_gpus = sys.argv[1:]
 
 def number(value):
     match = re.search(r"[0-9]+(?:\.[0-9]+)?", value or "")
     return float(match.group(0)) if match else None
+
+def display_gb(value):
+    if value is None:
+        return None
+    if abs(value - round(value)) < 0.05:
+        return f"{round(value):.0f} GB"
+    return f"{value:.1f} GB"
+
+def add_gpu(items, *, name, backend, vram_gb):
+    if not name or name == "unknown":
+        return
+    for item in items:
+        if item["name"] == name and item["backend"] == backend:
+            return
+    payload = {"name": name, "backend": backend}
+    if vram_gb is not None:
+        payload["vram_gb"] = vram_gb
+    items.append(payload)
+
+gpus = []
+primary_vram = number(vram)
+gpu_lower = (gpu or "").lower()
+if "amd" in gpu_lower or "radeon" in gpu_lower:
+    add_gpu(gpus, name=gpu, backend="rocm", vram_gb=primary_vram)
+
+for line in nvidia_gpus.splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    name, _, memory = line.partition(",")
+    memory_mib = number(memory)
+    add_gpu(gpus, name=name.strip(), backend="cuda", vram_gb=(memory_mib / 1024 if memory_mib is not None else None))
+
+vulkan_names = [line.strip() for line in vulkan_gpus.splitlines() if line.strip() and line.strip() != "unknown"]
+display_parts = []
+total_vram = 0.0
+known_vram_count = 0
+for item in gpus:
+    item_vram = item.get("vram_gb")
+    if item_vram is None:
+        display_parts.append(item["name"])
+    else:
+        display_parts.append(f"{item['name']} ({display_gb(item_vram)})")
+        total_vram += item_vram
+        known_vram_count += 1
+
+display_gpus = "; ".join(display_parts)
+display_total_vram = display_gb(total_vram) if known_vram_count else "unknown"
 
 payload = {
     "source": source,
@@ -144,6 +204,12 @@ payload = {
     "display_ram_gb": ram or "unknown",
     "display_gpu": gpu or "unknown",
     "display_vram": vram or "unknown",
+    "gpus": gpus,
+    "display_gpus": display_gpus,
+    "total_vram_gb": total_vram if known_vram_count else None,
+    "display_total_vram": display_total_vram,
+    "cuda_target": any(item["backend"] == "cuda" for item in gpus),
+    "vulkan_target": bool(vulkan_names),
 }
 print(json.dumps(payload, separators=(",", ":")))
 PY
@@ -153,7 +219,7 @@ detect_hardware() {
   local mode="$1"
   local host="$2"
   if [[ "$mode" == remote ]]; then
-    hardware_json "remote:$host" "$(get_remote_cpu_cores "$host")" "$(get_remote_ram "$host")" "$(get_remote_gpu "$host")" "$(get_remote_vram "$host")"
+    hardware_json "remote:$host" "$(get_remote_cpu_cores "$host")" "$(get_remote_ram "$host")" "$(get_remote_gpu "$host")" "$(get_remote_vram "$host")" "$(get_remote_nvidia_gpus "$host")" "$(get_remote_vulkan_gpus "$host")"
   else
     hardware_json "local" "$(get_cpu_cores)" "$(get_ram)" "$(get_local_gpu)" "$(get_local_vram)"
   fi
@@ -262,6 +328,8 @@ hardware = json.loads(sys.argv[1])
 gpu = hardware["display_gpu"]
 gpu_lower = gpu.lower()
 rocm = "yes" if "amd" in gpu_lower or "radeon" in gpu_lower else "unknown"
+cuda = "yes" if hardware.get("cuda_target") else "unknown"
+vulkan = "yes" if hardware.get("vulkan_target") else "unknown"
 print("Model Discovery Results:")
 print("-----------------------")
 print(f"Hardware source: {hardware['source']}")
@@ -270,7 +338,13 @@ print(f"- CPU Cores: {hardware['display_cpu_cores']}")
 print(f"- RAM: {hardware['display_ram_gb']} GB")
 print(f"- GPU: {gpu}")
 print(f"- VRAM: {hardware['display_vram']}")
+if hardware.get("display_gpus"):
+    print(f"- GPUs: {hardware['display_gpus']}")
+if hardware.get("display_total_vram") and hardware.get("display_total_vram") != "unknown":
+    print(f"- Total VRAM: {hardware['display_total_vram']}")
 print(f"- ROCm target: {rocm}")
+print(f"- CUDA target: {cuda}")
+print(f"- Vulkan target: {vulkan}")
 PY
 }
 

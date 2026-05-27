@@ -354,6 +354,40 @@ model-manager replace <old-file> <new-repo> --target "remote:$MODEL_HOST" --dry-
 
 If the remote host lacks the preferred download CLI, update flows fall back to a Python stdlib downloader.
 
+## Experimental Vulkan Split
+
+Use this only for mixed-vendor single-model experiments, such as a Radeon 7900 XT plus NVIDIA P40. Keep the ROCm launcher as the reliable fallback; Vulkan split is for testing whether one larger model can use both cards at acceptable speed.
+
+Requirements on the GPU host:
+
+- A separate llama.cpp build with Vulkan enabled.
+- Both GPUs visible to Vulkan.
+- The generated launcher copied to the Vulkan llama.cpp directory, or the service pointed at that Vulkan build.
+
+The generated Vulkan launcher exports the visible Vulkan devices and adds split flags before the normal context/batch flags:
+
+```bash
+export GGML_VK_VISIBLE_DEVICES=0,1
+./build/bin/llama-server \
+  -ngl 999 \
+  --split-mode layer \
+  --tensor-split 20,24 \
+  -c 65536
+```
+
+Start by benchmarking these tensor splits. Device order must match `GGML_VK_VISIBLE_DEVICES`; if Vulkan reports the P40 first, reverse the shares.
+
+```text
+20,24
+22,22
+24,20
+28,16
+32,12
+36,8
+```
+
+More VRAM does not guarantee better throughput. The P40 can bottleneck decode, so a split that leaves more layers on the 7900 XT may be faster than a split that fills all 44 GB.
+
 ### Update Manager
 
 update-manager is a compatibility helper. It does not mutate files; use `model-manager` for model workflow lifecycle commands.

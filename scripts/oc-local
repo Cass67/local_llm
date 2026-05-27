@@ -364,6 +364,30 @@ def metadata_context(container):
         return metadata_integer(container, "context", minimum=1)
     return metadata_integer(container, "ctx", minimum=1)
 
+def metadata_optional_vulkan_fields(container):
+    backend = container.get("backend") or "default"
+    visible_devices = container.get("visible_devices") or ""
+    split_mode = container.get("split_mode") or ""
+    tensor_split = container.get("tensor_split") or ""
+    for label, value in (
+        ("config.backend", backend),
+        ("config.visible_devices", visible_devices),
+        ("config.split_mode", split_mode),
+        ("config.tensor_split", tensor_split),
+    ):
+        reject_control_chars(label, value)
+    if backend == "default":
+        return backend, "", "", ""
+    if backend != "vulkan":
+        fail("config.backend must be vulkan when set")
+    if not isinstance(visible_devices, str) or not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
+        fail("config.visible_devices must be comma-separated device indexes")
+    if split_mode not in {"layer", "row"}:
+        fail("config.split_mode must be layer or row")
+    if not isinstance(tensor_split, str) or not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
+        fail("config.tensor_split must be comma-separated positive integers")
+    return backend, visible_devices, split_mode, tensor_split
+
 try:
     with open(path, encoding="utf-8") as handle:
         data = json.load(handle)
@@ -443,8 +467,11 @@ fields = [
     reject_control_chars("mmproj", profile.get("mmproj") or data.get("mmproj") or "none"),
     reject_control_chars("reasoning_effort", profile.get("reasoning_effort") or data.get("reasoning_effort") or "none"),
 ]
+fields.extend(metadata_optional_vulkan_fields(profile))
 if any(value is None or value == "" for value in fields):
-    fail("missing required fields")
+    required_fields = fields[:11]
+    if any(value is None or value == "" for value in required_fields):
+        fail("missing required fields")
 print("\n".join(str(value) for value in fields))
 PY
 )"; then
@@ -466,6 +493,10 @@ if [[ "$generated_profile" == true ]]; then
     IFS= read -r ngl
     IFS= read -r mmproj_mode
     IFS= read -r reasoning_effort
+    IFS= read -r backend
+    IFS= read -r visible_devices
+    IFS= read -r split_mode
+    IFS= read -r tensor_split
   } <<<"$generated_profile_output"
   if ! is_safe_remote_script "$remote_script"; then
     printf 'invalid generated remote script: %s\n' "$remote_script" >&2
@@ -478,6 +509,16 @@ if [[ "$generated_profile" == true ]]; then
     fi
   done
   for string_field in family model_name hf_repo quant mmproj_mode reasoning_effort; do
+    if has_control_chars "${!string_field}"; then
+      printf 'invalid generated string field %s contains control characters\n' "$string_field" >&2
+      exit 1
+    fi
+  done
+  if [[ "$backend" != default && "$backend" != vulkan ]]; then
+    printf 'invalid generated backend: %s\n' "$backend" >&2
+    exit 1
+  fi
+  for string_field in visible_devices split_mode tensor_split; do
     if has_control_chars "${!string_field}"; then
       printf 'invalid generated string field %s contains control characters\n' "$string_field" >&2
       exit 1
@@ -523,7 +564,14 @@ if [[ "$mmproj_mode" == enabled ]]; then
 elif [[ "$mmproj_mode" == disabled ]]; then
   server_command+=" --no-mmproj"
 fi
-server_command+=" --host 0.0.0.0 --port 8080 -ngl ${ngl} -c ${context} --flash-attn on -ub ${ubatch} -b ${batch} --threads \"\$(nproc)\" --prio 2"
+if [[ "$backend" == vulkan ]]; then
+  server_command="GGML_VK_VISIBLE_DEVICES=${visible_devices} ${server_command}"
+fi
+server_command+=" --host 0.0.0.0 --port 8080 -ngl ${ngl}"
+if [[ "$backend" == vulkan ]]; then
+  server_command+=" --split-mode ${split_mode} --tensor-split ${tensor_split}"
+fi
+server_command+=" -c ${context} --flash-attn on -ub ${ubatch} -b ${batch} --threads \"\$(nproc)\" --prio 2"
 server_command+=" --no-warmup --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0.0"
 server_command+=" --alias ${model_name}"
 
@@ -544,6 +592,12 @@ if [[ "$info" == true ]]; then
   printf 'ngl=%s\n' "$ngl"
   printf 'mmproj=%s\n' "$mmproj_mode"
   printf 'reasoning_effort=%s\n' "$reasoning_effort"
+  printf 'backend=%s\n' "$backend"
+  if [[ "$backend" == vulkan ]]; then
+    printf 'visible_devices=%s\n' "$visible_devices"
+    printf 'split_mode=%s\n' "$split_mode"
+    printf 'tensor_split=%s\n' "$tensor_split"
+  fi
   printf 'alias=%s\n' "$model_name"
   printf 'plugin_mode=%s\n' "$plugin_mode"
   if [[ "$ssh_password_prompt" == true ]]; then
