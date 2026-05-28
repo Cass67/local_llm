@@ -4,20 +4,25 @@ set -euo pipefail
 llama_cpp_dir="${LLAMA_CPP_DIR:-$HOME/llama.cpp}"
 usage() {
   cat >&2 <<'EOF'
-usage: bench-mtp-remote.sh --family FAMILY --repo REPO --hf-file FILE --alias ALIAS [options]
+usage: bench-mtp-remote.sh [options]
 
 Options:
-  --ctx N
-  --batch N
-  --ubatch N
+  --family FAMILY      Model family name (default: qwen3.6)
+  --repo REPO          Hugging Face repository path
+  --hf-file FILE       Specific GGUF filename
+  --alias ALIAS        Model alias identifier for the API
+  --ctx N              Context window size (default: 32768)
+  --batch N            Batch size (default: 64)
+  --ubatch N           Micro-batch size (default: 64)
 EOF
 }
 
-family=''
-repo=''
-hf_file=''
-alias=''
-ctx='65536'
+# Baseline defaults tuned precisely for your setup and target model
+family='qwen3.6'
+repo='unsloth/Qwen3.6-35B-A3B-GGUF'
+hf_file='Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf'
+alias='qwen3.6-35b-moe-q6'
+ctx='32768' 
 batch='64'
 ubatch='64'
 
@@ -201,14 +206,12 @@ run_trial() {
   stop_server
   : >"$log_file"
 
-  # FIX 1: Minimize CPU thread count when offloading 100% to asymmetric multi-GPUs.
-  # Eliminates system cache thrashing and driver queue synchronization bottlenecks.
+  # Fixes driver scheduling jitter across distinct GPU runtime frameworks (Vulkan/ROCm and CUDA)
   local compute_threads=4
 
-  # FIX 2: Asymmetric Tensor Splitting Map (7900 XT [20GB] + Tesla P40 [24GB])
-  # Biases the workload division (~55% vs ~45%) toward the faster 800 GB/s AMD VRAM
-  # instead of letting llama.cpp evenly split layers and choke execution at the P40's 346 GB/s limit.
-  # Adjust order to "45,55" if your OS initializes the P40 as card index 0.
+  # Direct Asymmetric Tensor Split Map: 7900 XT (20GB) + Tesla P40 (24GB)
+  # Forces ~55% of layers to live on the fast AMD bus, leaving ~45% to spill onto the Nvidia card.
+  # (Flip to "45,55" if your backend prioritizes the Tesla P40 as GPU Index 0)
   local tensor_split="55,45"
 
   printf 'START family=%s repo=%s file=%s ctx=%s batch=%s ubatch=%s spec_n=%s alias=%s\n' \
@@ -287,9 +290,7 @@ run_trial() {
 
 trap stop_server EXIT
 
-# FIX 3: Adjusted speculative lookahead boundaries. 
-# Native architectural MTP implementation tracks up to 3 or 4 tokens max. 
-# Removed ghost sweeps (up to 32) that skew results or provoke runtime VRAM failures.
+# Clean range to safely benchmark native model multi-token prediction lookahead limits
 spec_values=(1 2 3 4 5 6)
 
 clear_existing_servers
@@ -299,4 +300,3 @@ printf 'RUN run_id=%s results=%s logs=%s\n' "$run_id" "$results_csv" "$logs_dir"
 for spec_n in "${spec_values[@]}"; do
   run_trial "$family" "$repo" "$hf_file" "$ctx" "$batch" "$ubatch" "$spec_n" "$alias"
 done
-
