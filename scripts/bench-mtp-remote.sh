@@ -125,34 +125,6 @@ last_number_for() {
     ' "$log_file"
 }
 
-detect_thread_count() {
-  local count=""
-
-  if command -v nproc >/dev/null 2>&1; then
-    count="$(nproc 2>/dev/null || true)"
-    case "$count" in
-      '' | *[!0-9]*) ;;
-      *)
-        printf '%s\n' "$count"
-        return
-        ;;
-    esac
-  fi
-
-  if command -v sysctl >/dev/null 2>&1; then
-    count="$(sysctl -n hw.ncpu 2>/dev/null || true)"
-    case "$count" in
-      '' | *[!0-9]*) ;;
-      *)
-        printf '%s\n' "$count"
-        return
-        ;;
-    esac
-  fi
-
-  printf '%s\n' 4
-}
-
 json_string() {
   local value="$1"
   value="${value//\\/\\\\}"
@@ -223,13 +195,22 @@ run_trial() {
   local decode_tps=""
   local ready=false
   local iteration
-  local thread_count
   local chat_request
   local models_response
 
   stop_server
   : >"$log_file"
-  thread_count="$(detect_thread_count)"
+
+  # FIX 1: Minimize CPU thread count when offloading 100% to asymmetric multi-GPUs.
+  # Eliminates system cache thrashing and driver queue synchronization bottlenecks.
+  local compute_threads=4
+
+  # FIX 2: Asymmetric Tensor Splitting Map (7900 XT [20GB] + Tesla P40 [24GB])
+  # Biases the workload division (~55% vs ~45%) toward the faster 800 GB/s AMD VRAM
+  # instead of letting llama.cpp evenly split layers and choke execution at the P40's 346 GB/s limit.
+  # Adjust order to "45,55" if your OS initializes the P40 as card index 0.
+  local tensor_split="55,45"
+
   printf 'START family=%s repo=%s file=%s ctx=%s batch=%s ubatch=%s spec_n=%s alias=%s\n' \
     "$family" "$repo" "$hf_file" "$ctx" "$batch" "$ubatch" "$spec_n" "$alias"
 
@@ -241,16 +222,18 @@ run_trial() {
     --host 0.0.0.0 \
     --port "$port" \
     -ngl 999 \
+    --tensor-split "$tensor_split" \
     -c "$ctx" \
     --flash-attn on \
     -ub "$ubatch" \
     -b "$batch" \
-    --threads "$thread_count" \
+    --threads "$compute_threads" \
+    --threads-batch "$compute_threads" \
     --prio 2 \
     --no-warmup \
     --temp 0.6 \
     --top-p 0.95 \
-    --min-p 0.0 \
+    --min-p 0.05 \
     --spec-type draft-mtp \
     --spec-draft-n-max "$spec_n" \
     --alias "$alias" \
@@ -284,7 +267,7 @@ run_trial() {
 
   stop_server
 
-  if grep -Eiq 'hipMalloc failed|out of memory|OOM|cannot allocate memory|std::bad_alloc' "$log_file"; then
+  if grep -Eiq 'hipMalloc failed|out of memory|OOM|cannot allocate memory|std::bad_alloc|CUDA_ERROR_OUT_OF_MEMORY' "$log_file"; then
     status="oom"
     reason="OOM detected"
   fi
@@ -304,7 +287,10 @@ run_trial() {
 
 trap stop_server EXIT
 
-spec_values=(2 4 8 12 16 24 32)
+# FIX 3: Adjusted speculative lookahead boundaries. 
+# Native architectural MTP implementation tracks up to 3 or 4 tokens max. 
+# Removed ghost sweeps (up to 32) that skew results or provoke runtime VRAM failures.
+spec_values=(1 2 3 4 5 6)
 
 clear_existing_servers
 stop_server
@@ -313,3 +299,4 @@ printf 'RUN run_id=%s results=%s logs=%s\n' "$run_id" "$results_csv" "$logs_dir"
 for spec_n in "${spec_values[@]}"; do
   run_trial "$family" "$repo" "$hf_file" "$ctx" "$batch" "$ubatch" "$spec_n" "$alias"
 done
+
