@@ -1431,10 +1431,12 @@ printf 'ctx=65536\n'
 printf 'batch=128\n'
 printf 'ubatch=128\n'
 printf 'ngl=999\n'
-printf 'command=./build/bin/llama-server -hf unsloth/Qwen3-Coder-Next-GGUF:Q3_K_M --alias qwen3-coder-next\n'
+printf 'cache_type_k=q8_0\n'
+printf 'cache_type_v=q8_0\n'
+printf 'command=./build/bin/llama-server -hf unsloth/Qwen3-Coder-Next-GGUF:Q3_K_M -ctk q8_0 -ctv q8_0 --alias qwen3-coder-next\n'
 EOF
 chmod +x "$benchmark_run_tmp/bin/ssh"
-benchmark_run_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host)"
+benchmark_run_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host --cache-type-k q8_0 --cache-type-v q8_0)"
 assert_contains "$benchmark_run_output" "Benchmark result"
 assert_contains "$benchmark_run_output" "load_status=success"
 assert_contains "$benchmark_run_output" "prompt_tok_s=321.5"
@@ -1443,6 +1445,10 @@ assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "llama-server"
 assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "current-model.env"
 assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "systemctl --user restart llama-server.service"
 assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "http://127.0.0.1:\${port}/v1/chat/completions"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "-ctk"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "-ctv"
+assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" '== \~/*'
+assert_not_contains "$(<"$benchmark_run_tmp/remote-script.sh")" '== ~/*'
 assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "printf -v command_text_part '%q'"
 assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "(^|:)[[:space:]]+eval time"
 assert_not_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "eval.*tokens per second"
@@ -1476,6 +1482,58 @@ for key, value in expected.items():
         raise SystemExit(f"unexpected {key}: {result[key]!r}")
 if "llama-server" not in result["command"]:
     raise SystemExit(f"missing command: {result!r}")
+if result.get("cache_type_k") != "q8_0" or result.get("cache_type_v") != "q8_0":
+    raise SystemExit(f"unexpected cache types: {result!r}")
+PY
+cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+script_input="$(cat)"
+printf '%s
+printf 'load_status=success
+printf 'prompt_tok_s=222.0
+printf 'decode_tok_s=44.0
+printf 'prompt_tokens=128
+printf 'decode_tokens=256
+printf 'ctx=32768
+printf 'batch=128
+printf 'ubatch=64
+printf 'ngl=999
+printf 'backend=vulkan
+printf 'visible_devices=0,1
+printf 'split_mode=layer
+printf 'tensor_split=44,1
+printf 'command=GGML_VK_VISIBLE_DEVICES=0,1 ./build-vulkan/bin/llama-server --split-mode layer --tensor-split 44,1 --parallel 1 --no-cont-batching --alias qwen3-coder-next
+EOF
+chmod +x "$benchmark_run_tmp/bin/ssh"
+benchmark_vulkan_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp/vulkan-runs" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/vulkan-remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host --backend vulkan --visible-devices 0,1 --split-mode layer --tensor-split 44,1 --responsive)"
+assert_contains "$benchmark_vulkan_output" "Benchmark result"
+assert_contains "$benchmark_vulkan_output" "load_status=success"
+assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "export GGML_VK_VISIBLE_DEVICES"
+assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "./build-vulkan/bin/llama-server"
+assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "--split-mode"
+assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "--tensor-split"
+assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "--parallel"
+assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "--no-cont-batching"
+benchmark_vulkan_file="$(find "$benchmark_run_tmp/vulkan-runs/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
+python3 - "$benchmark_vulkan_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    result = json.load(handle)
+expected = {
+    "backend": "vulkan",
+    "visible_devices": "0,1",
+    "split_mode": "layer",
+    "tensor_split": "44,1",
+    "ctx": 32768,
+    "batch": 128,
+    "ubatch": 64,
+}
+for key, value in expected.items():
+    if result.get(key) != value:
+        raise SystemExit(f"unexpected {key}: {result!r}")
 PY
 cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
@@ -1678,7 +1736,7 @@ cat >"$accept_tmp/full.json" <<'EOF'
 {"mode":"full","target":"remote:bench-host","repo":"Example/Full-GGUF","family":"full","alias":"full-next","quant":"Q4_K_M","hf_file":"Full-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
 EOF
 cat >"$accept_tmp/vulkan.json" <<'EOF'
-{"mode":"full","target":"remote:bench-host","repo":"Example/Vulkan-GGUF","family":"vulkan","alias":"vulkan-split","quant":"Q4_K_M","hf_file":"Vulkan-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"backend":"vulkan","visible_devices":"0,1","split_mode":"layer","tensor_split":"20,24","load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
+{"mode":"full","target":"remote:bench-host","repo":"Example/Vulkan-GGUF","family":"vulkan","alias":"vulkan-split","quant":"Q4_K_M","hf_file":"Vulkan-Q4_K_M.gguf","cache_type_k":"q8_0","cache_type_v":"q8_0","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"backend":"vulkan","visible_devices":"0,1","split_mode":"layer","tensor_split":"20,24","cache_type_k":"q8_0","cache_type_v":"q8_0","load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
 EOF
 cat >"$accept_tmp/bad-alias.json" <<'EOF'
 {"mode":"full","target":"remote:bench-host","repo":"Example/Bad-GGUF","family":"badalias","alias":"bad\"alias","quant":"Q4_K_M","hf_file":"Bad-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
@@ -1738,8 +1796,11 @@ if [[ ! -f "$accept_vulkan_start" ]]; then
   exit 1
 fi
 assert_contains "$(<"$accept_vulkan_start")" 'export GGML_VK_VISIBLE_DEVICES=0,1'
+assert_contains "$(<"$accept_vulkan_start")" './build-vulkan/bin/llama-server'
 assert_contains "$(<"$accept_vulkan_start")" '--split-mode layer'
 assert_contains "$(<"$accept_vulkan_start")" '--tensor-split 20,24'
+assert_contains "$(<"$accept_vulkan_start")" '-ctk q8_0'
+assert_contains "$(<"$accept_vulkan_start")" '-ctv q8_0'
 python3 - "$accept_vulkan_runs/accepted/vulkan.json" "$accept_vulkan_start" <<'PY'
 import json
 import sys
@@ -1755,6 +1816,8 @@ expected_config = {
     "visible_devices": "0,1",
     "split_mode": "layer",
     "tensor_split": "20,24",
+    "cache_type_k": "q8_0",
+    "cache_type_v": "q8_0",
 }
 if accepted.get("config") != expected_config:
     raise SystemExit(f"unexpected Vulkan config: {accepted.get('config')!r}")
@@ -1767,6 +1830,7 @@ assert_contains "$accept_vulkan_info" "visible_devices=0,1"
 assert_contains "$accept_vulkan_info" "split_mode=layer"
 assert_contains "$accept_vulkan_info" "tensor_split=20,24"
 assert_contains "$accept_vulkan_info" "GGML_VK_VISIBLE_DEVICES=0,1"
+assert_contains "$accept_vulkan_info" "./build-vulkan/bin/llama-server"
 assert_contains "$accept_vulkan_info" "--split-mode layer"
 assert_contains "$accept_vulkan_info" "--tensor-split 20,24"
 accept_bad_repo_runs="$accept_tmp/bad-repo-runs"
@@ -2699,6 +2763,7 @@ assert_contains "$leading_remote_info" "profile=reliable"
 assert_contains "$leading_remote_info" "remote_host=example"
 assert_contains "$leading_remote_info" "remote_user=alice"
 assert_contains "$leading_remote_info" "ssh_password_prompt=enabled"
+assert_contains "$(<"$repo_root/scripts/oc-local")" "ssh_options=(-o BatchMode=no)"
 
 generated_accept_symlink_outside="$generated_accept_tmp/outside-custom.json"
 cp "$generated_accept_tmp/runs/accepted/custom.json" "$generated_accept_symlink_outside"

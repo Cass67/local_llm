@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: oc-local [family] [profile] [--lean] [--dry-run] [--info] [--remote HOST] [--user USER] [-k] [opencode args...]
+Usage: oc-local [family] [profile] [--lean] [--dry-run] [--info] [--remote HOST] [--user USER] [-k] [pi args...]
 
 Profiles must match the llama.cpp profile that this wrapper starts remotely.
 Profiles are family-specific. Use --info to see exact context, quant, batch, and command.
@@ -316,7 +316,7 @@ if [[ -n "$remote_user" ]]; then
 fi
 ssh_options=(-o BatchMode=yes)
 if [[ "$ssh_password_prompt" == true ]]; then
-  ssh_options=()
+  ssh_options=(-o BatchMode=no)
 fi
 if ! is_safe_family_name "$family"; then
   printf 'invalid model family: %s\n' "$family" >&2
@@ -468,6 +468,10 @@ fields = [
     reject_control_chars("reasoning_effort", profile.get("reasoning_effort") or data.get("reasoning_effort") or "none"),
 ]
 fields.extend(metadata_optional_vulkan_fields(profile))
+fields.extend([
+    reject_control_chars("cache_type_k", profile.get("cache_type_k") or "none"),
+    reject_control_chars("cache_type_v", profile.get("cache_type_v") or "none"),
+])
 if any(value is None or value == "" for value in fields):
     required_fields = fields[:11]
     if any(value is None or value == "" for value in required_fields):
@@ -497,6 +501,8 @@ if [[ "$generated_profile" == true ]]; then
     IFS= read -r visible_devices
     IFS= read -r split_mode
     IFS= read -r tensor_split
+    IFS= read -r cache_type_k
+    IFS= read -r cache_type_v
   } <<<"$generated_profile_output"
   if ! is_safe_remote_script "$remote_script"; then
     printf 'invalid generated remote script: %s\n' "$remote_script" >&2
@@ -518,7 +524,7 @@ if [[ "$generated_profile" == true ]]; then
     printf 'invalid generated backend: %s\n' "$backend" >&2
     exit 1
   fi
-  for string_field in visible_devices split_mode tensor_split; do
+  for string_field in visible_devices split_mode tensor_split cache_type_k cache_type_v; do
     if has_control_chars "${!string_field}"; then
       printf 'invalid generated string field %s contains control characters\n' "$string_field" >&2
       exit 1
@@ -538,7 +544,7 @@ output_limit="${OC_LOCAL_OUTPUT_LIMIT:-$default_output_limit}"
 reserved="${OC_LOCAL_RESERVED:-4096}"
 base_url="${OC_LOCAL_BASE_URL:-http://localhost:8080/v1}"
 api_key="${OC_LOCAL_API_KEY:-sk-dummy}"
-model="${OC_LOCAL_MODEL:-localllm/$model_name}"
+model="${OC_LOCAL_MODEL:-llama-cpp/$model_name}"
 wait_seconds="${OC_LOCAL_WAIT_SECONDS:-180}"
 
 plugin_json=''
@@ -553,7 +559,11 @@ config_content=$(cat <<EOF
 EOF
 )
 
-server_command="./build/bin/llama-server -hf ${hf_repo}"
+server_bin="./build/bin/llama-server"
+if [[ "$backend" == vulkan ]]; then
+  server_bin="./build-vulkan/bin/llama-server"
+fi
+server_command="${server_bin} -hf ${hf_repo}"
 if [[ "$quant" == *.gguf ]]; then
   server_command+=" --hf-file ${quant}"
 else
@@ -570,6 +580,12 @@ fi
 server_command+=" --host 0.0.0.0 --port 8080 -ngl ${ngl}"
 if [[ "$backend" == vulkan ]]; then
   server_command+=" --split-mode ${split_mode} --tensor-split ${tensor_split}"
+fi
+if [[ "${cache_type_k:-none}" != none ]]; then
+  server_command+=" -ctk ${cache_type_k}"
+fi
+if [[ "${cache_type_v:-none}" != none ]]; then
+  server_command+=" -ctv ${cache_type_v}"
 fi
 server_command+=" -c ${context} --flash-attn on -ub ${ubatch} -b ${batch} --threads \"\$(nproc)\" --prio 2"
 server_command+=" --no-warmup --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0.0"
@@ -598,6 +614,12 @@ if [[ "$info" == true ]]; then
     printf 'split_mode=%s\n' "$split_mode"
     printf 'tensor_split=%s\n' "$tensor_split"
   fi
+  if [[ "${cache_type_k:-none}" != none ]]; then
+    printf 'cache_type_k=%s\n' "$cache_type_k"
+  fi
+  if [[ "${cache_type_v:-none}" != none ]]; then
+    printf 'cache_type_v=%s\n' "$cache_type_v"
+  fi
   printf 'alias=%s\n' "$model_name"
   printf 'plugin_mode=%s\n' "$plugin_mode"
   if [[ "$ssh_password_prompt" == true ]]; then
@@ -610,7 +632,7 @@ if [[ "$info" == true ]]; then
   printf 'base_url=%s\n' "$base_url"
   printf 'wait_seconds=%s\n' "$wait_seconds"
   printf 'command=%s\n' "$server_command"
-  printf 'OPENCODE_CONFIG_CONTENT=%s\n' "$config_content"
+  printf 'pi_model=%s\n' "$model"
   exit 0
 fi
 
@@ -629,7 +651,7 @@ if [[ "$dry_run" == true ]]; then
     printf 'ssh_password_prompt=disabled\n'
   fi
   printf 'wait_seconds=%s\n' "$wait_seconds"
-  printf 'config=%s\n' "$config_content"
+  printf 'pi_model=%s\n' "$model"
   exit 0
 fi
 
@@ -681,5 +703,5 @@ until curl -fsS "$base_url/models" >/dev/null 2>&1; do
   sleep 2
 done
 
-printf 'Starting OpenCode with %s context (%s plugins)...\n' "$context" "$plugin_mode" >&2
-OPENCODE_CONFIG_CONTENT="$config_content" exec opencode -m "$model" "$@"
+printf 'Starting pi with %s context (%s plugins)...\n' "$context" "$plugin_mode" >&2
+exec pi --model "$model" "$@"
