@@ -637,6 +637,33 @@ print(removed)
 PY
 }
 
+ensure_launcher_model_log_redirect() {
+  local launcher_file="$1"
+
+  [[ -f "$launcher_file" && ! -L "$launcher_file" ]] || return 0
+  python3 - "$launcher_file" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+marker = 'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"'
+if marker in text:
+    raise SystemExit(0)
+needle = "set -euo pipefail\n"
+insert = (
+    'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
+    'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"\n'
+    'mkdir -p "$(dirname "$log_file")"\n'
+    'exec > >(tee "$log_file") 2>&1\n'
+)
+if needle not in text:
+    raise SystemExit(f"launcher is missing expected shell strict-mode line: {path}")
+path.write_text(text.replace(needle, needle + insert, 1), encoding="utf-8")
+PY
+  chmod +x "$launcher_file"
+}
+
 ensure_switcher_model() {
   local family="$1"
   local start_script="$2"
@@ -4033,6 +4060,7 @@ PY
   if [[ -n "$existing_launcher" ]]; then
     local removed_selection_count
     removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
+    ensure_launcher_model_log_redirect "${existing_launcher%% *}"
     accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v")"
     printf 'Accepted benchmark already has launcher\n'
     printf 'repo=%s\n' "$repo"
@@ -4116,6 +4144,10 @@ lines = [
     f"# local_llm_quant={quant}",
     f"# local_llm_hf_file={hf_file}",
     "set -euo pipefail",
+    'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+    'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"',
+    'mkdir -p "$(dirname "$log_file")"',
+    'exec > >(tee "$log_file") 2>&1',
     'profile="${1:-reliable}"',
     'case "$profile" in speed|fastlong|balanced|reliable|tiny) ;; *) echo "Usage: $0 {speed|fastlong|balanced|reliable|tiny}" >&2; exit 2 ;; esac',
     f"ctx={ctx}",

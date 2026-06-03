@@ -219,10 +219,11 @@ Only restart after the service unit, helper scripts, `current-model.env`, and ge
 ssh "$MODEL_HOST" 'systemctl --user restart llama-server.service'
 ```
 
-Inspect logs when startup fails:
+Inspect logs when startup fails. `journalctl` shows the service wrapper output; each generated model launcher also writes the current run to `$REMOTE_DIR/model.log` (for example, `~/llama.cpp/model.log`) and truncates it on restart:
 
 ```bash
 ssh "$MODEL_HOST" 'journalctl --user -u llama-server.service -n 160 --no-pager'
+ssh "$MODEL_HOST" "tail -160 '$REMOTE_DIR/model.log'"
 ```
 
 ### 5. Manual Web Support Files
