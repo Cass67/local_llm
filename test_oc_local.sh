@@ -65,12 +65,15 @@ switcher_service_contents="$(<"$repo_root/scripts/local-llm-switcher.service")"
 opencode_web_service_contents="$(<"$repo_root/scripts/opencode-web.service")"
 model_manager_contents="$(<"$repo_root/scripts/model-manager.sh")"
 model_discovery_contents="$(<"$repo_root/scripts/model-discovery.sh")"
+oc_local_contents="$(<"$repo_root/scripts/oc-local")"
 heretic_context_contents="$(<"$repo_root/docs/benchmarks/2026-05-15-heretic-context.md")"
 tracked_start_scripts="$(git -C "$repo_root" ls-files 'scripts/start*.sh')"
 if [[ -n "$tracked_start_scripts" ]]; then
   printf 'expected no tracked scripts/start*.sh launchers, but found:\n%s\n' "$tracked_start_scripts" >&2
   exit 1
 fi
+assert_contains "$oc_local_contents" "tail -80 \$remote_dir/model.log"
+assert_not_contains "$oc_local_contents" "llama-\${remote_profile}.log"
 assert_contains "$readme_contents" "Fresh pull workflow"
 assert_contains "$readme_contents" "\`local_llm\` is a bootstrap engine"
 assert_contains "$readme_contents" "./install.sh"
@@ -1772,6 +1775,12 @@ assert_contains "$(<"$accept_full_start")" "-c \"\$ctx\""
 assert_contains "$(<"$accept_full_start")" 'ctx=65536'
 assert_contains "$(<"$accept_full_start")" 'batch=128'
 assert_contains "$(<"$accept_full_start")" 'ubatch=64'
+# shellcheck disable=SC2016
+assert_contains "$(<"$accept_full_start")" 'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"'
+# shellcheck disable=SC2016
+assert_contains "$(<"$accept_full_start")" 'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"'
+# shellcheck disable=SC2016
+assert_contains "$(<"$accept_full_start")" 'exec > >(tee "$log_file") 2>&1'
 cmp -s "$repo_root/scripts/local-llm-switcher.py" "$accept_tmp/local-llm-switcher.before"
 if [[ ! -f "$accept_runs/accepted/full.json" ]]; then
   printf 'expected accepted metadata at family path %s\n' "$accept_runs/accepted/full.json" >&2

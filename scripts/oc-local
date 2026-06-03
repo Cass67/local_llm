@@ -688,7 +688,7 @@ deadline=$((SECONDS + wait_seconds))
 until ssh "${ssh_options[@]}" "$ssh_target" 'curl -fsS http://127.0.0.1:8080/v1/models >/dev/null 2>&1'; do
   if (( SECONDS >= deadline )); then
     printf 'timed out waiting for remote llama.cpp API after %s seconds\n' "$wait_seconds" >&2
-    printf 'check remote log: ssh %s %q\n' "$ssh_target" "tail -80 $remote_dir/llama-${remote_profile}.log" >&2
+    printf 'check remote log: ssh %s %q\n' "$ssh_target" "tail -80 $remote_dir/model.log" >&2
     exit 1
   fi
   sleep 2
