@@ -25,7 +25,9 @@ VRAM_RESERVE = 0.92
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Rank GGUF candidates for local_llm heterogeneous hardware")
+    parser = argparse.ArgumentParser(
+        description="Rank GGUF candidates for local_llm heterogeneous hardware"
+    )
     parser.add_argument("--hardware-json", default="{}", help="hardware facts as JSON")
     parser.add_argument("--limit", type=int, default=8, help="maximum candidates to output")
     parser.add_argument("--query", default="", help="search query used for metadata only")
@@ -98,10 +100,9 @@ def memory_for(params_b: float, quant_bpp: float, context: int) -> float:
 
 def choose_quant(params_b: float, vram_gb: float, context: int) -> tuple[str, float]:
     # Match string token mapping safely
-    quant_map = {q: bpp for q, bpp in QUANTS}
     fallback_q, fallback_bpp = QUANTS[-1]
     fallback = (fallback_q, memory_for(params_b, fallback_bpp, context))
-    
+
     for quant, bpp in QUANTS:
         required = memory_for(params_b, bpp, context)
         if required <= vram_gb:
@@ -157,22 +158,24 @@ def fit_level(required: float, available: float) -> str:
 def parse_hardware(hardware: dict[str, Any]) -> tuple[float, float, list[dict[str, Any]]]:
     """Parse unified JSON hardware fields to elegantly support standalone or dual setups."""
     gpus = hardware.get("gpus", [])
-    
+
     # If using legacy flat format, automatically upconvert into structured multi-gpu list
     if not gpus and ("vram_gb" in hardware or "gpu_name" in hardware):
-        gpus = [{
-            "name": hardware.get("gpu_name", "generic"),
-            "vram_gb": float(hardware.get("vram_gb", 20.0)),
-            "bandwidth": float(hardware.get("bandwidth", 512.0))
-        }]
-        
+        gpus = [
+            {
+                "name": hardware.get("gpu_name") or "generic",
+                "vram_gb": float(hardware.get("vram_gb") or 20.0),
+                "bandwidth": float(hardware.get("bandwidth") or 512.0),
+            }
+        ]
+
     total_vram = 0.0
     processed_gpus = []
-    
+
     for gpu in gpus:
         name = str(gpu.get("name") or "").lower()
         vram = float(gpu.get("vram_gb") or 0.0)
-        
+
         # Determine exact theoretical bandwidth profile if not explicitly set
         bw = gpu.get("bandwidth")
         if bw is None:
@@ -186,52 +189,57 @@ def parse_hardware(hardware: dict[str, Any]) -> tuple[float, float, list[dict[st
                 bw = 400.0
             else:
                 bw = 400.0  # Safe modern baseline default
-                
+
         total_vram += vram
         processed_gpus.append({"name": name, "vram": vram, "bandwidth": float(bw)})
-        
-    # Sort descending by speed to prioritize filling the faster memory layers first (e.g. 7900xt before P40)
+
+    # Sort descending by speed to prioritize filling faster memory layers first.
+    # Example: 7900 XT before P40.
     processed_gpus.sort(key=lambda x: x["bandwidth"], reverse=True)
     return total_vram, processed_gpus
 
 
-def calculate_mixed_tps(params_b: float, quant: str, file_size_gb: float, gpus: list[dict[str, Any]]) -> float:
+def calculate_mixed_tps(
+    params_b: float, quant: str, file_size_gb: float, gpus: list[dict[str, Any]]
+) -> float:
     """Calculates weighted effective processing speed across different hardware bounds."""
     if not gpus:
         return 0.1
-        
+
     # Standardize string token for dict parsing
     base_quant = quant.split("_XL")[0].split("_XS")[0]
-    
+
     # Extract structural bits-per-weight lookup table
-    bpp_dict = {q: bpp for q, bpp in QUANTS}
+    bpp_dict = dict(QUANTS)
     bpp = bpp_dict.get(quant, bpp_dict.get(base_quant, 5.0))
-    
+
     remaining_bytes = file_size_gb * 1073741824
     gpu_time_slices = []
-    
+
     # Walk down the available GPUs (fastest to slowest) to simulate layer loading splits
     for gpu in gpus:
         if remaining_bytes <= 0:
             break
         gpu_capacity_bytes = gpu["vram"] * 1073741824 * VRAM_RESERVE
         bytes_on_this_gpu = min(remaining_bytes, gpu_capacity_bytes)
-        
+
         # Time taken to fetch weights from this card's VRAM pool
         # Bandwidth is converted from GB/s to Bytes/s
         time_on_gpu = bytes_on_this_gpu / (gpu["bandwidth"] * 1000000000)
         gpu_time_slices.append(time_on_gpu)
         remaining_bytes -= bytes_on_this_gpu
-        
+
     # System RAM offload spill penalties
     if remaining_bytes > 0:
-        time_on_cpu = remaining_bytes / (32.0 * 1000000000)  # Standard PCIE/DDR system RAM fallback line
+        time_on_cpu = remaining_bytes / (
+            32.0 * 1000000000
+        )  # Standard PCIE/DDR system RAM fallback line
         gpu_time_slices.append(time_on_cpu)
-        
+
     total_layer_fetch_time = sum(gpu_time_slices)
     if total_layer_fetch_time <= 0:
         return 0.1
-        
+
     # Compute active computational load footprint ratio
     # MoE models execute much faster due to lower active compute weight relative to data size
     raw_tps = (1.0 / total_layer_fetch_time) * (file_size_gb / (params_b * (bpp / 8.0)))
@@ -241,48 +249,57 @@ def calculate_mixed_tps(params_b: float, quant: str, file_size_gb: float, gpus: 
 def score_candidate(item: dict[str, Any], hardware: dict[str, Any]) -> dict[str, Any] | None:
     if not is_gguf(item):
         return None
-        
+
     repo = repo_id(item)
     total_params, active_params = infer_params(repo)
     tags = [str(tag) for tag in item.get("tags", []) if isinstance(tag, str)]
     use_case = infer_use_case(repo, tags)
     cls = size_class(total_params)
-    
+
     params_for_memory = total_params or 30.0
     params_for_speed = active_params or total_params or 30.0
     context = 65536 if params_for_memory >= 10 else 32768
-    
+
     # Call our clean unified hardware parser
     vram_pool, gpus = parse_hardware(hardware)
-    
+
     best_file, file_quant, file_required = choose_file(item, vram_pool)
     if file_required is not None:
         quant = file_quant or "unknown"
         required = file_required
     else:
         quant, required = choose_quant(params_for_memory, vram_pool, context)
-        
+
     fit = fit_level(required, vram_pool)
     downloads = float(item.get("downloads") or 0)
     likes = float(item.get("likes") or 0)
 
     fit_points = {"perfect": 35.0, "good": 28.0, "marginal": 16.0, "too_tight": -25.0}[fit]
-    class_points = {"target": 24.0, "large": 12.0, "small": 4.0, "huge": -24.0, "unknown": -4.0}[cls]
+    class_points = {"target": 24.0, "large": 12.0, "small": 4.0, "huge": -24.0, "unknown": -4.0}[
+        cls
+    ]
     use_points = {"coding": 18.0, "reasoning": 10.0, "chat": 8.0, "multimodal": 7.0}[use_case]
-    
+
     popularity = min(10.0, math.log10(downloads + 1) * 2.0 + math.log10(likes + 1) * 1.5)
     repo_bonus = 8.0 if repo.lower().startswith(("unsloth/", "bartowski/")) else 0.0
     score = max(0.0, min(100.0, fit_points + class_points + use_points + popularity + repo_bonus))
 
     notes = []
     if active_params is not None and total_params is not None:
-        notes.append(f"MoE Architecture Detected: {active_params:g}B active / {total_params:g}B total structural framework.")
-        
+        notes.append(
+            f"MoE Architecture Detected: {active_params:g}B active / "
+            f"{total_params:g}B total structural framework."
+        )
+
     if len(gpus) > 1:
-        notes.append(f"Asymmetric Split Engaged: Parallel pooling across {len(gpus)} distinct discrete GPUs.")
-        
+        notes.append(
+            f"Asymmetric Split Engaged: Parallel pooling across {len(gpus)} distinct discrete GPUs."
+        )
+
     if fit == "too_tight":
-        notes.append("Warning: Model size footprint overflows target hardware total VRAM cache capabilities.")
+        notes.append(
+            "Warning: Model size footprint overflows target hardware total VRAM cache capabilities."
+        )
 
     return {
         "repo": repo,
@@ -310,23 +327,23 @@ def main() -> int:
     hardware = json.loads(args.hardware_json)
     if not isinstance(hardware, dict):
         raise SystemExit("--hardware-json must be a JSON object")
-        
+
     ranked = [
         candidate for item in load_json_stdin() if (candidate := score_candidate(item, hardware))
     ]
     ranked.sort(key=lambda item: (item["score"], item["downloads"]), reverse=True)
-    
+
     payload = {
         "query": args.query,
         "hardware": hardware,
         "total_candidates": len(ranked),
         "candidates": ranked[: args.limit],
     }
-    
+
     if args.json:
         print(json.dumps(payload, separators=(",", ":")))
         return 0
-        
+
     for candidate in payload["candidates"]:
         params = "unknown" if candidate["params_b"] is None else f"{candidate['params_b']:g}B"
         print(
@@ -340,4 +357,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

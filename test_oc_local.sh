@@ -1491,22 +1491,21 @@ PY
 cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-script_input="$(cat)"
-printf '%s
-printf 'load_status=success
-printf 'prompt_tok_s=222.0
-printf 'decode_tok_s=44.0
-printf 'prompt_tokens=128
-printf 'decode_tokens=256
-printf 'ctx=32768
-printf 'batch=128
-printf 'ubatch=64
-printf 'ngl=999
-printf 'backend=vulkan
-printf 'visible_devices=0,1
-printf 'split_mode=layer
-printf 'tensor_split=44,1
-printf 'command=GGML_VK_VISIBLE_DEVICES=0,1 ./build-vulkan/bin/llama-server --split-mode layer --tensor-split 44,1 --parallel 1 --no-cont-batching --alias qwen3-coder-next
+cat >>"$LOCAL_LLM_FAKE_SSH_SCRIPT"
+printf 'load_status=success\n'
+printf 'prompt_tok_s=222.0\n'
+printf 'decode_tok_s=44.0\n'
+printf 'prompt_tokens=128\n'
+printf 'decode_tokens=256\n'
+printf 'ctx=32768\n'
+printf 'batch=128\n'
+printf 'ubatch=64\n'
+printf 'ngl=999\n'
+printf 'backend=vulkan\n'
+printf 'visible_devices=0,1\n'
+printf 'split_mode=layer\n'
+printf 'tensor_split=44,1\n'
+printf 'command=GGML_VK_VISIBLE_DEVICES=0,1 ./build-vulkan/bin/llama-server --split-mode layer --tensor-split 44,1 --parallel 1 --no-cont-batching --alias qwen3-coder-next\n'
 EOF
 chmod +x "$benchmark_run_tmp/bin/ssh"
 benchmark_vulkan_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp/vulkan-runs" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/vulkan-remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host --backend vulkan --visible-devices 0,1 --split-mode layer --tensor-split 44,1 --responsive)"
@@ -1538,6 +1537,55 @@ for key, value in expected.items():
     if result.get(key) != value:
         raise SystemExit(f"unexpected {key}: {result!r}")
 PY
+cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat >>"$LOCAL_LLM_FAKE_SSH_SCRIPT"
+printf 'load_status=success\n'
+printf 'prompt_tok_s=240.0\n'
+printf 'decode_tok_s=88.0\n'
+printf 'prompt_tokens=128\n'
+printf 'decode_tokens=256\n'
+printf 'ctx=65536\n'
+printf 'batch=128\n'
+printf 'ubatch=128\n'
+printf 'ngl=999\n'
+printf 'backend=rocm\n'
+printf 'visible_devices=0,1\n'
+printf 'split_mode=row\n'
+printf 'tensor_split=1,1\n'
+printf 'ctx_shift=on\n'
+printf 'command=HIP_VISIBLE_DEVICES=0,1 ROCR_VISIBLE_DEVICES=0,1 ./build/bin/llama-server --split-mode row --tensor-split 1,1 --ctx-shift --alias qwen3-coder-next\n'
+EOF
+chmod +x "$benchmark_run_tmp/bin/ssh"
+benchmark_rocm_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp/rocm-runs" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/rocm-remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host --backend rocm --visible-devices 0,1 --split-mode row --tensor-split 1,1 --ctx-shift on)"
+assert_contains "$benchmark_rocm_output" "Benchmark result"
+assert_contains "$(<"$benchmark_run_tmp/rocm-remote-script.sh")" "export HIP_VISIBLE_DEVICES"
+assert_contains "$(<"$benchmark_run_tmp/rocm-remote-script.sh")" "export ROCR_VISIBLE_DEVICES"
+assert_contains "$(<"$benchmark_run_tmp/rocm-remote-script.sh")" "--ctx-shift"
+benchmark_rocm_file="$(find "$benchmark_run_tmp/rocm-runs/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
+python3 - "$benchmark_rocm_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    result = json.load(handle)
+expected = {
+    "backend": "rocm",
+    "visible_devices": "0,1",
+    "split_mode": "row",
+    "tensor_split": "1,1",
+    "ctx_shift": "on",
+}
+for key, value in expected.items():
+    if result.get(key) != value:
+        raise SystemExit(f"unexpected {key}: {result!r}")
+PY
+if "$repo_root/scripts/model-manager.sh" benchmark Example/Bad --target remote:bench-host --ctx-shift '../../bad' >/tmp/local-llm-bad-ctx-shift.out 2>&1; then
+  printf 'expected invalid ctx-shift benchmark option to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(</tmp/local-llm-bad-ctx-shift.out)" "invalid ctx shift"
 cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail

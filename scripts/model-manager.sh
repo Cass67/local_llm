@@ -716,9 +716,10 @@ write_accepted_metadata() {
   local tensor_split="${15:-}"
   local cache_type_k="${16:-}"
   local cache_type_v="${17:-}"
+  local ctx_shift="${18:-}"
 
   ensure_state_dir "$runs_dir/accepted" accepted || return 1
-  python3 - "$runs_dir/accepted" "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" <<'PY'
+  python3 - "$runs_dir/accepted" "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" <<'PY'
 import json
 import os
 import pathlib
@@ -727,12 +728,12 @@ import sys
 from pathlib import Path
 
 accepted_dir = Path(sys.argv[1])
-repo, family, alias, launcher_file, profile, ctx, batch, ubatch, ngl, quant, hf_file, backend, visible_devices, split_mode, tensor_split, cache_type_k, cache_type_v = sys.argv[2:]
+repo, family, alias, launcher_file, profile, ctx, batch, ubatch, ngl, quant, hf_file, backend, visible_devices, split_mode, tensor_split, cache_type_k, cache_type_v, ctx_shift = sys.argv[2:]
 if not re.fullmatch(r"[A-Za-z0-9_.-]+", family) or ".." in family or family.startswith("-"):
     raise SystemExit("model-manager refuses unsafe family")
 if not re.fullmatch(r"[A-Za-z0-9_.-]+", alias) or ".." in alias or alias.startswith("-"):
     raise SystemExit("model-manager refuses unsafe alias")
-for name, value in (("repo", repo), ("launcher_file", launcher_file), ("profile", profile), ("quant", quant), ("hf_file", hf_file), ("cache_type_k", cache_type_k), ("cache_type_v", cache_type_v)):
+for name, value in (("repo", repo), ("launcher_file", launcher_file), ("profile", profile), ("quant", quant), ("hf_file", hf_file), ("cache_type_k", cache_type_k), ("cache_type_v", cache_type_v), ("ctx_shift", ctx_shift)):
     if any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise SystemExit(f"accepted metadata field contains a control character: {name}")
     if name in {"cache_type_k", "cache_type_v"} and value and not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
@@ -775,9 +776,13 @@ if cache_type_k:
     payload["config"]["cache_type_k"] = cache_type_k
 if cache_type_v:
     payload["config"]["cache_type_v"] = cache_type_v
+if ctx_shift:
+    if ctx_shift not in {"on", "true", "1", "off", "false", "0"} and not re.fullmatch(r"[0-9]+", ctx_shift):
+        raise SystemExit("accepted metadata ctx_shift must be on/off or a non-negative integer")
+    payload["config"]["ctx_shift"] = ctx_shift
 if backend:
-    if backend != "vulkan":
-        raise SystemExit("accepted metadata backend must be vulkan when set")
+    if backend not in {"vulkan", "rocm"}:
+        raise SystemExit("accepted metadata backend must be rocm or vulkan when set")
     if not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
         raise SystemExit("accepted metadata visible_devices must be comma-separated device indexes")
     if split_mode not in {"layer", "row"}:
@@ -2728,9 +2733,10 @@ run_remote_benchmark() {
   local responsive="${15:-false}"
   local cache_type_k="${16:-}"
   local cache_type_v="${17:-}"
+  local ctx_shift="${18:-}"
   local empty_arg='__LOCAL_LLM_EMPTY__'
 
-  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" bash -s -- "$remote_dir" "$repo" "$family" "$alias" "$profile" "$quant" "${hf_file:-$empty_arg}" "$port" "$ctx" "$batch" "$ubatch" "$backend" "${visible_devices:-$empty_arg}" "${split_mode:-$empty_arg}" "${tensor_split:-$empty_arg}" "$responsive" "${cache_type_k:-$empty_arg}" "${cache_type_v:-$empty_arg}" <<'REMOTE_BENCH'
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" bash -s -- "$remote_dir" "$repo" "$family" "$alias" "$profile" "$quant" "${hf_file:-$empty_arg}" "$port" "$ctx" "$batch" "$ubatch" "$backend" "${visible_devices:-$empty_arg}" "${split_mode:-$empty_arg}" "${tensor_split:-$empty_arg}" "$responsive" "${cache_type_k:-$empty_arg}" "${cache_type_v:-$empty_arg}" "${ctx_shift:-$empty_arg}" <<'REMOTE_BENCH'
 set -euo pipefail
 
 remote_dir="$1"
@@ -2751,7 +2757,8 @@ tensor_split="${15}"
 responsive="${16}"
 cache_type_k="${17}"
 cache_type_v="${18}"
-for optional_name in hf_file visible_devices split_mode tensor_split cache_type_k cache_type_v; do
+ctx_shift="${19}"
+for optional_name in hf_file visible_devices split_mode tensor_split cache_type_k cache_type_v ctx_shift; do
   if [[ "${!optional_name}" == '__LOCAL_LLM_EMPTY__' ]]; then
     printf -v "$optional_name" '%s' ''
   fi
@@ -2804,6 +2811,9 @@ if [[ "$responsive" == true ]]; then
   batch=128
   ubatch=64
 fi
+if [[ "$backend" == rocm ]]; then
+  backend=default
+fi
 if [[ "$backend" == auto ]]; then
   backend=default
   if [[ -x ./build-vulkan/bin/llama-server ]]; then
@@ -2818,6 +2828,11 @@ if [[ "$backend" == vulkan ]]; then
   split_mode="${split_mode:-layer}"
   tensor_split="${tensor_split:-44,1}"
   export GGML_VK_VISIBLE_DEVICES="$visible_devices"
+elif [[ -n "$visible_devices" ]]; then
+  split_mode="${split_mode:-row}"
+  tensor_split="${tensor_split:-1,1}"
+  export HIP_VISIBLE_DEVICES="$visible_devices"
+  export ROCR_VISIBLE_DEVICES="$visible_devices"
 fi
 server_bin=./build/bin/llama-server
 if [[ "$backend" == vulkan ]]; then
@@ -2834,9 +2849,14 @@ server_cmd=(
   --port "$port"
   -ngl "$ngl"
 )
-if [[ "$backend" == vulkan ]]; then
+if [[ -n "$split_mode" || -n "$tensor_split" ]]; then
   server_cmd+=(--split-mode "$split_mode" --tensor-split "$tensor_split")
 fi
+case "$ctx_shift" in
+  on | true | 1) server_cmd+=(--ctx-shift) ;;
+  off | false | 0 | "") ;;
+  *) server_cmd+=(--ctx-shift "$ctx_shift") ;;
+esac
 if [[ -n "$cache_type_k" ]]; then
   server_cmd+=(-ctk "$cache_type_k")
 fi
@@ -2869,6 +2889,8 @@ fi
 command_text=""
 if [[ "$backend" == vulkan ]]; then
   command_text="GGML_VK_VISIBLE_DEVICES=$visible_devices "
+elif [[ -n "$visible_devices" ]]; then
+  command_text="HIP_VISIBLE_DEVICES=$visible_devices ROCR_VISIBLE_DEVICES=$visible_devices "
 fi
 for command_text_part in "${server_cmd[@]}"; do
   printf -v command_text_part '%q' "$command_text_part"
@@ -2880,6 +2902,9 @@ command_text="${command_text% }"
   printf '%s\n' 'set -euo pipefail'
   if [[ "$backend" == vulkan ]]; then
     printf 'export GGML_VK_VISIBLE_DEVICES=%q\n' "$visible_devices"
+  elif [[ -n "$visible_devices" ]]; then
+    printf 'export HIP_VISIBLE_DEVICES=%q\n' "$visible_devices"
+    printf 'export ROCR_VISIBLE_DEVICES=%q\n' "$visible_devices"
   fi
   printf '%s\n' 'profile="${1:-reliable}"'
   printf '%s\n' 'case "$profile" in speed|fastlong|balanced|reliable|tiny) ;; *) echo "Usage: $0 {speed|fastlong|balanced|reliable|tiny}" >&2; exit 2 ;; esac'
@@ -2948,11 +2973,18 @@ fi
 if [[ -n "$cache_type_v" ]]; then
   printf 'cache_type_v=%s\n' "$cache_type_v"
 fi
-if [[ "$backend" == vulkan ]]; then
-  printf 'backend=%s\n' "$backend"
+if [[ -n "$visible_devices" ]]; then
+  if [[ "$backend" == vulkan ]]; then
+    printf 'backend=%s\n' "$backend"
+  else
+    printf 'backend=%s\n' rocm
+  fi
   printf 'visible_devices=%s\n' "$visible_devices"
   printf 'split_mode=%s\n' "$split_mode"
   printf 'tensor_split=%s\n' "$tensor_split"
+fi
+if [[ -n "$ctx_shift" ]]; then
+  printf 'ctx_shift=%s\n' "$ctx_shift"
 fi
 printf 'command=%s\n' "$command_text"
 printf 'log_file=%s\n' "$log_file"
@@ -3215,6 +3247,7 @@ cmd_benchmark() {
   local responsive=false
   local cache_type_k=''
   local cache_type_v=''
+  local ctx_shift=''
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -3292,7 +3325,7 @@ cmd_benchmark() {
         ;;
       --backend)
         if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--backend requires auto, default, or vulkan' >&2
+          printf '%s\n' '--backend requires auto, default, rocm, or vulkan' >&2
           return 2
         fi
         backend="$2"
@@ -3320,6 +3353,14 @@ cmd_benchmark() {
           return 2
         fi
         tensor_split="$2"
+        shift 2
+        ;;
+      --ctx-shift)
+        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+          printf '%s\n' '--ctx-shift requires on, true, 1, off, false, 0, or a non-negative integer' >&2
+          return 2
+        fi
+        ctx_shift="$2"
         shift 2
         ;;
       --responsive)
@@ -3400,7 +3441,7 @@ cmd_benchmark() {
   done
 
   case "$backend" in
-    auto | default | vulkan) ;;
+    auto | default | rocm | vulkan) ;;
     *)
       printf 'invalid benchmark backend: %s\n' "$backend" >&2
       return 2
@@ -3430,6 +3471,15 @@ cmd_benchmark() {
   if [[ -n "$cache_type_v" && ! "$cache_type_v" =~ ^[A-Za-z0-9_.-]+$ ]]; then
     printf 'invalid cache type v: %s\n' "$cache_type_v" >&2
     return 2
+  fi
+  if [[ -n "$ctx_shift" ]]; then
+    case "$ctx_shift" in
+      on | true | 1 | off | false | 0) ;;
+      *[!0-9]*)
+        printf 'invalid ctx shift: %s\n' "$ctx_shift" >&2
+        return 2
+        ;;
+    esac
   fi
 
   case "$target" in
@@ -3549,7 +3599,7 @@ PY
         trial_number=$((trial_number + 1))
         printf 'running trial=%s/%s profile=%s ctx=%s batch=%s ubatch=%s ngl=999\n' \
           "$trial_number" "$trial_total" "$trial_profile" "$trial_ctx" "$trial_batch" "$trial_ubatch"
-        benchmark_output="$(run_remote_benchmark "${target#remote:}" "$repo" "$family" "$alias" "$trial_profile" "$quant" "$hf_file" "$trial_ctx" "$trial_batch" "$trial_ubatch" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$responsive" "$cache_type_k" "$cache_type_v")"
+        benchmark_output="$(run_remote_benchmark "${target#remote:}" "$repo" "$family" "$alias" "$trial_profile" "$quant" "$hf_file" "$trial_ctx" "$trial_batch" "$trial_ubatch" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$responsive" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
         load_status=''
         prompt_tok_s=''
         decode_tok_s=''
@@ -3734,8 +3784,9 @@ PY
     local result_tensor_split=''
     local result_cache_type_k=''
     local result_cache_type_v=''
+    local result_ctx_shift=''
     local line key value
-    benchmark_output="$(run_remote_benchmark "${target#remote:}" "$repo" "$family" "$alias" "${profile_list[0]}" "$quant" "$hf_file" "" "" "" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$responsive" "$cache_type_k" "$cache_type_v")"
+    benchmark_output="$(run_remote_benchmark "${target#remote:}" "$repo" "$family" "$alias" "${profile_list[0]}" "$quant" "$hf_file" "" "" "" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$responsive" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
     while IFS= read -r line; do
       key="${line%%=*}"
       value="${line#*=}"
@@ -3755,6 +3806,7 @@ PY
         tensor_split) result_tensor_split="$value" ;;
         cache_type_k) result_cache_type_k="$value" ;;
         cache_type_v) result_cache_type_v="$value" ;;
+        ctx_shift) result_ctx_shift="$value" ;;
         command) command_text="$value" ;;
         log_file) log_file="$value" ;;
       esac
@@ -3773,7 +3825,7 @@ PY
     done
     reject_symlink_state_file "$output_file" || return 1
 
-    python3 - "$output_file" "$target" "$repo" "$family" "$alias" "${profile_list[0]}" "$ctx" "$batch" "$ubatch" "$ngl" "$load_status" "$prompt_tok_s" "$decode_tok_s" "$prompt_tokens" "$decode_tokens" "$command_text" "$result_timestamp" "$quant" "$hf_file" "$result_backend" "$result_visible_devices" "$result_split_mode" "$result_tensor_split" "${result_cache_type_k:-$cache_type_k}" "${result_cache_type_v:-$cache_type_v}" <<'PY'
+    python3 - "$output_file" "$target" "$repo" "$family" "$alias" "${profile_list[0]}" "$ctx" "$batch" "$ubatch" "$ngl" "$load_status" "$prompt_tok_s" "$decode_tok_s" "$prompt_tokens" "$decode_tokens" "$command_text" "$result_timestamp" "$quant" "$hf_file" "$result_backend" "$result_visible_devices" "$result_split_mode" "$result_tensor_split" "${result_cache_type_k:-$cache_type_k}" "${result_cache_type_v:-$cache_type_v}" "${result_ctx_shift:-$ctx_shift}" <<'PY'
 import json
 import sys
 
@@ -3803,6 +3855,7 @@ import sys
     tensor_split,
     cache_type_k,
     cache_type_v,
+    ctx_shift,
 ) = sys.argv[1:]
 
 def integer(value):
@@ -3830,6 +3883,7 @@ result = {
     "hf_file": hf_file,
     "cache_type_k": cache_type_k or None,
     "cache_type_v": cache_type_v or None,
+    "ctx_shift": ctx_shift or None,
     "command": command,
     "timestamp": timestamp,
 }
@@ -4029,9 +4083,15 @@ backend = result.get("backend") or ""
 visible_devices = result.get("visible_devices") or ""
 split_mode = result.get("split_mode") or ""
 tensor_split = result.get("tensor_split") or ""
+ctx_shift = result.get("ctx_shift") or ""
+if ctx_shift:
+    if not isinstance(ctx_shift, str) or has_control_chars(ctx_shift):
+        raise SystemExit("benchmark JSON ctx_shift must be a safe string")
+    if ctx_shift not in {"on", "true", "1", "off", "false", "0"} and not re.fullmatch(r"[0-9]+", ctx_shift):
+        raise SystemExit("benchmark JSON ctx_shift must be on/off or a non-negative integer")
 if backend:
-    if backend != "vulkan":
-        raise SystemExit("benchmark JSON backend must be vulkan when set")
+    if backend not in {"vulkan", "rocm"}:
+        raise SystemExit("benchmark JSON backend must be rocm or vulkan when set")
     for key, value in (("visible_devices", visible_devices), ("split_mode", split_mode), ("tensor_split", tensor_split)):
         if not isinstance(value, str) or has_control_chars(value):
             raise SystemExit(f"benchmark JSON field must be a safe string: {key}")
@@ -4043,15 +4103,15 @@ if backend:
         raise SystemExit("benchmark JSON tensor_split must be comma-separated positive integers")
 values = [result[key] for key in required]
 values.extend(str(result.get(key) or "") for key in ("ctx", "batch", "ubatch", "ngl", "quant", "hf_file", "cache_type_k", "cache_type_v"))
-values.extend([backend, visible_devices, split_mode, tensor_split])
+values.extend([backend, visible_devices, split_mode, tensor_split, ctx_shift])
 print("\x1f".join(values))
 PY
   )"; then
     return 1
   fi
 
-  local ctx batch ubatch ngl quant hf_file cache_type_k cache_type_v backend visible_devices split_mode tensor_split
-  IFS=$'\x1f' read -r repo family alias target profile ctx batch ubatch ngl quant hf_file cache_type_k cache_type_v backend visible_devices split_mode tensor_split <<<"$json_fields"
+  local ctx batch ubatch ngl quant hf_file cache_type_k cache_type_v backend visible_devices split_mode tensor_split ctx_shift
+  IFS=$'\x1f' read -r repo family alias target profile ctx batch ubatch ngl quant hf_file cache_type_k cache_type_v backend visible_devices split_mode tensor_split ctx_shift <<<"$json_fields"
 
   ensure_runs_dirs
 
@@ -4061,7 +4121,7 @@ PY
     local removed_selection_count
     removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
     ensure_launcher_model_log_redirect "${existing_launcher%% *}"
-    accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v")"
+    accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
     printf 'Accepted benchmark already has launcher\n'
     printf 'repo=%s\n' "$repo"
     printf 'family=%s\n' "$family"
@@ -4111,12 +4171,12 @@ PY
   fi
   mkdir -p "${launcher_file%/*}"
 
-  python3 - "$launcher_file" "$repo" "$family" "$alias" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" <<'PY'
+  python3 - "$launcher_file" "$repo" "$family" "$alias" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" <<'PY'
 import shlex
 import sys
 import re
 
-path, repo, family, alias, ctx, batch, ubatch, ngl, quant, hf_file, backend, visible_devices, split_mode, tensor_split, cache_type_k, cache_type_v = sys.argv[1:]
+path, repo, family, alias, ctx, batch, ubatch, ngl, quant, hf_file, backend, visible_devices, split_mode, tensor_split, cache_type_k, cache_type_v, ctx_shift = sys.argv[1:]
 for name, value in (("repo", repo), ("family", family), ("alias", alias), ("quant", quant), ("hf_file", hf_file), ("cache_type_k", cache_type_k), ("cache_type_v", cache_type_v)):
     if any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise SystemExit(f"launcher field contains a control character: {name}")
@@ -4127,9 +4187,12 @@ for name, value, minimum in (("ctx", ctx, 1), ("batch", batch, 1), ("ubatch", ub
         if minimum == 1:
             raise SystemExit(f"missing positive numeric {name}")
         raise SystemExit(f"missing non-negative numeric {name}")
+if ctx_shift:
+    if ctx_shift not in {"on", "true", "1", "off", "false", "0"} and not re.fullmatch(r"[0-9]+", ctx_shift):
+        raise SystemExit("ctx_shift must be on/off or a non-negative integer")
 if backend:
-    if backend != "vulkan":
-        raise SystemExit("backend must be vulkan when set")
+    if backend not in {"vulkan", "rocm"}:
+        raise SystemExit("backend must be rocm or vulkan when set")
     if not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
         raise SystemExit("visible_devices must be comma-separated device indexes")
     if split_mode not in {"layer", "row"}:
@@ -4157,6 +4220,9 @@ lines = [
 ]
 if backend == "vulkan":
     lines.append(f"export GGML_VK_VISIBLE_DEVICES={visible_devices}")
+elif visible_devices:
+    lines.append(f"export HIP_VISIBLE_DEVICES={visible_devices}")
+    lines.append(f"export ROCR_VISIBLE_DEVICES={visible_devices}")
 server_bin = "./build-vulkan/bin/llama-server" if backend == "vulkan" else "./build/bin/llama-server"
 lines.extend([
     f"exec {server_bin} \\",
@@ -4171,11 +4237,15 @@ lines.extend([
     "  --port 8080 \\",
     '  -ngl "$ngl" \\',
 ])
-if backend == "vulkan":
+if backend:
     lines.extend([
         f"  --split-mode {shlex.quote(split_mode)} \\",
         f"  --tensor-split {shlex.quote(tensor_split)} \\",
     ])
+if ctx_shift in {"on", "true", "1"}:
+    lines.append("  --ctx-shift \\")
+elif ctx_shift and ctx_shift not in {"off", "false", "0"}:
+    lines.append(f"  --ctx-shift {shlex.quote(ctx_shift)} \\")
 if cache_type_k:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", cache_type_k):
         raise SystemExit("cache_type_k must be a safe llama.cpp cache type")
@@ -4207,7 +4277,7 @@ PY
   chmod +x "$launcher_file"
   local removed_selection_count
   removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
-  accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v")"
+  accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
 
   printf 'Accepted benchmark\n'
   printf 'repo=%s\n' "$repo"
