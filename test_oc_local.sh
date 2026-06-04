@@ -228,6 +228,7 @@ assert_not_contains "$model_manager_contents" "qwen-27b-hauhau"
 assert_not_contains "$model_manager_contents" "qwen-heretic"
 assert_not_contains "$model_discovery_contents" "Qwen3.6-35B-A3B"
 assert_not_contains "$model_discovery_contents" "Gemma-4-31B-it"
+assert_contains "$model_discovery_contents" 'OC_LOCAL_HF_FETCH_LIMIT:-100'
 assert_not_contains "$model_discovery_contents" "gpt-oss-20B"
 assert_contains "$heretic_context_contents" "historical benchmark"
 assert_contains "$heretic_context_contents" "not an active curated default"

@@ -261,7 +261,7 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 PY
     return 0
   fi
-  local fetch_limit="${OC_LOCAL_HF_FETCH_LIMIT:-50}"
+  local fetch_limit="${OC_LOCAL_HF_FETCH_LIMIT:-100}"
   if [[ "$fetch_limit" =~ ^[0-9]+$ ]] && ((fetch_limit < limit)); then
     fetch_limit="$limit"
   fi
