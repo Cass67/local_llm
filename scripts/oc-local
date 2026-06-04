@@ -586,9 +586,8 @@ if [[ "$backend" == vulkan || "$backend" == rocm ]]; then
   server_command+=" --split-mode ${split_mode} --tensor-split ${tensor_split}"
 fi
 case "${ctx_shift:-none}" in
-  on | true | 1) server_command+=" --ctx-shift" ;;
   none | off | false | 0) ;;
-  *) server_command+=" --ctx-shift ${ctx_shift}" ;;
+  *) server_command+=" --context-shift" ;;
 esac
 if [[ "${cache_type_k:-none}" != none ]]; then
   server_command+=" -ctk ${cache_type_k}"
