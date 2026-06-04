@@ -637,6 +637,31 @@ print(removed)
 PY
 }
 
+update_existing_launcher_runtime() {
+  local launcher_file="$1"
+  local ctx="$2"
+  local batch="$3"
+  local ubatch="$4"
+  local ngl="$5"
+
+  [[ -f "$launcher_file" && ! -L "$launcher_file" ]] || return 0
+  python3 - "$launcher_file" "$ctx" "$batch" "$ubatch" "$ngl" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+ctx, batch, ubatch, ngl = sys.argv[2:]
+for name, value in {"ctx": ctx, "batch": batch, "ubatch": ubatch, "ngl": ngl}.items():
+    if not re.fullmatch(r"[0-9]+", value):
+        raise SystemExit(f"invalid {name}")
+text = path.read_text(encoding="utf-8")
+for name, value in (("ctx", ctx), ("batch", batch), ("ubatch", ubatch), ("ngl", ngl)):
+    text = re.sub(rf"^{name}=[0-9]+$", f"{name}={value}", text, flags=re.MULTILINE)
+path.write_text(text, encoding="utf-8")
+PY
+}
+
 ensure_launcher_model_log_redirect() {
   local launcher_file="$1"
 
@@ -4173,6 +4198,7 @@ PY
     local removed_selection_count
     removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
     ensure_launcher_model_log_redirect "${existing_launcher%% *}"
+    update_existing_launcher_runtime "${existing_launcher%% *}" "$ctx" "$batch" "$ubatch" "$ngl"
     accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target")"
     printf 'Accepted benchmark already has launcher\n'
     printf 'repo=%s\n' "$repo"
