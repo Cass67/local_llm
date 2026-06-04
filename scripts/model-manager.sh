@@ -2592,12 +2592,26 @@ infer_family() {
   esac
 }
 
-infer_alias() {
+infer_slug_from_repo() {
   local name
   name="${1##*/}"
   name="${name%-GGUF}"
   name="${name%-gguf}"
-  printf '%s\n' "$name" | tr '[:upper:]' '[:lower:]'
+  printf '%s\n' "$name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^-+//; s/-+$//'
+}
+
+infer_benchmark_family() {
+  local family
+  family="$(infer_family "$1")"
+  if [[ "$family" == candidate ]]; then
+    infer_slug_from_repo "$1"
+  else
+    printf '%s\n' "$family"
+  fi
+}
+
+infer_alias() {
+  infer_slug_from_repo "$1"
 }
 
 infer_quant() {
@@ -3399,7 +3413,7 @@ cmd_benchmark() {
     return 2
   fi
   if [[ -z "$family" ]]; then
-    family="$(infer_family "$repo")"
+    family="$(infer_benchmark_family "$repo")"
   fi
   if [[ -z "$alias" ]]; then
     alias="$(infer_alias "$repo")"
