@@ -717,9 +717,10 @@ write_accepted_metadata() {
   local cache_type_k="${16:-}"
   local cache_type_v="${17:-}"
   local ctx_shift="${18:-}"
+  local target="${19:-}"
 
   ensure_state_dir "$runs_dir/accepted" accepted || return 1
-  python3 - "$runs_dir/accepted" "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" <<'PY'
+  python3 - "$runs_dir/accepted" "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target" <<'PY'
 import json
 import os
 import pathlib
@@ -728,12 +729,12 @@ import sys
 from pathlib import Path
 
 accepted_dir = Path(sys.argv[1])
-repo, family, alias, launcher_file, profile, ctx, batch, ubatch, ngl, quant, hf_file, backend, visible_devices, split_mode, tensor_split, cache_type_k, cache_type_v, ctx_shift = sys.argv[2:]
+repo, family, alias, launcher_file, profile, ctx, batch, ubatch, ngl, quant, hf_file, backend, visible_devices, split_mode, tensor_split, cache_type_k, cache_type_v, ctx_shift, target = sys.argv[2:]
 if not re.fullmatch(r"[A-Za-z0-9_.-]+", family) or ".." in family or family.startswith("-"):
     raise SystemExit("model-manager refuses unsafe family")
 if not re.fullmatch(r"[A-Za-z0-9_.-]+", alias) or ".." in alias or alias.startswith("-"):
     raise SystemExit("model-manager refuses unsafe alias")
-for name, value in (("repo", repo), ("launcher_file", launcher_file), ("profile", profile), ("quant", quant), ("hf_file", hf_file), ("cache_type_k", cache_type_k), ("cache_type_v", cache_type_v), ("ctx_shift", ctx_shift)):
+for name, value in (("repo", repo), ("launcher_file", launcher_file), ("profile", profile), ("quant", quant), ("hf_file", hf_file), ("cache_type_k", cache_type_k), ("cache_type_v", cache_type_v), ("ctx_shift", ctx_shift), ("target", target)):
     if any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise SystemExit(f"accepted metadata field contains a control character: {name}")
     if name in {"cache_type_k", "cache_type_v"} and value and not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
@@ -776,6 +777,10 @@ if cache_type_k:
     payload["config"]["cache_type_k"] = cache_type_k
 if cache_type_v:
     payload["config"]["cache_type_v"] = cache_type_v
+if target:
+    if not re.fullmatch(r"local|remote:[A-Za-z0-9_.:-]+", target):
+        raise SystemExit("accepted metadata target must be local or remote:<host>")
+    payload["target"] = target
 if ctx_shift:
     if ctx_shift not in {"on", "true", "1", "off", "false", "0"} and not re.fullmatch(r"[0-9]+", ctx_shift):
         raise SystemExit("accepted metadata ctx_shift must be on/off or a non-negative integer")
@@ -4135,7 +4140,7 @@ PY
     local removed_selection_count
     removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
     ensure_launcher_model_log_redirect "${existing_launcher%% *}"
-    accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
+    accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target")"
     printf 'Accepted benchmark already has launcher\n'
     printf 'repo=%s\n' "$repo"
     printf 'family=%s\n' "$family"
@@ -4289,7 +4294,7 @@ PY
   chmod +x "$launcher_file"
   local removed_selection_count
   removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
-  accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
+  accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target")"
 
   printf 'Accepted benchmark\n'
   printf 'repo=%s\n' "$repo"
