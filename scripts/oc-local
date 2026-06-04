@@ -378,8 +378,8 @@ def metadata_optional_vulkan_fields(container):
         reject_control_chars(label, value)
     if backend == "default":
         return backend, "none", "none", "none"
-    if backend != "vulkan":
-        fail("config.backend must be vulkan when set")
+    if backend not in {"vulkan", "rocm"}:
+        fail("config.backend must be rocm or vulkan when set")
     if not isinstance(visible_devices, str) or not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
         fail("config.visible_devices must be comma-separated device indexes")
     if split_mode not in {"layer", "row"}:
@@ -471,6 +471,7 @@ fields.extend(metadata_optional_vulkan_fields(profile))
 fields.extend([
     reject_control_chars("cache_type_k", profile.get("cache_type_k") or "none"),
     reject_control_chars("cache_type_v", profile.get("cache_type_v") or "none"),
+    reject_control_chars("ctx_shift", profile.get("ctx_shift") or "none"),
 ])
 if any(value is None or value == "" for value in fields):
     required_fields = fields[:11]
@@ -503,6 +504,7 @@ if [[ "$generated_profile" == true ]]; then
     IFS= read -r tensor_split
     IFS= read -r cache_type_k
     IFS= read -r cache_type_v
+    IFS= read -r ctx_shift
   } <<<"$generated_profile_output"
   if ! is_safe_remote_script "$remote_script"; then
     printf 'invalid generated remote script: %s\n' "$remote_script" >&2
@@ -520,11 +522,11 @@ if [[ "$generated_profile" == true ]]; then
       exit 1
     fi
   done
-  if [[ "$backend" != default && "$backend" != vulkan ]]; then
+  if [[ "$backend" != default && "$backend" != vulkan && "$backend" != rocm ]]; then
     printf 'invalid generated backend: %s\n' "$backend" >&2
     exit 1
   fi
-  for string_field in visible_devices split_mode tensor_split cache_type_k cache_type_v; do
+  for string_field in visible_devices split_mode tensor_split cache_type_k cache_type_v ctx_shift; do
     if has_control_chars "${!string_field}"; then
       printf 'invalid generated string field %s contains control characters\n' "$string_field" >&2
       exit 1
@@ -576,11 +578,18 @@ elif [[ "$mmproj_mode" == disabled ]]; then
 fi
 if [[ "$backend" == vulkan ]]; then
   server_command="GGML_VK_VISIBLE_DEVICES=${visible_devices} ${server_command}"
+elif [[ "$backend" == rocm ]]; then
+  server_command="HIP_VISIBLE_DEVICES=${visible_devices} ROCR_VISIBLE_DEVICES=${visible_devices} ${server_command}"
 fi
 server_command+=" --host 0.0.0.0 --port 8080 -ngl ${ngl}"
-if [[ "$backend" == vulkan ]]; then
+if [[ "$backend" == vulkan || "$backend" == rocm ]]; then
   server_command+=" --split-mode ${split_mode} --tensor-split ${tensor_split}"
 fi
+case "${ctx_shift:-none}" in
+  on | true | 1) server_command+=" --ctx-shift" ;;
+  none | off | false | 0) ;;
+  *) server_command+=" --ctx-shift ${ctx_shift}" ;;
+esac
 if [[ "${cache_type_k:-none}" != none ]]; then
   server_command+=" -ctk ${cache_type_k}"
 fi
@@ -609,7 +618,7 @@ if [[ "$info" == true ]]; then
   printf 'mmproj=%s\n' "$mmproj_mode"
   printf 'reasoning_effort=%s\n' "$reasoning_effort"
   printf 'backend=%s\n' "$backend"
-  if [[ "$backend" == vulkan ]]; then
+  if [[ "$backend" == vulkan || "$backend" == rocm ]]; then
     printf 'visible_devices=%s\n' "$visible_devices"
     printf 'split_mode=%s\n' "$split_mode"
     printf 'tensor_split=%s\n' "$tensor_split"
@@ -619,6 +628,9 @@ if [[ "$info" == true ]]; then
   fi
   if [[ "${cache_type_v:-none}" != none ]]; then
     printf 'cache_type_v=%s\n' "$cache_type_v"
+  fi
+  if [[ "${ctx_shift:-none}" != none ]]; then
+    printf 'ctx_shift=%s\n' "$ctx_shift"
   fi
   printf 'alias=%s\n' "$model_name"
   printf 'plugin_mode=%s\n' "$plugin_mode"
