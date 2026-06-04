@@ -4332,7 +4332,7 @@ cmd_deploy() {
         shift
         ;;
       -h | --help)
-        printf '%s\n' 'Usage: model-manager deploy --target remote:<host> --dry-run'
+        printf '%s\n' 'Usage: model-manager deploy --target remote:<host> [--dry-run|--yes]'
         return 0
         ;;
       --*)
@@ -4346,12 +4346,8 @@ cmd_deploy() {
     esac
   done
 
-  if [[ "$yes" == true ]]; then
-    printf '%s\n' 'deploy --yes is not implemented; first pass is dry-run only' >&2
-    return 2
-  fi
-  if [[ "$dry_run" != true ]]; then
-    printf '%s\n' 'deploy is dry-run only; rerun with --dry-run' >&2
+  if [[ "$yes" == true && "$dry_run" == true ]]; then
+    printf '%s\n' 'choose either --dry-run or --yes, not both' >&2
     return 2
   fi
   case "$target" in
@@ -4473,11 +4469,14 @@ for raw_path in sys.argv[3:]:
         continue
     family = accepted.get("family") or path.stem
     alias = accepted.get("alias") or accepted.get("model_name") or "unknown"
+    profile = accepted.get("profile") or "reliable"
     require_safe_label(path.name, "family", family)
     require_safe_label(path.name, "alias", alias)
+    require_safe_label(path.name, "profile", profile)
     if "model_name" in accepted:
         require_safe_label(path.name, "model_name", accepted.get("model_name"))
-    print(f"accepted={path.name}\tfamily={family}\talias={alias}\tlauncher={launcher_path}\tremote={remote_dir}/{launcher_name}")
+    mtime = path.stat().st_mtime
+    print(f"accepted={path.name}\tfamily={family}\talias={alias}\tlauncher={launcher_path}\tremote={remote_dir}/{launcher_name}\tprofile={profile}\tmtime={mtime}")
 PY
   )"; then
     printf '%s\n' 'deploy plan generation failed' >&2
@@ -4500,7 +4499,7 @@ PY
   printf 'target=%s\n' "$target"
   printf 'remote_dir=%s\n' "$remote_dir"
   printf 'Generated launchers:\n'
-  while IFS=$'\t' read -r accepted family alias launcher remote_path; do
+  while IFS=$'\t' read -r accepted family alias launcher remote_path profile mtime; do
     printf '  %s %s %s\n' "$family" "$alias" "$accepted"
     printf '    copy launcher: %s -> %s:%s\n' "${launcher#launcher=}" "$host" "${remote_path#remote=}"
   done <<<"$plan_rows"
@@ -4520,7 +4519,55 @@ PY
   printf '  copy support: %s/scripts/run-local-llm-caddy-container.sh -> %s:%s/run-local-llm-caddy-container.sh\n' "$repo_root" "$host" "$remote_dir"
   printf '  copy service: %s/scripts/local-llm-switcher.service -> %s:~/.config/systemd/user/local-llm-switcher.service\n' "$repo_root" "$host"
   printf '  copy service: %s/scripts/opencode-web.service -> %s:~/.config/systemd/user/opencode-web.service\n' "$repo_root" "$host"
-  printf '%s\n' 'Dry-run only: no files copied.'
+  if [[ "$dry_run" == true ]]; then
+    printf '%s\n' 'Dry-run only: no files copied.'
+    return 0
+  fi
+
+  if [[ ! "$remote_dir" =~ ^(~|/)?[A-Za-z0-9_./-]+$ ]]; then
+    printf 'invalid remote dir: %s\n' "$remote_dir" >&2
+    return 2
+  fi
+
+  local q_remote_dir
+  printf -v q_remote_dir '%q' "$remote_dir"
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "mkdir -p $q_remote_dir ~/.config/systemd/user ~/.config/local_llm" || return 1
+
+  local current_launcher=''
+  local current_profile='reliable'
+  local current_mtime='-1'
+  local launcher_path launcher_name remote_path profile_value mtime_value
+  while IFS=$'\t' read -r accepted family alias launcher remote_path profile mtime; do
+    launcher_path="${launcher#launcher=}"
+    launcher_name="${remote_path##*/}"
+    profile_value="${profile#profile=}"
+    mtime_value="${mtime#mtime=}"
+    scp "$launcher_path" "$host:$remote_dir/$launcher_name" || return 1
+    if python3 - "$mtime_value" "$current_mtime" <<'PY'; then
+import sys
+raise SystemExit(0 if float(sys.argv[1]) > float(sys.argv[2]) else 1)
+PY
+      current_launcher="$launcher_name"
+      current_profile="$profile_value"
+      current_mtime="$mtime_value"
+    fi
+  done <<<"$plan_rows"
+
+  scp "$repo_root/scripts/run-current-model.sh" "$host:$remote_dir/run-current-model.sh" || return 1
+  scp "$repo_root/scripts/local-llm-switcher.py" "$host:$remote_dir/local-llm-switcher.py" || return 1
+  scp "$repo_root/scripts/Caddyfile.local-llm" "$host:$remote_dir/Caddyfile.local-llm" || return 1
+  scp "$repo_root/scripts/run-local-llm-caddy-container.sh" "$host:$remote_dir/run-local-llm-caddy-container.sh" || return 1
+  scp "$repo_root/scripts/local-llm-switcher.service" "$host:~/.config/systemd/user/local-llm-switcher.service" || return 1
+  scp "$repo_root/scripts/opencode-web.service" "$host:~/.config/systemd/user/opencode-web.service" || return 1
+
+  if [[ -z "$current_launcher" ]]; then
+    printf '%s\n' 'deploy could not determine current launcher' >&2
+    return 1
+  fi
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "cd $q_remote_dir && chmod +x *.sh local-llm-switcher.py 2>/dev/null || true; { printf '%s\\n' 'REMOTE_SCRIPT=./$current_launcher'; printf '%s\\n' 'REMOTE_PROFILE=$current_profile'; } > current-model.env; systemctl --user restart llama-server.service" || return 1
+  printf 'Deploy complete\n'
+  printf 'target=%s\n' "$target"
+  printf 'current=%s profile=%s\n' "$current_launcher" "$current_profile"
 }
 
 main() {
