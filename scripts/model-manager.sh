@@ -3267,6 +3267,9 @@ cmd_benchmark() {
   local cache_type_k=''
   local cache_type_v=''
   local ctx_shift=''
+  local ctx_override=''
+  local batch_override=''
+  local ubatch_override=''
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -3372,6 +3375,30 @@ cmd_benchmark() {
           return 2
         fi
         tensor_split="$2"
+        shift 2
+        ;;
+      --ctx)
+        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+          printf '%s\n' '--ctx requires a positive integer' >&2
+          return 2
+        fi
+        ctx_override="$2"
+        shift 2
+        ;;
+      --batch)
+        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+          printf '%s\n' '--batch requires a positive integer' >&2
+          return 2
+        fi
+        batch_override="$2"
+        shift 2
+        ;;
+      --ubatch)
+        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+          printf '%s\n' '--ubatch requires a positive integer' >&2
+          return 2
+        fi
+        ubatch_override="$2"
         shift 2
         ;;
       --ctx-shift)
@@ -3487,6 +3514,12 @@ cmd_benchmark() {
     printf 'invalid cache type k: %s\n' "$cache_type_k" >&2
     return 2
   fi
+  for numeric_override in ctx_override batch_override ubatch_override; do
+    if [[ -n "${!numeric_override}" && ! "${!numeric_override}" =~ ^[1-9][0-9]*$ ]]; then
+      printf 'invalid numeric benchmark override %s: %s\n' "$numeric_override" "${!numeric_override}" >&2
+      return 2
+    fi
+  done
   if [[ -n "$cache_type_v" && ! "$cache_type_v" =~ ^[A-Za-z0-9_.-]+$ ]]; then
     printf 'invalid cache type v: %s\n' "$cache_type_v" >&2
     return 2
@@ -3805,7 +3838,7 @@ PY
     local result_cache_type_v=''
     local result_ctx_shift=''
     local line key value
-    benchmark_output="$(run_remote_benchmark "${target#remote:}" "$repo" "$family" "$alias" "${profile_list[0]}" "$quant" "$hf_file" "" "" "" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$responsive" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
+    benchmark_output="$(run_remote_benchmark "${target#remote:}" "$repo" "$family" "$alias" "${profile_list[0]}" "$quant" "$hf_file" "$ctx_override" "$batch_override" "$ubatch_override" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$responsive" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
     while IFS= read -r line; do
       key="${line%%=*}"
       value="${line#*=}"

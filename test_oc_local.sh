@@ -1509,7 +1509,7 @@ printf 'tensor_split=44,1\n'
 printf 'command=GGML_VK_VISIBLE_DEVICES=0,1 ./build-vulkan/bin/llama-server --split-mode layer --tensor-split 44,1 --parallel 1 --no-cont-batching --alias qwen3-coder-next\n'
 EOF
 chmod +x "$benchmark_run_tmp/bin/ssh"
-benchmark_vulkan_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp/vulkan-runs" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/vulkan-remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host --backend vulkan --visible-devices 0,1 --split-mode layer --tensor-split 44,1 --responsive)"
+benchmark_vulkan_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp/vulkan-runs" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/vulkan-remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host --backend vulkan --visible-devices 0,1 --split-mode layer --tensor-split 44,1 --ctx 131072 --batch 64 --ubatch 64)"
 assert_contains "$benchmark_vulkan_output" "Benchmark result"
 assert_contains "$benchmark_vulkan_output" "load_status=success"
 assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "export GGML_VK_VISIBLE_DEVICES"
