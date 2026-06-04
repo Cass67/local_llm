@@ -4489,6 +4489,21 @@ PY
   fi
 
   local host="${target#remote:}"
+  local support_dir="${LOCAL_LLM_SUPPORT_DIR:-}"
+  if [[ -z "$support_dir" ]]; then
+    if [[ -f "$repo_root/scripts/run-current-model.sh" ]]; then
+      support_dir="$repo_root/scripts"
+    else
+      support_dir="${LOCAL_LLM_SHARE_DIR:-$HOME/.local/share/local_llm}/scripts"
+    fi
+  fi
+  for support_file in run-current-model.sh local-llm-switcher.py Caddyfile.local-llm run-local-llm-caddy-container.sh local-llm-switcher.service opencode-web.service; do
+    if [[ ! -f "$support_dir/$support_file" ]]; then
+      printf 'deploy support file missing: %s\n' "$support_dir/$support_file" >&2
+      return 1
+    fi
+  done
+
   local env_remote_dir="$remote_dir"
   local env_remote_dir_warning=false
   if [[ "$env_remote_dir" == "~" || "$env_remote_dir" == \~/* || "$env_remote_dir" != /* ]]; then
@@ -4513,12 +4528,12 @@ PY
   printf '    LLAMA_DIR=%s\n' "$env_remote_dir"
   printf '    LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002\n'
   printf '    LOCAL_LLM_INJECT_TARGET=opencode\n'
-  printf '  copy support: %s/scripts/run-current-model.sh -> %s:%s/run-current-model.sh\n' "$repo_root" "$host" "$remote_dir"
-  printf '  copy support: %s/scripts/local-llm-switcher.py -> %s:%s/local-llm-switcher.py\n' "$repo_root" "$host" "$remote_dir"
-  printf '  copy support: %s/scripts/Caddyfile.local-llm -> %s:%s/Caddyfile.local-llm\n' "$repo_root" "$host" "$remote_dir"
-  printf '  copy support: %s/scripts/run-local-llm-caddy-container.sh -> %s:%s/run-local-llm-caddy-container.sh\n' "$repo_root" "$host" "$remote_dir"
-  printf '  copy service: %s/scripts/local-llm-switcher.service -> %s:~/.config/systemd/user/local-llm-switcher.service\n' "$repo_root" "$host"
-  printf '  copy service: %s/scripts/opencode-web.service -> %s:~/.config/systemd/user/opencode-web.service\n' "$repo_root" "$host"
+  printf '  copy support: %s/run-current-model.sh -> %s:%s/run-current-model.sh\n' "$support_dir" "$host" "$remote_dir"
+  printf '  copy support: %s/local-llm-switcher.py -> %s:%s/local-llm-switcher.py\n' "$support_dir" "$host" "$remote_dir"
+  printf '  copy support: %s/Caddyfile.local-llm -> %s:%s/Caddyfile.local-llm\n' "$support_dir" "$host" "$remote_dir"
+  printf '  copy support: %s/run-local-llm-caddy-container.sh -> %s:%s/run-local-llm-caddy-container.sh\n' "$support_dir" "$host" "$remote_dir"
+  printf '  copy service: %s/local-llm-switcher.service -> %s:~/.config/systemd/user/local-llm-switcher.service\n' "$support_dir" "$host"
+  printf '  copy service: %s/opencode-web.service -> %s:~/.config/systemd/user/opencode-web.service\n' "$support_dir" "$host"
   if [[ "$dry_run" == true ]]; then
     printf '%s\n' 'Dry-run only: no files copied.'
     return 0
@@ -4553,12 +4568,12 @@ PY
     fi
   done <<<"$plan_rows"
 
-  scp "$repo_root/scripts/run-current-model.sh" "$host:$remote_dir/run-current-model.sh" || return 1
-  scp "$repo_root/scripts/local-llm-switcher.py" "$host:$remote_dir/local-llm-switcher.py" || return 1
-  scp "$repo_root/scripts/Caddyfile.local-llm" "$host:$remote_dir/Caddyfile.local-llm" || return 1
-  scp "$repo_root/scripts/run-local-llm-caddy-container.sh" "$host:$remote_dir/run-local-llm-caddy-container.sh" || return 1
-  scp "$repo_root/scripts/local-llm-switcher.service" "$host:~/.config/systemd/user/local-llm-switcher.service" || return 1
-  scp "$repo_root/scripts/opencode-web.service" "$host:~/.config/systemd/user/opencode-web.service" || return 1
+  scp "$support_dir/run-current-model.sh" "$host:$remote_dir/run-current-model.sh" || return 1
+  scp "$support_dir/local-llm-switcher.py" "$host:$remote_dir/local-llm-switcher.py" || return 1
+  scp "$support_dir/Caddyfile.local-llm" "$host:$remote_dir/Caddyfile.local-llm" || return 1
+  scp "$support_dir/run-local-llm-caddy-container.sh" "$host:$remote_dir/run-local-llm-caddy-container.sh" || return 1
+  scp "$support_dir/local-llm-switcher.service" "$host:~/.config/systemd/user/local-llm-switcher.service" || return 1
+  scp "$support_dir/opencode-web.service" "$host:~/.config/systemd/user/opencode-web.service" || return 1
 
   if [[ -z "$current_launcher" ]]; then
     printf '%s\n' 'deploy could not determine current launcher' >&2

@@ -130,7 +130,7 @@ if [[ ! -f "$REPO_ROOT/scripts/oc-local" ]]; then
   exit 1
 fi
 
-mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$RUNS_DIR"
+mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$RUNS_DIR" "$SHARE_DIR/scripts"
 
 # Copy core scripts (overwrite existing)
 echo "Installing core scripts..."
@@ -141,6 +141,14 @@ install -m 0755 "$REPO_ROOT/scripts/model-discovery.sh" "$BIN_DIR/model-discover
 install -m 0755 "$REPO_ROOT/scripts/model-fit.py" "$BIN_DIR/model-fit.py"
 install -m 0755 "$REPO_ROOT/scripts/update-manager.sh" "$BIN_DIR/update-manager"
 install -m 0755 "$REPO_ROOT/scripts/hardware-analyzer.sh" "$BIN_DIR/hardware-analyzer"
+
+# Copy deploy support files (overwrite existing)
+install -m 0755 "$REPO_ROOT/scripts/run-current-model.sh" "$SHARE_DIR/scripts/run-current-model.sh"
+install -m 0755 "$REPO_ROOT/scripts/local-llm-switcher.py" "$SHARE_DIR/scripts/local-llm-switcher.py"
+install -m 0644 "$REPO_ROOT/scripts/Caddyfile.local-llm" "$SHARE_DIR/scripts/Caddyfile.local-llm"
+install -m 0755 "$REPO_ROOT/scripts/run-local-llm-caddy-container.sh" "$SHARE_DIR/scripts/run-local-llm-caddy-container.sh"
+install -m 0644 "$REPO_ROOT/scripts/local-llm-switcher.service" "$SHARE_DIR/scripts/local-llm-switcher.service"
+install -m 0644 "$REPO_ROOT/scripts/opencode-web.service" "$SHARE_DIR/scripts/opencode-web.service"
 
 # Copy configs (overwrite existing)
 echo "Installing configuration..."
