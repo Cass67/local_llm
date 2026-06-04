@@ -2050,18 +2050,29 @@ deploy_unsafe_contents="$(<"$deploy_unsafe_output")"
 assert_contains "$deploy_unsafe_contents" "invalid accepted metadata"
 assert_contains "$deploy_unsafe_contents" "family contains unsafe characters"
 assert_not_contains "$deploy_unsafe_contents" "qwen next"
-deploy_no_dry_run_output="$accept_tmp/deploy-no-dry-run.out"
-if LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host >"$deploy_no_dry_run_output" 2>&1; then
-  printf 'expected deploy without --dry-run to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$deploy_no_dry_run_output")" "deploy is dry-run only"
-deploy_yes_output="$accept_tmp/deploy-yes.out"
-if LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --yes >"$deploy_yes_output" 2>&1; then
-  printf 'expected deploy --yes to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$deploy_yes_output")" "deploy --yes is not implemented"
+deploy_bin="$accept_tmp/deploy-bin"
+mkdir -p "$deploy_bin"
+cat >"$deploy_bin/scp" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'scp %s\n' "$*" >>"$LOCAL_LLM_DEPLOY_LOG"
+EOF
+cat >"$deploy_bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'ssh %s\n' "$*" >>"$LOCAL_LLM_DEPLOY_LOG"
+EOF
+chmod +x "$deploy_bin/scp" "$deploy_bin/ssh"
+deploy_real_log="$accept_tmp/deploy-real.log"
+deploy_real_output="$(PATH="$deploy_bin:$PATH" LOCAL_LLM_DEPLOY_LOG="$deploy_real_log" LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host)"
+assert_contains "$deploy_real_output" "Deploy complete"
+assert_contains "$deploy_real_output" "current=start1.sh profile=reliable"
+assert_contains "$(<"$deploy_real_log")" "scp $accept_existing_runs/launchers/start1.sh bench-host:~/llama.cpp/start1.sh"
+assert_contains "$(<"$deploy_real_log")" "run-current-model.sh"
+assert_contains "$(<"$deploy_real_log")" "systemctl --user restart llama-server.service"
+deploy_yes_log="$accept_tmp/deploy-yes.log"
+deploy_yes_output="$(PATH="$deploy_bin:$PATH" LOCAL_LLM_DEPLOY_LOG="$deploy_yes_log" LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --yes)"
+assert_contains "$deploy_yes_output" "Deploy complete"
 deploy_local_output="$accept_tmp/deploy-local.out"
 if LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target local --dry-run >"$deploy_local_output" 2>&1; then
   printf 'expected deploy local target to fail\n' >&2
