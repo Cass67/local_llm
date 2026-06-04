@@ -178,7 +178,9 @@ SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 EOF
   if [[ -n "$remote_host" ]]; then
     cat >>"$BIN_DIR/$name" <<EOF
-exec "\$SCRIPT_DIR/oc-local" "$family" "$profile" --remote "\${OC_LOCAL_REMOTE_HOST:-$remote_host}" "\$@"
+remote_host="\${OC_LOCAL_REMOTE_HOST:-$remote_host}"
+export OC_LOCAL_BASE_URL="\${OC_LOCAL_BASE_URL:-http://\$remote_host:8080/v1}"
+exec "\$SCRIPT_DIR/oc-local" "$family" "$profile" --remote "\$remote_host" "\$@"
 EOF
   else
     cat >>"$BIN_DIR/$name" <<EOF
