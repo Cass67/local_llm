@@ -2489,7 +2489,9 @@ fi
 assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "# local_llm generated wrapper"
 printf '#!/usr/bin/env bash\n# local_llm generated wrapper\nexec old-wrapper\n' >"$installer_accept_bin/oc-custom-reliable"
 LOCAL_LLM_SHARE_DIR="$installer_accept_share" "$repo_root/installer.sh" -p "$installer_accept_bin" >/dev/null
-assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "--remote \"\${OC_LOCAL_REMOTE_HOST:-bench-host}\""
+assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "remote_host=\"\${OC_LOCAL_REMOTE_HOST:-bench-host}\""
+assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "OC_LOCAL_BASE_URL=\"\${OC_LOCAL_BASE_URL:-http://\$remote_host:8080/v1}\""
+assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "--remote \"\$remote_host\""
 
 probe_tmp="$(mktemp -d)"
 trap 'rm -rf "$probe_tmp" "$manager_tmp" "$discover_tmp" "$select_tmp" "$select_collision_tmp" "$benchmark_tmp" "$benchmark_record_tmp" "$benchmark_multi_tmp" "$benchmark_bad_profile_tmp" "$accept_tmp" "$installer_tmp" "$installer_accept_tmp"' EXIT
