@@ -1555,14 +1555,14 @@ printf 'visible_devices=0,1\n'
 printf 'split_mode=row\n'
 printf 'tensor_split=1,1\n'
 printf 'ctx_shift=on\n'
-printf 'command=HIP_VISIBLE_DEVICES=0,1 ROCR_VISIBLE_DEVICES=0,1 ./build/bin/llama-server --split-mode row --tensor-split 1,1 --ctx-shift --alias qwen3-coder-next\n'
+printf 'command=HIP_VISIBLE_DEVICES=0,1 ROCR_VISIBLE_DEVICES=0,1 ./build/bin/llama-server --split-mode row --tensor-split 1,1 --context-shift --alias qwen3-coder-next\n'
 EOF
 chmod +x "$benchmark_run_tmp/bin/ssh"
 benchmark_rocm_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp/rocm-runs" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/rocm-remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host --backend rocm --visible-devices 0,1 --split-mode row --tensor-split 1,1 --ctx-shift on)"
 assert_contains "$benchmark_rocm_output" "Benchmark result"
 assert_contains "$(<"$benchmark_run_tmp/rocm-remote-script.sh")" "export HIP_VISIBLE_DEVICES"
 assert_contains "$(<"$benchmark_run_tmp/rocm-remote-script.sh")" "export ROCR_VISIBLE_DEVICES"
-assert_contains "$(<"$benchmark_run_tmp/rocm-remote-script.sh")" "--ctx-shift"
+assert_contains "$(<"$benchmark_run_tmp/rocm-remote-script.sh")" "--context-shift"
 benchmark_rocm_file="$(find "$benchmark_run_tmp/rocm-runs/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
 python3 - "$benchmark_rocm_file" <<'PY'
 import json
@@ -2639,6 +2639,46 @@ assert_contains "$remote_multi_gpu_output" "- Total VRAM: 44 GB"
 assert_contains "$remote_multi_gpu_output" "ROCm target: yes"
 assert_contains "$remote_multi_gpu_output" "- CUDA target: yes"
 assert_contains "$remote_multi_gpu_output" "- Vulkan target: yes"
+
+cat >"$probe_tmp/ssh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+command_text="${*: -1}"
+case "$command_text" in
+  nproc)
+    printf '16\n'
+    ;;
+  *free*)
+    printf '60\n'
+    ;;
+  *rocminfo*Marketing*head\ -1*)
+    printf 'AMD Radeon RX 7900 XT\n'
+    ;;
+  *rocminfo*Marketing*)
+    printf 'AMD Radeon RX 7900 XT\nAMD Radeon RX 7900 XT\n'
+    ;;
+  *mem_info_vram_total*break*)
+    printf '21474836480\n'
+    ;;
+  *mem_info_vram_total*)
+    printf '21474836480\n21474836480\n'
+    ;;
+  *nvidia-smi*)
+    exit 0
+    ;;
+  *vulkaninfo*)
+    printf 'GPU0:\n\tdeviceName = AMD Radeon RX 7900 XT\nGPU1:\n\tdeviceName = AMD Radeon RX 7900 XT\n'
+    ;;
+  *)
+    printf 'unknown\n'
+    ;;
+esac
+EOF
+chmod +x "$probe_tmp/ssh"
+remote_dual_amd_output="$(PATH="$probe_tmp:$PATH" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-discovery.sh" --host dual-amd-host --installed-only)"
+assert_contains "$remote_dual_amd_output" "Hardware source: remote:dual-amd-host"
+assert_contains "$remote_dual_amd_output" "- GPUs: AMD Radeon RX 7900 XT (20 GB); AMD Radeon RX 7900 XT (20 GB)"
+assert_contains "$remote_dual_amd_output" "- Total VRAM: 40 GB"
 
 cat >"$probe_tmp/nproc" <<'EOF'
 #!/usr/bin/env bash

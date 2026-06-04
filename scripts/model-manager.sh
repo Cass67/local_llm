@@ -2853,9 +2853,9 @@ if [[ -n "$split_mode" || -n "$tensor_split" ]]; then
   server_cmd+=(--split-mode "$split_mode" --tensor-split "$tensor_split")
 fi
 case "$ctx_shift" in
-  on | true | 1) server_cmd+=(--ctx-shift) ;;
+  on | true | 1) server_cmd+=(--context-shift) ;;
   off | false | 0 | "") ;;
-  *) server_cmd+=(--ctx-shift "$ctx_shift") ;;
+  *) server_cmd+=(--context-shift) ;;
 esac
 if [[ -n "$cache_type_k" ]]; then
   server_cmd+=(-ctk "$cache_type_k")
@@ -4242,10 +4242,8 @@ if backend:
         f"  --split-mode {shlex.quote(split_mode)} \\",
         f"  --tensor-split {shlex.quote(tensor_split)} \\",
     ])
-if ctx_shift in {"on", "true", "1"}:
-    lines.append("  --ctx-shift \\")
-elif ctx_shift and ctx_shift not in {"off", "false", "0"}:
-    lines.append(f"  --ctx-shift {shlex.quote(ctx_shift)} \\")
+if ctx_shift and ctx_shift not in {"off", "false", "0"}:
+    lines.append("  --context-shift \\")
 if cache_type_k:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", cache_type_k):
         raise SystemExit("cache_type_k must be a safe llama.cpp cache type")

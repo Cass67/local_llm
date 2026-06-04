@@ -23,7 +23,7 @@ Out of scope:
 
 ## Architecture
 
-The project already stores accepted model settings in benchmark JSON and accepted metadata, then generates shell launchers that invoke `llama-server`. This change extends that existing metadata pipeline with ROCm dual-device visibility and `--ctx-shift` support.
+The project already stores accepted model settings in benchmark JSON and accepted metadata, then generates shell launchers that invoke `llama-server`. This change extends that existing metadata pipeline with ROCm dual-device visibility and context-shift support.
 
 The launcher remains the single source of truth for runtime flags. Benchmark commands produce the same fields that generated launchers consume, so a passing benchmark can be accepted without manual flag drift.
 
@@ -37,12 +37,12 @@ For the target host and model, the preferred runtime shape is:
 - GPU layer offload: `-ngl 999`.
 - tensor split: `--tensor-split 1,1`.
 - split mode: benchmark `row` and `layer`; use the faster stable result.
-- context shift: pass `--ctx-shift` when configured so long chats can roll instead of failing when context fills.
+- context shift: pass llama.cpp's `--context-shift` when configured so long chats can roll instead of failing when context fills.
 
 ## Data Flow
 
 1. `model-manager benchmark` runs the current accepted model with explicit dual-GPU ROCm settings.
-2. The remote benchmark starts `./build/bin/llama-server` with dual-device env, split flags, max context, and optional `--ctx-shift`.
+2. The remote benchmark starts `./build/bin/llama-server` with dual-device env, split flags, max context, and optional `--context-shift`.
 3. Benchmark output records `backend`, `visible_devices`, `split_mode`, `tensor_split`, cache types, and `ctx_shift`.
 4. `model-manager accept` reads those fields and writes accepted metadata.
 5. Generated launchers include the same env and flags.

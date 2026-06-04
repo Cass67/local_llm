@@ -117,6 +117,16 @@ get_remote_vram() {
   printf 'unknown\n'
 }
 
+get_remote_amd_gpu_names() {
+  local host="$1"
+  ssh_probe "$host" "rocminfo 2>/dev/null | grep -i 'Marketing Name' | grep -vi 'Intel' | sed 's/.*Marketing Name:[[:space:]]*//'"
+}
+
+get_remote_amd_vram_bytes() {
+  local host="$1"
+  ssh_probe "$host" "for f in /sys/class/drm/card*/device/mem_info_vram_total; do [ -r \"\${f}\" ] && cat \"\${f}\"; done"
+}
+
 get_remote_nvidia_gpus() {
   local host="$1"
   ssh_probe "$host" "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>/dev/null"
@@ -133,14 +143,16 @@ hardware_json() {
   local ram="$3"
   local gpu="$4"
   local vram="$5"
-  local nvidia_gpus="${6:-}"
-  local vulkan_gpus="${7:-}"
-  python3 - "$source" "$cpu" "$ram" "$gpu" "$vram" "$nvidia_gpus" "$vulkan_gpus" <<'PY'
+  local amd_gpu_names="${6:-}"
+  local amd_vram_bytes="${7:-}"
+  local nvidia_gpus="${8:-}"
+  local vulkan_gpus="${9:-}"
+  python3 - "$source" "$cpu" "$ram" "$gpu" "$vram" "$amd_gpu_names" "$amd_vram_bytes" "$nvidia_gpus" "$vulkan_gpus" <<'PY'
 import json
 import re
 import sys
 
-source, cpu, ram, gpu, vram, nvidia_gpus, vulkan_gpus = sys.argv[1:]
+source, cpu, ram, gpu, vram, amd_gpu_names, amd_vram_bytes, nvidia_gpus, vulkan_gpus = sys.argv[1:]
 
 def number(value):
     match = re.search(r"[0-9]+(?:\.[0-9]+)?", value or "")
@@ -153,12 +165,13 @@ def display_gb(value):
         return f"{round(value):.0f} GB"
     return f"{value:.1f} GB"
 
-def add_gpu(items, *, name, backend, vram_gb):
+def add_gpu(items, *, name, backend, vram_gb, allow_duplicate=False):
     if not name or name == "unknown":
         return
-    for item in items:
-        if item["name"] == name and item["backend"] == backend:
-            return
+    if not allow_duplicate:
+        for item in items:
+            if item["name"] == name and item["backend"] == backend:
+                return
     payload = {"name": name, "backend": backend}
     if vram_gb is not None:
         payload["vram_gb"] = vram_gb
@@ -166,9 +179,20 @@ def add_gpu(items, *, name, backend, vram_gb):
 
 gpus = []
 primary_vram = number(vram)
-gpu_lower = (gpu or "").lower()
-if "amd" in gpu_lower or "radeon" in gpu_lower:
-    add_gpu(gpus, name=gpu, backend="rocm", vram_gb=primary_vram)
+amd_names = [line.strip() for line in amd_gpu_names.splitlines() if line.strip() and line.strip() != "unknown"]
+amd_vram_values = []
+for line in amd_vram_bytes.splitlines():
+    line = line.strip()
+    if re.fullmatch(r"[0-9]+", line):
+        amd_vram_values.append(float(line) / 1073741824)
+if amd_names:
+    for index, name in enumerate(amd_names):
+        item_vram = amd_vram_values[index] if index < len(amd_vram_values) else None
+        add_gpu(gpus, name=name, backend="rocm", vram_gb=item_vram, allow_duplicate=True)
+else:
+    gpu_lower = (gpu or "").lower()
+    if "amd" in gpu_lower or "radeon" in gpu_lower:
+        add_gpu(gpus, name=gpu, backend="rocm", vram_gb=primary_vram)
 
 for line in nvidia_gpus.splitlines():
     line = line.strip()
@@ -219,7 +243,7 @@ detect_hardware() {
   local mode="$1"
   local host="$2"
   if [[ "$mode" == remote ]]; then
-    hardware_json "remote:$host" "$(get_remote_cpu_cores "$host")" "$(get_remote_ram "$host")" "$(get_remote_gpu "$host")" "$(get_remote_vram "$host")" "$(get_remote_nvidia_gpus "$host")" "$(get_remote_vulkan_gpus "$host")"
+    hardware_json "remote:$host" "$(get_remote_cpu_cores "$host")" "$(get_remote_ram "$host")" "$(get_remote_gpu "$host")" "$(get_remote_vram "$host")" "$(get_remote_amd_gpu_names "$host")" "$(get_remote_amd_vram_bytes "$host")" "$(get_remote_nvidia_gpus "$host")" "$(get_remote_vulkan_gpus "$host")"
   else
     hardware_json "local" "$(get_cpu_cores)" "$(get_ram)" "$(get_local_gpu)" "$(get_local_vram)"
   fi
