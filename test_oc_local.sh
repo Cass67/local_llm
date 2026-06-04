@@ -1969,6 +1969,7 @@ expected = {
     "hf_file": "Full-Q4_K_M.gguf",
     "quant": "Q4_K_M",
     "profile": "reliable",
+    "target": "remote:bench-host",
     "config": {"ctx": 65536, "batch": 128, "ubatch": 64, "ngl": 999},
 }
 if accepted != expected:
@@ -1987,6 +1988,14 @@ assert_contains "$accept_existing_output" "start_script=$accept_existing_runs/la
 assert_contains "$accept_existing_output" "accepted_metadata_file=$accept_existing_runs/accepted/qwen-coder.json"
 assert_contains "$accept_existing_output" "removed_selection_count=1"
 assert_not_contains "$accept_existing_output" "scripts/start98.sh"
+python3 - "$accept_existing_runs/accepted/qwen-coder.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    accepted = json.load(handle)
+if accepted.get("target") != "remote:bench-host":
+    raise SystemExit(f"expected accepted target to be preserved: {accepted!r}")
+PY
 deploy_output="$(LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run)"
 assert_contains "$deploy_output" "Deploy plan"
 assert_contains "$deploy_output" "target=remote:bench-host"
@@ -2470,7 +2479,7 @@ installer_accept_bin="$installer_accept_tmp/bin"
 installer_accept_share="$installer_accept_tmp/share"
 mkdir -p "$installer_accept_share/runs/accepted"
 cat >"$installer_accept_share/runs/accepted/custom.json" <<'JSON'
-{"family":"custom","profile":"reliable"}
+{"family":"custom","profile":"reliable","target":"remote:bench-host"}
 JSON
 LOCAL_LLM_SHARE_DIR="$installer_accept_share" "$repo_root/installer.sh" -p "$installer_accept_bin" >/dev/null
 if [[ ! -x "$installer_accept_bin/oc-custom-reliable" || ! -x "$installer_accept_bin/oc-custom" ]]; then
@@ -2480,7 +2489,7 @@ fi
 assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "# local_llm generated wrapper"
 printf '#!/usr/bin/env bash\n# local_llm generated wrapper\nexec old-wrapper\n' >"$installer_accept_bin/oc-custom-reliable"
 LOCAL_LLM_SHARE_DIR="$installer_accept_share" "$repo_root/installer.sh" -p "$installer_accept_bin" >/dev/null
-assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "exec \"\$SCRIPT_DIR/oc-local\" \"custom\" \"reliable\" \"\$@\""
+assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "--remote \"\${OC_LOCAL_REMOTE_HOST:-bench-host}\""
 
 probe_tmp="$(mktemp -d)"
 trap 'rm -rf "$probe_tmp" "$manager_tmp" "$discover_tmp" "$select_tmp" "$select_collision_tmp" "$benchmark_tmp" "$benchmark_record_tmp" "$benchmark_multi_tmp" "$benchmark_bad_profile_tmp" "$accept_tmp" "$installer_tmp" "$installer_accept_tmp"' EXIT

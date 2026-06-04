@@ -167,6 +167,7 @@ create_wrapper() {
   local name="$1"
   local family="$2"
   local profile="$3"
+  local remote_host="${4:-}"
 
   [[ "$name" != "oc-local" ]] || return 0
   rm -f "$BIN_DIR/$name"
@@ -174,17 +175,25 @@ create_wrapper() {
 #!/usr/bin/env bash
 $WRAPPER_MARKER
 SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+EOF
+  if [[ -n "$remote_host" ]]; then
+    cat >>"$BIN_DIR/$name" <<EOF
+exec "\$SCRIPT_DIR/oc-local" "$family" "$profile" --remote "\${OC_LOCAL_REMOTE_HOST:-$remote_host}" "\$@"
+EOF
+  else
+    cat >>"$BIN_DIR/$name" <<EOF
 exec "\$SCRIPT_DIR/oc-local" "$family" "$profile" "\$@"
 EOF
+  fi
   chmod +x "$BIN_DIR/$name"
 }
 
 if [[ -d "$RUNS_DIR/accepted" ]]; then
-  while IFS=$'\t' read -r family profile; do
+  while IFS=$'\t' read -r family profile remote_host; do
     [[ -n "$family" && -n "$profile" ]] || continue
-    create_wrapper "oc-${family}-${profile}" "$family" "$profile"
+    create_wrapper "oc-${family}-${profile}" "$family" "$profile" "$remote_host"
     if [[ "$profile" == "reliable" ]]; then
-      create_wrapper "oc-${family}" "$family" "$profile"
+      create_wrapper "oc-${family}" "$family" "$profile" "$remote_host"
     fi
   done < <(
     python3 - "$RUNS_DIR/accepted" <<'PY'
@@ -204,13 +213,19 @@ for path in sorted(accepted_dir.glob("*.json")):
         continue
     family = data.get("family") or path.stem
     profiles = []
+    target = data.get("target") or ""
+    remote_host = ""
+    if isinstance(target, str) and target.startswith("remote:"):
+        remote_host = target.split(":", 1)[1]
+    if remote_host and (not safe.fullmatch(remote_host) or ".." in remote_host):
+        remote_host = ""
     if isinstance(data.get("profile"), str):
         profiles.append(data["profile"])
     if isinstance(data.get("profiles"), dict):
         profiles.extend(key for key in data["profiles"] if isinstance(key, str))
     for profile in sorted(set(profiles)):
         if safe.fullmatch(family) and safe.fullmatch(profile) and ".." not in family + profile:
-            print(f"{family}\t{profile}")
+            print(f"{family}\t{profile}\t{remote_host}")
 PY
   )
 fi
