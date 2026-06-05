@@ -1,5 +1,46 @@
 # Security Lockdown Rules
 
+## Progress updates
+
+For long-running or multi-step tasks, keep the user updated at every meaningful step.
+
+- Before starting each major action, state what you are about to do.
+- After each command/build/test/download, report concise status:
+  - what succeeded
+  - what failed
+  - current blocker, if any
+  - next step
+- For long-running operations, report progress periodically instead of staying silent.
+- If switching strategy, explain why in one short sentence.
+- Keep updates terse but specific. Example:
+  "Update: model weights 33/66 downloaded, 12GB used, 172GB free. Continuing."
+
+## Change workflow
+
+When changing any live service, remote host, generated launcher, model config, or benchmark-derived setting, complete the full source-to-runtime loop before calling the task done.
+
+1. Identify the source of truth before editing:
+   - repo file under this checkout, or
+   - local model-manager state under `$HOME/.local/share/local_llm`, or
+   - remote runtime file on the GPU host.
+2. If a live/remote file is changed, update the matching local source-of-truth launcher/metadata too. Do not leave `ubt26` and local launchers drifting.
+3. Back up live runtime files before changing them.
+4. Apply the change to the live host only after source-of-truth state is updated or explicitly noted as intentionally runtime-only.
+5. Restart only the required service. Avoid competing manual servers on the same port.
+6. For `oc-*` shortcuts, keep exactly one canonical shortcut per accepted family unless multiple real profiles exist. Do not create duplicate default-plus-`-reliable` wrappers when both point to the same `reliable` profile.
+7. Verify after every service change:
+   - `systemctl --user status` for affected services,
+   - API health (`/v1/models` for llama/vLLM servers),
+   - no restart loops,
+   - GPU VRAM/use sanity when model serving changed,
+   - a short functional request if model behavior changed.
+8. Report:
+   - changed local files,
+   - changed remote files,
+   - active service/model/port,
+   - verification result,
+   - rollback path.
+
 Treat all credentials and private material as inaccessible by default.
 
 ## Secret Handling
