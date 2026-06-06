@@ -16,7 +16,19 @@ Run this from a new checkout on the client machine:
 
 ```bash
 ./install.sh
-model-manager bootstrap --target remote:<host> --dry-run
+model-manager init --target remote:<host>
+model-manager install "coding gguf"
+model-manager list
+model-manager export > local-llm-backup.json
+```
+
+Replace `<host>` with your GPU host. `init` sets the target once — no need to repeat `--target` on every command. `install` discovers, scores, and accepts a model in one step.
+
+### Full pipeline (advanced)
+
+For fine-grained control, the original commands are still available:
+
+```bash
 model-manager bootstrap --target remote:<host> --yes
 model-manager discover "coding gguf" --target remote:<host>
 model-manager benchmark <source> --target remote:<host> --full
@@ -29,9 +41,9 @@ Use placeholders literally as placeholders: replace `<host>`, `<source>`, and `<
 
 ## Features
 
-- Fresh-pull bootstrap for local/remote targets.
+- Simplified 3-step workflow: `init` → `install` → `oc-local`.
+- Full pipeline still available: `bootstrap`, `discover`, `benchmark`, `accept`, `deploy`.
 - Hardware-aware GGUF discovery and readable inventory.
-- Full benchmark flow before accepting a model.
 - Generated launcher state under `$HOME/.local/share/local_llm` / `runs`.
 - Export/restore for moving accepted model state between machines.
 - OpenCode wrapper support through `oc-local <family> <profile> --info` and `--remote`.
@@ -56,11 +68,11 @@ Test install and empty-state behavior without touching your real state:
 tmp="$(mktemp -d)"
 LOCAL_LLM_BIN_DIR="$tmp/bin" LOCAL_LLM_SHARE_DIR="$tmp/share" ./install.sh
 PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager list
-PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager bootstrap --target remote:example-host --dry-run
+PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager init --target remote:example-host
 PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager deploy --target remote:example-host --dry-run
 ```
 
-Expected: `model-manager list` shows no accepted profiles or launchers, `bootstrap --dry-run` prints a plan, and `deploy --dry-run` says there is nothing to deploy.
+Expected: `model-manager list` shows no accepted profiles or launchers, `init` sets the target, and `deploy --dry-run` says there is nothing to deploy.
 
 Verify the repo has no committed model launchers:
 
@@ -166,18 +178,19 @@ Check wrapper resolution without starting a model:
 oc-local <family> <profile> --info
 ```
 
-### 3. Bootstrap And Accept A Model
+### 3. Initialize And Install A Model
 
 ```bash
-model-manager bootstrap --target remote:<host> --dry-run
-model-manager bootstrap --target remote:<host> --yes
-model-manager discover "coding gguf" --target remote:<host>
-model-manager benchmark <source> --target remote:<host> --full
-model-manager accept <benchmark.json>
-model-manager deploy --target remote:<host> --dry-run
+model-manager init --target remote:<host>
+model-manager install "coding gguf"
+model-manager list
+model-manager status
 model-manager export > local-llm-backup.json
 model-manager restore local-llm-backup.json
 ```
+
+`init` sets the target once — no need to repeat `--target` on every command.
+`install` discovers, scores, and accepts a model in one step.
 
 `model-manager` owns the GGUF lifecycle: Readable inventory, discovery, benchmark runs, accepted state, updates, replacements, deletes, export, and restore.
 
