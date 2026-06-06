@@ -15,29 +15,57 @@ if [[ ! -f "$MODEL_FIT_SCRIPT" ]]; then
   MODEL_FIT_SCRIPT="$repo_root/scripts/model-fit.py"
 fi
 
+# Python backend for new simplified commands
+MODEL_MANAGER_PY="$SCRIPT_DIR/model_manager"
+if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+  MODEL_MANAGER_PY="$repo_root/scripts/model_manager"
+fi
+
 runs_dir="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
 generated_launcher_dir="$runs_dir/launchers"
 
 default_target() {
+  # Env override
   if [[ -n "${OC_LOCAL_REMOTE_HOST:-}" ]]; then
     printf 'remote:%s\n' "$OC_LOCAL_REMOTE_HOST"
-  else
-    printf 'local\n'
+    return 0
   fi
+  # Read from saved config (new: runs/config.json, legacy: runs/bootstrap/config.json)
+  if [[ -f "$runs_dir/config.json" ]]; then
+    local target
+    target="$(python3 -c "import json; print(json.load(open('$runs_dir/config.json'))['target'])" 2>/dev/null)" || true
+    if [[ -n "$target" ]]; then
+      printf '%s\n' "$target"
+      return 0
+    fi
+  fi
+  if [[ -f "$runs_dir/bootstrap/config.json" ]]; then
+    local target
+    target="$(python3 -c "import json; print(json.load(open('$runs_dir/bootstrap/config.json'))['target'])" 2>/dev/null)" || true
+    if [[ -n "$target" ]]; then
+      printf '%s\n' "$target"
+      return 0
+    fi
+  fi
+  printf 'local\n'
 }
 
 usage() {
   cat <<'EOF'
 Usage: model-manager <command> [options]
 
-Commands:
-  bootstrap Bootstrap first-run model-manager state
+Simplified workflow:
+  init      Set target once (replaces bootstrap)
+  install   Discover, score, accept a model in one step
+
+Full commands:
+  bootstrap Bootstrap first-run model-manager state (legacy)
   list      Show installed and cached models
   update    Show cached model update suggestions
   replace   Replace a cached remote GGUF basename safely
   delete    Delete a repo from local metadata and remote GGUF cache
   discover   Find candidate models
-  select     Select a candidate model
+  select     Select a candidate model (legacy — install replaces this)
   benchmark  Benchmark a selected model
   accept     Accept benchmark results
   deploy     Preview generated state deployment
@@ -680,7 +708,7 @@ insert = (
     'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
     'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"\n'
     'mkdir -p "$(dirname "$log_file")"\n'
-    'exec > >(tee "$log_file") 2>&1\n'
+    'exec > >(stdbuf -oL -eL awk '\''!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/erased invalidated context checkpoint/ && !/creating new checkpoint during processing/'\'' | tee "$log_file") 2>&1\n'
 )
 if needle not in text:
     raise SystemExit(f"launcher is missing expected shell strict-mode line: {path}")
@@ -830,6 +858,102 @@ with path.open("w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)
     handle.write("\n")
 print(path)
+PY
+}
+
+write_vulkan_equivalent_for_accepted() {
+  local accepted_metadata_file="$1"
+
+  python3 - "$accepted_metadata_file" <<'PY'
+import json
+import os
+import pathlib
+import re
+import stat
+import sys
+from pathlib import Path
+
+metadata_path = Path(sys.argv[1])
+if metadata_path.is_symlink() or not metadata_path.is_file():
+    raise SystemExit(f"refusing unsafe accepted metadata path: {metadata_path}")
+accepted = json.loads(metadata_path.read_text(encoding="utf-8"))
+if not isinstance(accepted, dict):
+    raise SystemExit("accepted metadata must be an object")
+
+safe = re.compile(r"[A-Za-z0-9_.-]+")
+def require_safe(name, value):
+    if not isinstance(value, str) or not safe.fullmatch(value) or ".." in value or value.startswith("-"):
+        raise SystemExit(f"unsafe {name}: {value!r}")
+    return value
+
+family = require_safe("family", accepted.get("family") or metadata_path.stem)
+alias = require_safe("alias", accepted.get("alias") or accepted.get("model_name") or family)
+profile = require_safe("profile", accepted.get("profile") or "reliable")
+if family.endswith("-vulkan") or alias.endswith("-vulkan"):
+    raise SystemExit("accepted metadata is already a Vulkan entry")
+
+launcher_file = accepted.get("launcher_file")
+if not isinstance(launcher_file, str):
+    raise SystemExit("accepted metadata missing launcher_file")
+launcher_path = Path(launcher_file)
+if launcher_path.is_symlink() or not launcher_path.is_file():
+    raise SystemExit(f"launcher file is missing or unsafe: {launcher_path}")
+if launcher_path.name.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_.-]+\.sh", launcher_path.name):
+    raise SystemExit(f"unsafe launcher basename: {launcher_path.name}")
+
+v_family = family + "-vulkan"
+v_alias = alias + "-vulkan"
+v_launcher_name = launcher_path.with_suffix("").name + "-vulkan.sh"
+v_launcher_path = launcher_path.with_name(v_launcher_name)
+
+text = launcher_path.read_text(encoding="utf-8")
+text = text.replace(f"# local_llm_family={family}", f"# local_llm_family={v_family}")
+text = text.replace(f"# local_llm_alias={alias}", f"# local_llm_alias={v_alias}")
+text = re.sub(r"^export HIP_VISIBLE_DEVICES=.*\n", "", text, flags=re.MULTILINE)
+text = re.sub(r"^export ROCR_VISIBLE_DEVICES=.*\n", "", text, flags=re.MULTILINE)
+if "GGML_VK_VISIBLE_DEVICES" not in text:
+    text = re.sub(r"(ngl=.*\n)", r"\1export GGML_VK_VISIBLE_DEVICES=0,1\n", text, count=1)
+text = text.replace("exec ./build/bin/llama-server \\", "exec ./build-vulkan/bin/llama-server \\")
+text = re.sub(r"(--alias\s+)([A-Za-z0-9_.-]+)(\s*\\)", rf"\1{v_alias}\3", text)
+if "./build-vulkan/bin/llama-server" not in text:
+    raise SystemExit("failed to rewrite launcher to Vulkan binary")
+
+v_launcher_path.write_text(text, encoding="utf-8")
+mode = launcher_path.stat().st_mode
+v_launcher_path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+v_accepted = dict(accepted)
+v_accepted["family"] = v_family
+v_accepted["alias"] = v_alias
+v_accepted["model_name"] = v_alias
+v_accepted["launcher_file"] = str(v_launcher_path)
+v_accepted["remote_start"] = "./" + v_launcher_name
+config = dict(v_accepted.get("config") or {})
+config["backend"] = "vulkan"
+config["visible_devices"] = config.get("visible_devices") or "0,1"
+config["split_mode"] = config.get("split_mode") or "layer"
+config["tensor_split"] = config.get("tensor_split") or "1,1"
+v_accepted["config"] = config
+v_metadata_path = metadata_path.with_name(v_family + ".json")
+if v_metadata_path.is_symlink():
+    raise SystemExit(f"refusing symlinked Vulkan metadata path: {v_metadata_path}")
+v_metadata_path.write_text(json.dumps(v_accepted, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+bin_dir = Path.home() / ".local" / "bin"
+oc_local = bin_dir / "oc-local"
+if oc_local.exists() and not oc_local.is_symlink():
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    shortcut = bin_dir / ("oc-" + v_family)
+    shortcut.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"exec /bin/bash \"$HOME/.local/bin/oc-local\" {v_family} {profile} --remote \"${{OC_LOCAL_REMOTE_HOST:-ubt26}}\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    shortcut.chmod(0o755)
+    print(f"vulkan_shortcut={shortcut}")
+print(f"vulkan_launcher_file={v_launcher_path}")
+print(f"vulkan_accepted_metadata_file={v_metadata_path}")
 PY
 }
 
@@ -4018,6 +4142,7 @@ PY
 cmd_accept() {
   local benchmark_file=''
   local dry_run=false
+  local create_vulkan=false
   local json_fields
   local repo
   local family
@@ -4039,8 +4164,13 @@ cmd_accept() {
         dry_run=true
         shift
         ;;
+      --vulkan)
+        create_vulkan=true
+        shift
+        ;;
       -h | --help)
-        usage
+        printf '%s\n' 'Usage: model-manager accept [--dry-run] [--vulkan] BENCHMARK.json'
+        printf '%s\n' '  --vulkan  also create a Vulkan backend metadata/launcher/oc-* peer'
         return 0
         ;;
       --*)
@@ -4195,6 +4325,21 @@ PY
   local existing_launcher
   existing_launcher="$(find_existing_accepted_launcher "$repo" "$family" "$alias")"
   if [[ -n "$existing_launcher" ]]; then
+    if [[ "$dry_run" == true ]]; then
+      printf 'Accept plan\n'
+      printf 'repo=%s\n' "$repo"
+      printf 'family=%s\n' "$family"
+      printf 'alias=%s\n' "$alias"
+      printf 'target=%s\n' "$target"
+      printf 'profile=%s\n' "$profile"
+      printf 'launcher_file=%s\n' "${existing_launcher%% *}"
+      printf 'Dry-run actions:\n'
+      printf 'would update accepted metadata under %s\n' "$runs_dir/accepted"
+      if [[ "$create_vulkan" == true ]]; then
+        printf 'would also create/update Vulkan equivalent metadata/launcher/shortcut\n'
+      fi
+      return 0
+    fi
     local removed_selection_count
     removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
     ensure_launcher_model_log_redirect "${existing_launcher%% *}"
@@ -4208,6 +4353,9 @@ PY
     printf 'profile=%s\n' "$profile"
     printf 'start_script=%s\n' "${existing_launcher%% *}"
     printf 'accepted_metadata_file=%s\n' "$accepted_metadata_file"
+    if [[ "$create_vulkan" == true ]]; then
+      write_vulkan_equivalent_for_accepted "$accepted_metadata_file"
+    fi
     printf 'removed_selection_count=%s\n' "$removed_selection_count"
     return 0
   fi
@@ -4239,6 +4387,9 @@ PY
     printf 'Dry-run actions:\n'
     printf 'would create %s\n' "$launcher_file"
     printf 'would write accepted metadata under %s\n' "$runs_dir/accepted"
+    if [[ "$create_vulkan" == true ]]; then
+      printf 'would also create Vulkan equivalent metadata/launcher/shortcut\n'
+    fi
     return 0
   fi
 
@@ -4288,7 +4439,7 @@ lines = [
     'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
     'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"',
     'mkdir -p "$(dirname "$log_file")"',
-    'exec > >(tee "$log_file") 2>&1',
+    'exec > >(stdbuf -oL -eL awk '\''!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/erased invalidated context checkpoint/ && !/creating new checkpoint during processing/'\'' | tee "$log_file") 2>&1',
     'profile="${1:-reliable}"',
     'case "$profile" in speed|fastlong|balanced|reliable|tiny) ;; *) echo "Usage: $0 {speed|fastlong|balanced|reliable|tiny}" >&2; exit 2 ;; esac',
     f"ctx={ctx}",
@@ -4368,6 +4519,9 @@ PY
   printf 'launcher_file=%s\n' "$launcher_file"
   printf 'start_script=%s\n' "$start_script"
   printf 'accepted_metadata_file=%s\n' "$accepted_metadata_file"
+  if [[ "$create_vulkan" == true ]]; then
+    write_vulkan_equivalent_for_accepted "$accepted_metadata_file"
+  fi
   printf 'removed_selection_count=%s\n' "$removed_selection_count"
 }
 
@@ -4656,14 +4810,40 @@ main() {
     -h | --help | '')
       usage
       ;;
+    init)
+      # New simplified init — delegates to Python backend
+      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+        return 1
+      fi
+      python3 -m scripts.model_manager init "${@:2}"
+      ;;
+    install)
+      # New simplified install — delegates to Python backend
+      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+        return 1
+      fi
+      python3 -m scripts.model_manager install "${@:2}"
+      ;;
     bootstrap)
       cmd_bootstrap "${@:2}"
       ;;
     status)
-      cmd_status
+      # Delegates to Python backend (reads both new and legacy state)
+      if [[ -d "$MODEL_MANAGER_PY" ]]; then
+        python3 -m scripts.model_manager status
+      else
+        cmd_status
+      fi
       ;;
     list)
-      cmd_list "${@:2}"
+      # Delegates to Python backend (reads both new and legacy state)
+      if [[ -d "$MODEL_MANAGER_PY" ]]; then
+        python3 -m scripts.model_manager list
+      else
+        cmd_list "${@:2}"
+      fi
       ;;
     update)
       cmd_update "${@:2}"
@@ -4672,7 +4852,12 @@ main() {
       cmd_replace "${@:2}"
       ;;
     delete)
-      cmd_delete "${@:2}"
+      # Delegates to Python backend (deletes accepted metadata)
+      if [[ -d "$MODEL_MANAGER_PY" ]]; then
+        python3 -m scripts.model_manager delete "${@:2}"
+      else
+        cmd_delete "${@:2}"
+      fi
       ;;
     discover)
       cmd_discover "${@:2}"
