@@ -821,7 +821,8 @@ payload = {
     "hf_file": hf_file,
     "quant": quant,
     "profile": profile,
-    "config": {},
+    "reasoning": True,
+    "config": {"reasoning": True},
 }
 for key, value, minimum in (("ctx", ctx, 1), ("batch", batch, 1), ("ubatch", ubatch, 1), ("ngl", ngl, 0)):
     parsed = accepted_integer(key, value, minimum=minimum)
@@ -854,6 +855,11 @@ if backend:
         "split_mode": split_mode,
         "tensor_split": tensor_split,
     })
+
+payload["profiles"] = {
+    name: dict(payload["config"])
+    for name in ("speed", "fastlong", "balanced", "reliable", "tiny")
+}
 
 with path.open("w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)
@@ -2975,7 +2981,7 @@ run_remote_benchmark() {
   local hf_file="$7"
   local remote_dir="${OC_LOCAL_REMOTE_DIR:-~/llama.cpp}"
   local port=8080
-  local ctx="${8:-65536}"
+  local ctx="${8:-131072}"
   local batch="${9:-4096}"
   local ubatch="${10:-256}"
   local backend="${11:-auto}"
@@ -3079,7 +3085,7 @@ if [[ -f current-model.env ]]; then
   previous_current_model_env="$(cat current-model.env)"
 fi
 if [[ "$responsive" == true ]]; then
-  ctx=32768
+  ctx=131072
   batch=4096
   ubatch=256
 fi
@@ -3162,11 +3168,7 @@ server_cmd+=(
   --presence-penalty 0.0
   --alias "$alias"
 )
-if [[ "${LOCAL_LLM_REASONING:-on}" != off && "${LOCAL_LLM_REASONING:-on}" != false && "${LOCAL_LLM_REASONING:-on}" != 0 ]]; then
-  server_cmd+=(--reasoning on)
-else
-  server_cmd+=(--reasoning off)
-fi
+server_cmd+=(--reasoning on)
 command_text=""
 if [[ "$backend" == vulkan ]]; then
   command_text="GGML_VK_VISIBLE_DEVICES=$visible_devices "

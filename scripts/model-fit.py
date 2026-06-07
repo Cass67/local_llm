@@ -258,7 +258,7 @@ def score_candidate(item: dict[str, Any], hardware: dict[str, Any]) -> dict[str,
 
     params_for_memory = total_params or 30.0
     params_for_speed = active_params or total_params or 30.0
-    context = 65536 if params_for_memory >= 10 else 32768
+    context = 131072
 
     # Call our clean unified hardware parser
     vram_pool, gpus = parse_hardware(hardware)

@@ -539,7 +539,7 @@ class InstallProgressScreen(Screen[None]):
             self.app.call_from_thread(self._set_busy, False)
             return
         profile = "balanced"
-        ctx = "32768"
+        ctx = "131072"
         family = _infer_family(repo)
         alias = _infer_alias(repo)
 

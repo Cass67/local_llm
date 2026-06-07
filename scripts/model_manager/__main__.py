@@ -52,7 +52,7 @@ def main() -> int:
         choices=["speed", "fastlong", "balanced", "reliable", "tiny"],
         help="profile for launcher",
     )
-    p_install.add_argument("--ctx", default="32768", help="context size")
+    p_install.add_argument("--ctx", default="131072", help="context size")
     p_install.set_defaults(func=cmd_install)
 
     # list

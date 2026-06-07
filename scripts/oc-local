@@ -430,14 +430,15 @@ if not safe_generated_name(model_name):
 
 profile = None
 config = data.get("config")
-if data.get("profile") == requested_profile and isinstance(config, dict):
+profiles = data.get("profiles")
+if isinstance(profiles, dict):
+    candidate = profiles.get(requested_profile)
+    if isinstance(candidate, dict):
+        profile = candidate
+if profile is None and isinstance(config, dict):
+    # Generated launchers accept all standard profile names; when accepted metadata
+    # has one shared config, use it for any requested profile.
     profile = config
-else:
-    profiles = data.get("profiles")
-    if isinstance(profiles, dict):
-        candidate = profiles.get(requested_profile)
-        if isinstance(candidate, dict):
-            profile = candidate
 
 if profile is None:
     fail(f"missing profile {requested_profile!r}")
@@ -573,7 +574,7 @@ elif [[ -n "$remote_host" ]]; then
 else
 	base_url="http://localhost:8080/v1"
 fi
-api_key="${OC_LOCAL_API_KEY:-sk-dummy}"
+api_key="${OC_LOCAL_API_KEY:-dummy-local-llm}"
 model="${OC_LOCAL_MODEL:-ubt26-llamacpp/$model_name}"
 wait_seconds="${OC_LOCAL_WAIT_SECONDS:-180}"
 
@@ -587,12 +588,6 @@ reasoning_json=''
 if [[ "${reasoning_enabled:-false}" == true ]]; then
 	reasoning_json='"reasoning":true,'
 fi
-
-config_content=$(
-	cat <<EOF
-{${plugin_json}"provider":{"localllm":{"npm":"@ai-sdk/openai-compatible","name":"LocalLLM","options":{"baseURL":"${base_url}","apiKey":"${api_key}"},"models":{"${model_name}":{"name":"${model_name}",${reasoning_json}"tool_call":false,"limit":{"context":${context},"output":${output_limit}}}}}},"compaction":{"auto":true,"prune":true,"reserved":${reserved}}}
-EOF
-)
 
 server_bin="./build/bin/llama-server"
 if [[ "$backend" == vulkan ]]; then
@@ -771,6 +766,74 @@ until curl -fsS "$base_url/models" >/dev/null 2>&1; do
 	fi
 	sleep 2
 done
+
+provider_id="${model%%/*}"
+model_id="${model#*/}"
+if [[ "$provider_id" == "$model" ]]; then
+	provider_id="localllm"
+	model_id="$model"
+fi
+models_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+models_file="$models_dir/models.json"
+mkdir -p "$models_dir"
+python3 - "$models_file" "$provider_id" "$model_id" "$model_name" "$base_url" "$api_key" "$context" "$output_limit" "${reasoning_enabled:-false}" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]).expanduser()
+provider_id, model_id, model_name, base_url, api_key = sys.argv[2:7]
+context = int(sys.argv[7])
+output_limit = int(sys.argv[8])
+reasoning = sys.argv[9] == "true"
+if path.exists() and not path.is_symlink():
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        raise SystemExit(f"invalid models.json: {path}")
+else:
+    data = {}
+if not isinstance(data, dict):
+    raise SystemExit(f"models.json must be an object: {path}")
+providers = data.setdefault("providers", {})
+if not isinstance(providers, dict):
+    raise SystemExit("models.json providers must be an object")
+provider = providers.setdefault(provider_id, {})
+if not isinstance(provider, dict):
+    raise SystemExit(f"models.json provider must be an object: {provider_id}")
+provider.update({
+    "baseUrl": base_url,
+    "api": "openai-completions",
+    "apiKey": api_key,
+    "compat": {
+        "supportsDeveloperRole": False,
+        "supportsReasoningEffort": False,
+    },
+})
+models = provider.setdefault("models", [])
+if not isinstance(models, list):
+    raise SystemExit(f"models.json provider models must be a list: {provider_id}")
+entry = None
+for item in models:
+    if isinstance(item, dict) and item.get("id") == model_id:
+        entry = item
+        break
+if entry is None:
+    entry = {"id": model_id}
+    models.append(entry)
+entry.update({
+    "name": model_name,
+    "reasoning": reasoning,
+    "input": ["text"],
+    "contextWindow": context,
+    "maxTokens": output_limit,
+    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+})
+tmp = path.with_suffix(path.suffix + ".tmp")
+tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(tmp, path)
+PY
 
 printf 'Starting pi with %s context (%s plugins)...\n' "$context" "$plugin_mode" >&2
 exec pi --model "$model" "$@"
