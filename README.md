@@ -368,6 +368,47 @@ model-manager replace <old-file> <new-repo> --target "remote:$MODEL_HOST" --dry-
 
 If the remote host lacks the preferred download CLI, update flows fall back to a Python stdlib downloader.
 
+#### TUI workflow
+
+Run `model-manager` with no subcommand to open the Textual TUI. Selectable screens use arrows and Enter, not typed indexes:
+
+- Search returns diversified GGUF candidates and defaults to 30 results.
+- Install shows both search candidates and model repos already present in the remote Hugging Face cache.
+- Run shows accepted models in a table, cycles available profiles per row, starts the remote service, and verifies `/v1/models` before reporting success.
+- Delete shows accepted models plus remote cache-only model repos, supports Space multi-select, and removes accepted metadata, launchers, selections, shortcuts/profiles, and remote cache paths when confirmed.
+
+For remote targets, inventory and fit checks must use the GPU host, not the client. Set once with:
+
+```bash
+model-manager init --target remote:<host>
+```
+
+Then `list`, `install`, `run`, `delete`, and `status` use the configured remote host. On equal dual-GPU Vulkan systems, generated launchers should use an even split such as `--split-mode layer --tensor-split 1,1` unless a benchmark says otherwise.
+
+#### llama.cpp long-context cache mitigation
+
+Some SWA/hybrid GGUF models, especially long-context Qwen/Gemma-family runs, can log:
+
+```text
+forcing full prompt re-processing due to lack of cache data
+slot print_timing: ... prompt processing
+```
+
+Do not hide these lines as the primary fix. Generated `llama-server` launchers should use the cache/prefill mitigation that previously tested well on the remote GPU host:
+
+```text
+--timeout 1200
+--threads-http 2
+--parallel 1
+--no-cont-batching
+--ctx-checkpoints 128
+--checkpoint-every-n-tokens 1024
+--cache-ram 32768
+-b 4096 -ub 256
+```
+
+`--cache-ram 32768` is MiB; it gives llama.cpp about 32 GiB of RAM-backed prompt/checkpoint cache. Earlier working runs used at least 16 GiB (`--cache-ram 16384`), then final tuning used 32 GiB. Keep cache idle slots enabled unless a benchmark proves otherwise. `--swa-full` exists in llama.cpp, but it was not the final fix for the Qwen/Gemma cache-loss case; denser checkpoints, one slot, longer timeout, fewer HTTP threads, and faster prefill were the useful knobs.
+
 ## Experimental Vulkan Split
 
 Use this only for mixed-vendor single-model experiments, such as a Radeon 7900 XT plus NVIDIA P40. Keep the ROCm launcher as the reliable fallback; Vulkan split is for testing whether one larger model can use both cards at acceptable speed.
