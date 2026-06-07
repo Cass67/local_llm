@@ -385,6 +385,16 @@ model-manager init --target remote:<host>
 
 Then `list`, `install`, `run`, `delete`, and `status` use the configured remote host. On equal dual-GPU Vulkan systems, generated launchers should use an even split such as `--split-mode layer --tensor-split 1,1` unless a benchmark says otherwise.
 
+#### llama.cpp context and compaction safety
+
+Generated model profiles should default to `-c 131072` (128k context) when the model can load on the target hardware. The `oc-local` wrapper uses accepted model metadata to write the Pi/OpenCode provider limit:
+
+```json
+"limit": {"context": 131072, "output": 4096}
+```
+
+Keep this provider limit aligned with the live `llama-server -c` value. If the provider advertises only 32768 tokens, Pi can fail during compact-and-retry with errors like `request exceeds the available context size (32768 tokens)` instead of recovering. Larger accepted contexts give auto-compaction enough space to continue rather than die on the first overflow.
+
 #### llama.cpp long-context cache mitigation
 
 Some SWA/hybrid GGUF models, especially long-context Qwen/Gemma-family runs, can log:
@@ -404,6 +414,7 @@ Do not hide these lines as the primary fix. Generated `llama-server` launchers s
 --ctx-checkpoints 128
 --checkpoint-every-n-tokens 1024
 --cache-ram 32768
+-c 131072
 -b 4096 -ub 256
 ```
 

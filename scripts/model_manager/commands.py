@@ -123,7 +123,7 @@ def cmd_search(args: argparse.Namespace) -> int:
 def install_model(
     index: int,
     profile: str = "balanced",
-    ctx: str = "32768",
+    ctx: str = "131072",
 ) -> dict:
     """Install a model: pick candidate → download → benchmark → return result.
 
@@ -221,7 +221,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     """
     index = args.index
     profile = args.profile or "balanced"
-    ctx = args.ctx or "32768"
+    ctx = args.ctx or "131072"
 
     result = install_model(index, profile, ctx)
 
