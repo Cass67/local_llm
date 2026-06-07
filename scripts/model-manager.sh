@@ -15,29 +15,58 @@ if [[ ! -f "$MODEL_FIT_SCRIPT" ]]; then
   MODEL_FIT_SCRIPT="$repo_root/scripts/model-fit.py"
 fi
 
+# Python backend for new simplified commands
+MODEL_MANAGER_PY="$SCRIPT_DIR/model_manager"
+if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+  MODEL_MANAGER_PY="$repo_root/scripts/model_manager"
+fi
+
 runs_dir="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
 generated_launcher_dir="$runs_dir/launchers"
 
 default_target() {
+  # Env override
   if [[ -n "${OC_LOCAL_REMOTE_HOST:-}" ]]; then
     printf 'remote:%s\n' "$OC_LOCAL_REMOTE_HOST"
-  else
-    printf 'local\n'
+    return 0
   fi
+  # Read from saved config (new: runs/config.json, legacy: runs/bootstrap/config.json)
+  if [[ -f "$runs_dir/config.json" ]]; then
+    local target
+    target="$(python3 -c "import json; print(json.load(open('$runs_dir/config.json'))['target'])" 2>/dev/null)" || true
+    if [[ -n "$target" ]]; then
+      printf '%s\n' "$target"
+      return 0
+    fi
+  fi
+  if [[ -f "$runs_dir/bootstrap/config.json" ]]; then
+    local target
+    target="$(python3 -c "import json; print(json.load(open('$runs_dir/bootstrap/config.json'))['target'])" 2>/dev/null)" || true
+    if [[ -n "$target" ]]; then
+      printf '%s\n' "$target"
+      return 0
+    fi
+  fi
+  printf 'local\n'
 }
 
 usage() {
   cat <<'EOF'
 Usage: model-manager <command> [options]
 
-Commands:
-  bootstrap Bootstrap first-run model-manager state
+Simplified workflow:
+  init      Set target once (replaces bootstrap)
+  search    Search and score models (use with install)
+  install   Install a model by index from search results
+
+Full commands:
+  bootstrap Bootstrap first-run model-manager state (legacy)
   list      Show installed and cached models
   update    Show cached model update suggestions
   replace   Replace a cached remote GGUF basename safely
   delete    Delete a repo from local metadata and remote GGUF cache
   discover   Find candidate models
-  select     Select a candidate model
+  select     Select a candidate model (legacy — install replaces this)
   benchmark  Benchmark a selected model
   accept     Accept benchmark results
   deploy     Preview generated state deployment
@@ -680,7 +709,7 @@ insert = (
     'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
     'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"\n'
     'mkdir -p "$(dirname "$log_file")"\n'
-    'exec > >(tee "$log_file") 2>&1\n'
+    'exec > >(stdbuf -oL -eL awk '\''!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/erased invalidated context checkpoint/ && !/creating new checkpoint during processing/'\'' | tee "$log_file") 2>&1\n'
 )
 if needle not in text:
     raise SystemExit(f"launcher is missing expected shell strict-mode line: {path}")
@@ -830,6 +859,102 @@ with path.open("w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)
     handle.write("\n")
 print(path)
+PY
+}
+
+write_vulkan_equivalent_for_accepted() {
+  local accepted_metadata_file="$1"
+
+  python3 - "$accepted_metadata_file" <<'PY'
+import json
+import os
+import pathlib
+import re
+import stat
+import sys
+from pathlib import Path
+
+metadata_path = Path(sys.argv[1])
+if metadata_path.is_symlink() or not metadata_path.is_file():
+    raise SystemExit(f"refusing unsafe accepted metadata path: {metadata_path}")
+accepted = json.loads(metadata_path.read_text(encoding="utf-8"))
+if not isinstance(accepted, dict):
+    raise SystemExit("accepted metadata must be an object")
+
+safe = re.compile(r"[A-Za-z0-9_.-]+")
+def require_safe(name, value):
+    if not isinstance(value, str) or not safe.fullmatch(value) or ".." in value or value.startswith("-"):
+        raise SystemExit(f"unsafe {name}: {value!r}")
+    return value
+
+family = require_safe("family", accepted.get("family") or metadata_path.stem)
+alias = require_safe("alias", accepted.get("alias") or accepted.get("model_name") or family)
+profile = require_safe("profile", accepted.get("profile") or "reliable")
+if family.endswith("-vulkan") or alias.endswith("-vulkan"):
+    raise SystemExit("accepted metadata is already a Vulkan entry")
+
+launcher_file = accepted.get("launcher_file")
+if not isinstance(launcher_file, str):
+    raise SystemExit("accepted metadata missing launcher_file")
+launcher_path = Path(launcher_file)
+if launcher_path.is_symlink() or not launcher_path.is_file():
+    raise SystemExit(f"launcher file is missing or unsafe: {launcher_path}")
+if launcher_path.name.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_.-]+\.sh", launcher_path.name):
+    raise SystemExit(f"unsafe launcher basename: {launcher_path.name}")
+
+v_family = family + "-vulkan"
+v_alias = alias + "-vulkan"
+v_launcher_name = launcher_path.with_suffix("").name + "-vulkan.sh"
+v_launcher_path = launcher_path.with_name(v_launcher_name)
+
+text = launcher_path.read_text(encoding="utf-8")
+text = text.replace(f"# local_llm_family={family}", f"# local_llm_family={v_family}")
+text = text.replace(f"# local_llm_alias={alias}", f"# local_llm_alias={v_alias}")
+text = re.sub(r"^export HIP_VISIBLE_DEVICES=.*\n", "", text, flags=re.MULTILINE)
+text = re.sub(r"^export ROCR_VISIBLE_DEVICES=.*\n", "", text, flags=re.MULTILINE)
+if "GGML_VK_VISIBLE_DEVICES" not in text:
+    text = re.sub(r"(ngl=.*\n)", r"\1export GGML_VK_VISIBLE_DEVICES=0,1\n", text, count=1)
+text = text.replace("exec ./build/bin/llama-server \\", "exec ./build-vulkan/bin/llama-server \\")
+text = re.sub(r"(--alias\s+)([A-Za-z0-9_.-]+)(\s*\\)", rf"\1{v_alias}\3", text)
+if "./build-vulkan/bin/llama-server" not in text:
+    raise SystemExit("failed to rewrite launcher to Vulkan binary")
+
+v_launcher_path.write_text(text, encoding="utf-8")
+mode = launcher_path.stat().st_mode
+v_launcher_path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+v_accepted = dict(accepted)
+v_accepted["family"] = v_family
+v_accepted["alias"] = v_alias
+v_accepted["model_name"] = v_alias
+v_accepted["launcher_file"] = str(v_launcher_path)
+v_accepted["remote_start"] = "./" + v_launcher_name
+config = dict(v_accepted.get("config") or {})
+config["backend"] = "vulkan"
+config["visible_devices"] = config.get("visible_devices") or "0,1"
+config["split_mode"] = config.get("split_mode") or "layer"
+config["tensor_split"] = config.get("tensor_split") or "1,1"
+v_accepted["config"] = config
+v_metadata_path = metadata_path.with_name(v_family + ".json")
+if v_metadata_path.is_symlink():
+    raise SystemExit(f"refusing symlinked Vulkan metadata path: {v_metadata_path}")
+v_metadata_path.write_text(json.dumps(v_accepted, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+bin_dir = Path.home() / ".local" / "bin"
+oc_local = bin_dir / "oc-local"
+if oc_local.exists() and not oc_local.is_symlink():
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    shortcut = bin_dir / ("oc-" + v_family)
+    shortcut.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f"exec /bin/bash \"$HOME/.local/bin/oc-local\" {v_family} {profile} --remote \"${{OC_LOCAL_REMOTE_HOST:-ubt26}}\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    shortcut.chmod(0o755)
+    print(f"vulkan_shortcut={shortcut}")
+print(f"vulkan_launcher_file={v_launcher_path}")
+print(f"vulkan_accepted_metadata_file={v_metadata_path}")
 PY
 }
 
@@ -1363,6 +1488,64 @@ print(removed)
 PY
 }
 
+find_accepted_metadata_by_repo() {
+  local repo="$1"
+  python3 - "$runs_dir/accepted" "$repo" <<'PY'
+import json
+import pathlib
+import sys
+
+accepted_dir = pathlib.Path(sys.argv[1])
+repo = sys.argv[2]
+for path in sorted(accepted_dir.glob("*.json")):
+    if path.name == "default.json" or path.is_symlink():
+        continue
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        continue
+    if isinstance(data, dict) and data.get("repo") == repo:
+        family = data.get("family") or path.stem
+        launcher_file = data.get("launcher_file") or ""
+        alias = data.get("alias") or data.get("model_name") or ""
+        print(f"family={family}")
+        print(f"launcher_file={launcher_file}")
+        print(f"alias={alias}")
+        raise SystemExit(0)
+PY
+}
+
+remove_accepted_metadata_by_family() {
+  local family="$1"
+  local accepted_file="$runs_dir/accepted/$family.json"
+  if [[ -f "$accepted_file" && ! -L "$accepted_file" ]]; then
+    rm -f -- "$accepted_file"
+    printf '1\n'
+  else
+    printf '0\n'
+  fi
+}
+
+remove_accepted_default_if_matches() {
+  local family="$1"
+  local default_file="$runs_dir/accepted/default.json"
+  [[ -f "$default_file" && ! -L "$default_file" ]] || return 0
+  python3 - "$default_file" "$family" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+family = sys.argv[2]
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+if isinstance(data, dict) and data.get("family") == family:
+    path.unlink()
+PY
+}
+
 run_remote_delete_repo_cache() {
   local host="$1"
   local repo="$2"
@@ -1372,6 +1555,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 
 repo, mode = sys.argv[1:]
@@ -1400,7 +1584,10 @@ if os.path.isdir(repo_cache_path):
     planned += 1
     print(json.dumps({"repo": repo, "kind": "hf_repo_cache", "path": repo_cache_path, "action": mode}, separators=(",", ":")))
     if mode == "delete":
-        shutil.rmtree(repo_cache_path)
+        try:
+            shutil.rmtree(repo_cache_path)
+        except PermissionError:
+            subprocess.run(["sudo", "rm", "-rf", "--", repo_cache_path], check=True)
         deleted += 1
 
 for root in file_roots:
@@ -1421,7 +1608,10 @@ for root in file_roots:
             planned += 1
             print(json.dumps({"repo": found_repo, "kind": "gguf_file", "file": name, "path": path, "action": mode}, separators=(",", ":")))
             if mode == "delete":
-                os.remove(path)
+                try:
+                    os.remove(path)
+                except PermissionError:
+                    subprocess.run(["sudo", "rm", "-f", "--", path], check=True)
                 deleted += 1
 print(json.dumps({"planned": planned, "deleted": deleted, "status": "success"}, separators=(",", ":")))
 PY
@@ -2503,11 +2693,29 @@ cmd_delete() {
     return 0
   fi
 
-  local removed_selections removed_switcher
+  local removed_selections removed_switcher meta_info family launcher_file removed_accepted
+  meta_info="$(find_accepted_metadata_by_repo "$repo")"
+  family=""
+  launcher_file=""
+  if [[ -n "$meta_info" ]]; then
+    family="$(printf '%s\n' "$meta_info" | awk -F= '$1=="family"{print $2; exit}')"
+    launcher_file="$(printf '%s\n' "$meta_info" | awk -F= '$1=="launcher_file"{print $2; exit}')"
+  fi
   removed_selections="$(remove_selection_repo_entries "$repo")"
   removed_switcher="$(remove_switcher_repo_entries "$repo" "$alias")"
+  removed_accepted=0
+  if [[ -n "$family" ]]; then
+    removed_accepted="$(remove_accepted_metadata_by_family "$family")"
+    remove_accepted_default_if_matches "$family"
+    remove_switcher_family_entries "$family" >/dev/null || true
+    remove_oc_local_family_entries "$family" >/dev/null || true
+    if [[ -n "$launcher_file" && -f "$launcher_file" && ! -L "$launcher_file" ]]; then
+      rm -f -- "$launcher_file"
+    fi
+  fi
   printf 'removed_selection_count=%s\n' "$removed_selections"
   printf 'removed_switcher_count=%s\n' "$removed_switcher"
+  printf 'removed_accepted_count=%s\n' "$removed_accepted"
   printf 'remote_cache_delete:\n'
   run_remote_delete_repo_cache "${target#remote:}" "$repo" delete
 }
@@ -2686,7 +2894,7 @@ benchmark_hardware_json() {
   local vram=''
   case "$target" in
     remote:*)
-      vram="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "${target#remote:}" 'for f in /sys/class/drm/card*/device/mem_info_vram_total; do [ -r "$f" ] && cat "$f" && break; done' 2>/dev/null || true)"
+      vram="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "${target#remote:}" 'total=0; for f in /sys/class/drm/card*/device/mem_info_vram_total; do [ -r "$f" ] && total=$((total + $(cat "$f"))); done; [ "$total" -gt 0 ] && echo "$total"' 2>/dev/null || true)"
       ;;
   esac
   python3 - "$target" "$vram" <<'PY'
@@ -2768,8 +2976,8 @@ run_remote_benchmark() {
   local remote_dir="${OC_LOCAL_REMOTE_DIR:-~/llama.cpp}"
   local port=8080
   local ctx="${8:-65536}"
-  local batch="${9:-128}"
-  local ubatch="${10:-$batch}"
+  local batch="${9:-4096}"
+  local ubatch="${10:-256}"
   local backend="${11:-auto}"
   local visible_devices="${12:-}"
   local split_mode="${13:-}"
@@ -2781,6 +2989,7 @@ run_remote_benchmark() {
   local empty_arg='__LOCAL_LLM_EMPTY__'
 
   ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" bash -s -- "$remote_dir" "$repo" "$family" "$alias" "$profile" "$quant" "${hf_file:-$empty_arg}" "$port" "$ctx" "$batch" "$ubatch" "$backend" "${visible_devices:-$empty_arg}" "${split_mode:-$empty_arg}" "${tensor_split:-$empty_arg}" "$responsive" "${cache_type_k:-$empty_arg}" "${cache_type_v:-$empty_arg}" "${ctx_shift:-$empty_arg}" <<'REMOTE_BENCH'
+export PATH="$HOME/.local/bin:$PATH"
 set -euo pipefail
 
 remote_dir="$1"
@@ -2810,6 +3019,8 @@ done
 ngl=999
 server_pid=""
 service_was_active=false
+had_current_model_env=false
+previous_current_model_env=""
 if [[ "$remote_dir" == "~" || "$remote_dir" == \~/* ]]; then
   remote_dir="$HOME${remote_dir#\~}"
 fi
@@ -2828,11 +3039,24 @@ json_string() {
 }
 
 stop_server() {
-  return 0
+  systemctl --user stop llama-server.service >/dev/null 2>&1 || true
+  pkill -u "$(id -u)" -f 'llama-server' >/dev/null 2>&1 || true
+  sleep 2
 }
 
 restore_service() {
-  return 0
+  cd "$remote_dir" 2>/dev/null || return 0
+  if [[ "$had_current_model_env" == true ]]; then
+    printf '%s\n' "$previous_current_model_env" >current-model.env.tmp
+    mv current-model.env.tmp current-model.env
+    systemctl --user restart llama-server.service >/dev/null 2>&1 || true
+  else
+    rm -f current-model.env current-model.env.tmp
+    systemctl --user stop llama-server.service >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${start_script:-}" ]]; then
+    rm -f -- "$start_script"
+  fi
 }
 
 last_number_for() {
@@ -2850,10 +3074,14 @@ last_tokens_for() {
 trap restore_service EXIT
 
 cd "$remote_dir"
+if [[ -f current-model.env ]]; then
+  had_current_model_env=true
+  previous_current_model_env="$(cat current-model.env)"
+fi
 if [[ "$responsive" == true ]]; then
   ctx=32768
-  batch=128
-  ubatch=64
+  batch=4096
+  ubatch=256
 fi
 if [[ "$backend" == rocm ]]; then
   backend=default
@@ -2870,7 +3098,7 @@ fi
 if [[ "$backend" == vulkan ]]; then
   visible_devices="${visible_devices:-0,1}"
   split_mode="${split_mode:-layer}"
-  tensor_split="${tensor_split:-44,1}"
+  tensor_split="${tensor_split:-1,1}"
   export GGML_VK_VISIBLE_DEVICES="$visible_devices"
 elif [[ -n "$visible_devices" ]]; then
   split_mode="${split_mode:-row}"
@@ -2891,6 +3119,10 @@ server_cmd=(
   "${model_args[@]}"
   --host 0.0.0.0
   --port "$port"
+  --timeout 1200
+  --threads-http 2
+  --parallel 1
+  --no-cont-batching
   -ngl "$ngl"
 )
 if [[ -n "$split_mode" || -n "$tensor_split" ]]; then
@@ -2908,6 +3140,9 @@ if [[ -n "$cache_type_v" ]]; then
   server_cmd+=(-ctv "$cache_type_v")
 fi
 server_cmd+=(
+  --ctx-checkpoints 128
+  --checkpoint-every-n-tokens 1024
+  --cache-ram 32768
   -c "$ctx"
   --flash-attn on
   -ub "$ubatch"
@@ -2917,7 +3152,7 @@ server_cmd+=(
   --no-warmup
 )
 if [[ "$responsive" == true ]]; then
-  server_cmd+=(--parallel 1 --no-cont-batching --cache-ram 1024 --no-cache-idle-slots)
+  : # responsive mode is now baked into default server args
 fi
 server_cmd+=(
   --temp 0.6
@@ -2927,7 +3162,9 @@ server_cmd+=(
   --presence-penalty 0.0
   --alias "$alias"
 )
-if [[ "$family" != gpt-oss && "$family" != deepseek-r1 ]]; then
+if [[ "${LOCAL_LLM_REASONING:-on}" != off && "${LOCAL_LLM_REASONING:-on}" != false && "${LOCAL_LLM_REASONING:-on}" != 0 ]]; then
+  server_cmd+=(--reasoning on)
+else
   server_cmd+=(--reasoning off)
 fi
 command_text=""
@@ -2967,6 +3204,7 @@ remote_script="./$start_script"
 mv current-model.env.tmp current-model.env
 : >"$log_file"
 restart_started="$(date -Is)"
+stop_server
 systemctl --user restart llama-server.service
 
 load_status=timeout
@@ -3642,13 +3880,10 @@ PY
     if [[ "$full" == true ]]; then
       local trials_tsv=''
       local -a trial_matrix=(
-        'speed|32768|256|256'
-        'speed|32768|128|128'
-        'balanced|49152|128|128'
-        'balanced|49152|64|64'
-        'reliable|65536|128|128'
-        'reliable|65536|64|64'
-        'tiny|65536|64|64'
+        'speed|32768|4096|256'
+        'balanced|49152|4096|256'
+        'reliable|65536|4096|256'
+        'tiny|65536|4096|256'
       )
       local trial_number=0
       local trial_total="${#trial_matrix[@]}"
@@ -4018,6 +4253,7 @@ PY
 cmd_accept() {
   local benchmark_file=''
   local dry_run=false
+  local create_vulkan=false
   local json_fields
   local repo
   local family
@@ -4039,8 +4275,13 @@ cmd_accept() {
         dry_run=true
         shift
         ;;
+      --vulkan)
+        create_vulkan=true
+        shift
+        ;;
       -h | --help)
-        usage
+        printf '%s\n' 'Usage: model-manager accept [--dry-run] [--vulkan] BENCHMARK.json'
+        printf '%s\n' '  --vulkan  also create a Vulkan backend metadata/launcher/oc-* peer'
         return 0
         ;;
       --*)
@@ -4195,6 +4436,21 @@ PY
   local existing_launcher
   existing_launcher="$(find_existing_accepted_launcher "$repo" "$family" "$alias")"
   if [[ -n "$existing_launcher" ]]; then
+    if [[ "$dry_run" == true ]]; then
+      printf 'Accept plan\n'
+      printf 'repo=%s\n' "$repo"
+      printf 'family=%s\n' "$family"
+      printf 'alias=%s\n' "$alias"
+      printf 'target=%s\n' "$target"
+      printf 'profile=%s\n' "$profile"
+      printf 'launcher_file=%s\n' "${existing_launcher%% *}"
+      printf 'Dry-run actions:\n'
+      printf 'would update accepted metadata under %s\n' "$runs_dir/accepted"
+      if [[ "$create_vulkan" == true ]]; then
+        printf 'would also create/update Vulkan equivalent metadata/launcher/shortcut\n'
+      fi
+      return 0
+    fi
     local removed_selection_count
     removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
     ensure_launcher_model_log_redirect "${existing_launcher%% *}"
@@ -4208,6 +4464,9 @@ PY
     printf 'profile=%s\n' "$profile"
     printf 'start_script=%s\n' "${existing_launcher%% *}"
     printf 'accepted_metadata_file=%s\n' "$accepted_metadata_file"
+    if [[ "$create_vulkan" == true ]]; then
+      write_vulkan_equivalent_for_accepted "$accepted_metadata_file"
+    fi
     printf 'removed_selection_count=%s\n' "$removed_selection_count"
     return 0
   fi
@@ -4239,6 +4498,9 @@ PY
     printf 'Dry-run actions:\n'
     printf 'would create %s\n' "$launcher_file"
     printf 'would write accepted metadata under %s\n' "$runs_dir/accepted"
+    if [[ "$create_vulkan" == true ]]; then
+      printf 'would also create Vulkan equivalent metadata/launcher/shortcut\n'
+    fi
     return 0
   fi
 
@@ -4277,6 +4539,7 @@ if backend:
         raise SystemExit("split_mode must be layer or row")
     if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
         raise SystemExit("tensor_split must be comma-separated positive integers")
+awk_filter = "!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/erased invalidated context checkpoint/ && !/creating new checkpoint during processing/ && !/forcing full prompt re-processing due to lack of cache data/ && !/slot print_timing:.*prompt processing/"
 lines = [
     "#!/usr/bin/env bash",
     f"# local_llm_repo={repo}",
@@ -4288,7 +4551,7 @@ lines = [
     'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
     'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"',
     'mkdir -p "$(dirname "$log_file")"',
-    'exec > >(tee "$log_file") 2>&1',
+    f'exec > >(stdbuf -oL -eL awk {shlex.quote(awk_filter)} | tee "$log_file") 2>&1',
     'profile="${1:-reliable}"',
     'case "$profile" in speed|fastlong|balanced|reliable|tiny) ;; *) echo "Usage: $0 {speed|fastlong|balanced|reliable|tiny}" >&2; exit 2 ;; esac',
     f"ctx={ctx}",
@@ -4344,7 +4607,7 @@ lines.extend([
     "  --min-p 0.0 \\",
     "  --presence-penalty 0.0 \\",
     f"  --alias {shlex.quote(alias)} \\",
-    "  --reasoning off",
+    "  --reasoning on",
 ])
 with open(path, "w", encoding="utf-8") as handle:
     handle.write("\n".join(lines))
@@ -4368,6 +4631,9 @@ PY
   printf 'launcher_file=%s\n' "$launcher_file"
   printf 'start_script=%s\n' "$start_script"
   printf 'accepted_metadata_file=%s\n' "$accepted_metadata_file"
+  if [[ "$create_vulkan" == true ]]; then
+    write_vulkan_equivalent_for_accepted "$accepted_metadata_file"
+  fi
   printf 'removed_selection_count=%s\n' "$removed_selection_count"
 }
 
@@ -4656,14 +4922,48 @@ main() {
     -h | --help | '')
       usage
       ;;
+    init)
+      # New simplified init — delegates to Python backend
+      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+        return 1
+      fi
+      python3 -m scripts.model_manager init "${@:2}"
+      ;;
+    search)
+      # Delegates to Python backend
+      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+        return 1
+      fi
+      python3 -m scripts.model_manager search "${@:2}"
+      ;;
+    install)
+      # New simplified install — delegates to Python backend
+      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+        return 1
+      fi
+      python3 -m scripts.model_manager install "${@:2}"
+      ;;
     bootstrap)
       cmd_bootstrap "${@:2}"
       ;;
     status)
-      cmd_status
+      # Delegates to Python backend (reads both new and legacy state)
+      if [[ -d "$MODEL_MANAGER_PY" ]]; then
+        python3 -m scripts.model_manager status
+      else
+        cmd_status
+      fi
       ;;
     list)
-      cmd_list "${@:2}"
+      # Delegates to Python backend (reads both new and legacy state)
+      if [[ -d "$MODEL_MANAGER_PY" ]]; then
+        python3 -m scripts.model_manager list
+      else
+        cmd_list "${@:2}"
+      fi
       ;;
     update)
       cmd_update "${@:2}"
@@ -4672,6 +4972,7 @@ main() {
       cmd_replace "${@:2}"
       ;;
     delete)
+      # Use bash implementation: full purge supports repo, profiles, remote cache, launchers.
       cmd_delete "${@:2}"
       ;;
     discover)
@@ -4694,6 +4995,14 @@ main() {
       ;;
     restore)
       cmd_restore "${@:2}"
+      ;;
+    tui)
+      # Launch interactive TUI
+      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+        return 1
+      fi
+      python3 -m scripts.model_manager tui
       ;;
     *)
       printf 'Unknown command: %s\n\n' "$command_name" >&2
