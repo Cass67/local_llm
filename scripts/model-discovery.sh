@@ -16,7 +16,7 @@ Usage: model-discovery [options]
 
 Options:
   --query <text>       Hugging Face search query. Default: GGUF
-  --limit <n>          maximum ranked candidates to print. Default: 8
+  --limit <n>          maximum ranked candidates to print. Default: 30
   --host <host>        inspect a remote model host over SSH
   --local              inspect local hardware instead of the remote host
   --installed-only     show only already tuned profiles
@@ -414,7 +414,7 @@ EOF
 
 main() {
   local query='GGUF'
-  local limit=8
+  local limit=30
   local host="${OC_LOCAL_REMOTE_HOST:-}"
   local mode='auto'
   local installed_only=false

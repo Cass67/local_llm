@@ -16,7 +16,19 @@ Run this from a new checkout on the client machine:
 
 ```bash
 ./install.sh
-model-manager bootstrap --target remote:<host> --dry-run
+model-manager init --target remote:<host>
+model-manager install "coding gguf"
+model-manager list
+model-manager export > local-llm-backup.json
+```
+
+Replace `<host>` with your GPU host. `init` sets the target once — no need to repeat `--target` on every command. `install` discovers, scores, and accepts a model in one step.
+
+### Full pipeline (advanced)
+
+For fine-grained control, the original commands are still available:
+
+```bash
 model-manager bootstrap --target remote:<host> --yes
 model-manager discover "coding gguf" --target remote:<host>
 model-manager benchmark <source> --target remote:<host> --full
@@ -29,9 +41,9 @@ Use placeholders literally as placeholders: replace `<host>`, `<source>`, and `<
 
 ## Features
 
-- Fresh-pull bootstrap for local/remote targets.
+- Simplified 3-step workflow: `init` → `install` → `oc-local`.
+- Full pipeline still available: `bootstrap`, `discover`, `benchmark`, `accept`, `deploy`.
 - Hardware-aware GGUF discovery and readable inventory.
-- Full benchmark flow before accepting a model.
 - Generated launcher state under `$HOME/.local/share/local_llm` / `runs`.
 - Export/restore for moving accepted model state between machines.
 - OpenCode wrapper support through `oc-local <family> <profile> --info` and `--remote`.
@@ -56,11 +68,11 @@ Test install and empty-state behavior without touching your real state:
 tmp="$(mktemp -d)"
 LOCAL_LLM_BIN_DIR="$tmp/bin" LOCAL_LLM_SHARE_DIR="$tmp/share" ./install.sh
 PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager list
-PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager bootstrap --target remote:example-host --dry-run
+PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager init --target remote:example-host
 PATH="$tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$tmp/share/runs" model-manager deploy --target remote:example-host --dry-run
 ```
 
-Expected: `model-manager list` shows no accepted profiles or launchers, `bootstrap --dry-run` prints a plan, and `deploy --dry-run` says there is nothing to deploy.
+Expected: `model-manager list` shows no accepted profiles or launchers, `init` sets the target, and `deploy --dry-run` says there is nothing to deploy.
 
 Verify the repo has no committed model launchers:
 
@@ -166,18 +178,19 @@ Check wrapper resolution without starting a model:
 oc-local <family> <profile> --info
 ```
 
-### 3. Bootstrap And Accept A Model
+### 3. Initialize And Install A Model
 
 ```bash
-model-manager bootstrap --target remote:<host> --dry-run
-model-manager bootstrap --target remote:<host> --yes
-model-manager discover "coding gguf" --target remote:<host>
-model-manager benchmark <source> --target remote:<host> --full
-model-manager accept <benchmark.json>
-model-manager deploy --target remote:<host> --dry-run
+model-manager init --target remote:<host>
+model-manager install "coding gguf"
+model-manager list
+model-manager status
 model-manager export > local-llm-backup.json
 model-manager restore local-llm-backup.json
 ```
+
+`init` sets the target once — no need to repeat `--target` on every command.
+`install` discovers, scores, and accepts a model in one step.
 
 `model-manager` owns the GGUF lifecycle: Readable inventory, discovery, benchmark runs, accepted state, updates, replacements, deletes, export, and restore.
 
@@ -354,6 +367,47 @@ model-manager replace <old-file> <new-repo> --target "remote:$MODEL_HOST" --dry-
 ```
 
 If the remote host lacks the preferred download CLI, update flows fall back to a Python stdlib downloader.
+
+#### TUI workflow
+
+Run `model-manager` with no subcommand to open the Textual TUI. Selectable screens use arrows and Enter, not typed indexes:
+
+- Search returns diversified GGUF candidates and defaults to 30 results.
+- Install shows both search candidates and model repos already present in the remote Hugging Face cache.
+- Run shows accepted models in a table, cycles available profiles per row, starts the remote service, and verifies `/v1/models` before reporting success.
+- Delete shows accepted models plus remote cache-only model repos, supports Space multi-select, and removes accepted metadata, launchers, selections, shortcuts/profiles, and remote cache paths when confirmed.
+
+For remote targets, inventory and fit checks must use the GPU host, not the client. Set once with:
+
+```bash
+model-manager init --target remote:<host>
+```
+
+Then `list`, `install`, `run`, `delete`, and `status` use the configured remote host. On equal dual-GPU Vulkan systems, generated launchers should use an even split such as `--split-mode layer --tensor-split 1,1` unless a benchmark says otherwise.
+
+#### llama.cpp long-context cache mitigation
+
+Some SWA/hybrid GGUF models, especially long-context Qwen/Gemma-family runs, can log:
+
+```text
+forcing full prompt re-processing due to lack of cache data
+slot print_timing: ... prompt processing
+```
+
+Do not hide these lines as the primary fix. Generated `llama-server` launchers should use the cache/prefill mitigation that previously tested well on the remote GPU host:
+
+```text
+--timeout 1200
+--threads-http 2
+--parallel 1
+--no-cont-batching
+--ctx-checkpoints 128
+--checkpoint-every-n-tokens 1024
+--cache-ram 32768
+-b 4096 -ub 256
+```
+
+`--cache-ram 32768` is MiB; it gives llama.cpp about 32 GiB of RAM-backed prompt/checkpoint cache. Earlier working runs used at least 16 GiB (`--cache-ram 16384`), then final tuning used 32 GiB. Keep cache idle slots enabled unless a benchmark proves otherwise. `--swa-full` exists in llama.cpp, but it was not the final fix for the Qwen/Gemma cache-loss case; denser checkpoints, one slot, longer timeout, fewer HTTP threads, and faster prefill were the useful knobs.
 
 ## Experimental Vulkan Split
 
