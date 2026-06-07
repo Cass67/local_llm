@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import argparse
 
-from .commands import cmd_delete, cmd_init, cmd_install, cmd_list, cmd_status
+from .commands import (
+    cmd_delete,
+    cmd_init,
+    cmd_install,
+    cmd_list,
+    cmd_search,
+    cmd_status,
+)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="model-manager",
-        description="Manage local LLM models — discover, install, list, delete.",
+        description="Manage local LLM models — search, install, list, delete.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -19,27 +26,33 @@ def main() -> int:
     p_init.add_argument("--target", required=True, help="local or remote:<host>")
     p_init.set_defaults(func=cmd_init)
 
+    # search
+    p_search = sub.add_parser(
+        "search",
+        help="Search and score models, save candidates for install",
+    )
+    p_search.add_argument("query", nargs="?", default="GGUF", help="search query")
+    p_search.add_argument("--limit", type=int, default=30, help="max candidates to show")
+    p_search.set_defaults(func=cmd_search)
+
     # install
     p_install = sub.add_parser(
         "install",
-        help="Discover, score, and accept a model in one step",
+        help="Install a candidate by index (requires search first)",
     )
-    p_install.add_argument("query", nargs="?", default="GGUF", help="search query")
-    p_install.add_argument("--family", help="model family name (inferred if omitted)")
+    p_install.add_argument(
+        "--index",
+        type=int,
+        required=True,
+        help="candidate index from search results (1-based)",
+    )
     p_install.add_argument(
         "--profile",
         default="balanced",
         choices=["speed", "fastlong", "balanced", "reliable", "tiny"],
         help="profile for launcher",
     )
-    p_install.add_argument("--limit", type=int, default=5, help="max candidates to consider")
-    p_install.add_argument("--ctx", default="32768", help="context size for accepted metadata")
-    p_install.add_argument(
-        "--full", action="store_true", help="run full benchmark (not yet implemented)"
-    )
-    p_install.add_argument(
-        "--hardware-json", default="{}", help="hardware facts as JSON for scoring"
-    )
+    p_install.add_argument("--ctx", default="32768", help="context size")
     p_install.set_defaults(func=cmd_install)
 
     # list
@@ -55,7 +68,17 @@ def main() -> int:
     p_delete.add_argument("--family", required=True, help="family to delete")
     p_delete.set_defaults(func=cmd_delete)
 
+    # tui
+    sub.add_parser("tui", help="Launch interactive TUI")
+
     args = parser.parse_args()
+
+    if args.command == "tui":
+        from .tui import ModelManagerTUI
+
+        ModelManagerTUI().run()
+        return 0
+
     return args.func(args)
 
 

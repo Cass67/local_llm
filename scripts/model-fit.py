@@ -155,7 +155,7 @@ def fit_level(required: float, available: float) -> str:
     return "marginal"
 
 
-def parse_hardware(hardware: dict[str, Any]) -> tuple[float, float, list[dict[str, Any]]]:
+def parse_hardware(hardware: dict[str, Any]) -> tuple[float, list[dict[str, Any]]]:
     """Parse unified JSON hardware fields to elegantly support standalone or dual setups."""
     gpus = hardware.get("gpus", [])
 
@@ -322,6 +322,95 @@ def score_candidate(item: dict[str, Any], hardware: dict[str, Any]) -> dict[str,
     }
 
 
+def param_bucket(params_b: float | None) -> str:
+    if params_b is None:
+        return "unknown"
+    if params_b < 4:
+        return "<4B"
+    if params_b < 8:
+        return "4-8B"
+    if params_b < 14:
+        return "8-14B"
+    if params_b < 22:
+        return "14-22B"
+    if params_b < 32:
+        return "22-32B"
+    if params_b < 45:
+        return "32-45B"
+    if params_b < 70:
+        return "45-70B"
+    return "70B+"
+
+
+def quant_bucket(quant: str | None) -> str:
+    value = (quant or "unknown").upper()
+    if "Q8" in value or "8_" in value:
+        return "Q8"
+    if "Q6" in value or "6_" in value:
+        return "Q6"
+    if "Q5" in value or "5_" in value:
+        return "Q5"
+    if "Q4" in value or "4_" in value:
+        return "Q4"
+    if "Q3" in value or "IQ3" in value:
+        return "Q3"
+    if "Q2" in value or "IQ2" in value:
+        return "Q2"
+    if "FP8" in value or "F8" in value:
+        return "FP8"
+    return value.split("_", 1)[0]
+
+
+def family_bucket(repo: str) -> str:
+    name = repo.lower().rsplit("/", 1)[-1]
+    name = re.sub(r"(?:gguf|q\d[^-]*|iq\d[^-]*|fp8|awq|gptq|uncensored|abliterated)", "", name)
+    name = re.sub(r"[-_]+", "-", name).strip("-")
+    parts = [
+        part
+        for part in name.split("-")
+        if not re.fullmatch(r"\d+(?:\.\d+)?b|a\d+(?:\.\d+)?b", part)
+    ]
+    return "-".join(parts[:4]) or repo.lower()
+
+
+def diversified_candidates(ranked: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    selected_repos: set[str] = set()
+
+    def add_pass(key_func, max_per_key: int) -> None:
+        counts: dict[tuple[Any, ...], int] = {}
+        for item in ranked:
+            if len(selected) >= limit:
+                return
+            repo = item["repo"]
+            if repo in selected_repos:
+                continue
+            key = key_func(item)
+            if counts.get(key, 0) >= max_per_key:
+                continue
+            selected.append(item)
+            selected_repos.add(repo)
+            counts[key] = counts.get(key, 0) + 1
+
+    # First pass: strongest diversity across family + parameter + quant buckets.
+    add_pass(
+        lambda item: (
+            family_bucket(str(item["repo"])),
+            param_bucket(item.get("params_b")),
+            quant_bucket(item.get("best_quant")),
+        ),
+        1,
+    )
+    # Second pass: allow another quant per family/param bucket.
+    add_pass(
+        lambda item: (family_bucket(str(item["repo"])), param_bucket(item.get("params_b"))),
+        2,
+    )
+    # Final pass: fill by score.
+    add_pass(lambda item: ("all",), limit)
+    return selected[:limit]
+
+
 def main() -> int:
     args = parse_args()
     hardware = json.loads(args.hardware_json)
@@ -331,13 +420,16 @@ def main() -> int:
     ranked = [
         candidate for item in load_json_stdin() if (candidate := score_candidate(item, hardware))
     ]
-    ranked.sort(key=lambda item: (item["score"], item["downloads"]), reverse=True)
+    ranked.sort(
+        key=lambda item: (item["score"], item["estimated_tps"], item["downloads"]), reverse=True
+    )
+    selected = diversified_candidates(ranked, args.limit)
 
     payload = {
         "query": args.query,
         "hardware": hardware,
         "total_candidates": len(ranked),
-        "candidates": ranked[: args.limit],
+        "candidates": selected,
     }
 
     if args.json:

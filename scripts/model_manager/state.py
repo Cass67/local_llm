@@ -17,12 +17,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-RUNS_DIR = Path(
-    os.environ.get("LOCAL_LLM_RUNS_DIR", "$HOME/.local/share/local_llm/runs")
-).expanduser()
+RUNS_DIR = Path(os.environ.get("LOCAL_LLM_RUNS_DIR", "~/.local/share/local_llm/runs")).expanduser()
 ACCEPTED_DIR = RUNS_DIR / "accepted"
 LAUNCHERS_DIR = RUNS_DIR / "launchers"
+CANDIDATES_DIR = RUNS_DIR / "candidates"
 CONFIG_FILE = RUNS_DIR / "config.json"
+CANDIDATES_FILE = CANDIDATES_DIR / "latest.json"
 
 SAFE_FAMILY = re.compile(r"^[A-Za-z0-9_.-]+$")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -31,7 +31,7 @@ TARGET_RE = re.compile(r"^local$|^remote:[A-Za-z0-9_.:-]+$")
 
 def ensure_dirs() -> None:
     """Create state directories if missing, reject symlinks."""
-    for d in (RUNS_DIR, ACCEPTED_DIR, LAUNCHERS_DIR):
+    for d in (RUNS_DIR, ACCEPTED_DIR, LAUNCHERS_DIR, CANDIDATES_DIR):
         if d.is_symlink():
             sys.exit(f"refuses symlinked dir: {d}")
         d.mkdir(parents=True, exist_ok=True)
@@ -133,3 +133,26 @@ def delete_accepted(family: str) -> bool:
         path.unlink()
         return True
     return False
+
+
+def save_candidates(candidates: list[dict[str, Any]]) -> None:
+    """Save search results to candidates/latest.json."""
+    ensure_dirs()
+    if CANDIDATES_FILE.is_symlink():
+        sys.exit(f"refuses symlinked candidates file: {CANDIDATES_FILE}")
+    CANDIDATES_FILE.write_text(json.dumps(candidates, indent=2, sort_keys=True) + "\n")
+
+
+def load_candidates() -> list[dict[str, Any]] | None:
+    """Load saved search results. Returns None if not yet searched."""
+    if not CANDIDATES_FILE.exists():
+        return None
+    if CANDIDATES_FILE.is_symlink():
+        sys.exit(f"refuses symlinked candidates file: {CANDIDATES_FILE}")
+    try:
+        data = json.loads(CANDIDATES_FILE.read_text())
+        if isinstance(data, list):
+            return data
+        return None
+    except (json.JSONDecodeError, OSError):
+        return None

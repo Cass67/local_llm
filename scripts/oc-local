@@ -469,6 +469,12 @@ fields = [
     reject_control_chars("reasoning_effort", profile.get("reasoning_effort") or data.get("reasoning_effort") or "none"),
 ]
 fields.extend(metadata_optional_vulkan_fields(profile))
+reasoning_value = profile.get("reasoning", data.get("reasoning", True))
+if isinstance(reasoning_value, str):
+    reasoning_value = reasoning_value.lower() in {"1", "true", "yes", "on"}
+elif not isinstance(reasoning_value, bool):
+    reasoning_value = False
+fields.append("true" if reasoning_value else "false")
 fields.extend([
     reject_control_chars("cache_type_k", profile.get("cache_type_k") or "none"),
     reject_control_chars("cache_type_v", profile.get("cache_type_v") or "none"),
@@ -508,6 +514,7 @@ if [[ "$generated_profile" == true ]]; then
 		IFS= read -r visible_devices
 		IFS= read -r split_mode
 		IFS= read -r tensor_split
+		IFS= read -r reasoning_enabled
 		IFS= read -r cache_type_k
 		IFS= read -r cache_type_v
 		IFS= read -r ctx_shift
@@ -527,7 +534,7 @@ if [[ "$generated_profile" == true ]]; then
 			exit 1
 		fi
 	done
-	for string_field in family model_name hf_repo quant mmproj_mode reasoning_effort; do
+	for string_field in family model_name hf_repo quant mmproj_mode reasoning_effort reasoning_enabled; do
 		if has_control_chars "${!string_field}"; then
 			printf 'invalid generated string field %s contains control characters\n' "$string_field" >&2
 			exit 1
@@ -535,6 +542,10 @@ if [[ "$generated_profile" == true ]]; then
 	done
 	if [[ "$backend" != default && "$backend" != vulkan && "$backend" != rocm ]]; then
 		printf 'invalid generated backend: %s\n' "$backend" >&2
+		exit 1
+	fi
+	if [[ "$reasoning_enabled" != true && "$reasoning_enabled" != false ]]; then
+		printf 'invalid generated reasoning flag: %s\n' "$reasoning_enabled" >&2
 		exit 1
 	fi
 	for string_field in visible_devices split_mode tensor_split cache_type_k cache_type_v ctx_shift cache_ram spec_type spec_draft_n_max threads threads_batch; do
@@ -555,9 +566,15 @@ fi
 default_output_limit=4096
 output_limit="${OC_LOCAL_OUTPUT_LIMIT:-$default_output_limit}"
 reserved="${OC_LOCAL_RESERVED:-4096}"
-base_url="${OC_LOCAL_BASE_URL:-http://localhost:8080/v1}"
+if [[ -n "${OC_LOCAL_BASE_URL:-}" ]]; then
+	base_url="$OC_LOCAL_BASE_URL"
+elif [[ -n "$remote_host" ]]; then
+	base_url="http://$remote_host:8080/v1"
+else
+	base_url="http://localhost:8080/v1"
+fi
 api_key="${OC_LOCAL_API_KEY:-sk-dummy}"
-model="${OC_LOCAL_MODEL:-llama-cpp/$model_name}"
+model="${OC_LOCAL_MODEL:-ubt26-llamacpp/$model_name}"
 wait_seconds="${OC_LOCAL_WAIT_SECONDS:-180}"
 
 plugin_json=''
@@ -566,10 +583,14 @@ if [[ "$lean" == true ]]; then
 	plugin_json='"plugin":[],'
 	plugin_mode=lean
 fi
+reasoning_json=''
+if [[ "${reasoning_enabled:-false}" == true ]]; then
+	reasoning_json='"reasoning":true,'
+fi
 
 config_content=$(
 	cat <<EOF
-{${plugin_json}"provider":{"localllm":{"npm":"@ai-sdk/openai-compatible","name":"LocalLLM","options":{"baseURL":"${base_url}","apiKey":"${api_key}"},"models":{"${model_name}":{"name":"${model_name}","tool_call":false,"limit":{"context":${context},"output":${output_limit}}}}}},"compaction":{"auto":true,"prune":true,"reserved":${reserved}}}
+{${plugin_json}"provider":{"localllm":{"npm":"@ai-sdk/openai-compatible","name":"LocalLLM","options":{"baseURL":"${base_url}","apiKey":"${api_key}"},"models":{"${model_name}":{"name":"${model_name}",${reasoning_json}"tool_call":false,"limit":{"context":${context},"output":${output_limit}}}}}},"compaction":{"auto":true,"prune":true,"reserved":${reserved}}}
 EOF
 )
 
@@ -645,6 +666,7 @@ if [[ "$info" == true ]]; then
 	printf 'ubatch=%s\n' "$ubatch"
 	printf 'ngl=%s\n' "$ngl"
 	printf 'mmproj=%s\n' "$mmproj_mode"
+	printf 'reasoning=%s\n' "${reasoning_enabled:-false}"
 	printf 'reasoning_effort=%s\n' "$reasoning_effort"
 	printf 'backend=%s\n' "$backend"
 	if [[ "$backend" == vulkan || "$backend" == rocm ]]; then
