@@ -19,7 +19,9 @@ from typing import Any
 from urllib.parse import urlsplit
 
 LLAMA_DIR = Path(os.environ.get("LLAMA_DIR", "~/llama.cpp")).expanduser()
-ACCEPTED_DIR = Path(os.environ.get("LOCAL_LLM_ACCEPTED_DIR", str(LLAMA_DIR / "accepted"))).expanduser()
+ACCEPTED_DIR = Path(
+    os.environ.get("LOCAL_LLM_ACCEPTED_DIR", str(LLAMA_DIR / "accepted"))
+).expanduser()
 CURRENT_MODEL_ENV = Path(
     os.environ.get("LLAMA_CURRENT_MODEL_ENV", str(LLAMA_DIR / "current-model.env"))
 )
@@ -240,7 +242,11 @@ def load_models() -> list[Model]:
         reasoning = bool(metadata.get("reasoning"))
         remote_script = "./" + path.name
         current_profile = current_values.get("REMOTE_PROFILE")
-        profile = current_profile if current_values.get("REMOTE_SCRIPT") == remote_script and current_profile else "reliable"
+        profile = (
+            current_profile
+            if current_values.get("REMOTE_SCRIPT") == remote_script and current_profile
+            else "reliable"
+        )
         model_id = f"{family}:{profile}"
         if model_id in seen:
             continue
