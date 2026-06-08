@@ -106,10 +106,12 @@ def list_accepted() -> list[tuple[str, dict[str, Any]]]:
     ensure_dirs()
     results = []
     for path in sorted(ACCEPTED_DIR.glob("*.json")):
-        if path.is_symlink():
+        if path.name == "default.json" or path.is_symlink():
             continue
         try:
             data = json.loads(path.read_text())
+            if not isinstance(data, dict) or not data.get("remote_start"):
+                continue
             family = path.stem
             results.append((family, data))
         except (json.JSONDecodeError, OSError):
