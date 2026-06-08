@@ -5,53 +5,53 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$SCRIPT_DIR/.." && pwd)"
 MODEL_DISCOVERY_SCRIPT="$SCRIPT_DIR/model-discovery.sh"
 if [[ ! -f "$MODEL_DISCOVERY_SCRIPT" ]]; then
-  MODEL_DISCOVERY_SCRIPT="$SCRIPT_DIR/model-discovery"
+	MODEL_DISCOVERY_SCRIPT="$SCRIPT_DIR/model-discovery"
 fi
 if [[ ! -f "$MODEL_DISCOVERY_SCRIPT" ]]; then
-  MODEL_DISCOVERY_SCRIPT="$repo_root/scripts/model-discovery.sh"
+	MODEL_DISCOVERY_SCRIPT="$repo_root/scripts/model-discovery.sh"
 fi
 MODEL_FIT_SCRIPT="$SCRIPT_DIR/model-fit.py"
 if [[ ! -f "$MODEL_FIT_SCRIPT" ]]; then
-  MODEL_FIT_SCRIPT="$repo_root/scripts/model-fit.py"
+	MODEL_FIT_SCRIPT="$repo_root/scripts/model-fit.py"
 fi
 
 # Python backend for new simplified commands
 MODEL_MANAGER_PY="$SCRIPT_DIR/model_manager"
 if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
-  MODEL_MANAGER_PY="$repo_root/scripts/model_manager"
+	MODEL_MANAGER_PY="$repo_root/scripts/model_manager"
 fi
 
 runs_dir="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
 generated_launcher_dir="$runs_dir/launchers"
 
 default_target() {
-  # Env override
-  if [[ -n "${OC_LOCAL_REMOTE_HOST:-}" ]]; then
-    printf 'remote:%s\n' "$OC_LOCAL_REMOTE_HOST"
-    return 0
-  fi
-  # Read from saved config (new: runs/config.json, legacy: runs/bootstrap/config.json)
-  if [[ -f "$runs_dir/config.json" ]]; then
-    local target
-    target="$(python3 -c "import json; print(json.load(open('$runs_dir/config.json'))['target'])" 2>/dev/null)" || true
-    if [[ -n "$target" ]]; then
-      printf '%s\n' "$target"
-      return 0
-    fi
-  fi
-  if [[ -f "$runs_dir/bootstrap/config.json" ]]; then
-    local target
-    target="$(python3 -c "import json; print(json.load(open('$runs_dir/bootstrap/config.json'))['target'])" 2>/dev/null)" || true
-    if [[ -n "$target" ]]; then
-      printf '%s\n' "$target"
-      return 0
-    fi
-  fi
-  printf 'local\n'
+	# Env override
+	if [[ -n "${OC_LOCAL_REMOTE_HOST:-}" ]]; then
+		printf 'remote:%s\n' "$OC_LOCAL_REMOTE_HOST"
+		return 0
+	fi
+	# Read from saved config (new: runs/config.json, legacy: runs/bootstrap/config.json)
+	if [[ -f "$runs_dir/config.json" ]]; then
+		local target
+		target="$(python3 -c "import json; print(json.load(open('$runs_dir/config.json'))['target'])" 2>/dev/null)" || true
+		if [[ -n "$target" ]]; then
+			printf '%s\n' "$target"
+			return 0
+		fi
+	fi
+	if [[ -f "$runs_dir/bootstrap/config.json" ]]; then
+		local target
+		target="$(python3 -c "import json; print(json.load(open('$runs_dir/bootstrap/config.json'))['target'])" 2>/dev/null)" || true
+		if [[ -n "$target" ]]; then
+			printf '%s\n' "$target"
+			return 0
+		fi
+	fi
+	printf 'local\n'
 }
 
 usage() {
-  cat <<'EOF'
+	cat <<'EOF'
 Usage: model-manager <command> [options]
 
 Simplified workflow:
@@ -69,55 +69,56 @@ Full commands:
   select     Select a candidate model (legacy — install replaces this)
   benchmark  Benchmark a selected model
   accept     Accept benchmark results
-  deploy     Preview generated state deployment
-  export     Export local model-manager state as JSON
-  restore    Restore local model-manager state from JSON
-  status     Show model-manager status
+  deploy           Preview generated state deployment
+  update-launcher  Regenerate launcher for an accepted model
+  export           Export local model-manager state as JSON
+  restore          Restore local model-manager state from JSON
+  status           Show model-manager status
 
 Options:
   -h, --help  Show this help
 EOF
-  printf '\nRepository: %s\n' "$repo_root"
+	printf '\nRepository: %s\n' "$repo_root"
 }
 
 not_implemented() {
-  local command_name="$1"
-  printf 'model-manager %s: not implemented yet\n' "$command_name" >&2
-  return 1
+	local command_name="$1"
+	printf 'model-manager %s: not implemented yet\n' "$command_name" >&2
+	return 1
 }
 
 ensure_state_dir() {
-  local dir="$1"
-  local label="$2"
+	local dir="$1"
+	local label="$2"
 
-  if [[ -L "$dir" ]]; then
-    printf 'model-manager refuses symlinked %s dir: %s\n' "$label" "$dir" >&2
-    return 1
-  fi
-  if [[ -e "$dir" && ! -d "$dir" ]]; then
-    printf 'model-manager state path is not a directory: %s\n' "$dir" >&2
-    return 1
-  fi
-  mkdir -p "$dir"
-  if [[ -L "$dir" ]]; then
-    printf 'model-manager refuses symlinked %s dir: %s\n' "$label" "$dir" >&2
-    return 1
-  fi
+	if [[ -L "$dir" ]]; then
+		printf 'model-manager refuses symlinked %s dir: %s\n' "$label" "$dir" >&2
+		return 1
+	fi
+	if [[ -e "$dir" && ! -d "$dir" ]]; then
+		printf 'model-manager state path is not a directory: %s\n' "$dir" >&2
+		return 1
+	fi
+	mkdir -p "$dir"
+	if [[ -L "$dir" ]]; then
+		printf 'model-manager refuses symlinked %s dir: %s\n' "$label" "$dir" >&2
+		return 1
+	fi
 }
 
 reject_symlink_state_file() {
-  local path="$1"
+	local path="$1"
 
-  if [[ -L "$path" ]]; then
-    printf 'model-manager refuses symlinked state file: %s\n' "$path" >&2
-    return 1
-  fi
+	if [[ -L "$path" ]]; then
+		printf 'model-manager refuses symlinked state file: %s\n' "$path" >&2
+		return 1
+	fi
 }
 
 validate_launcher_write_target() {
-  local path="$1"
+	local path="$1"
 
-  python3 - "$runs_dir" "$generated_launcher_dir" "$path" <<'PY'
+	python3 - "$runs_dir" "$generated_launcher_dir" "$path" <<'PY'
 import os
 import pathlib
 import sys
@@ -172,128 +173,128 @@ PY
 }
 
 ensure_runs_dirs() {
-  ensure_state_dir "$runs_dir" runs || return 1
-  ensure_state_dir "$runs_dir/candidates" candidates || return 1
-  ensure_state_dir "$runs_dir/selections" selections || return 1
-  ensure_state_dir "$runs_dir/benchmarks" benchmarks || return 1
-  ensure_state_dir "$runs_dir/replacements" replacements || return 1
-  ensure_state_dir "$runs_dir/accepted" accepted || return 1
-  ensure_state_dir "$generated_launcher_dir" launchers || return 1
+	ensure_state_dir "$runs_dir" runs || return 1
+	ensure_state_dir "$runs_dir/candidates" candidates || return 1
+	ensure_state_dir "$runs_dir/selections" selections || return 1
+	ensure_state_dir "$runs_dir/benchmarks" benchmarks || return 1
+	ensure_state_dir "$runs_dir/replacements" replacements || return 1
+	ensure_state_dir "$runs_dir/accepted" accepted || return 1
+	ensure_state_dir "$generated_launcher_dir" launchers || return 1
 }
 
 count_json_files() {
-  local dir="$1"
-  local -a files=()
+	local dir="$1"
+	local -a files=()
 
-  if [[ -d "$dir" ]]; then
-    shopt -s nullglob
-    files=("$dir"/*.json)
-    shopt -u nullglob
-  fi
+	if [[ -d "$dir" ]]; then
+		shopt -s nullglob
+		files=("$dir"/*.json)
+		shopt -u nullglob
+	fi
 
-  printf '%s\n' "${#files[@]}"
+	printf '%s\n' "${#files[@]}"
 }
 
 is_safe_generated_name() {
-  local value="$1"
-  [[ "$value" =~ ^[A-Za-z0-9_.-]+$ && "$value" != *..* && "$value" != -* ]]
+	local value="$1"
+	[[ "$value" =~ ^[A-Za-z0-9_.-]+$ && "$value" != *..* && "$value" != -* ]]
 }
 
 cmd_status() {
-  ensure_runs_dirs
-  printf 'Model Manager Status\n'
-  printf '====================\n'
-  printf 'Runs dir: %s\n' "$runs_dir"
-  printf 'Candidates: %s\n' "$(count_json_files "$runs_dir/candidates")"
-  printf 'Selections: %s\n' "$(count_json_files "$runs_dir/selections")"
-  printf 'Benchmarks: %s\n' "$(count_json_files "$runs_dir/benchmarks")"
+	ensure_runs_dirs
+	printf 'Model Manager Status\n'
+	printf '====================\n'
+	printf 'Runs dir: %s\n' "$runs_dir"
+	printf 'Candidates: %s\n' "$(count_json_files "$runs_dir/candidates")"
+	printf 'Selections: %s\n' "$(count_json_files "$runs_dir/selections")"
+	printf 'Benchmarks: %s\n' "$(count_json_files "$runs_dir/benchmarks")"
 }
 
 print_bootstrap_plan() {
-  local target="$1"
+	local target="$1"
 
-  printf 'Bootstrap plan\n'
-  printf '==============\n'
-  printf 'target=%s\n' "$target"
-  printf 'runs_dir=%s\n' "$runs_dir"
-  printf 'config=%s\n' "$runs_dir/bootstrap/config.json"
-  printf 'next=model-manager discover --target %s\n' "$target"
+	printf 'Bootstrap plan\n'
+	printf '==============\n'
+	printf 'target=%s\n' "$target"
+	printf 'runs_dir=%s\n' "$runs_dir"
+	printf 'config=%s\n' "$runs_dir/bootstrap/config.json"
+	printf 'next=model-manager discover --target %s\n' "$target"
 }
 
 cmd_bootstrap() {
-  local target
-  target="$(default_target)"
-  local dry_run=false
-  local yes=false
+	local target
+	target="$(default_target)"
+	local dry_run=false
+	local yes=false
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --target)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--target requires local or remote:<host>' >&2
-          return 2
-        fi
-        target="$2"
-        shift 2
-        ;;
-      --dry-run)
-        dry_run=true
-        shift
-        ;;
-      --yes)
-        yes=true
-        shift
-        ;;
-      -h | --help)
-        usage
-        return 0
-        ;;
-      --*)
-        printf 'Unknown bootstrap option: %s\n' "$1" >&2
-        return 2
-        ;;
-      *)
-        printf 'Unexpected bootstrap argument: %s\n' "$1" >&2
-        return 2
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--target)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--target requires local or remote:<host>' >&2
+				return 2
+			fi
+			target="$2"
+			shift 2
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--yes)
+			yes=true
+			shift
+			;;
+		-h | --help)
+			usage
+			return 0
+			;;
+		--*)
+			printf 'Unknown bootstrap option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			printf 'Unexpected bootstrap argument: %s\n' "$1" >&2
+			return 2
+			;;
+		esac
+	done
 
-  if [[ "$dry_run" == true && "$yes" == true ]]; then
-    printf '%s\n' 'choose either --dry-run or --yes, not both' >&2
-    return 2
-  fi
+	if [[ "$dry_run" == true && "$yes" == true ]]; then
+		printf '%s\n' 'choose either --dry-run or --yes, not both' >&2
+		return 2
+	fi
 
-  case "$target" in
-    local) ;;
-    remote:*)
-      if [[ -z "${target#remote:}" ]]; then
-        printf 'remote target requires a host: %s\n' "$target" >&2
-        return 2
-      fi
-      if [[ "${target#remote:}" == -* ]]; then
-        printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
-        return 2
-      fi
-      ;;
-    *)
-      printf 'invalid target: %s\n' "$target" >&2
-      printf 'expected local or remote:<host>\n' >&2
-      return 2
-      ;;
-  esac
-  if [[ ! "$target" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
-    printf '%s\n' 'invalid target: use only letters, digits, dot, underscore, colon, and hyphen' >&2
-    return 2
-  fi
+	case "$target" in
+	local) ;;
+	remote:*)
+		if [[ -z "${target#remote:}" ]]; then
+			printf 'remote target requires a host: %s\n' "$target" >&2
+			return 2
+		fi
+		if [[ "${target#remote:}" == -* ]]; then
+			printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
+			return 2
+		fi
+		;;
+	*)
+		printf 'invalid target: %s\n' "$target" >&2
+		printf 'expected local or remote:<host>\n' >&2
+		return 2
+		;;
+	esac
+	if [[ ! "$target" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
+		printf '%s\n' 'invalid target: use only letters, digits, dot, underscore, colon, and hyphen' >&2
+		return 2
+	fi
 
-  print_bootstrap_plan "$target"
+	print_bootstrap_plan "$target"
 
-  if [[ "$yes" == true ]]; then
-    ensure_state_dir "$runs_dir" runs || return 1
-    ensure_state_dir "$runs_dir/bootstrap" bootstrap || return 1
-    reject_symlink_state_file "$runs_dir/bootstrap/config.json" || return 1
-    python3 - "$runs_dir/bootstrap/config.json" "$target" <<'PY'
+	if [[ "$yes" == true ]]; then
+		ensure_state_dir "$runs_dir" runs || return 1
+		ensure_state_dir "$runs_dir/bootstrap" bootstrap || return 1
+		reject_symlink_state_file "$runs_dir/bootstrap/config.json" || return 1
+		python3 - "$runs_dir/bootstrap/config.json" "$target" <<'PY'
 import datetime
 import json
 import sys
@@ -307,21 +308,21 @@ with open(path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)
     handle.write("\n")
 PY
-    printf 'wrote=%s\n' "$runs_dir/bootstrap/config.json"
-  elif [[ "$dry_run" != true ]]; then
-    printf 'hint=rerun with --yes to write bootstrap config\n'
-  fi
+		printf 'wrote=%s\n' "$runs_dir/bootstrap/config.json"
+	elif [[ "$dry_run" != true ]]; then
+		printf 'hint=rerun with --yes to write bootstrap config\n'
+	fi
 }
 
 print_profile_inventory() {
-  local profiles_json="$repo_root/configs/profiles.json"
+	local profiles_json="$repo_root/configs/profiles.json"
 
-  printf 'Profiles\n\n'
-  if [[ ! -f "$profiles_json" ]]; then
-    printf '  None\n'
-    return 0
-  fi
-  python3 - "$profiles_json" <<'PY'
+	printf 'Profiles\n\n'
+	if [[ ! -f "$profiles_json" ]]; then
+		printf '  None\n'
+		return 0
+	fi
+	python3 - "$profiles_json" <<'PY'
 import json
 import sys
 from collections import defaultdict
@@ -374,21 +375,21 @@ PY
 }
 
 print_selection_inventory() {
-  local selection_dir="$runs_dir/selections"
-  local -a selection_files=()
+	local selection_dir="$runs_dir/selections"
+	local -a selection_files=()
 
-  if [[ -d "$selection_dir" ]]; then
-    shopt -s nullglob
-    selection_files=("$selection_dir"/*.json)
-    shopt -u nullglob
-  fi
+	if [[ -d "$selection_dir" ]]; then
+		shopt -s nullglob
+		selection_files=("$selection_dir"/*.json)
+		shopt -u nullglob
+	fi
 
-  printf 'Pending Selections\n\n'
-  if ((${#selection_files[@]} == 0)); then
-    printf '  None\n'
-    return 0
-  fi
-  python3 - "${selection_files[@]}" <<'PY'
+	printf 'Pending Selections\n\n'
+	if ((${#selection_files[@]} == 0)); then
+		printf '  None\n'
+		return 0
+	fi
+	python3 - "${selection_files[@]}" <<'PY'
 import json
 import os
 import re
@@ -444,21 +445,21 @@ PY
 }
 
 print_launcher_inventory() {
-  print_generated_launcher_inventory
+	print_generated_launcher_inventory
 }
 
 print_generated_launcher_inventory() {
-  local -a launcher_files=()
+	local -a launcher_files=()
 
-  if [[ -d "$generated_launcher_dir" ]]; then
-    shopt -s nullglob
-    launcher_files=("$generated_launcher_dir"/start*.sh)
-    shopt -u nullglob
-  fi
+	if [[ -d "$generated_launcher_dir" ]]; then
+		shopt -s nullglob
+		launcher_files=("$generated_launcher_dir"/start*.sh)
+		shopt -u nullglob
+	fi
 
-  ((${#launcher_files[@]} > 0)) || return 0
+	((${#launcher_files[@]} > 0)) || return 0
 
-  python3 - "${launcher_files[@]}" <<'PY'
+	python3 - "${launcher_files[@]}" <<'PY'
 import re
 import shlex
 import sys
@@ -533,14 +534,14 @@ PY
 }
 
 print_launcher_cards() {
-  local launcher_inventory="$1"
+	local launcher_inventory="$1"
 
-  printf 'Launchers\n\n'
-  if [[ -z "$launcher_inventory" ]]; then
-    printf '  None\n'
-    return 0
-  fi
-  python3 - "$launcher_inventory" <<'PY'
+	printf 'Launchers\n\n'
+	if [[ -z "$launcher_inventory" ]]; then
+		printf '  None\n'
+		return 0
+	fi
+	python3 - "$launcher_inventory" <<'PY'
 import sys
 
 rows = []
@@ -573,19 +574,19 @@ PY
 }
 
 find_existing_launcher() {
-  : "$1" "$2"
-  return 0
+	: "$1" "$2"
+	return 0
 }
 
 find_existing_accepted_launcher() {
-  local repo="$1"
-  local family="$2"
-  local alias="$3"
-  local metadata_file="$runs_dir/accepted/$family.json"
+	local repo="$1"
+	local family="$2"
+	local alias="$3"
+	local metadata_file="$runs_dir/accepted/$family.json"
 
-  [[ -f "$metadata_file" ]] || return 0
-  reject_symlink_state_file "$metadata_file" || return 1
-  python3 - "$metadata_file" "$repo" "$family" "$alias" "$generated_launcher_dir" <<'PY'
+	[[ -f "$metadata_file" ]] || return 0
+	reject_symlink_state_file "$metadata_file" || return 1
+	python3 - "$metadata_file" "$repo" "$family" "$alias" "$generated_launcher_dir" <<'PY'
 import json
 import pathlib
 import re
@@ -634,16 +635,16 @@ PY
 }
 
 remove_matching_selections() {
-  local repo="$1"
-  local alias="$2"
-  local selection_dir="$runs_dir/selections"
+	local repo="$1"
+	local alias="$2"
+	local selection_dir="$runs_dir/selections"
 
-  [[ -d "$selection_dir" ]] || {
-    printf '0\n'
-    return 0
-  }
+	[[ -d "$selection_dir" ]] || {
+		printf '0\n'
+		return 0
+	}
 
-  python3 - "$selection_dir" "$repo" "$alias" <<'PY'
+	python3 - "$selection_dir" "$repo" "$alias" <<'PY'
 import json
 import pathlib
 import sys
@@ -667,15 +668,15 @@ PY
 }
 
 update_existing_launcher_runtime() {
-  local launcher_file="$1"
-  local ctx="$2"
-  local batch="$3"
-  local ubatch="$4"
-  local ngl="$5"
-  local tensor_split="${6:-}"
+	local launcher_file="$1"
+	local ctx="$2"
+	local batch="$3"
+	local ubatch="$4"
+	local ngl="$5"
+	local tensor_split="${6:-}"
 
-  [[ -f "$launcher_file" && ! -L "$launcher_file" ]] || return 0
-  python3 - "$launcher_file" "$ctx" "$batch" "$ubatch" "$ngl" "$tensor_split" <<'PY'
+	[[ -f "$launcher_file" && ! -L "$launcher_file" ]] || return 0
+	python3 - "$launcher_file" "$ctx" "$batch" "$ubatch" "$ngl" "$tensor_split" <<'PY'
 import pathlib
 import re
 import sys
@@ -701,45 +702,51 @@ PY
 }
 
 ensure_launcher_model_log_redirect() {
-  local launcher_file="$1"
+	local launcher_file="$1"
 
-  [[ -f "$launcher_file" && ! -L "$launcher_file" ]] || return 0
-  python3 - "$launcher_file" <<'PY'
+	[[ -f "$launcher_file" && ! -L "$launcher_file" ]] || return 0
+	python3 - "$launcher_file" <<'PY'
 import pathlib
+import re
 import sys
 
 path = pathlib.Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-marker = 'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"'
-if marker in text:
-    raise SystemExit(0)
 needle = "set -euo pipefail\n"
-insert = (
-    'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
-    'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"\n'
-    'mkdir -p "$(dirname "$log_file")"\n'
-    'exec > >(stdbuf -oL -eL awk '\''!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/erased invalidated context checkpoint/ && !/creating new checkpoint during processing/'\'' | tee "$log_file") 2>&1\n'
-)
-if needle not in text:
-    raise SystemExit(f"launcher is missing expected shell strict-mode line: {path}")
-path.write_text(text.replace(needle, needle + insert, 1), encoding="utf-8")
+awk_filter = "!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/erased invalidated context checkpoint/ && !/creating new checkpoint during processing/ && !/forcing full prompt re-processing due to lack of cache data/ && !/slot print_timing:.*prompt processing/"
+exec_line = f"exec > >(stdbuf -oL -eL awk '{awk_filter}' | tee \"$log_file\") 2>&1"
+if "exec > >(stdbuf -oL -eL awk " in text:
+    text = re.sub(r"^exec > >\(stdbuf -oL -eL awk '.*' \| tee \"\$log_file\"\) 2>&1$", exec_line, text, count=1, flags=re.MULTILINE)
+elif 'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"' in text:
+    text = text.replace('mkdir -p "$(dirname "$log_file")"\n', 'mkdir -p "$(dirname "$log_file")"\n' + exec_line + "\n", 1)
+else:
+    insert = (
+        'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
+        'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"\n'
+        'mkdir -p "$(dirname "$log_file")"\n'
+        f'{exec_line}\n'
+    )
+    if needle not in text:
+        raise SystemExit(f"launcher is missing expected shell strict-mode line: {path}")
+    text = text.replace(needle, needle + insert, 1)
+path.write_text(text, encoding="utf-8")
 PY
-  chmod +x "$launcher_file"
+	chmod +x "$launcher_file"
 }
 
 ensure_switcher_model() {
-  local family="$1"
-  local start_script="$2"
-  local alias="$3"
-  local label="$4"
-  local switcher="$repo_root/scripts/local-llm-switcher.py"
+	local family="$1"
+	local start_script="$2"
+	local alias="$3"
+	local label="$4"
+	local switcher="$repo_root/scripts/local-llm-switcher.py"
 
-  [[ -f "$switcher" ]] || {
-    printf 'missing\n'
-    return 0
-  }
+	[[ -f "$switcher" ]] || {
+		printf 'missing\n'
+		return 0
+	}
 
-  python3 - "$switcher" "$family" "$start_script" "$alias" "$label" <<'PY'
+	python3 - "$switcher" "$family" "$start_script" "$alias" "$label" <<'PY'
 import pathlib
 import sys
 
@@ -762,28 +769,28 @@ PY
 }
 
 write_accepted_metadata() {
-  local repo="$1"
-  local family="$2"
-  local alias="$3"
-  local launcher_file="$4"
-  local profile="$5"
-  local ctx="$6"
-  local batch="$7"
-  local ubatch="$8"
-  local ngl="$9"
-  local quant="${10}"
-  local hf_file="${11}"
-  local backend="${12:-}"
-  local visible_devices="${13:-}"
-  local split_mode="${14:-}"
-  local tensor_split="${15:-}"
-  local cache_type_k="${16:-}"
-  local cache_type_v="${17:-}"
-  local ctx_shift="${18:-}"
-  local target="${19:-}"
+	local repo="$1"
+	local family="$2"
+	local alias="$3"
+	local launcher_file="$4"
+	local profile="$5"
+	local ctx="$6"
+	local batch="$7"
+	local ubatch="$8"
+	local ngl="$9"
+	local quant="${10}"
+	local hf_file="${11}"
+	local backend="${12:-}"
+	local visible_devices="${13:-}"
+	local split_mode="${14:-}"
+	local tensor_split="${15:-}"
+	local cache_type_k="${16:-}"
+	local cache_type_v="${17:-}"
+	local ctx_shift="${18:-}"
+	local target="${19:-}"
 
-  ensure_state_dir "$runs_dir/accepted" accepted || return 1
-  python3 - "$runs_dir/accepted" "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target" <<'PY'
+	ensure_state_dir "$runs_dir/accepted" accepted || return 1
+	python3 - "$runs_dir/accepted" "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target" <<'PY'
 import json
 import os
 import pathlib
@@ -880,9 +887,9 @@ PY
 }
 
 write_vulkan_equivalent_for_accepted() {
-  local accepted_metadata_file="$1"
+	local accepted_metadata_file="$1"
 
-  python3 - "$accepted_metadata_file" <<'PY'
+	python3 - "$accepted_metadata_file" <<'PY'
 import json
 import os
 import pathlib
@@ -976,20 +983,20 @@ PY
 }
 
 cmd_export() {
-  if (($# > 0)); then
-    printf 'export accepts no arguments\n' >&2
-    return 2
-  fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    printf '%s\n' 'python3 is required to export model-manager state' >&2
-    return 1
-  fi
-  if [[ -L "$runs_dir" ]]; then
-    printf 'export refuses symlinked runs dir: %s\n' "$runs_dir" >&2
-    return 1
-  fi
+	if (($# > 0)); then
+		printf 'export accepts no arguments\n' >&2
+		return 2
+	fi
+	if ! command -v python3 >/dev/null 2>&1; then
+		printf '%s\n' 'python3 is required to export model-manager state' >&2
+		return 1
+	fi
+	if [[ -L "$runs_dir" ]]; then
+		printf 'export refuses symlinked runs dir: %s\n' "$runs_dir" >&2
+		return 1
+	fi
 
-  python3 - "$runs_dir" <<'PY'
+	python3 - "$runs_dir" <<'PY'
 import json
 import os
 import pathlib
@@ -1081,17 +1088,17 @@ PY
 }
 
 cmd_restore() {
-  local backup_file="${1:-}"
-  if [[ -z "$backup_file" || $# -ne 1 ]]; then
-    printf 'restore requires one backup JSON file\n' >&2
-    return 2
-  fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    printf '%s\n' 'python3 is required to restore model-manager state' >&2
-    return 1
-  fi
+	local backup_file="${1:-}"
+	if [[ -z "$backup_file" || $# -ne 1 ]]; then
+		printf 'restore requires one backup JSON file\n' >&2
+		return 2
+	fi
+	if ! command -v python3 >/dev/null 2>&1; then
+		printf '%s\n' 'python3 is required to restore model-manager state' >&2
+		return 1
+	fi
 
-  python3 - "$runs_dir" "$backup_file" <<'PY'
+	python3 - "$runs_dir" "$backup_file" <<'PY'
 import json
 import os
 import pathlib
@@ -1364,14 +1371,14 @@ PY
 }
 
 remove_switcher_repo_entries() {
-  local repo="$1"
-  local alias="$2"
-  local switcher="$repo_root/scripts/local-llm-switcher.py"
-  [[ -f "$switcher" ]] || {
-    printf '0\n'
-    return 0
-  }
-  python3 - "$switcher" "$repo" "$alias" <<'PY'
+	local repo="$1"
+	local alias="$2"
+	local switcher="$repo_root/scripts/local-llm-switcher.py"
+	[[ -f "$switcher" ]] || {
+		printf '0\n'
+		return 0
+	}
+	python3 - "$switcher" "$repo" "$alias" <<'PY'
 import pathlib
 import re
 import sys
@@ -1406,13 +1413,13 @@ PY
 }
 
 remove_switcher_family_entries() {
-  local family="$1"
-  local switcher="$repo_root/scripts/local-llm-switcher.py"
-  [[ -f "$switcher" ]] || {
-    printf '0\n'
-    return 0
-  }
-  python3 - "$switcher" "$family" <<'PY'
+	local family="$1"
+	local switcher="$repo_root/scripts/local-llm-switcher.py"
+	[[ -f "$switcher" ]] || {
+		printf '0\n'
+		return 0
+	}
+	python3 - "$switcher" "$family" <<'PY'
 import pathlib
 import re
 import sys
@@ -1444,13 +1451,13 @@ PY
 }
 
 remove_oc_local_family_entries() {
-  local family="$1"
-  local oc_local="$repo_root/scripts/oc-local"
-  [[ -f "$oc_local" ]] || {
-    printf '0\n'
-    return 0
-  }
-  python3 - "$oc_local" "$family" <<'PY'
+	local family="$1"
+	local oc_local="$repo_root/scripts/oc-local"
+	[[ -f "$oc_local" ]] || {
+		printf '0\n'
+		return 0
+	}
+	python3 - "$oc_local" "$family" <<'PY'
 import pathlib
 import re
 import sys
@@ -1479,13 +1486,13 @@ PY
 }
 
 remove_selection_repo_entries() {
-  local repo="$1"
-  local selection_dir="$runs_dir/selections"
-  [[ -d "$selection_dir" ]] || {
-    printf '0\n'
-    return 0
-  }
-  python3 - "$selection_dir" "$repo" <<'PY'
+	local repo="$1"
+	local selection_dir="$runs_dir/selections"
+	[[ -d "$selection_dir" ]] || {
+		printf '0\n'
+		return 0
+	}
+	python3 - "$selection_dir" "$repo" <<'PY'
 import json
 import pathlib
 import sys
@@ -1506,8 +1513,8 @@ PY
 }
 
 find_accepted_metadata_by_repo() {
-  local repo="$1"
-  python3 - "$runs_dir/accepted" "$repo" <<'PY'
+	local repo="$1"
+	python3 - "$runs_dir/accepted" "$repo" <<'PY'
 import json
 import pathlib
 import sys
@@ -1533,21 +1540,21 @@ PY
 }
 
 remove_accepted_metadata_by_family() {
-  local family="$1"
-  local accepted_file="$runs_dir/accepted/$family.json"
-  if [[ -f "$accepted_file" && ! -L "$accepted_file" ]]; then
-    rm -f -- "$accepted_file"
-    printf '1\n'
-  else
-    printf '0\n'
-  fi
+	local family="$1"
+	local accepted_file="$runs_dir/accepted/$family.json"
+	if [[ -f "$accepted_file" && ! -L "$accepted_file" ]]; then
+		rm -f -- "$accepted_file"
+		printf '1\n'
+	else
+		printf '0\n'
+	fi
 }
 
 remove_accepted_default_if_matches() {
-  local family="$1"
-  local default_file="$runs_dir/accepted/default.json"
-  [[ -f "$default_file" && ! -L "$default_file" ]] || return 0
-  python3 - "$default_file" "$family" <<'PY'
+	local family="$1"
+	local default_file="$runs_dir/accepted/default.json"
+	[[ -f "$default_file" && ! -L "$default_file" ]] || return 0
+	python3 - "$default_file" "$family" <<'PY'
 import json
 import pathlib
 import sys
@@ -1564,10 +1571,10 @@ PY
 }
 
 run_remote_delete_repo_cache() {
-  local host="$1"
-  local repo="$2"
-  local mode="$3"
-  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" python3 - "$repo" "$mode" <<'PY'
+	local host="$1"
+	local repo="$2"
+	local mode="$3"
+	ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" python3 - "$repo" "$mode" <<'PY'
 import json
 import os
 import re
@@ -1635,12 +1642,12 @@ PY
 }
 
 remote_cache_inventory() {
-  local target="$1"
-  local host="${target#remote:}"
-  local raw_output
+	local target="$1"
+	local host="${target#remote:}"
+	local raw_output
 
-  if ! raw_output="$(
-    ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" python3 - <<'REMOTE_CACHE' 2>/dev/null
+	if ! raw_output="$(
+		ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" python3 - <<'REMOTE_CACHE' 2>/dev/null
 import json
 import os
 
@@ -1674,13 +1681,13 @@ for root in roots:
                 revision = path.split("/snapshots/", 1)[1].split("/", 1)[0]
             print(json.dumps({"repo": repo, "file": name, "path": path, "size_gb": f"{size_gb:.1f}", "cache": "remote", "revision": revision}, separators=(",", ":")))
 REMOTE_CACHE
-  )"; then
-    printf 'Warning: remote cache inventory failed for %s\n' "$target" >&2
-    return 0
-  fi
+	)"; then
+		printf 'Warning: remote cache inventory failed for %s\n' "$target" >&2
+		return 0
+	fi
 
-  [[ -n "$raw_output" ]] || return 0
-  python3 - "$raw_output" <<'PY'
+	[[ -n "$raw_output" ]] || return 0
+	python3 - "$raw_output" <<'PY'
 import json
 import sys
 
@@ -1698,14 +1705,14 @@ PY
 }
 
 print_remote_cache_inventory() {
-  local inventory
-  inventory="$(remote_cache_inventory "$1")"
-  printf 'Remote Cache\n\n'
-  if [[ -z "$inventory" ]]; then
-    printf '  None\n'
-    return 0
-  fi
-  python3 - "$inventory" <<'PY'
+	local inventory
+	inventory="$(remote_cache_inventory "$1")"
+	printf 'Remote Cache\n\n'
+	if [[ -z "$inventory" ]]; then
+		printf '  None\n'
+		return 0
+	fi
+	python3 - "$inventory" <<'PY'
 import json
 import sys
 from collections import defaultdict
@@ -1734,8 +1741,8 @@ PY
 }
 
 cache_inventory_repo_file() {
-  local line="$1"
-  python3 - "$line" <<'PY'
+	local line="$1"
+	python3 - "$line" <<'PY'
 import json
 import sys
 
@@ -1751,22 +1758,22 @@ PY
 }
 
 run_remote_delete_exact_path() {
-  local host="$1"
-  local old_path="$2"
-  local old_path_b64
+	local host="$1"
+	local old_path="$2"
+	local old_path_b64
 
-  old_path_b64="$(
-    python3 - "$old_path" <<'PY'
+	old_path_b64="$(
+		python3 - "$old_path" <<'PY'
 import base64
 import sys
 
 print(base64.b64encode(sys.argv[1].encode()).decode())
 PY
-  )"
+	)"
 
-  {
-    printf "old_path_b64='%s'\n" "$old_path_b64"
-    cat <<'REMOTE_DELETE_EXACT'
+	{
+		printf "old_path_b64='%s'\n" "$old_path_b64"
+		cat <<'REMOTE_DELETE_EXACT'
 set -euo pipefail
 
 old_path="$(python3 - "$old_path_b64" <<'PY'
@@ -1805,14 +1812,14 @@ else
   printf 'delete_status=not_found\n'
 fi
 REMOTE_DELETE_EXACT
-  } | ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" bash -s
+	} | ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" bash -s
 }
 
 run_remote_delete_repo_basename() {
-  local host="$1"
-  local repo="$2"
-  local basename="$3"
-  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" python3 - "$repo" "$basename" <<'PY'
+	local host="$1"
+	local repo="$2"
+	local basename="$3"
+	ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" python3 - "$repo" "$basename" <<'PY'
 import os
 import sys
 
@@ -1846,11 +1853,11 @@ PY
 }
 
 update_local_model_references() {
-  local repo="$1"
-  local old_file="$2"
-  local new_file="$3"
+	local repo="$1"
+	local old_file="$2"
+	local new_file="$3"
 
-  python3 - "$repo_root" "$repo" "$old_file" "$new_file" <<'PY'
+	python3 - "$repo_root" "$repo" "$old_file" "$new_file" <<'PY'
 import pathlib
 import sys
 
@@ -1884,12 +1891,12 @@ PY
 }
 
 hf_latest_revision() {
-  local repo="$1"
-  if [[ -n "${LOCAL_LLM_HF_REVISION_FIXTURE:-}" ]]; then
-    printf '%s\n' "$LOCAL_LLM_HF_REVISION_FIXTURE"
-    return 0
-  fi
-  python3 - "$repo" <<'PY'
+	local repo="$1"
+	if [[ -n "${LOCAL_LLM_HF_REVISION_FIXTURE:-}" ]]; then
+		printf '%s\n' "$LOCAL_LLM_HF_REVISION_FIXTURE"
+		return 0
+	fi
+	python3 - "$repo" <<'PY'
 import json
 import sys
 import urllib.request
@@ -1908,310 +1915,310 @@ PY
 }
 
 cmd_list() {
-  local target='local'
+	local target='local'
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --target)
-        if [[ $# -lt 2 || "$2" == --* ]]; then
-          printf '%s\n' '--target requires local or remote:<host>' >&2
-          return 2
-        fi
-        target="$2"
-        shift 2
-        ;;
-      -h | --help)
-        usage
-        return 0
-        ;;
-      --*)
-        printf 'Unknown list option: %s\n' "$1" >&2
-        return 2
-        ;;
-      *)
-        printf 'list accepts options only, got: %s\n' "$1" >&2
-        return 2
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--target)
+			if [[ $# -lt 2 || "$2" == --* ]]; then
+				printf '%s\n' '--target requires local or remote:<host>' >&2
+				return 2
+			fi
+			target="$2"
+			shift 2
+			;;
+		-h | --help)
+			usage
+			return 0
+			;;
+		--*)
+			printf 'Unknown list option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			printf 'list accepts options only, got: %s\n' "$1" >&2
+			return 2
+			;;
+		esac
+	done
 
-  case "$target" in
-    local) ;;
-    remote:*)
-      if [[ -z "${target#remote:}" ]]; then
-        printf 'remote target requires a host: %s\n' "$target" >&2
-        return 2
-      fi
-      if [[ "${target#remote:}" == -* ]]; then
-        printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
-        return 2
-      fi
-      ;;
-    *)
-      printf 'invalid target: %s\n' "$target" >&2
-      return 2
-      ;;
-  esac
+	case "$target" in
+	local) ;;
+	remote:*)
+		if [[ -z "${target#remote:}" ]]; then
+			printf 'remote target requires a host: %s\n' "$target" >&2
+			return 2
+		fi
+		if [[ "${target#remote:}" == -* ]]; then
+			printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
+			return 2
+		fi
+		;;
+	*)
+		printf 'invalid target: %s\n' "$target" >&2
+		return 2
+		;;
+	esac
 
-  ensure_runs_dirs
-  local launcher_inventory
-  launcher_inventory="$(print_launcher_inventory)"
-  printf 'Models\n\n'
-  print_profile_inventory
-  printf '\n'
-  if [[ -n "$launcher_inventory" ]]; then
-    print_launcher_cards "$launcher_inventory"
-  else
-    print_launcher_cards ''
-  fi
-  printf '\n'
-  LOCAL_LLM_PROMOTED_LAUNCHERS="$launcher_inventory" print_selection_inventory
-  if [[ "$target" == remote:* ]]; then
-    printf '\n'
-    print_remote_cache_inventory "$target"
-  fi
+	ensure_runs_dirs
+	local launcher_inventory
+	launcher_inventory="$(print_launcher_inventory)"
+	printf 'Models\n\n'
+	print_profile_inventory
+	printf '\n'
+	if [[ -n "$launcher_inventory" ]]; then
+		print_launcher_cards "$launcher_inventory"
+	else
+		print_launcher_cards ''
+	fi
+	printf '\n'
+	LOCAL_LLM_PROMOTED_LAUNCHERS="$launcher_inventory" print_selection_inventory
+	if [[ "$target" == remote:* ]]; then
+		printf '\n'
+		print_remote_cache_inventory "$target"
+	fi
 }
 
 cmd_update() {
-  local target
-  target="$(default_target)"
-  local dry_run=false
-  local yes=false
+	local target
+	target="$(default_target)"
+	local dry_run=false
+	local yes=false
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --target)
-        if [[ $# -lt 2 || "$2" == --* ]]; then
-          printf '%s\n' '--target requires local or remote:<host>' >&2
-          return 2
-        fi
-        target="$2"
-        shift 2
-        ;;
-      --dry-run)
-        dry_run=true
-        shift
-        ;;
-      --yes)
-        yes=true
-        shift
-        ;;
-      -h | --help)
-        usage
-        return 0
-        ;;
-      --*)
-        printf 'Unknown update option: %s\n' "$1" >&2
-        return 2
-        ;;
-      *)
-        printf 'update accepts options only, got: %s\n' "$1" >&2
-        return 2
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--target)
+			if [[ $# -lt 2 || "$2" == --* ]]; then
+				printf '%s\n' '--target requires local or remote:<host>' >&2
+				return 2
+			fi
+			target="$2"
+			shift 2
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--yes)
+			yes=true
+			shift
+			;;
+		-h | --help)
+			usage
+			return 0
+			;;
+		--*)
+			printf 'Unknown update option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			printf 'update accepts options only, got: %s\n' "$1" >&2
+			return 2
+			;;
+		esac
+	done
 
-  if [[ "$dry_run" == "$yes" ]]; then
-    printf '%s\n' 'update requires exactly one of --dry-run or --yes' >&2
-    return 2
-  fi
+	if [[ "$dry_run" == "$yes" ]]; then
+		printf '%s\n' 'update requires exactly one of --dry-run or --yes' >&2
+		return 2
+	fi
 
-  case "$target" in
-    local) ;;
-    remote:*)
-      if [[ -z "${target#remote:}" ]]; then
-        printf 'remote target requires a host: %s\n' "$target" >&2
-        return 2
-      fi
-      if [[ "${target#remote:}" == -* ]]; then
-        printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
-        return 2
-      fi
-      ;;
-    *)
-      printf 'invalid target: %s\n' "$target" >&2
-      return 2
-      ;;
-  esac
+	case "$target" in
+	local) ;;
+	remote:*)
+		if [[ -z "${target#remote:}" ]]; then
+			printf 'remote target requires a host: %s\n' "$target" >&2
+			return 2
+		fi
+		if [[ "${target#remote:}" == -* ]]; then
+			printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
+			return 2
+		fi
+		;;
+	*)
+		printf 'invalid target: %s\n' "$target" >&2
+		return 2
+		;;
+	esac
 
-  ensure_runs_dirs
-  if [[ "$dry_run" == true ]]; then
-    printf 'Recommended Updates\n'
-  else
-    printf 'Update result\n'
-  fi
-  [[ "$target" == remote:* ]] || return 0
+	ensure_runs_dirs
+	if [[ "$dry_run" == true ]]; then
+		printf 'Recommended Updates\n'
+	else
+		printf 'Update result\n'
+	fi
+	[[ "$target" == remote:* ]] || return 0
 
-  local inventory line repo_file repo file cached_revision cached_path cached_basename dynamic_choice latest_quant latest_file latest_basename lower_file latest_revision reason update_number
-  local remote_output delete_status deleted_file download_status key value audit_file
-  update_number=0
-  inventory="$(remote_cache_inventory "$target")"
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    repo_file="$(cache_inventory_repo_file "$line")"
-    IFS=$'\t' read -r repo file cached_revision cached_path <<<"$repo_file"
-    [[ -n "$repo" && -n "$file" && "$repo" != unknown ]] || continue
-    lower_file="$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')"
-    case "$lower_file" in
-      mmproj* | *mmproj* | *projector*) continue ;;
-    esac
-    dynamic_choice="$(resolve_dynamic_quant_file "$repo" "$target")"
-    latest_quant="$(printf '%s\n' "$dynamic_choice" | sed -n '1p')"
-    latest_file="$(printf '%s\n' "$dynamic_choice" | sed -n '2p')"
-    cached_basename="${file##*/}"
-    latest_basename="${latest_file##*/}"
-    reason='new-file'
-    latest_revision=''
-    if [[ -n "$latest_file" && "$latest_basename" == "$cached_basename" ]]; then
-      latest_revision="$(hf_latest_revision "$repo")"
-      if [[ -n "$cached_revision" && -n "$latest_revision" && "$cached_revision" != "$latest_revision" ]]; then
-        reason='same-file-newer-snapshot'
-      else
-        continue
-      fi
-    fi
-    [[ -n "$latest_file" ]] || continue
-    update_number=$((update_number + 1))
-    if [[ "$dry_run" == true ]]; then
-      printf '\n[%s] %s\n\n' "$update_number" "$repo"
-      printf '  Replace this cached file:\n\n'
-      printf '    %s\n' "$file"
-      if [[ -n "$cached_revision" ]]; then
-        printf '    cached revision: %s\n' "$cached_revision"
-      fi
-      printf '\n'
-      printf '  With this Hugging Face file:\n\n'
-      printf '    %s\n' "$latest_file"
-      if [[ -n "$latest_quant" ]]; then
-        printf '    quant: %s\n' "$latest_quant"
-      fi
-      if [[ "$reason" == same-file-newer-snapshot ]]; then
-        printf '    latest revision: %s\n' "$latest_revision"
-      fi
-      printf '\n'
-      printf '  Why this is recommended:\n\n'
-      case "$reason" in
-        same-file-newer-snapshot)
-          printf '    The same GGUF filename exists in a newer Hugging Face snapshot.\n'
-          ;;
-        *)
-          printf '    Hugging Face has a better-fitting GGUF for this host.\n'
-          ;;
-      esac
-      printf '    Projector files such as mmproj*.gguf were ignored.\n'
-      printf '\n'
-      printf '  What --yes will do:\n\n'
-      printf '    1. Download %s.\n' "$latest_file"
-      printf '    2. Delete %s only after the download succeeds.\n' "$cached_basename"
-      printf '\n'
-      printf '  Target: %s\n' "$target"
-      continue
-    fi
+	local inventory line repo_file repo file cached_revision cached_path cached_basename dynamic_choice latest_quant latest_file latest_basename lower_file latest_revision reason update_number
+	local remote_output delete_status deleted_file download_status key value audit_file
+	update_number=0
+	inventory="$(remote_cache_inventory "$target")"
+	while IFS= read -r line; do
+		[[ -n "$line" ]] || continue
+		repo_file="$(cache_inventory_repo_file "$line")"
+		IFS=$'\t' read -r repo file cached_revision cached_path <<<"$repo_file"
+		[[ -n "$repo" && -n "$file" && "$repo" != unknown ]] || continue
+		lower_file="$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')"
+		case "$lower_file" in
+		mmproj* | *mmproj* | *projector*) continue ;;
+		esac
+		dynamic_choice="$(resolve_dynamic_quant_file "$repo" "$target")"
+		latest_quant="$(printf '%s\n' "$dynamic_choice" | sed -n '1p')"
+		latest_file="$(printf '%s\n' "$dynamic_choice" | sed -n '2p')"
+		cached_basename="${file##*/}"
+		latest_basename="${latest_file##*/}"
+		reason='new-file'
+		latest_revision=''
+		if [[ -n "$latest_file" && "$latest_basename" == "$cached_basename" ]]; then
+			latest_revision="$(hf_latest_revision "$repo")"
+			if [[ -n "$cached_revision" && -n "$latest_revision" && "$cached_revision" != "$latest_revision" ]]; then
+				reason='same-file-newer-snapshot'
+			else
+				continue
+			fi
+		fi
+		[[ -n "$latest_file" ]] || continue
+		update_number=$((update_number + 1))
+		if [[ "$dry_run" == true ]]; then
+			printf '\n[%s] %s\n\n' "$update_number" "$repo"
+			printf '  Replace this cached file:\n\n'
+			printf '    %s\n' "$file"
+			if [[ -n "$cached_revision" ]]; then
+				printf '    cached revision: %s\n' "$cached_revision"
+			fi
+			printf '\n'
+			printf '  With this Hugging Face file:\n\n'
+			printf '    %s\n' "$latest_file"
+			if [[ -n "$latest_quant" ]]; then
+				printf '    quant: %s\n' "$latest_quant"
+			fi
+			if [[ "$reason" == same-file-newer-snapshot ]]; then
+				printf '    latest revision: %s\n' "$latest_revision"
+			fi
+			printf '\n'
+			printf '  Why this is recommended:\n\n'
+			case "$reason" in
+			same-file-newer-snapshot)
+				printf '    The same GGUF filename exists in a newer Hugging Face snapshot.\n'
+				;;
+			*)
+				printf '    Hugging Face has a better-fitting GGUF for this host.\n'
+				;;
+			esac
+			printf '    Projector files such as mmproj*.gguf were ignored.\n'
+			printf '\n'
+			printf '  What --yes will do:\n\n'
+			printf '    1. Download %s.\n' "$latest_file"
+			printf '    2. Delete %s only after the download succeeds.\n' "$cached_basename"
+			printf '\n'
+			printf '  Target: %s\n' "$target"
+			continue
+		fi
 
-    local remote_output_file
-    remote_output_file="$(mktemp)"
-    if ! run_remote_replace "${target#remote:}" "__local_llm_download_only__.gguf" "$repo" "$latest_file" "$latest_quant" | tee "$remote_output_file"; then
-      rm -f "$remote_output_file"
-      printf 'remote update failed for %s current=%s\n' "$repo" "$cached_basename" >&2
-      return 1
-    fi
-    remote_output="$(<"$remote_output_file")"
-    rm -f "$remote_output_file"
-    delete_status='unknown'
-    deleted_file='none'
-    download_status='unknown'
-    while IFS= read -r line; do
-      key="${line%%=*}"
-      value="${line#*=}"
-      case "$key" in
-        deleted) deleted_file="$value" ;;
-        download_status) download_status="$value" ;;
-      esac
-    done <<<"$remote_output"
-    if [[ "$download_status" == success && "$reason" == new-file ]]; then
-      local delete_output
-      delete_output="$(run_remote_delete_repo_basename "${target#remote:}" "$repo" "$cached_basename")"
-      printf '%s\n' "$delete_output"
-      while IFS= read -r line; do
-        key="${line%%=*}"
-        value="${line#*=}"
-        case "$key" in
-          deleted) deleted_file="$value" ;;
-          delete_status) delete_status="$value" ;;
-        esac
-      done <<<"$delete_output"
-    elif [[ "$download_status" == success && -n "$cached_path" ]]; then
-      local delete_output
-      delete_output="$(run_remote_delete_exact_path "${target#remote:}" "$cached_path")"
-      printf '%s\n' "$delete_output"
-      while IFS= read -r line; do
-        key="${line%%=*}"
-        value="${line#*=}"
-        case "$key" in
-          deleted) deleted_file="$value" ;;
-          delete_status) delete_status="$value" ;;
-        esac
-      done <<<"$delete_output"
-    elif [[ "$download_status" == success ]]; then
-      delete_status=not_found
-      deleted_file=none
-    else
-      delete_status=not_attempted
-      deleted_file=none
-    fi
-    local reference_output reference_status reference_files
-    reference_status=not_attempted
-    reference_files=none
-    if [[ "$download_status" == success ]]; then
-      reference_output="$(update_local_model_references "$repo" "$cached_basename" "$latest_file")"
-      printf '%s\n' "$reference_output"
-      while IFS= read -r line; do
-        key="${line%%=*}"
-        value="${line#*=}"
-        case "$key" in
-          reference_status) reference_status="$value" ;;
-          reference_files) reference_files="$value" ;;
-        esac
-      done <<<"$reference_output"
-    fi
-    audit_file="$(write_replacement_audit "$cached_basename" "$repo" "$latest_quant" "$latest_file" "$target" update "$delete_status" "$deleted_file" "$download_status")"
-    printf 'updated repo=%s old=%s new=%s target=%s\n' "$repo" "$cached_basename" "$latest_file" "$target"
-    printf 'download_status=%s\n' "$download_status"
-    printf 'delete_status=%s\n' "$delete_status"
-    printf 'deleted=%s\n' "$deleted_file"
-    printf 'reference_status=%s\n' "$reference_status"
-    printf 'reference_files=%s\n' "$reference_files"
-    printf 'audit_file=%s\n' "$audit_file"
-    if [[ "$delete_status" != deleted || "$download_status" != success ]]; then
-      return 1
-    fi
-  done <<<"$inventory"
+		local remote_output_file
+		remote_output_file="$(mktemp)"
+		if ! run_remote_replace "${target#remote:}" "__local_llm_download_only__.gguf" "$repo" "$latest_file" "$latest_quant" | tee "$remote_output_file"; then
+			rm -f "$remote_output_file"
+			printf 'remote update failed for %s current=%s\n' "$repo" "$cached_basename" >&2
+			return 1
+		fi
+		remote_output="$(<"$remote_output_file")"
+		rm -f "$remote_output_file"
+		delete_status='unknown'
+		deleted_file='none'
+		download_status='unknown'
+		while IFS= read -r line; do
+			key="${line%%=*}"
+			value="${line#*=}"
+			case "$key" in
+			deleted) deleted_file="$value" ;;
+			download_status) download_status="$value" ;;
+			esac
+		done <<<"$remote_output"
+		if [[ "$download_status" == success && "$reason" == new-file ]]; then
+			local delete_output
+			delete_output="$(run_remote_delete_repo_basename "${target#remote:}" "$repo" "$cached_basename")"
+			printf '%s\n' "$delete_output"
+			while IFS= read -r line; do
+				key="${line%%=*}"
+				value="${line#*=}"
+				case "$key" in
+				deleted) deleted_file="$value" ;;
+				delete_status) delete_status="$value" ;;
+				esac
+			done <<<"$delete_output"
+		elif [[ "$download_status" == success && -n "$cached_path" ]]; then
+			local delete_output
+			delete_output="$(run_remote_delete_exact_path "${target#remote:}" "$cached_path")"
+			printf '%s\n' "$delete_output"
+			while IFS= read -r line; do
+				key="${line%%=*}"
+				value="${line#*=}"
+				case "$key" in
+				deleted) deleted_file="$value" ;;
+				delete_status) delete_status="$value" ;;
+				esac
+			done <<<"$delete_output"
+		elif [[ "$download_status" == success ]]; then
+			delete_status=not_found
+			deleted_file=none
+		else
+			delete_status=not_attempted
+			deleted_file=none
+		fi
+		local reference_output reference_status reference_files
+		reference_status=not_attempted
+		reference_files=none
+		if [[ "$download_status" == success ]]; then
+			reference_output="$(update_local_model_references "$repo" "$cached_basename" "$latest_file")"
+			printf '%s\n' "$reference_output"
+			while IFS= read -r line; do
+				key="${line%%=*}"
+				value="${line#*=}"
+				case "$key" in
+				reference_status) reference_status="$value" ;;
+				reference_files) reference_files="$value" ;;
+				esac
+			done <<<"$reference_output"
+		fi
+		audit_file="$(write_replacement_audit "$cached_basename" "$repo" "$latest_quant" "$latest_file" "$target" update "$delete_status" "$deleted_file" "$download_status")"
+		printf 'updated repo=%s old=%s new=%s target=%s\n' "$repo" "$cached_basename" "$latest_file" "$target"
+		printf 'download_status=%s\n' "$download_status"
+		printf 'delete_status=%s\n' "$delete_status"
+		printf 'deleted=%s\n' "$deleted_file"
+		printf 'reference_status=%s\n' "$reference_status"
+		printf 'reference_files=%s\n' "$reference_files"
+		printf 'audit_file=%s\n' "$audit_file"
+		if [[ "$delete_status" != deleted || "$download_status" != success ]]; then
+			return 1
+		fi
+	done <<<"$inventory"
 }
 
 write_replacement_audit() {
-  local old_file="$1"
-  local new_repo="$2"
-  local selected_quant="$3"
-  local selected_file="$4"
-  local target="$5"
-  local action="$6"
-  local delete_status="$7"
-  local deleted_file="$8"
-  local download_status="$9"
-  local timestamp result_timestamp safe_old output_file unique_suffix
+	local old_file="$1"
+	local new_repo="$2"
+	local selected_quant="$3"
+	local selected_file="$4"
+	local target="$5"
+	local action="$6"
+	local delete_status="$7"
+	local deleted_file="$8"
+	local download_status="$9"
+	local timestamp result_timestamp safe_old output_file unique_suffix
 
-  timestamp="$(date +%Y%m%d-%H%M%S)"
-  result_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  safe_old="${old_file//[^A-Za-z0-9_.-]/-}"
-  unique_suffix="$$"
-  output_file="$runs_dir/replacements/${timestamp}-${safe_old}-${unique_suffix}.json"
-  while [[ -e "$output_file" ]]; do
-    unique_suffix="${unique_suffix}x"
-    output_file="$runs_dir/replacements/${timestamp}-${safe_old}-${unique_suffix}.json"
-  done
-  reject_symlink_state_file "$output_file" || return 1
+	timestamp="$(date +%Y%m%d-%H%M%S)"
+	result_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	safe_old="${old_file//[^A-Za-z0-9_.-]/-}"
+	unique_suffix="$$"
+	output_file="$runs_dir/replacements/${timestamp}-${safe_old}-${unique_suffix}.json"
+	while [[ -e "$output_file" ]]; do
+		unique_suffix="${unique_suffix}x"
+		output_file="$runs_dir/replacements/${timestamp}-${safe_old}-${unique_suffix}.json"
+	done
+	reject_symlink_state_file "$output_file" || return 1
 
-  python3 - "$output_file" "$old_file" "$new_repo" "$selected_quant" "$selected_file" "$target" "$action" "$delete_status" "$deleted_file" "$download_status" "$result_timestamp" <<'PY'
+	python3 - "$output_file" "$old_file" "$new_repo" "$selected_quant" "$selected_file" "$target" "$action" "$delete_status" "$deleted_file" "$download_status" "$result_timestamp" <<'PY'
 import json
 import sys
 
@@ -2244,56 +2251,56 @@ with open(output_file, "w", encoding="utf-8") as handle:
     json.dump(record, handle, separators=(",", ":"))
     handle.write("\n")
 PY
-  printf '%s\n' "$output_file"
+	printf '%s\n' "$output_file"
 }
 
 run_remote_replace() {
-  local host="$1"
-  local old_file="$2"
-  local new_repo="$3"
-  local selected_file="$4"
-  local selected_quant="$5"
-  local old_file_b64 new_repo_b64 selected_file_b64 selected_quant_b64
+	local host="$1"
+	local old_file="$2"
+	local new_repo="$3"
+	local selected_file="$4"
+	local selected_quant="$5"
+	local old_file_b64 new_repo_b64 selected_file_b64 selected_quant_b64
 
-  old_file_b64="$(
-    python3 - "$old_file" <<'PY'
+	old_file_b64="$(
+		python3 - "$old_file" <<'PY'
 import base64
 import sys
 
 print(base64.b64encode(sys.argv[1].encode()).decode())
 PY
-  )"
-  new_repo_b64="$(
-    python3 - "$new_repo" <<'PY'
+	)"
+	new_repo_b64="$(
+		python3 - "$new_repo" <<'PY'
 import base64
 import sys
 
 print(base64.b64encode(sys.argv[1].encode()).decode())
 PY
-  )"
-  selected_file_b64="$(
-    python3 - "$selected_file" <<'PY'
+	)"
+	selected_file_b64="$(
+		python3 - "$selected_file" <<'PY'
 import base64
 import sys
 
 print(base64.b64encode(sys.argv[1].encode()).decode())
 PY
-  )"
-  selected_quant_b64="$(
-    python3 - "$selected_quant" <<'PY'
+	)"
+	selected_quant_b64="$(
+		python3 - "$selected_quant" <<'PY'
 import base64
 import sys
 
 print(base64.b64encode(sys.argv[1].encode()).decode())
 PY
-  )"
+	)"
 
-  {
-    printf "old_file_b64='%s'\n" "$old_file_b64"
-    printf "new_repo_b64='%s'\n" "$new_repo_b64"
-    printf "selected_file_b64='%s'\n" "$selected_file_b64"
-    printf "selected_quant_b64='%s'\n" "$selected_quant_b64"
-    cat <<'REMOTE_REPLACE'
+	{
+		printf "old_file_b64='%s'\n" "$old_file_b64"
+		printf "new_repo_b64='%s'\n" "$new_repo_b64"
+		printf "selected_file_b64='%s'\n" "$selected_file_b64"
+		printf "selected_quant_b64='%s'\n" "$selected_quant_b64"
+		cat <<'REMOTE_REPLACE'
 set -euo pipefail
 
 decode_b64() {
@@ -2459,314 +2466,314 @@ case "${#matches[@]}" in
 esac
 printf 'download_status=%s\n' "$download_status"
 REMOTE_REPLACE
-  } | ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" bash -s 2>/dev/null
+	} | ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" bash -s 2>/dev/null
 }
 
 cmd_replace() {
-  local old_file=''
-  local new_repo=''
-  local target=''
-  local dry_run=false
-  local yes=false
-  local positional_count=0
+	local old_file=''
+	local new_repo=''
+	local target=''
+	local dry_run=false
+	local yes=false
+	local positional_count=0
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --target)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--target requires remote:<host>' >&2
-          return 2
-        fi
-        target="$2"
-        shift 2
-        ;;
-      --dry-run)
-        dry_run=true
-        shift
-        ;;
-      --yes)
-        yes=true
-        shift
-        ;;
-      -h | --help)
-        usage
-        return 0
-        ;;
-      --*)
-        printf 'Unknown replace option: %s\n' "$1" >&2
-        return 2
-        ;;
-      *)
-        positional_count=$((positional_count + 1))
-        case "$positional_count" in
-          1) old_file="$1" ;;
-          2) new_repo="$1" ;;
-          *)
-            printf 'replace accepts two arguments, got extra argument: %s\n' "$1" >&2
-            return 2
-            ;;
-        esac
-        shift
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--target)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--target requires remote:<host>' >&2
+				return 2
+			fi
+			target="$2"
+			shift 2
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--yes)
+			yes=true
+			shift
+			;;
+		-h | --help)
+			usage
+			return 0
+			;;
+		--*)
+			printf 'Unknown replace option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			positional_count=$((positional_count + 1))
+			case "$positional_count" in
+			1) old_file="$1" ;;
+			2) new_repo="$1" ;;
+			*)
+				printf 'replace accepts two arguments, got extra argument: %s\n' "$1" >&2
+				return 2
+				;;
+			esac
+			shift
+			;;
+		esac
+	done
 
-  if [[ -z "$old_file" || -z "$new_repo" ]]; then
-    printf '%s\n' 'Usage: model-manager replace <old-file> <new-repo> --target remote:<host> --dry-run|--yes' >&2
-    return 2
-  fi
-  case "$old_file" in
-    '' | */* | *..*)
-      printf '%s\n' 'old-file must be a basename without / or ..' >&2
-      return 2
-      ;;
-  esac
-  if [[ ! "$old_file" =~ ^[A-Za-z0-9._+-]+[.][Gg][Gg][Uu][Ff]$ ]]; then
-    printf '%s\n' 'old-file must be a safe GGUF basename matching [A-Za-z0-9._+-]+.gguf' >&2
-    return 2
-  fi
-  if [[ "$dry_run" == "$yes" ]]; then
-    printf '%s\n' 'replace requires exactly one of --dry-run or --yes' >&2
-    return 2
-  fi
-  case "$target" in
-    remote:*)
-      if [[ -z "${target#remote:}" ]]; then
-        printf 'remote target requires a host: %s\n' "$target" >&2
-        return 2
-      fi
-      if [[ "${target#remote:}" == -* ]]; then
-        printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
-        return 2
-      fi
-      ;;
-    '')
-      printf '%s\n' 'replace requires --target remote:<host>' >&2
-      return 2
-      ;;
-    *)
-      printf 'invalid target: %s\n' "$target" >&2
-      return 2
-      ;;
-  esac
+	if [[ -z "$old_file" || -z "$new_repo" ]]; then
+		printf '%s\n' 'Usage: model-manager replace <old-file> <new-repo> --target remote:<host> --dry-run|--yes' >&2
+		return 2
+	fi
+	case "$old_file" in
+	'' | */* | *..*)
+		printf '%s\n' 'old-file must be a basename without / or ..' >&2
+		return 2
+		;;
+	esac
+	if [[ ! "$old_file" =~ ^[A-Za-z0-9._+-]+[.][Gg][Gg][Uu][Ff]$ ]]; then
+		printf '%s\n' 'old-file must be a safe GGUF basename matching [A-Za-z0-9._+-]+.gguf' >&2
+		return 2
+	fi
+	if [[ "$dry_run" == "$yes" ]]; then
+		printf '%s\n' 'replace requires exactly one of --dry-run or --yes' >&2
+		return 2
+	fi
+	case "$target" in
+	remote:*)
+		if [[ -z "${target#remote:}" ]]; then
+			printf 'remote target requires a host: %s\n' "$target" >&2
+			return 2
+		fi
+		if [[ "${target#remote:}" == -* ]]; then
+			printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
+			return 2
+		fi
+		;;
+	'')
+		printf '%s\n' 'replace requires --target remote:<host>' >&2
+		return 2
+		;;
+	*)
+		printf 'invalid target: %s\n' "$target" >&2
+		return 2
+		;;
+	esac
 
-  ensure_runs_dirs
+	ensure_runs_dirs
 
-  local dynamic_choice selected_quant selected_file action audit_file remote_output
-  local delete_status deleted_file download_status line key value
-  dynamic_choice="$(resolve_dynamic_quant_file "$new_repo" "$target")"
-  selected_quant="$(printf '%s\n' "$dynamic_choice" | sed -n '1p')"
-  selected_file="$(printf '%s\n' "$dynamic_choice" | sed -n '2p')"
-  action='dry-run'
-  if [[ "$yes" == true ]]; then
-    action='replace'
-  fi
-  if [[ "$dry_run" == true ]]; then
-    audit_file="$(write_replacement_audit "$old_file" "$new_repo" "$selected_quant" "$selected_file" "$target" "$action" planned planned planned)"
-    printf 'Replacement dry-run\n'
-    printf 'old_file=%s\n' "$old_file"
-    printf 'new_repo=%s\n' "$new_repo"
-    printf 'selected_quant=%s\n' "$selected_quant"
-    printf 'selected_file=%s\n' "$selected_file"
-    printf 'target=%s\n' "$target"
-    printf 'would_delete_remote_basename=%s\n' "$old_file"
-    printf 'would_download_repo=%s\n' "$new_repo"
-    printf 'would_download_file=%s\n' "$selected_file"
-    printf 'audit_file=%s\n' "$audit_file"
-    return 0
-  fi
+	local dynamic_choice selected_quant selected_file action audit_file remote_output
+	local delete_status deleted_file download_status line key value
+	dynamic_choice="$(resolve_dynamic_quant_file "$new_repo" "$target")"
+	selected_quant="$(printf '%s\n' "$dynamic_choice" | sed -n '1p')"
+	selected_file="$(printf '%s\n' "$dynamic_choice" | sed -n '2p')"
+	action='dry-run'
+	if [[ "$yes" == true ]]; then
+		action='replace'
+	fi
+	if [[ "$dry_run" == true ]]; then
+		audit_file="$(write_replacement_audit "$old_file" "$new_repo" "$selected_quant" "$selected_file" "$target" "$action" planned planned planned)"
+		printf 'Replacement dry-run\n'
+		printf 'old_file=%s\n' "$old_file"
+		printf 'new_repo=%s\n' "$new_repo"
+		printf 'selected_quant=%s\n' "$selected_quant"
+		printf 'selected_file=%s\n' "$selected_file"
+		printf 'target=%s\n' "$target"
+		printf 'would_delete_remote_basename=%s\n' "$old_file"
+		printf 'would_download_repo=%s\n' "$new_repo"
+		printf 'would_download_file=%s\n' "$selected_file"
+		printf 'audit_file=%s\n' "$audit_file"
+		return 0
+	fi
 
-  if ! remote_output="$(run_remote_replace "${target#remote:}" "$old_file" "$new_repo" "$selected_file" "$selected_quant")"; then
-    printf 'remote replacement failed for %s\n' "$target" >&2
-    return 1
-  fi
-  delete_status='unknown'
-  deleted_file='none'
-  download_status='unknown'
-  while IFS= read -r line; do
-    key="${line%%=*}"
-    value="${line#*=}"
-    case "$key" in
-      deleted) deleted_file="$value" ;;
-      delete_status) delete_status="$value" ;;
-      download_status) download_status="$value" ;;
-    esac
-  done <<<"$remote_output"
-  audit_file="$(write_replacement_audit "$old_file" "$new_repo" "$selected_quant" "$selected_file" "$target" "$action" "$delete_status" "$deleted_file" "$download_status")"
+	if ! remote_output="$(run_remote_replace "${target#remote:}" "$old_file" "$new_repo" "$selected_file" "$selected_quant")"; then
+		printf 'remote replacement failed for %s\n' "$target" >&2
+		return 1
+	fi
+	delete_status='unknown'
+	deleted_file='none'
+	download_status='unknown'
+	while IFS= read -r line; do
+		key="${line%%=*}"
+		value="${line#*=}"
+		case "$key" in
+		deleted) deleted_file="$value" ;;
+		delete_status) delete_status="$value" ;;
+		download_status) download_status="$value" ;;
+		esac
+	done <<<"$remote_output"
+	audit_file="$(write_replacement_audit "$old_file" "$new_repo" "$selected_quant" "$selected_file" "$target" "$action" "$delete_status" "$deleted_file" "$download_status")"
 
-  if [[ "$delete_status" != deleted || "$deleted_file" != "$old_file" || "$download_status" != success ]]; then
-    printf 'Replacement did not complete\n'
-    printf 'old_file=%s\n' "$old_file"
-    printf 'new_repo=%s\n' "$new_repo"
-    printf 'selected_quant=%s\n' "$selected_quant"
-    printf 'selected_file=%s\n' "$selected_file"
-    printf 'target=%s\n' "$target"
-    printf '%s\n' "$remote_output"
-    printf 'audit_file=%s\n' "$audit_file"
-    return 1
-  fi
+	if [[ "$delete_status" != deleted || "$deleted_file" != "$old_file" || "$download_status" != success ]]; then
+		printf 'Replacement did not complete\n'
+		printf 'old_file=%s\n' "$old_file"
+		printf 'new_repo=%s\n' "$new_repo"
+		printf 'selected_quant=%s\n' "$selected_quant"
+		printf 'selected_file=%s\n' "$selected_file"
+		printf 'target=%s\n' "$target"
+		printf '%s\n' "$remote_output"
+		printf 'audit_file=%s\n' "$audit_file"
+		return 1
+	fi
 
-  printf 'Replacement complete\n'
-  printf 'old_file=%s\n' "$old_file"
-  printf 'new_repo=%s\n' "$new_repo"
-  printf 'selected_quant=%s\n' "$selected_quant"
-  printf 'selected_file=%s\n' "$selected_file"
-  printf 'target=%s\n' "$target"
-  printf '%s\n' "$remote_output"
-  printf 'audit_file=%s\n' "$audit_file"
+	printf 'Replacement complete\n'
+	printf 'old_file=%s\n' "$old_file"
+	printf 'new_repo=%s\n' "$new_repo"
+	printf 'selected_quant=%s\n' "$selected_quant"
+	printf 'selected_file=%s\n' "$selected_file"
+	printf 'target=%s\n' "$target"
+	printf '%s\n' "$remote_output"
+	printf 'audit_file=%s\n' "$audit_file"
 }
 
 cmd_delete() {
-  local repo=''
-  local profile_pattern=''
-  local target
-  target="$(default_target)"
-  local dry_run=true
-  local yes=false
+	local repo=''
+	local profile_pattern=''
+	local target
+	target="$(default_target)"
+	local dry_run=true
+	local yes=false
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --target)
-        [[ $# -ge 2 && "$2" != --* ]] || {
-          printf '%s\n' '--target requires remote:<host>' >&2
-          return 2
-        }
-        target="$2"
-        shift 2
-        ;;
-      --profile)
-        [[ $# -ge 2 && "$2" != --* ]] || {
-          printf '%s\n' '--profile requires family:profile or family:*' >&2
-          return 2
-        }
-        profile_pattern="$2"
-        shift 2
-        ;;
-      --dry-run)
-        dry_run=true
-        shift
-        ;;
-      --yes)
-        yes=true
-        dry_run=false
-        shift
-        ;;
-      -h | --help)
-        printf '%s\n' 'Usage: model-manager delete <repo>|--profile family:profile --target remote:<host> [--dry-run|--yes]'
-        return 0
-        ;;
-      --*)
-        printf 'Unknown delete option: %s\n' "$1" >&2
-        return 2
-        ;;
-      *)
-        if [[ -n "$repo" ]]; then
-          printf 'delete accepts one repo, got extra argument: %s\n' "$1" >&2
-          return 2
-        fi
-        repo="$1"
-        shift
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--target)
+			[[ $# -ge 2 && "$2" != --* ]] || {
+				printf '%s\n' '--target requires remote:<host>' >&2
+				return 2
+			}
+			target="$2"
+			shift 2
+			;;
+		--profile)
+			[[ $# -ge 2 && "$2" != --* ]] || {
+				printf '%s\n' '--profile requires family:profile or family:*' >&2
+				return 2
+			}
+			profile_pattern="$2"
+			shift 2
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--yes)
+			yes=true
+			dry_run=false
+			shift
+			;;
+		-h | --help)
+			printf '%s\n' 'Usage: model-manager delete <repo>|--profile family:profile --target remote:<host> [--dry-run|--yes]'
+			return 0
+			;;
+		--*)
+			printf 'Unknown delete option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			if [[ -n "$repo" ]]; then
+				printf 'delete accepts one repo, got extra argument: %s\n' "$1" >&2
+				return 2
+			fi
+			repo="$1"
+			shift
+			;;
+		esac
+	done
 
-  if [[ -n "$repo" && -n "$profile_pattern" ]]; then
-    printf '%s\n' 'delete accepts either a repo or --profile, not both' >&2
-    return 2
-  fi
-  [[ -n "$repo" || -n "$profile_pattern" ]] || {
-    printf '%s\n' 'delete requires a repo or --profile' >&2
-    return 2
-  }
-  case "$target" in
-    remote:*) ;;
-    *)
-      printf '%s\n' 'delete requires --target remote:<host>' >&2
-      return 2
-      ;;
-  esac
-  if [[ -z "${target#remote:}" || "${target#remote:}" == -* ]]; then
-    printf 'invalid remote target: %s\n' "$target" >&2
-    return 2
-  fi
+	if [[ -n "$repo" && -n "$profile_pattern" ]]; then
+		printf '%s\n' 'delete accepts either a repo or --profile, not both' >&2
+		return 2
+	fi
+	[[ -n "$repo" || -n "$profile_pattern" ]] || {
+		printf '%s\n' 'delete requires a repo or --profile' >&2
+		return 2
+	}
+	case "$target" in
+	remote:*) ;;
+	*)
+		printf '%s\n' 'delete requires --target remote:<host>' >&2
+		return 2
+		;;
+	esac
+	if [[ -z "${target#remote:}" || "${target#remote:}" == -* ]]; then
+		printf 'invalid remote target: %s\n' "$target" >&2
+		return 2
+	fi
 
-  ensure_runs_dirs
-  if [[ -n "$profile_pattern" ]]; then
-    cmd_delete_profile "$profile_pattern" "$target" "$dry_run" "$yes"
-    return $?
-  fi
+	ensure_runs_dirs
+	if [[ -n "$profile_pattern" ]]; then
+		cmd_delete_profile "$profile_pattern" "$target" "$dry_run" "$yes"
+		return $?
+	fi
 
-  local alias
-  alias="$(infer_alias "$repo")"
-  printf 'Delete %s\n' "$([[ "$yes" == true ]] && printf 'result' || printf 'dry-run')"
-  printf 'repo=%s\n' "$repo"
-  printf 'target=%s\n' "$target"
+	local alias
+	alias="$(infer_alias "$repo")"
+	printf 'Delete %s\n' "$([[ "$yes" == true ]] && printf 'result' || printf 'dry-run')"
+	printf 'repo=%s\n' "$repo"
+	printf 'target=%s\n' "$target"
 
-  if [[ "$dry_run" == true ]]; then
-    printf 'would_remove_selections_for_repo=%s\n' "$repo"
-    printf 'would_remove_switcher_entries_for_repo=%s\n' "$repo"
-    printf 'remote_cache_plan:\n'
-    run_remote_delete_repo_cache "${target#remote:}" "$repo" plan || true
-    return 0
-  fi
+	if [[ "$dry_run" == true ]]; then
+		printf 'would_remove_selections_for_repo=%s\n' "$repo"
+		printf 'would_remove_switcher_entries_for_repo=%s\n' "$repo"
+		printf 'remote_cache_plan:\n'
+		run_remote_delete_repo_cache "${target#remote:}" "$repo" plan || true
+		return 0
+	fi
 
-  local removed_selections removed_switcher meta_info family launcher_file removed_accepted
-  meta_info="$(find_accepted_metadata_by_repo "$repo")"
-  family=""
-  launcher_file=""
-  if [[ -n "$meta_info" ]]; then
-    family="$(printf '%s\n' "$meta_info" | awk -F= '$1=="family"{print $2; exit}')"
-    launcher_file="$(printf '%s\n' "$meta_info" | awk -F= '$1=="launcher_file"{print $2; exit}')"
-  fi
-  removed_selections="$(remove_selection_repo_entries "$repo")"
-  removed_switcher="$(remove_switcher_repo_entries "$repo" "$alias")"
-  removed_accepted=0
-  if [[ -n "$family" ]]; then
-    removed_accepted="$(remove_accepted_metadata_by_family "$family")"
-    remove_accepted_default_if_matches "$family"
-    remove_switcher_family_entries "$family" >/dev/null || true
-    remove_oc_local_family_entries "$family" >/dev/null || true
-    if [[ -n "$launcher_file" && -f "$launcher_file" && ! -L "$launcher_file" ]]; then
-      rm -f -- "$launcher_file"
-    fi
-  fi
-  printf 'removed_selection_count=%s\n' "$removed_selections"
-  printf 'removed_switcher_count=%s\n' "$removed_switcher"
-  printf 'removed_accepted_count=%s\n' "$removed_accepted"
-  printf 'remote_cache_delete:\n'
-  run_remote_delete_repo_cache "${target#remote:}" "$repo" delete
+	local removed_selections removed_switcher meta_info family launcher_file removed_accepted
+	meta_info="$(find_accepted_metadata_by_repo "$repo")"
+	family=""
+	launcher_file=""
+	if [[ -n "$meta_info" ]]; then
+		family="$(printf '%s\n' "$meta_info" | awk -F= '$1=="family"{print $2; exit}')"
+		launcher_file="$(printf '%s\n' "$meta_info" | awk -F= '$1=="launcher_file"{print $2; exit}')"
+	fi
+	removed_selections="$(remove_selection_repo_entries "$repo")"
+	removed_switcher="$(remove_switcher_repo_entries "$repo" "$alias")"
+	removed_accepted=0
+	if [[ -n "$family" ]]; then
+		removed_accepted="$(remove_accepted_metadata_by_family "$family")"
+		remove_accepted_default_if_matches "$family"
+		remove_switcher_family_entries "$family" >/dev/null || true
+		remove_oc_local_family_entries "$family" >/dev/null || true
+		if [[ -n "$launcher_file" && -f "$launcher_file" && ! -L "$launcher_file" ]]; then
+			rm -f -- "$launcher_file"
+		fi
+	fi
+	printf 'removed_selection_count=%s\n' "$removed_selections"
+	printf 'removed_switcher_count=%s\n' "$removed_switcher"
+	printf 'removed_accepted_count=%s\n' "$removed_accepted"
+	printf 'remote_cache_delete:\n'
+	run_remote_delete_repo_cache "${target#remote:}" "$repo" delete
 }
 
 cmd_delete_profile() {
-  local profile_pattern="$1"
-  local target="$2"
-  local dry_run="$3"
-  local yes="$4"
-  local profiles_json="${LOCAL_LLM_PROFILES_JSON:-$repo_root/configs/profiles.json}"
-  if [[ ! -f "$profiles_json" && -f "$HOME/.local/share/local_llm/config/profiles.json" ]]; then
-    profiles_json="$HOME/.local/share/local_llm/config/profiles.json"
-  fi
+	local profile_pattern="$1"
+	local target="$2"
+	local dry_run="$3"
+	local yes="$4"
+	local profiles_json="${LOCAL_LLM_PROFILES_JSON:-$repo_root/configs/profiles.json}"
+	if [[ ! -f "$profiles_json" && -f "$HOME/.local/share/local_llm/config/profiles.json" ]]; then
+		profiles_json="$HOME/.local/share/local_llm/config/profiles.json"
+	fi
 
-  [[ "$profile_pattern" == *:* ]] || {
-    printf '%s\n' '--profile requires family:profile or family:*' >&2
-    return 2
-  }
-  [[ -f "$profiles_json" ]] || {
-    printf 'profiles JSON not found: %s\n' "$profiles_json" >&2
-    return 1
-  }
+	[[ "$profile_pattern" == *:* ]] || {
+		printf '%s\n' '--profile requires family:profile or family:*' >&2
+		return 2
+	}
+	[[ -f "$profiles_json" ]] || {
+		printf 'profiles JSON not found: %s\n' "$profiles_json" >&2
+		return 1
+	}
 
-  local mode
-  local family="${profile_pattern%%:*}"
-  local wanted_profile="${profile_pattern#*:}"
-  mode=plan
-  if [[ "$yes" == true && "$dry_run" != true ]]; then
-    mode=delete
-  fi
+	local mode
+	local family="${profile_pattern%%:*}"
+	local wanted_profile="${profile_pattern#*:}"
+	mode=plan
+	if [[ "$yes" == true && "$dry_run" != true ]]; then
+		mode=delete
+	fi
 
-  printf 'Delete profile %s\n' "$([[ "$mode" == delete ]] && printf 'result' || printf 'dry-run')"
+	printf 'Delete profile %s\n' "$([[ "$mode" == delete ]] && printf 'result' || printf 'dry-run')"
 
-  python3 - "$profiles_json" "$profile_pattern" "$mode" <<'PY'
+	python3 - "$profiles_json" "$profile_pattern" "$mode" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -2810,111 +2817,111 @@ if mode == "delete":
     path.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n", encoding="utf-8")
     print(f"removed_profile_count={len(matched)}")
 PY
-  if [[ "$mode" == delete && "$wanted_profile" == '*' ]]; then
-    local removed_switcher_count removed_oc_local_count
-    removed_switcher_count="$(remove_switcher_family_entries "$family")"
-    removed_oc_local_count="$(remove_oc_local_family_entries "$family")"
-    printf 'removed_switcher_count=%s\n' "$removed_switcher_count"
-    printf 'removed_launcher_family_count=%s\n' "$removed_oc_local_count"
-  fi
+	if [[ "$mode" == delete && "$wanted_profile" == '*' ]]; then
+		local removed_switcher_count removed_oc_local_count
+		removed_switcher_count="$(remove_switcher_family_entries "$family")"
+		removed_oc_local_count="$(remove_oc_local_family_entries "$family")"
+		printf 'removed_switcher_count=%s\n' "$removed_switcher_count"
+		printf 'removed_launcher_family_count=%s\n' "$removed_oc_local_count"
+	fi
 }
 
 infer_family() {
-  local repo_lower
-  repo_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$repo_lower" in
-    *qwen3-coder-next*)
-      printf '%s\n' 'qwen-coder-next'
-      ;;
-    *qwen*coder*)
-      printf '%s\n' 'qwen-coder'
-      ;;
-    *deepseek*)
-      printf '%s\n' 'deepseek-r1'
-      ;;
-    *qwen*)
-      printf '%s\n' 'qwen'
-      ;;
-    *gemma*)
-      printf '%s\n' 'gemma'
-      ;;
-    *gpt-oss*)
-      printf '%s\n' 'gpt-oss'
-      ;;
-    *)
-      printf '%s\n' 'candidate'
-      ;;
-  esac
+	local repo_lower
+	repo_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+	case "$repo_lower" in
+	*qwen3-coder-next*)
+		printf '%s\n' 'qwen-coder-next'
+		;;
+	*qwen*coder*)
+		printf '%s\n' 'qwen-coder'
+		;;
+	*deepseek*)
+		printf '%s\n' 'deepseek-r1'
+		;;
+	*qwen*)
+		printf '%s\n' 'qwen'
+		;;
+	*gemma*)
+		printf '%s\n' 'gemma'
+		;;
+	*gpt-oss*)
+		printf '%s\n' 'gpt-oss'
+		;;
+	*)
+		printf '%s\n' 'candidate'
+		;;
+	esac
 }
 
 infer_slug_from_repo() {
-  local name
-  name="${1##*/}"
-  name="${name%-GGUF}"
-  name="${name%-gguf}"
-  printf '%s\n' "$name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^-+//; s/-+$//'
+	local name
+	name="${1##*/}"
+	name="${name%-GGUF}"
+	name="${name%-gguf}"
+	printf '%s\n' "$name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^-+//; s/-+$//'
 }
 
 infer_benchmark_family() {
-  local family
-  family="$(infer_family "$1")"
-  if [[ "$family" == candidate ]]; then
-    infer_slug_from_repo "$1"
-  else
-    printf '%s\n' "$family"
-  fi
+	local family
+	family="$(infer_family "$1")"
+	if [[ "$family" == candidate ]]; then
+		infer_slug_from_repo "$1"
+	else
+		printf '%s\n' "$family"
+	fi
 }
 
 infer_alias() {
-  infer_slug_from_repo "$1"
+	infer_slug_from_repo "$1"
 }
 
 infer_quant() {
-  local repo_lower="${2:-}"
-  repo_lower="$(printf '%s' "$repo_lower" | tr '[:upper:]' '[:lower:]')"
-  if [[ "$repo_lower" == *qwen3-coder-next* ]]; then
-    printf '%s\n' 'UD-TQ1_0'
-    return 0
-  fi
-  local family="$1"
-  case "$family" in
-    qwen-coder | qwen | deepseek-r1)
-      printf '%s\n' 'Q3_K_M'
-      ;;
-    gemma)
-      printf '%s\n' 'UD-Q2_K_XL'
-      ;;
-    gpt-oss)
-      printf '%s\n' 'UD-Q8_K_XL'
-      ;;
-    *)
-      printf '%s\n' 'Q3_K_M'
-      ;;
-  esac
+	local repo_lower="${2:-}"
+	repo_lower="$(printf '%s' "$repo_lower" | tr '[:upper:]' '[:lower:]')"
+	if [[ "$repo_lower" == *qwen3-coder-next* ]]; then
+		printf '%s\n' 'UD-TQ1_0'
+		return 0
+	fi
+	local family="$1"
+	case "$family" in
+	qwen-coder | qwen | deepseek-r1)
+		printf '%s\n' 'Q3_K_M'
+		;;
+	gemma)
+		printf '%s\n' 'UD-Q2_K_XL'
+		;;
+	gpt-oss)
+		printf '%s\n' 'UD-Q8_K_XL'
+		;;
+	*)
+		printf '%s\n' 'Q3_K_M'
+		;;
+	esac
 }
 
 infer_hf_file() {
-  local repo_lower
-  repo_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$repo_lower" in
-    *qwen3-coder-next*)
-      printf '%s\n' 'Qwen3-Coder-Next-UD-TQ1_0.gguf'
-      ;;
-    *)
-      printf '\n'
-      ;;
-  esac
+	local repo_lower
+	repo_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+	case "$repo_lower" in
+	*qwen3-coder-next*)
+		printf '%s\n' 'Qwen3-Coder-Next-UD-TQ1_0.gguf'
+		;;
+	*)
+		printf '\n'
+		;;
+	esac
 }
 
 benchmark_hardware_json() {
-  local target="$1"
-  local vram=''
-  case "$target" in
-    remote:*)
-      vram="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "${target#remote:}" 'total=0; for f in /sys/class/drm/card*/device/mem_info_vram_total; do [ -r "$f" ] && total=$((total + $(cat "$f"))); done; [ "$total" -gt 0 ] && echo "$total"' 2>/dev/null || true)"
-      ;;
-  esac
-  python3 - "$target" "$vram" <<'PY'
+	local target="$1"
+	local vram=''
+	case "$target" in
+	remote:*)
+		vram="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "${target#remote:}" 'total=0; for f in /sys/class/drm/card*/device/mem_info_vram_total; do [ -r "$f" ] && total=$((total + $(cat "$f"))); done; [ "$total" -gt 0 ] && echo "$total"' 2>/dev/null || true)"
+		;;
+	esac
+	python3 - "$target" "$vram" <<'PY'
 import json
 import sys
 
@@ -2928,34 +2935,34 @@ PY
 }
 
 fetch_repo_tree_json() {
-  local repo="$1"
-  if [[ -n "${LOCAL_LLM_HF_TREE_FIXTURE:-}" ]]; then
-    python3 - "$LOCAL_LLM_HF_TREE_FIXTURE" <<'PY'
+	local repo="$1"
+	if [[ -n "${LOCAL_LLM_HF_TREE_FIXTURE:-}" ]]; then
+		python3 - "$LOCAL_LLM_HF_TREE_FIXTURE" <<'PY'
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as handle:
     print(handle.read(), end="")
 PY
-    return 0
-  fi
-  local encoded_repo
-  encoded_repo="$(
-    python3 - "$repo" <<'PY'
+		return 0
+	fi
+	local encoded_repo
+	encoded_repo="$(
+		python3 - "$repo" <<'PY'
 from urllib.parse import quote
 import sys
 print(quote(sys.argv[1], safe="/"))
 PY
-  )"
-  curl -fsSL "https://huggingface.co/api/models/${encoded_repo}/tree/main" 2>/dev/null || printf '[]\n'
+	)"
+	curl -fsSL "https://huggingface.co/api/models/${encoded_repo}/tree/main" 2>/dev/null || printf '[]\n'
 }
 
 resolve_dynamic_quant_file() {
-  local repo="$1"
-  local target="$2"
-  local tree_json hardware
-  tree_json="$(fetch_repo_tree_json "$repo")"
-  hardware="$(benchmark_hardware_json "$target")"
-  python3 - "$repo" "$hardware" "$MODEL_FIT_SCRIPT" "$tree_json" <<'PY'
+	local repo="$1"
+	local target="$2"
+	local tree_json hardware
+	tree_json="$(fetch_repo_tree_json "$repo")"
+	hardware="$(benchmark_hardware_json "$target")"
+	python3 - "$repo" "$hardware" "$MODEL_FIT_SCRIPT" "$tree_json" <<'PY'
 import json
 import subprocess
 import sys
@@ -2983,29 +2990,29 @@ PY
 }
 
 run_remote_benchmark() {
-  local host="$1"
-  local repo="$2"
-  local family="$3"
-  local alias="$4"
-  local profile="$5"
-  local quant="$6"
-  local hf_file="$7"
-  local remote_dir="${OC_LOCAL_REMOTE_DIR:-~/llama.cpp}"
-  local port=8080
-  local ctx="${8:-131072}"
-  local batch="${9:-4096}"
-  local ubatch="${10:-256}"
-  local backend="${11:-auto}"
-  local visible_devices="${12:-}"
-  local split_mode="${13:-}"
-  local tensor_split="${14:-}"
-  local responsive="${15:-false}"
-  local cache_type_k="${16:-}"
-  local cache_type_v="${17:-}"
-  local ctx_shift="${18:-}"
-  local empty_arg='__LOCAL_LLM_EMPTY__'
+	local host="$1"
+	local repo="$2"
+	local family="$3"
+	local alias="$4"
+	local profile="$5"
+	local quant="$6"
+	local hf_file="$7"
+	local remote_dir="${OC_LOCAL_REMOTE_DIR:-~/llama.cpp}"
+	local port=8080
+	local ctx="${8:-131072}"
+	local batch="${9:-4096}"
+	local ubatch="${10:-256}"
+	local backend="${11:-auto}"
+	local visible_devices="${12:-}"
+	local split_mode="${13:-}"
+	local tensor_split="${14:-}"
+	local responsive="${15:-false}"
+	local cache_type_k="${16:-}"
+	local cache_type_v="${17:-}"
+	local ctx_shift="${18:-}"
+	local empty_arg='__LOCAL_LLM_EMPTY__'
 
-  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" bash -s -- "$remote_dir" "$repo" "$family" "$alias" "$profile" "$quant" "${hf_file:-$empty_arg}" "$port" "$ctx" "$batch" "$ubatch" "$backend" "${visible_devices:-$empty_arg}" "${split_mode:-$empty_arg}" "${tensor_split:-$empty_arg}" "$responsive" "${cache_type_k:-$empty_arg}" "${cache_type_v:-$empty_arg}" "${ctx_shift:-$empty_arg}" <<'REMOTE_BENCH'
+	ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" bash -s -- "$remote_dir" "$repo" "$family" "$alias" "$profile" "$quant" "${hf_file:-$empty_arg}" "$port" "$ctx" "$batch" "$ubatch" "$backend" "${visible_devices:-$empty_arg}" "${split_mode:-$empty_arg}" "${tensor_split:-$empty_arg}" "$responsive" "${cache_type_k:-$empty_arg}" "${cache_type_v:-$empty_arg}" "${ctx_shift:-$empty_arg}" <<'REMOTE_BENCH'
 export PATH="$HOME/.local/bin:$PATH"
 set -euo pipefail
 
@@ -3057,8 +3064,14 @@ json_string() {
 
 stop_server() {
   systemctl --user stop llama-server.service >/dev/null 2>&1 || true
+  systemctl --user reset-failed llama-server.service >/dev/null 2>&1 || true
   pkill -u "$(id -u)" -f 'llama-server' >/dev/null 2>&1 || true
-  sleep 2
+  for _ in $(seq 1 30); do
+    if ! pgrep -u "$(id -u)" -f 'llama-server' >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
 }
 
 restore_service() {
@@ -3163,9 +3176,9 @@ if [[ -n "$cache_type_v" ]]; then
   server_cmd+=(-ctv "$cache_type_v")
 fi
 server_cmd+=(
-  --ctx-checkpoints 128
-  --checkpoint-every-n-tokens 1024
-  --cache-ram 32768
+  --cache-ram 16384
+  --ctx-checkpoints 64
+  --checkpoint-every-n-tokens 4096
   -c "$ctx"
   --flash-attn on
   -ub "$ubatch"
@@ -3177,10 +3190,21 @@ server_cmd+=(
 if [[ "$responsive" == true ]]; then
   : # responsive mode is now baked into default server args
 fi
+sampler_temp="0.6"
+sampler_top_p="0.95"
+sampler_top_k="20"
+if [[ "${family,,}" == gemma* || "${alias,,}" == gemma* || "${repo,,}" == *gemma* ]]; then
+  sampler_temp="1.0"
+  sampler_top_p="0.95"
+  sampler_top_k="64"
+fi
+case "${repo,,} ${family,,} ${alias,,}" in
+  *gemma-4-12b*) server_cmd+=(--no-mmproj) ;;
+esac
 server_cmd+=(
-  --temp 0.6
-  --top-p 0.95
-  --top-k 20
+  --temp "$sampler_temp"
+  --top-p "$sampler_top_p"
+  --top-k "$sampler_top_k"
   --min-p 0.0
   --presence-penalty 0.0
   --alias "$alias"
@@ -3240,9 +3264,9 @@ for _ in $(seq 1 180); do
 done
 
 if [[ "$load_status" == success ]]; then
-  prompt='Write a deterministic benchmark response of exactly 32 numbered lines. Each line must contain one concise sentence about local inference performance, queueing, memory bandwidth, and token generation. Do not stop early.'
-  request="{\"model\":$(json_string "$alias"),\"messages\":[{\"role\":\"user\",\"content\":$(json_string "$prompt")}],\"max_tokens\":512,\"temperature\":0}"
-  if ! curl -fsS --max-time 300 "http://127.0.0.1:${port}/v1/chat/completions" -H 'Content-Type: application/json' -d "$request" >"$response_file" 2>>"$log_file"; then
+  prompt='You are running a local model benchmark. Read this checklist: cache reuse, prompt prefill, decode throughput, memory pressure, tool-use responsiveness, and service health. Reply with exactly one word: ok'
+  request="{\"model\":$(json_string "$alias"),\"messages\":[{\"role\":\"user\",\"content\":$(json_string "$prompt")}],\"max_tokens\":128,\"temperature\":0}"
+  if ! curl -fsS --max-time 180 "http://127.0.0.1:${port}/v1/chat/completions" -H 'Content-Type: application/json' -d "$request" >"$response_file" 2>>"$log_file"; then
     load_status=error
   fi
 fi
@@ -3256,8 +3280,42 @@ prompt_tok_s="$(last_number_for 'prompt eval time' "$log_file")"
 decode_tok_s="$(last_number_for '(^|:)[[:space:]]+eval time' "$log_file")"
 prompt_tokens="$(last_tokens_for 'prompt eval time' "$log_file")"
 decode_tokens="$(last_tokens_for '(^|:)[[:space:]]+eval time' "$log_file")"
-if [[ "$load_status" == success && ( -z "$decode_tokens" || "$decode_tokens" -lt 128 ) ]]; then
-  load_status=too_short
+if [[ "$load_status" == success ]]; then
+  quality_status="$(python3 - "$prompt_tok_s" "$decode_tok_s" "$prompt_tokens" "$decode_tokens" <<'PY'
+import sys
+prompt_tps, decode_tps, prompt_tokens, decode_tokens = sys.argv[1:]
+
+def number(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+def integer(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+ptps = number(prompt_tps)
+dtps = number(decode_tps)
+ptok = integer(prompt_tokens)
+dtok = integer(decode_tokens)
+if dtok is None or dtok < 64:
+    print("too_short")
+elif ptok is None or ptok < 48:
+    print("prompt_probe_too_short")
+elif ptps is None or ptps < 25.0:
+    print("prompt_too_slow")
+elif dtps is None or dtps < 4.5:
+    print("decode_too_slow")
+else:
+    print("success")
+PY
+)"
+  if [[ "$quality_status" != success ]]; then
+    load_status="$quality_status"
+  fi
 fi
 printf 'load_status=%s\n' "$load_status"
 printf 'prompt_tok_s=%s\n' "$prompt_tok_s"
@@ -3293,90 +3351,90 @@ REMOTE_BENCH
 }
 
 cmd_discover() {
-  local target
-  target="$(default_target)"
-  local query='GGUF'
-  local limit=8
-  local json=false
+	local target
+	target="$(default_target)"
+	local query='GGUF'
+	local limit=8
+	local json=false
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --target)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--target requires local or remote:<host>' >&2
-          return 2
-        fi
-        target="$2"
-        shift 2
-        ;;
-      --query)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--query requires text' >&2
-          return 2
-        fi
-        query="$2"
-        shift 2
-        ;;
-      --limit)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--limit requires a number' >&2
-          return 2
-        fi
-        limit="$2"
-        shift 2
-        ;;
-      --json)
-        json=true
-        shift
-        ;;
-      -h | --help)
-        usage
-        return 0
-        ;;
-      --*)
-        printf 'Unknown discover option: %s\n' "$1" >&2
-        return 2
-        ;;
-      *)
-        query="$1"
-        shift
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--target)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--target requires local or remote:<host>' >&2
+				return 2
+			fi
+			target="$2"
+			shift 2
+			;;
+		--query)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--query requires text' >&2
+				return 2
+			fi
+			query="$2"
+			shift 2
+			;;
+		--limit)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--limit requires a number' >&2
+				return 2
+			fi
+			limit="$2"
+			shift 2
+			;;
+		--json)
+			json=true
+			shift
+			;;
+		-h | --help)
+			usage
+			return 0
+			;;
+		--*)
+			printf 'Unknown discover option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			query="$1"
+			shift
+			;;
+		esac
+	done
 
-  case "$limit" in
-    '' | *[!0-9]*)
-      printf 'invalid limit: %s\n' "$limit" >&2
-      return 2
-      ;;
-  esac
+	case "$limit" in
+	'' | *[!0-9]*)
+		printf 'invalid limit: %s\n' "$limit" >&2
+		return 2
+		;;
+	esac
 
-  case "$target" in
-    local) ;;
-    remote:*)
-      if [[ -z "${target#remote:}" ]]; then
-        printf 'remote target requires a host: %s\n' "$target" >&2
-        return 2
-      fi
-      ;;
-    *)
-      printf 'invalid target: %s\n' "$target" >&2
-      printf 'expected local or remote:<host>\n' >&2
-      return 2
-      ;;
-  esac
+	case "$target" in
+	local) ;;
+	remote:*)
+		if [[ -z "${target#remote:}" ]]; then
+			printf 'remote target requires a host: %s\n' "$target" >&2
+			return 2
+		fi
+		;;
+	*)
+		printf 'invalid target: %s\n' "$target" >&2
+		printf 'expected local or remote:<host>\n' >&2
+		return 2
+		;;
+	esac
 
-  if [[ "$json" == true ]]; then
-    local discovery_json
-    case "$target" in
-      local)
-        discovery_json="$($MODEL_DISCOVERY_SCRIPT --local --query "$query" --limit "$limit" --json)"
-        ;;
-      remote:*)
-        discovery_json="$($MODEL_DISCOVERY_SCRIPT --host "${target#remote:}" --query "$query" --limit "$limit" --json)"
-        ;;
-    esac
-    python3 - "$target" "$query" "$limit" "$discovery_json" <<'PY'
+	if [[ "$json" == true ]]; then
+		local discovery_json
+		case "$target" in
+		local)
+			discovery_json="$($MODEL_DISCOVERY_SCRIPT --local --query "$query" --limit "$limit" --json)"
+			;;
+		remote:*)
+			discovery_json="$($MODEL_DISCOVERY_SCRIPT --host "${target#remote:}" --query "$query" --limit "$limit" --json)"
+			;;
+		esac
+		python3 - "$target" "$query" "$limit" "$discovery_json" <<'PY'
 import json
 import sys
 
@@ -3387,131 +3445,131 @@ payload["query"] = query
 payload["limit"] = limit
 print(json.dumps(payload, separators=(",", ":")))
 PY
-    return 0
-  fi
+		return 0
+	fi
 
-  case "$target" in
-    local)
-      "$MODEL_DISCOVERY_SCRIPT" --local --query "$query" --limit "$limit"
-      ;;
-    remote:*)
-      "$MODEL_DISCOVERY_SCRIPT" --host "${target#remote:}" --query "$query" --limit "$limit"
-      ;;
-  esac
+	case "$target" in
+	local)
+		"$MODEL_DISCOVERY_SCRIPT" --local --query "$query" --limit "$limit"
+		;;
+	remote:*)
+		"$MODEL_DISCOVERY_SCRIPT" --host "${target#remote:}" --query "$query" --limit "$limit"
+		;;
+	esac
 }
 
 cmd_select() {
-  local target
-  target="$(default_target)"
-  local repo=''
-  local family=''
-  local alias=''
-  local purpose=''
+	local target
+	target="$(default_target)"
+	local repo=''
+	local family=''
+	local alias=''
+	local purpose=''
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --target)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--target requires local or remote:<host>' >&2
-          return 2
-        fi
-        target="$2"
-        shift 2
-        ;;
-      --repo)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--repo requires a value' >&2
-          return 2
-        fi
-        repo="$2"
-        shift 2
-        ;;
-      --family)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--family requires a value' >&2
-          return 2
-        fi
-        family="$2"
-        shift 2
-        ;;
-      --alias)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--alias requires a value' >&2
-          return 2
-        fi
-        alias="$2"
-        shift 2
-        ;;
-      --purpose)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--purpose requires a value' >&2
-          return 2
-        fi
-        purpose="$2"
-        shift 2
-        ;;
-      -h | --help)
-        usage
-        return 0
-        ;;
-      --*)
-        printf 'Unknown select option: %s\n' "$1" >&2
-        return 2
-        ;;
-      *)
-        repo="$1"
-        shift
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--target)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--target requires local or remote:<host>' >&2
+				return 2
+			fi
+			target="$2"
+			shift 2
+			;;
+		--repo)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--repo requires a value' >&2
+				return 2
+			fi
+			repo="$2"
+			shift 2
+			;;
+		--family)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--family requires a value' >&2
+				return 2
+			fi
+			family="$2"
+			shift 2
+			;;
+		--alias)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--alias requires a value' >&2
+				return 2
+			fi
+			alias="$2"
+			shift 2
+			;;
+		--purpose)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--purpose requires a value' >&2
+				return 2
+			fi
+			purpose="$2"
+			shift 2
+			;;
+		-h | --help)
+			usage
+			return 0
+			;;
+		--*)
+			printf 'Unknown select option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			repo="$1"
+			shift
+			;;
+		esac
+	done
 
-  if [[ -z "$repo" ]]; then
-    printf '%s\n' 'select requires --repo' >&2
-    return 2
-  fi
-  if [[ -z "$family" ]]; then
-    family="$(infer_family "$repo")"
-  fi
-  if [[ -z "$alias" ]]; then
-    alias="$(infer_alias "$repo")"
-  fi
+	if [[ -z "$repo" ]]; then
+		printf '%s\n' 'select requires --repo' >&2
+		return 2
+	fi
+	if [[ -z "$family" ]]; then
+		family="$(infer_family "$repo")"
+	fi
+	if [[ -z "$alias" ]]; then
+		alias="$(infer_alias "$repo")"
+	fi
 
-  case "$target" in
-    local) ;;
-    remote:*)
-      if [[ -z "${target#remote:}" ]]; then
-        printf 'remote target requires a host: %s\n' "$target" >&2
-        return 2
-      fi
-      ;;
-    *)
-      printf 'invalid target: %s\n' "$target" >&2
-      printf 'expected local or remote:<host>\n' >&2
-      return 2
-      ;;
-  esac
+	case "$target" in
+	local) ;;
+	remote:*)
+		if [[ -z "${target#remote:}" ]]; then
+			printf 'remote target requires a host: %s\n' "$target" >&2
+			return 2
+		fi
+		;;
+	*)
+		printf 'invalid target: %s\n' "$target" >&2
+		printf 'expected local or remote:<host>\n' >&2
+		return 2
+		;;
+	esac
 
-  if ! command -v python3 >/dev/null 2>&1; then
-    printf '%s\n' 'python3 is required for selection JSON' >&2
-    return 1
-  fi
+	if ! command -v python3 >/dev/null 2>&1; then
+		printf '%s\n' 'python3 is required for selection JSON' >&2
+		return 1
+	fi
 
-  ensure_runs_dirs
-  local timestamp
-  local safe_family
-  local output_file
-  local unique_suffix
-  timestamp="$(date +%Y%m%d-%H%M%S)"
-  safe_family="${family//[^A-Za-z0-9_.-]/-}"
-  unique_suffix="$$"
-  output_file="$runs_dir/selections/${timestamp}-${safe_family}-${unique_suffix}.json"
-  while [[ -e "$output_file" ]]; do
-    unique_suffix="${unique_suffix}x"
-    output_file="$runs_dir/selections/${timestamp}-${safe_family}-${unique_suffix}.json"
-  done
-  reject_symlink_state_file "$output_file" || return 1
+	ensure_runs_dirs
+	local timestamp
+	local safe_family
+	local output_file
+	local unique_suffix
+	timestamp="$(date +%Y%m%d-%H%M%S)"
+	safe_family="${family//[^A-Za-z0-9_.-]/-}"
+	unique_suffix="$$"
+	output_file="$runs_dir/selections/${timestamp}-${safe_family}-${unique_suffix}.json"
+	while [[ -e "$output_file" ]]; do
+		unique_suffix="${unique_suffix}x"
+		output_file="$runs_dir/selections/${timestamp}-${safe_family}-${unique_suffix}.json"
+	done
+	reject_symlink_state_file "$output_file" || return 1
 
-  python3 - "$output_file" "$repo" "$family" "$alias" "$target" "$purpose" <<'PY'
+	python3 - "$output_file" "$repo" "$family" "$alias" "$target" "$purpose" <<'PY'
 import json
 import sys
 
@@ -3524,339 +3582,339 @@ with open(output_file, "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 
-  printf 'Selected %s\n' "$repo"
-  printf 'Wrote selection: %s\n' "$output_file"
+	printf 'Selected %s\n' "$repo"
+	printf 'Wrote selection: %s\n' "$output_file"
 }
 
 cmd_benchmark() {
-  local target
-  target="$(default_target)"
-  local repo=''
-  local family=''
-  local alias=''
-  local profiles='reliable'
-  local -a profile_list=()
-  local dry_run=false
-  local record_only=false
-  local quant=''
-  local hf_file=''
-  local full=false
-  local backend='auto'
-  local visible_devices=''
-  local split_mode=''
-  local tensor_split=''
-  local responsive=false
-  local cache_type_k=''
-  local cache_type_v=''
-  local ctx_shift=''
-  local ctx_override=''
-  local batch_override=''
-  local ubatch_override=''
+	local target
+	target="$(default_target)"
+	local repo=''
+	local family=''
+	local alias=''
+	local profiles='reliable'
+	local -a profile_list=()
+	local dry_run=false
+	local record_only=false
+	local quant=''
+	local hf_file=''
+	local full=false
+	local backend='auto'
+	local visible_devices=''
+	local split_mode=''
+	local tensor_split=''
+	local responsive=false
+	local cache_type_k=''
+	local cache_type_v=''
+	local ctx_shift=''
+	local ctx_override=''
+	local batch_override=''
+	local ubatch_override=''
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --target)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--target requires local or remote:<host>' >&2
-          return 2
-        fi
-        target="$2"
-        shift 2
-        ;;
-      --repo)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--repo requires a value' >&2
-          return 2
-        fi
-        repo="$2"
-        shift 2
-        ;;
-      --family)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--family requires a value' >&2
-          return 2
-        fi
-        family="$2"
-        shift 2
-        ;;
-      --alias)
-        if [[ $# -lt 2 ]]; then
-          printf '%s\n' '--alias requires a value' >&2
-          return 2
-        fi
-        alias="$2"
-        shift 2
-        ;;
-      --profiles)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--profiles requires a non-empty value' >&2
-          return 2
-        fi
-        profiles="$2"
-        shift 2
-        ;;
-      --quant)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--quant requires a non-empty value' >&2
-          return 2
-        fi
-        quant="$2"
-        shift 2
-        ;;
-      --hf-file)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--hf-file requires a non-empty value' >&2
-          return 2
-        fi
-        hf_file="$2"
-        shift 2
-        ;;
-      --cache-type-k)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--cache-type-k requires a non-empty value' >&2
-          return 2
-        fi
-        cache_type_k="$2"
-        shift 2
-        ;;
-      --cache-type-v)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--cache-type-v requires a non-empty value' >&2
-          return 2
-        fi
-        cache_type_v="$2"
-        shift 2
-        ;;
-      --backend)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--backend requires auto, default, rocm, or vulkan' >&2
-          return 2
-        fi
-        backend="$2"
-        shift 2
-        ;;
-      --visible-devices)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--visible-devices requires comma-separated device indexes' >&2
-          return 2
-        fi
-        visible_devices="$2"
-        shift 2
-        ;;
-      --split-mode)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--split-mode requires layer or row' >&2
-          return 2
-        fi
-        split_mode="$2"
-        shift 2
-        ;;
-      --tensor-split)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--tensor-split requires comma-separated positive integers' >&2
-          return 2
-        fi
-        tensor_split="$2"
-        shift 2
-        ;;
-      --ctx)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--ctx requires a positive integer' >&2
-          return 2
-        fi
-        ctx_override="$2"
-        shift 2
-        ;;
-      --batch)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--batch requires a positive integer' >&2
-          return 2
-        fi
-        batch_override="$2"
-        shift 2
-        ;;
-      --ubatch)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--ubatch requires a positive integer' >&2
-          return 2
-        fi
-        ubatch_override="$2"
-        shift 2
-        ;;
-      --ctx-shift)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--ctx-shift requires on, true, 1, off, false, 0, or a non-negative integer' >&2
-          return 2
-        fi
-        ctx_shift="$2"
-        shift 2
-        ;;
-      --responsive)
-        responsive=true
-        shift
-        ;;
-      --dry-run)
-        dry_run=true
-        shift
-        ;;
-      --full)
-        full=true
-        shift
-        ;;
-      --record-only)
-        record_only=true
-        shift
-        ;;
-      -h | --help)
-        usage
-        return 0
-        ;;
-      --*)
-        printf 'Unknown benchmark option: %s\n' "$1" >&2
-        return 2
-        ;;
-      *)
-        repo="$1"
-        shift
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--target)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--target requires local or remote:<host>' >&2
+				return 2
+			fi
+			target="$2"
+			shift 2
+			;;
+		--repo)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--repo requires a value' >&2
+				return 2
+			fi
+			repo="$2"
+			shift 2
+			;;
+		--family)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--family requires a value' >&2
+				return 2
+			fi
+			family="$2"
+			shift 2
+			;;
+		--alias)
+			if [[ $# -lt 2 ]]; then
+				printf '%s\n' '--alias requires a value' >&2
+				return 2
+			fi
+			alias="$2"
+			shift 2
+			;;
+		--profiles)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--profiles requires a non-empty value' >&2
+				return 2
+			fi
+			profiles="$2"
+			shift 2
+			;;
+		--quant)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--quant requires a non-empty value' >&2
+				return 2
+			fi
+			quant="$2"
+			shift 2
+			;;
+		--hf-file)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--hf-file requires a non-empty value' >&2
+				return 2
+			fi
+			hf_file="$2"
+			shift 2
+			;;
+		--cache-type-k)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--cache-type-k requires a non-empty value' >&2
+				return 2
+			fi
+			cache_type_k="$2"
+			shift 2
+			;;
+		--cache-type-v)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--cache-type-v requires a non-empty value' >&2
+				return 2
+			fi
+			cache_type_v="$2"
+			shift 2
+			;;
+		--backend)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--backend requires auto, default, rocm, or vulkan' >&2
+				return 2
+			fi
+			backend="$2"
+			shift 2
+			;;
+		--visible-devices)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--visible-devices requires comma-separated device indexes' >&2
+				return 2
+			fi
+			visible_devices="$2"
+			shift 2
+			;;
+		--split-mode)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--split-mode requires layer or row' >&2
+				return 2
+			fi
+			split_mode="$2"
+			shift 2
+			;;
+		--tensor-split)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--tensor-split requires comma-separated positive integers' >&2
+				return 2
+			fi
+			tensor_split="$2"
+			shift 2
+			;;
+		--ctx)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--ctx requires a positive integer' >&2
+				return 2
+			fi
+			ctx_override="$2"
+			shift 2
+			;;
+		--batch)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--batch requires a positive integer' >&2
+				return 2
+			fi
+			batch_override="$2"
+			shift 2
+			;;
+		--ubatch)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--ubatch requires a positive integer' >&2
+				return 2
+			fi
+			ubatch_override="$2"
+			shift 2
+			;;
+		--ctx-shift)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--ctx-shift requires on, true, 1, off, false, 0, or a non-negative integer' >&2
+				return 2
+			fi
+			ctx_shift="$2"
+			shift 2
+			;;
+		--responsive)
+			responsive=true
+			shift
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--full)
+			full=true
+			shift
+			;;
+		--record-only)
+			record_only=true
+			shift
+			;;
+		-h | --help)
+			usage
+			return 0
+			;;
+		--*)
+			printf 'Unknown benchmark option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			repo="$1"
+			shift
+			;;
+		esac
+	done
 
-  if [[ -z "$repo" ]]; then
-    printf '%s\n' 'benchmark requires --repo' >&2
-    return 2
-  fi
-  if [[ -z "$family" ]]; then
-    family="$(infer_benchmark_family "$repo")"
-  fi
-  if [[ -z "$alias" ]]; then
-    alias="$(infer_alias "$repo")"
-  fi
-  if [[ -z "$quant" && -z "$hf_file" ]]; then
-    dynamic_choice="$(resolve_dynamic_quant_file "$repo" "$target")"
-    quant="$(printf '%s\n' "$dynamic_choice" | sed -n '1p')"
-    hf_file="$(printf '%s\n' "$dynamic_choice" | sed -n '2p')"
-  fi
-  if [[ -z "$quant" ]]; then
-    quant="$(infer_quant "$family" "$repo")"
-  fi
-  if [[ -z "$hf_file" ]]; then
-    hf_file="$(infer_hf_file "$repo")"
-  fi
+	if [[ -z "$repo" ]]; then
+		printf '%s\n' 'benchmark requires --repo' >&2
+		return 2
+	fi
+	if [[ -z "$family" ]]; then
+		family="$(infer_benchmark_family "$repo")"
+	fi
+	if [[ -z "$alias" ]]; then
+		alias="$(infer_alias "$repo")"
+	fi
+	if [[ -z "$quant" && -z "$hf_file" ]]; then
+		dynamic_choice="$(resolve_dynamic_quant_file "$repo" "$target")"
+		quant="$(printf '%s\n' "$dynamic_choice" | sed -n '1p')"
+		hf_file="$(printf '%s\n' "$dynamic_choice" | sed -n '2p')"
+	fi
+	if [[ -z "$quant" ]]; then
+		quant="$(infer_quant "$family" "$repo")"
+	fi
+	if [[ -z "$hf_file" ]]; then
+		hf_file="$(infer_hf_file "$repo")"
+	fi
 
-  ensure_runs_dirs
+	ensure_runs_dirs
 
-  case "$profiles" in
-    ,* | *, | *,,*)
-      printf '%s\n' '--profiles contains an empty profile' >&2
-      return 2
-      ;;
-  esac
+	case "$profiles" in
+	,* | *, | *,,*)
+		printf '%s\n' '--profiles contains an empty profile' >&2
+		return 2
+		;;
+	esac
 
-  IFS=, read -r -a profile_list <<<"$profiles"
-  local profile
-  for profile in "${profile_list[@]}"; do
-    if [[ -z "$profile" ]]; then
-      printf '%s\n' '--profiles contains an empty profile' >&2
-      return 2
-    fi
-    case "$profile" in
-      *[!A-Za-z0-9_.-]*)
-        printf 'invalid benchmark profile: %s\n' "$profile" >&2
-        return 2
-        ;;
-    esac
-  done
+	IFS=, read -r -a profile_list <<<"$profiles"
+	local profile
+	for profile in "${profile_list[@]}"; do
+		if [[ -z "$profile" ]]; then
+			printf '%s\n' '--profiles contains an empty profile' >&2
+			return 2
+		fi
+		case "$profile" in
+		*[!A-Za-z0-9_.-]*)
+			printf 'invalid benchmark profile: %s\n' "$profile" >&2
+			return 2
+			;;
+		esac
+	done
 
-  case "$backend" in
-    auto | default | rocm | vulkan) ;;
-    *)
-      printf 'invalid benchmark backend: %s\n' "$backend" >&2
-      return 2
-      ;;
-  esac
-  if [[ -n "$visible_devices" && ! "$visible_devices" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
-    printf 'invalid visible devices: %s\n' "$visible_devices" >&2
-    return 2
-  fi
-  if [[ -n "$split_mode" ]]; then
-    case "$split_mode" in
-      layer | row) ;;
-      *)
-        printf 'invalid split mode: %s\n' "$split_mode" >&2
-        return 2
-        ;;
-    esac
-  fi
-  if [[ -n "$tensor_split" && ! "$tensor_split" =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]]; then
-    printf 'invalid tensor split: %s\n' "$tensor_split" >&2
-    return 2
-  fi
-  if [[ -n "$cache_type_k" && ! "$cache_type_k" =~ ^[A-Za-z0-9_.-]+$ ]]; then
-    printf 'invalid cache type k: %s\n' "$cache_type_k" >&2
-    return 2
-  fi
-  for numeric_override in ctx_override batch_override ubatch_override; do
-    if [[ -n "${!numeric_override}" && ! "${!numeric_override}" =~ ^[1-9][0-9]*$ ]]; then
-      printf 'invalid numeric benchmark override %s: %s\n' "$numeric_override" "${!numeric_override}" >&2
-      return 2
-    fi
-  done
-  if [[ -n "$cache_type_v" && ! "$cache_type_v" =~ ^[A-Za-z0-9_.-]+$ ]]; then
-    printf 'invalid cache type v: %s\n' "$cache_type_v" >&2
-    return 2
-  fi
-  if [[ -n "$ctx_shift" ]]; then
-    case "$ctx_shift" in
-      on | true | 1 | off | false | 0) ;;
-      *[!0-9]*)
-        printf 'invalid ctx shift: %s\n' "$ctx_shift" >&2
-        return 2
-        ;;
-    esac
-  fi
+	case "$backend" in
+	auto | default | rocm | vulkan) ;;
+	*)
+		printf 'invalid benchmark backend: %s\n' "$backend" >&2
+		return 2
+		;;
+	esac
+	if [[ -n "$visible_devices" && ! "$visible_devices" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+		printf 'invalid visible devices: %s\n' "$visible_devices" >&2
+		return 2
+	fi
+	if [[ -n "$split_mode" ]]; then
+		case "$split_mode" in
+		layer | row) ;;
+		*)
+			printf 'invalid split mode: %s\n' "$split_mode" >&2
+			return 2
+			;;
+		esac
+	fi
+	if [[ -n "$tensor_split" && ! "$tensor_split" =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]]; then
+		printf 'invalid tensor split: %s\n' "$tensor_split" >&2
+		return 2
+	fi
+	if [[ -n "$cache_type_k" && ! "$cache_type_k" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+		printf 'invalid cache type k: %s\n' "$cache_type_k" >&2
+		return 2
+	fi
+	for numeric_override in ctx_override batch_override ubatch_override; do
+		if [[ -n "${!numeric_override}" && ! "${!numeric_override}" =~ ^[1-9][0-9]*$ ]]; then
+			printf 'invalid numeric benchmark override %s: %s\n' "$numeric_override" "${!numeric_override}" >&2
+			return 2
+		fi
+	done
+	if [[ -n "$cache_type_v" && ! "$cache_type_v" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+		printf 'invalid cache type v: %s\n' "$cache_type_v" >&2
+		return 2
+	fi
+	if [[ -n "$ctx_shift" ]]; then
+		case "$ctx_shift" in
+		on | true | 1 | off | false | 0) ;;
+		*[!0-9]*)
+			printf 'invalid ctx shift: %s\n' "$ctx_shift" >&2
+			return 2
+			;;
+		esac
+	fi
 
-  case "$target" in
-    local) ;;
-    remote:*)
-      if [[ -z "${target#remote:}" ]]; then
-        printf 'remote target requires a host: %s\n' "$target" >&2
-        return 2
-      fi
-      ;;
-    *)
-      printf 'invalid target: %s\n' "$target" >&2
-      printf 'expected local or remote:<host>\n' >&2
-      return 2
-      ;;
-  esac
+	case "$target" in
+	local) ;;
+	remote:*)
+		if [[ -z "${target#remote:}" ]]; then
+			printf 'remote target requires a host: %s\n' "$target" >&2
+			return 2
+		fi
+		;;
+	*)
+		printf 'invalid target: %s\n' "$target" >&2
+		printf 'expected local or remote:<host>\n' >&2
+		return 2
+		;;
+	esac
 
-  if [[ "$record_only" == true ]]; then
-    if ! command -v python3 >/dev/null 2>&1; then
-      printf '%s\n' 'python3 is required for benchmark JSON' >&2
-      return 1
-    fi
+	if [[ "$record_only" == true ]]; then
+		if ! command -v python3 >/dev/null 2>&1; then
+			printf '%s\n' 'python3 is required for benchmark JSON' >&2
+			return 1
+		fi
 
-    local timestamp
-    local result_timestamp
-    local safe_family
-    local safe_profile
-    local output_file
-    local unique_suffix
-    timestamp="$(date +%Y%m%d-%H%M%S)"
-    result_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    safe_family="${family//[^A-Za-z0-9_.-]/-}"
-    for profile in "${profile_list[@]}"; do
-      safe_profile="${profile//[^A-Za-z0-9_.-]/-}"
-      unique_suffix="$$"
-      output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
-      while [[ -e "$output_file" ]]; do
-        unique_suffix="${unique_suffix}x"
-        output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
-      done
-      reject_symlink_state_file "$output_file" || return 1
+		local timestamp
+		local result_timestamp
+		local safe_family
+		local safe_profile
+		local output_file
+		local unique_suffix
+		timestamp="$(date +%Y%m%d-%H%M%S)"
+		result_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+		safe_family="${family//[^A-Za-z0-9_.-]/-}"
+		for profile in "${profile_list[@]}"; do
+			safe_profile="${profile//[^A-Za-z0-9_.-]/-}"
+			unique_suffix="$$"
+			output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
+			while [[ -e "$output_file" ]]; do
+				unique_suffix="${unique_suffix}x"
+				output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
+			done
+			reject_symlink_state_file "$output_file" || return 1
 
-      python3 - "$output_file" "$target" "$repo" "$family" "$alias" "$profile" "$result_timestamp" <<'PY'
+			python3 - "$output_file" "$target" "$repo" "$family" "$alias" "$profile" "$result_timestamp" <<'PY'
 import json
 import sys
 
@@ -3882,106 +3940,106 @@ with open(output_file, "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 
-      printf 'Wrote benchmark result: %s\n' "$output_file"
-    done
-    return 0
-  fi
+			printf 'Wrote benchmark result: %s\n' "$output_file"
+		done
+		return 0
+	fi
 
-  if [[ "$dry_run" != true ]]; then
-    case "$target" in
-      remote:*) ;;
-      *)
-        printf '%s\n' 'benchmark execution currently requires a remote:<host> target; use --dry-run for a plan' >&2
-        return 2
-        ;;
-    esac
+	if [[ "$dry_run" != true ]]; then
+		case "$target" in
+		remote:*) ;;
+		*)
+			printf '%s\n' 'benchmark execution currently requires a remote:<host> target; use --dry-run for a plan' >&2
+			return 2
+			;;
+		esac
 
-    if [[ "$full" == true ]]; then
-      local trials_tsv=''
-      local -a trial_matrix=(
-        'speed|32768|4096|256'
-        'balanced|49152|4096|256'
-        'reliable|65536|4096|256'
-        'tiny|65536|4096|256'
-      )
-      local trial_number=0
-      local trial_total="${#trial_matrix[@]}"
-      local trial_spec trial_profile trial_ctx trial_batch trial_ubatch
-      local benchmark_output line key value
-      local load_status prompt_tok_s decode_tok_s prompt_tokens decode_tokens ctx batch ubatch ngl result_cache_type_k result_cache_type_v command_text log_file
-      printf 'Full benchmark start\n'
-      printf 'repo=%s\n' "$repo"
-      printf 'family=%s\n' "$family"
-      printf 'alias=%s\n' "$alias"
-      printf 'target=%s\n' "$target"
-      printf 'quant=%s\n' "$quant"
-      if [[ -n "$hf_file" ]]; then
-        printf 'hf_file=%s\n' "$hf_file"
-      fi
-      if [[ -n "$cache_type_k" ]]; then
-        printf 'cache_type_k=%s\n' "$cache_type_k"
-      fi
-      if [[ -n "$cache_type_v" ]]; then
-        printf 'cache_type_v=%s\n' "$cache_type_v"
-      fi
-      printf 'trials=%s\n' "$trial_total"
-      for trial_spec in "${trial_matrix[@]}"; do
-        IFS='|' read -r trial_profile trial_ctx trial_batch trial_ubatch <<<"$trial_spec"
-        trial_number=$((trial_number + 1))
-        printf 'running trial=%s/%s profile=%s ctx=%s batch=%s ubatch=%s ngl=999\n' \
-          "$trial_number" "$trial_total" "$trial_profile" "$trial_ctx" "$trial_batch" "$trial_ubatch"
-        benchmark_output="$(run_remote_benchmark "${target#remote:}" "$repo" "$family" "$alias" "$trial_profile" "$quant" "$hf_file" "$trial_ctx" "$trial_batch" "$trial_ubatch" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$responsive" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
-        load_status=''
-        prompt_tok_s=''
-        decode_tok_s=''
-        prompt_tokens=''
-        decode_tokens=''
-        ctx=''
-        batch=''
-        ubatch=''
-        ngl=''
-        result_cache_type_k=''
-        result_cache_type_v=''
-        command_text=''
-        log_file=''
-        while IFS= read -r line; do
-          key="${line%%=*}"
-          value="${line#*=}"
-          case "$key" in
-            load_status) load_status="$value" ;;
-            prompt_tok_s) prompt_tok_s="$value" ;;
-            decode_tok_s) decode_tok_s="$value" ;;
-            prompt_tokens) prompt_tokens="$value" ;;
-            decode_tokens) decode_tokens="$value" ;;
-            ctx) ctx="$value" ;;
-            batch) batch="$value" ;;
-            ubatch) ubatch="$value" ;;
-            ngl) ngl="$value" ;;
-            cache_type_k) result_cache_type_k="$value" ;;
-            cache_type_v) result_cache_type_v="$value" ;;
-            command) command_text="$value" ;;
-            log_file) log_file="$value" ;;
-          esac
-        done <<<"$benchmark_output"
-        trials_tsv+="${trial_number}"$'\t'"${trial_profile}"$'\t'"${ctx:-$trial_ctx}"$'\t'"${batch:-$trial_batch}"$'\t'"${ubatch:-$trial_ubatch}"$'\t'"${ngl:-999}"$'\t'"${load_status:-unknown}"$'\t'"${prompt_tok_s}"$'\t'"${decode_tok_s}"$'\t'"${prompt_tokens}"$'\t'"${decode_tokens}"$'\t'"${result_cache_type_k:-$cache_type_k}"$'\t'"${result_cache_type_v:-$cache_type_v}"$'\t'"${command_text}"$'\t'"${log_file}"$'\n'
-        printf 'trial=%s profile=%s ctx=%s batch=%s ubatch=%s load_status=%s prompt_tok_s=%s decode_tok_s=%s prompt_tokens=%s decode_tokens=%s\n' \
-          "$trial_number" "$trial_profile" "${ctx:-$trial_ctx}" "${batch:-$trial_batch}" "${ubatch:-$trial_ubatch}" "${load_status:-unknown}" "${prompt_tok_s:-null}" "${decode_tok_s:-null}" "${prompt_tokens:-null}" "${decode_tokens:-null}"
-      done
+		if [[ "$full" == true ]]; then
+			local trials_tsv=''
+			local -a trial_matrix=(
+				'speed|32768|4096|256'
+				'balanced|49152|4096|256'
+				'reliable|65536|4096|256'
+				'tiny|65536|4096|256'
+			)
+			local trial_number=0
+			local trial_total="${#trial_matrix[@]}"
+			local trial_spec trial_profile trial_ctx trial_batch trial_ubatch
+			local benchmark_output line key value
+			local load_status prompt_tok_s decode_tok_s prompt_tokens decode_tokens ctx batch ubatch ngl result_cache_type_k result_cache_type_v command_text log_file
+			printf 'Full benchmark start\n'
+			printf 'repo=%s\n' "$repo"
+			printf 'family=%s\n' "$family"
+			printf 'alias=%s\n' "$alias"
+			printf 'target=%s\n' "$target"
+			printf 'quant=%s\n' "$quant"
+			if [[ -n "$hf_file" ]]; then
+				printf 'hf_file=%s\n' "$hf_file"
+			fi
+			if [[ -n "$cache_type_k" ]]; then
+				printf 'cache_type_k=%s\n' "$cache_type_k"
+			fi
+			if [[ -n "$cache_type_v" ]]; then
+				printf 'cache_type_v=%s\n' "$cache_type_v"
+			fi
+			printf 'trials=%s\n' "$trial_total"
+			for trial_spec in "${trial_matrix[@]}"; do
+				IFS='|' read -r trial_profile trial_ctx trial_batch trial_ubatch <<<"$trial_spec"
+				trial_number=$((trial_number + 1))
+				printf 'running trial=%s/%s profile=%s ctx=%s batch=%s ubatch=%s ngl=999\n' \
+					"$trial_number" "$trial_total" "$trial_profile" "$trial_ctx" "$trial_batch" "$trial_ubatch"
+				benchmark_output="$(run_remote_benchmark "${target#remote:}" "$repo" "$family" "$alias" "$trial_profile" "$quant" "$hf_file" "$trial_ctx" "$trial_batch" "$trial_ubatch" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$responsive" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
+				load_status=''
+				prompt_tok_s=''
+				decode_tok_s=''
+				prompt_tokens=''
+				decode_tokens=''
+				ctx=''
+				batch=''
+				ubatch=''
+				ngl=''
+				result_cache_type_k=''
+				result_cache_type_v=''
+				command_text=''
+				log_file=''
+				while IFS= read -r line; do
+					key="${line%%=*}"
+					value="${line#*=}"
+					case "$key" in
+					load_status) load_status="$value" ;;
+					prompt_tok_s) prompt_tok_s="$value" ;;
+					decode_tok_s) decode_tok_s="$value" ;;
+					prompt_tokens) prompt_tokens="$value" ;;
+					decode_tokens) decode_tokens="$value" ;;
+					ctx) ctx="$value" ;;
+					batch) batch="$value" ;;
+					ubatch) ubatch="$value" ;;
+					ngl) ngl="$value" ;;
+					cache_type_k) result_cache_type_k="$value" ;;
+					cache_type_v) result_cache_type_v="$value" ;;
+					command) command_text="$value" ;;
+					log_file) log_file="$value" ;;
+					esac
+				done <<<"$benchmark_output"
+				trials_tsv+="${trial_number}"$'\t'"${trial_profile}"$'\t'"${ctx:-$trial_ctx}"$'\t'"${batch:-$trial_batch}"$'\t'"${ubatch:-$trial_ubatch}"$'\t'"${ngl:-999}"$'\t'"${load_status:-unknown}"$'\t'"${prompt_tok_s}"$'\t'"${decode_tok_s}"$'\t'"${prompt_tokens}"$'\t'"${decode_tokens}"$'\t'"${result_cache_type_k:-$cache_type_k}"$'\t'"${result_cache_type_v:-$cache_type_v}"$'\t'"${command_text}"$'\t'"${log_file}"$'\n'
+				printf 'trial=%s profile=%s ctx=%s batch=%s ubatch=%s load_status=%s prompt_tok_s=%s decode_tok_s=%s prompt_tokens=%s decode_tokens=%s\n' \
+					"$trial_number" "$trial_profile" "${ctx:-$trial_ctx}" "${batch:-$trial_batch}" "${ubatch:-$trial_ubatch}" "${load_status:-unknown}" "${prompt_tok_s:-null}" "${decode_tok_s:-null}" "${prompt_tokens:-null}" "${decode_tokens:-null}"
+			done
 
-      local timestamp result_timestamp safe_family output_file unique_suffix recommendations_output
-      timestamp="$(date +%Y%m%d-%H%M%S)"
-      result_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      safe_family="${family//[^A-Za-z0-9_.-]/-}"
-      unique_suffix="$$"
-      output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-full-${unique_suffix}.json"
-      while [[ -e "$output_file" ]]; do
-        unique_suffix="${unique_suffix}x"
-        output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-full-${unique_suffix}.json"
-      done
-      reject_symlink_state_file "$output_file" || return 1
+			local timestamp result_timestamp safe_family output_file unique_suffix recommendations_output
+			timestamp="$(date +%Y%m%d-%H%M%S)"
+			result_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+			safe_family="${family//[^A-Za-z0-9_.-]/-}"
+			unique_suffix="$$"
+			output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-full-${unique_suffix}.json"
+			while [[ -e "$output_file" ]]; do
+				unique_suffix="${unique_suffix}x"
+				output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-full-${unique_suffix}.json"
+			done
+			reject_symlink_state_file "$output_file" || return 1
 
-      recommendations_output="$(
-        TRIALS_TSV="$trials_tsv" python3 - "$output_file" "$target" "$repo" "$family" "$alias" "$quant" "$hf_file" "$cache_type_k" "$cache_type_v" "$result_timestamp" <<'PY'
+			recommendations_output="$(
+				TRIALS_TSV="$trials_tsv" python3 - "$output_file" "$target" "$repo" "$family" "$alias" "$quant" "$hf_file" "$cache_type_k" "$cache_type_v" "$result_timestamp" <<'PY'
 import json
 import os
 import sys
@@ -4038,8 +4096,12 @@ for line in raw:
 successful = [
     trial for trial in trials
     if trial["load_status"] == "success"
+    and trial.get("prompt_tok_s") is not None
+    and trial.get("prompt_tok_s") >= 25.0
     and trial.get("decode_tok_s") is not None
-    and (trial.get("decode_tokens") or 0) >= 128
+    and trial.get("decode_tok_s") >= 4.5
+    and (trial.get("prompt_tokens") or 0) >= 48
+    and (trial.get("decode_tokens") or 0) >= 64
 ]
 
 def copy_trial(trial):
@@ -4086,77 +4148,77 @@ for name, trial in recommendations.items():
     else:
         print(f"recommendation={name} none")
 PY
-      )"
-      printf 'Full benchmark result\n'
-      printf 'repo=%s\n' "$repo"
-      printf 'family=%s\n' "$family"
-      printf 'alias=%s\n' "$alias"
-      printf 'target=%s\n' "$target"
-      printf '%s\n' "$recommendations_output"
-      printf 'result_file=%s\n' "$output_file"
-      return 0
-    fi
+			)"
+			printf 'Full benchmark result\n'
+			printf 'repo=%s\n' "$repo"
+			printf 'family=%s\n' "$family"
+			printf 'alias=%s\n' "$alias"
+			printf 'target=%s\n' "$target"
+			printf '%s\n' "$recommendations_output"
+			printf 'result_file=%s\n' "$output_file"
+			return 0
+		fi
 
-    local benchmark_output
-    local load_status=''
-    local prompt_tok_s=''
-    local decode_tok_s=''
-    local prompt_tokens=''
-    local decode_tokens=''
-    local ctx=''
-    local batch=''
-    local ubatch=''
-    local ngl=''
-    local command_text=''
-    local log_file=''
-    local result_backend=''
-    local result_visible_devices=''
-    local result_split_mode=''
-    local result_tensor_split=''
-    local result_cache_type_k=''
-    local result_cache_type_v=''
-    local result_ctx_shift=''
-    local line key value
-    benchmark_output="$(run_remote_benchmark "${target#remote:}" "$repo" "$family" "$alias" "${profile_list[0]}" "$quant" "$hf_file" "$ctx_override" "$batch_override" "$ubatch_override" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$responsive" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
-    while IFS= read -r line; do
-      key="${line%%=*}"
-      value="${line#*=}"
-      case "$key" in
-        load_status) load_status="$value" ;;
-        prompt_tok_s) prompt_tok_s="$value" ;;
-        decode_tok_s) decode_tok_s="$value" ;;
-        prompt_tokens) prompt_tokens="$value" ;;
-        decode_tokens) decode_tokens="$value" ;;
-        ctx) ctx="$value" ;;
-        batch) batch="$value" ;;
-        ubatch) ubatch="$value" ;;
-        ngl) ngl="$value" ;;
-        backend) result_backend="$value" ;;
-        visible_devices) result_visible_devices="$value" ;;
-        split_mode) result_split_mode="$value" ;;
-        tensor_split) result_tensor_split="$value" ;;
-        cache_type_k) result_cache_type_k="$value" ;;
-        cache_type_v) result_cache_type_v="$value" ;;
-        ctx_shift) result_ctx_shift="$value" ;;
-        command) command_text="$value" ;;
-        log_file) log_file="$value" ;;
-      esac
-    done <<<"$benchmark_output"
+		local benchmark_output
+		local load_status=''
+		local prompt_tok_s=''
+		local decode_tok_s=''
+		local prompt_tokens=''
+		local decode_tokens=''
+		local ctx=''
+		local batch=''
+		local ubatch=''
+		local ngl=''
+		local command_text=''
+		local log_file=''
+		local result_backend=''
+		local result_visible_devices=''
+		local result_split_mode=''
+		local result_tensor_split=''
+		local result_cache_type_k=''
+		local result_cache_type_v=''
+		local result_ctx_shift=''
+		local line key value
+		benchmark_output="$(run_remote_benchmark "${target#remote:}" "$repo" "$family" "$alias" "${profile_list[0]}" "$quant" "$hf_file" "$ctx_override" "$batch_override" "$ubatch_override" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$responsive" "$cache_type_k" "$cache_type_v" "$ctx_shift")"
+		while IFS= read -r line; do
+			key="${line%%=*}"
+			value="${line#*=}"
+			case "$key" in
+			load_status) load_status="$value" ;;
+			prompt_tok_s) prompt_tok_s="$value" ;;
+			decode_tok_s) decode_tok_s="$value" ;;
+			prompt_tokens) prompt_tokens="$value" ;;
+			decode_tokens) decode_tokens="$value" ;;
+			ctx) ctx="$value" ;;
+			batch) batch="$value" ;;
+			ubatch) ubatch="$value" ;;
+			ngl) ngl="$value" ;;
+			backend) result_backend="$value" ;;
+			visible_devices) result_visible_devices="$value" ;;
+			split_mode) result_split_mode="$value" ;;
+			tensor_split) result_tensor_split="$value" ;;
+			cache_type_k) result_cache_type_k="$value" ;;
+			cache_type_v) result_cache_type_v="$value" ;;
+			ctx_shift) result_ctx_shift="$value" ;;
+			command) command_text="$value" ;;
+			log_file) log_file="$value" ;;
+			esac
+		done <<<"$benchmark_output"
 
-    local timestamp result_timestamp safe_family safe_profile output_file unique_suffix
-    timestamp="$(date +%Y%m%d-%H%M%S)"
-    result_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    safe_family="${family//[^A-Za-z0-9_.-]/-}"
-    safe_profile="${profile_list[0]//[^A-Za-z0-9_.-]/-}"
-    unique_suffix="$$"
-    output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
-    while [[ -e "$output_file" ]]; do
-      unique_suffix="${unique_suffix}x"
-      output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
-    done
-    reject_symlink_state_file "$output_file" || return 1
+		local timestamp result_timestamp safe_family safe_profile output_file unique_suffix
+		timestamp="$(date +%Y%m%d-%H%M%S)"
+		result_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+		safe_family="${family//[^A-Za-z0-9_.-]/-}"
+		safe_profile="${profile_list[0]//[^A-Za-z0-9_.-]/-}"
+		unique_suffix="$$"
+		output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
+		while [[ -e "$output_file" ]]; do
+			unique_suffix="${unique_suffix}x"
+			output_file="$runs_dir/benchmarks/${timestamp}-${safe_family}-${safe_profile}-${unique_suffix}.json"
+		done
+		reject_symlink_state_file "$output_file" || return 1
 
-    python3 - "$output_file" "$target" "$repo" "$family" "$alias" "${profile_list[0]}" "$ctx" "$batch" "$ubatch" "$ngl" "$load_status" "$prompt_tok_s" "$decode_tok_s" "$prompt_tokens" "$decode_tokens" "$command_text" "$result_timestamp" "$quant" "$hf_file" "$result_backend" "$result_visible_devices" "$result_split_mode" "$result_tensor_split" "${result_cache_type_k:-$cache_type_k}" "${result_cache_type_v:-$cache_type_v}" "${result_ctx_shift:-$ctx_shift}" <<'PY'
+		python3 - "$output_file" "$target" "$repo" "$family" "$alias" "${profile_list[0]}" "$ctx" "$batch" "$ubatch" "$ngl" "$load_status" "$prompt_tok_s" "$decode_tok_s" "$prompt_tokens" "$decode_tokens" "$command_text" "$result_timestamp" "$quant" "$hf_file" "$result_backend" "$result_visible_devices" "$result_split_mode" "$result_tensor_split" "${result_cache_type_k:-$cache_type_k}" "${result_cache_type_v:-$cache_type_v}" "${result_ctx_shift:-$ctx_shift}" <<'PY'
 import json
 import sys
 
@@ -4233,108 +4295,108 @@ with open(output_file, "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 
-    if [[ "$load_status" == success && -n "$prompt_tok_s" && -n "$decode_tok_s" && -n "$decode_tokens" && "$decode_tokens" -ge 128 ]]; then
-      printf 'Benchmark result\n'
-    else
-      printf 'Benchmark did not complete\n'
-    fi
-    printf 'repo=%s\n' "$repo"
-    printf 'family=%s\n' "$family"
-    printf 'alias=%s\n' "$alias"
-    printf 'profile=%s\n' "${profile_list[0]}"
-    printf 'target=%s\n' "$target"
-    printf 'load_status=%s\n' "${load_status:-unknown}"
-    printf 'prompt_tok_s=%s\n' "${prompt_tok_s:-null}"
-    printf 'decode_tok_s=%s\n' "${decode_tok_s:-null}"
-    printf 'prompt_tokens=%s\n' "${prompt_tokens:-null}"
-    printf 'decode_tokens=%s\n' "${decode_tokens:-null}"
-    if [[ "$load_status" != success || -z "$prompt_tok_s" || -z "$decode_tok_s" || -z "$decode_tokens" || "$decode_tokens" -lt 128 ]]; then
-      printf 'reason=%s\n' 'model did not become ready or did not emit throughput metrics'
-    fi
-    printf 'log_file=%s\n' "${log_file:-unknown}"
-    printf 'result_file=%s\n' "$output_file"
-    return 0
-  fi
+		if [[ "$load_status" == success && -n "$prompt_tok_s" && -n "$decode_tok_s" && -n "$prompt_tokens" && -n "$decode_tokens" && "$prompt_tokens" -ge 48 && "$decode_tokens" -ge 64 ]]; then
+			printf 'Benchmark result\n'
+		else
+			printf 'Benchmark did not complete\n'
+		fi
+		printf 'repo=%s\n' "$repo"
+		printf 'family=%s\n' "$family"
+		printf 'alias=%s\n' "$alias"
+		printf 'profile=%s\n' "${profile_list[0]}"
+		printf 'target=%s\n' "$target"
+		printf 'load_status=%s\n' "${load_status:-unknown}"
+		printf 'prompt_tok_s=%s\n' "${prompt_tok_s:-null}"
+		printf 'decode_tok_s=%s\n' "${decode_tok_s:-null}"
+		printf 'prompt_tokens=%s\n' "${prompt_tokens:-null}"
+		printf 'decode_tokens=%s\n' "${decode_tokens:-null}"
+		if [[ "$load_status" != success || -z "$prompt_tok_s" || -z "$decode_tok_s" || -z "$prompt_tokens" || -z "$decode_tokens" || "$prompt_tokens" -lt 48 || "$decode_tokens" -lt 64 ]]; then
+			printf 'reason=%s\n' 'model did not become ready, was too slow, or did not emit enough throughput metrics'
+		fi
+		printf 'log_file=%s\n' "${log_file:-unknown}"
+		printf 'result_file=%s\n' "$output_file"
+		return 0
+	fi
 
-  printf 'Benchmark plan\n'
-  printf 'repo=%s\n' "$repo"
-  printf 'family=%s\n' "$family"
-  printf 'alias=%s\n' "$alias"
-  printf 'profiles=%s\n' "$profiles"
-  printf 'quant=%s\n' "$quant"
-  if [[ -n "$hf_file" ]]; then
-    printf 'hf_file=%s\n' "$hf_file"
-  fi
-  if [[ -n "$cache_type_k" ]]; then
-    printf 'cache_type_k=%s\n' "$cache_type_k"
-  fi
-  if [[ -n "$cache_type_v" ]]; then
-    printf 'cache_type_v=%s\n' "$cache_type_v"
-  fi
-  printf 'target=%s\n' "$target"
+	printf 'Benchmark plan\n'
+	printf 'repo=%s\n' "$repo"
+	printf 'family=%s\n' "$family"
+	printf 'alias=%s\n' "$alias"
+	printf 'profiles=%s\n' "$profiles"
+	printf 'quant=%s\n' "$quant"
+	if [[ -n "$hf_file" ]]; then
+		printf 'hf_file=%s\n' "$hf_file"
+	fi
+	if [[ -n "$cache_type_k" ]]; then
+		printf 'cache_type_k=%s\n' "$cache_type_k"
+	fi
+	if [[ -n "$cache_type_v" ]]; then
+		printf 'cache_type_v=%s\n' "$cache_type_v"
+	fi
+	printf 'target=%s\n' "$target"
 }
 
 cmd_accept() {
-  local benchmark_file=''
-  local dry_run=false
-  local create_vulkan=false
-  local json_fields
-  local repo
-  local family
-  local alias
-  local target
-  local profile
-  local start_script
-  local launcher_file
-  local max_start=0
-  local start_path
-  local start_name
-  local start_number
-  local start_value
-  local accepted_metadata_file
+	local benchmark_file=''
+	local dry_run=false
+	local create_vulkan=false
+	local json_fields
+	local repo
+	local family
+	local alias
+	local target
+	local profile
+	local start_script
+	local launcher_file
+	local max_start=0
+	local start_path
+	local start_name
+	local start_number
+	local start_value
+	local accepted_metadata_file
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --dry-run)
-        dry_run=true
-        shift
-        ;;
-      --vulkan)
-        create_vulkan=true
-        shift
-        ;;
-      -h | --help)
-        printf '%s\n' 'Usage: model-manager accept [--dry-run] [--vulkan] BENCHMARK.json'
-        printf '%s\n' '  --vulkan  also create a Vulkan backend metadata/launcher/oc-* peer'
-        return 0
-        ;;
-      --*)
-        printf 'Unknown accept option: %s\n' "$1" >&2
-        return 2
-        ;;
-      *)
-        if [[ -n "$benchmark_file" ]]; then
-          printf 'accept accepts one benchmark JSON file, got extra argument: %s\n' "$1" >&2
-          return 2
-        fi
-        benchmark_file="$1"
-        shift
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--vulkan)
+			create_vulkan=true
+			shift
+			;;
+		-h | --help)
+			printf '%s\n' 'Usage: model-manager accept [--dry-run] [--vulkan] BENCHMARK.json'
+			printf '%s\n' '  --vulkan  also create a Vulkan backend metadata/launcher/oc-* peer'
+			return 0
+			;;
+		--*)
+			printf 'Unknown accept option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			if [[ -n "$benchmark_file" ]]; then
+				printf 'accept accepts one benchmark JSON file, got extra argument: %s\n' "$1" >&2
+				return 2
+			fi
+			benchmark_file="$1"
+			shift
+			;;
+		esac
+	done
 
-  if [[ -z "$benchmark_file" ]]; then
-    printf '%s\n' 'accept requires a benchmark JSON file' >&2
-    return 2
-  fi
+	if [[ -z "$benchmark_file" ]]; then
+		printf '%s\n' 'accept requires a benchmark JSON file' >&2
+		return 2
+	fi
 
-  if ! command -v python3 >/dev/null 2>&1; then
-    printf '%s\n' 'python3 is required to parse benchmark JSON' >&2
-    return 1
-  fi
+	if ! command -v python3 >/dev/null 2>&1; then
+		printf '%s\n' 'python3 is required to parse benchmark JSON' >&2
+		return 1
+	fi
 
-  if ! json_fields="$(
-    python3 - "$benchmark_file" <<'PY'
+	if ! json_fields="$(
+		python3 - "$benchmark_file" <<'PY'
 import json
 import os
 import re
@@ -4387,6 +4449,21 @@ def has_control_chars(value):
 
 if result.get("load_status") != "success":
     raise SystemExit(f"benchmark JSON load_status is not success: {result.get('load_status')}")
+quality_checks = (
+    ("prompt_tokens", 48, "integer"),
+    ("decode_tokens", 64, "integer"),
+    ("prompt_tok_s", 25.0, "number"),
+    ("decode_tok_s", 4.5, "number"),
+)
+for key, minimum, kind in quality_checks:
+    value = result.get(key)
+    if kind == "integer":
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise SystemExit(f"benchmark JSON field must be an integer: {key}")
+    elif not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise SystemExit(f"benchmark JSON field must be a number: {key}")
+    if value < minimum:
+        raise SystemExit(f"benchmark JSON field below acceptance threshold: {key}={value} < {minimum}")
 for key, minimum in (("ctx", 1), ("batch", 1), ("ubatch", 1), ("ngl", 0)):
     if key in result and not isinstance(result[key], int):
         raise SystemExit(f"benchmark JSON field must be an integer: {key}")
@@ -4451,94 +4528,94 @@ values.extend(str(result.get(key) or "") for key in ("ctx", "batch", "ubatch", "
 values.extend([backend, visible_devices, split_mode, tensor_split, ctx_shift])
 print("\x1f".join(values))
 PY
-  )"; then
-    return 1
-  fi
+	)"; then
+		return 1
+	fi
 
-  local ctx batch ubatch ngl quant hf_file cache_type_k cache_type_v backend visible_devices split_mode tensor_split ctx_shift
-  IFS=$'\x1f' read -r repo family alias target profile ctx batch ubatch ngl quant hf_file cache_type_k cache_type_v backend visible_devices split_mode tensor_split ctx_shift <<<"$json_fields"
+	local ctx batch ubatch ngl quant hf_file cache_type_k cache_type_v backend visible_devices split_mode tensor_split ctx_shift
+	IFS=$'\x1f' read -r repo family alias target profile ctx batch ubatch ngl quant hf_file cache_type_k cache_type_v backend visible_devices split_mode tensor_split ctx_shift <<<"$json_fields"
 
-  ensure_runs_dirs
+	ensure_runs_dirs
 
-  local existing_launcher
-  existing_launcher="$(find_existing_accepted_launcher "$repo" "$family" "$alias")"
-  if [[ -n "$existing_launcher" ]]; then
-    if [[ "$dry_run" == true ]]; then
-      printf 'Accept plan\n'
-      printf 'repo=%s\n' "$repo"
-      printf 'family=%s\n' "$family"
-      printf 'alias=%s\n' "$alias"
-      printf 'target=%s\n' "$target"
-      printf 'profile=%s\n' "$profile"
-      printf 'launcher_file=%s\n' "${existing_launcher%% *}"
-      printf 'Dry-run actions:\n'
-      printf 'would update accepted metadata under %s\n' "$runs_dir/accepted"
-      if [[ "$create_vulkan" == true ]]; then
-        printf 'would also create/update Vulkan equivalent metadata/launcher/shortcut\n'
-      fi
-      return 0
-    fi
-    local removed_selection_count
-    removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
-    ensure_launcher_model_log_redirect "${existing_launcher%% *}"
-    update_existing_launcher_runtime "${existing_launcher%% *}" "$ctx" "$batch" "$ubatch" "$ngl" "$tensor_split"
-    accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target")"
-    printf 'Accepted benchmark already has launcher\n'
-    printf 'repo=%s\n' "$repo"
-    printf 'family=%s\n' "$family"
-    printf 'alias=%s\n' "$alias"
-    printf 'target=%s\n' "$target"
-    printf 'profile=%s\n' "$profile"
-    printf 'start_script=%s\n' "${existing_launcher%% *}"
-    printf 'accepted_metadata_file=%s\n' "$accepted_metadata_file"
-    if [[ "$create_vulkan" == true ]]; then
-      write_vulkan_equivalent_for_accepted "$accepted_metadata_file"
-    fi
-    printf 'removed_selection_count=%s\n' "$removed_selection_count"
-    return 0
-  fi
+	local existing_launcher
+	existing_launcher="$(find_existing_accepted_launcher "$repo" "$family" "$alias")"
+	if [[ -n "$existing_launcher" ]]; then
+		if [[ "$dry_run" == true ]]; then
+			printf 'Accept plan\n'
+			printf 'repo=%s\n' "$repo"
+			printf 'family=%s\n' "$family"
+			printf 'alias=%s\n' "$alias"
+			printf 'target=%s\n' "$target"
+			printf 'profile=%s\n' "$profile"
+			printf 'launcher_file=%s\n' "${existing_launcher%% *}"
+			printf 'Dry-run actions:\n'
+			printf 'would update accepted metadata under %s\n' "$runs_dir/accepted"
+			if [[ "$create_vulkan" == true ]]; then
+				printf 'would also create/update Vulkan equivalent metadata/launcher/shortcut\n'
+			fi
+			return 0
+		fi
+		local removed_selection_count
+		removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
+		ensure_launcher_model_log_redirect "${existing_launcher%% *}"
+		update_existing_launcher_runtime "${existing_launcher%% *}" "$ctx" "$batch" "$ubatch" "$ngl" "$tensor_split"
+		accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target")"
+		printf 'Accepted benchmark already has launcher\n'
+		printf 'repo=%s\n' "$repo"
+		printf 'family=%s\n' "$family"
+		printf 'alias=%s\n' "$alias"
+		printf 'target=%s\n' "$target"
+		printf 'profile=%s\n' "$profile"
+		printf 'start_script=%s\n' "${existing_launcher%% *}"
+		printf 'accepted_metadata_file=%s\n' "$accepted_metadata_file"
+		if [[ "$create_vulkan" == true ]]; then
+			write_vulkan_equivalent_for_accepted "$accepted_metadata_file"
+		fi
+		printf 'removed_selection_count=%s\n' "$removed_selection_count"
+		return 0
+	fi
 
-  shopt -s nullglob
-  for start_path in "$repo_root"/scripts/start*.sh "$generated_launcher_dir"/start*.sh; do
-    start_name="${start_path##*/}"
-    start_number="${start_name#start}"
-    start_number="${start_number%.sh}"
-    if [[ -n "$start_number" && "$start_number" != *[!0-9]* ]]; then
-      start_value=$((10#$start_number))
-      if ((start_value > max_start)); then
-        max_start="$start_value"
-      fi
-    fi
-  done
-  shopt -u nullglob
-  launcher_file="${LOCAL_LLM_ACCEPT_START_SCRIPT:-$generated_launcher_dir/start$((max_start + 1)).sh}"
-  start_script="$launcher_file"
+	shopt -s nullglob
+	for start_path in "$repo_root"/scripts/start*.sh "$generated_launcher_dir"/start*.sh; do
+		start_name="${start_path##*/}"
+		start_number="${start_name#start}"
+		start_number="${start_number%.sh}"
+		if [[ -n "$start_number" && "$start_number" != *[!0-9]* ]]; then
+			start_value=$((10#$start_number))
+			if ((start_value > max_start)); then
+				max_start="$start_value"
+			fi
+		fi
+	done
+	shopt -u nullglob
+	launcher_file="${LOCAL_LLM_ACCEPT_START_SCRIPT:-$generated_launcher_dir/start$((max_start + 1)).sh}"
+	start_script="$launcher_file"
 
-  if [[ "$dry_run" == true ]]; then
-    printf 'Accept plan\n'
-    printf 'repo=%s\n' "$repo"
-    printf 'family=%s\n' "$family"
-    printf 'alias=%s\n' "$alias"
-    printf 'target=%s\n' "$target"
-    printf 'profile=%s\n' "$profile"
-    printf 'launcher_file=%s\n' "$launcher_file"
-    printf 'Dry-run actions:\n'
-    printf 'would create %s\n' "$launcher_file"
-    printf 'would write accepted metadata under %s\n' "$runs_dir/accepted"
-    if [[ "$create_vulkan" == true ]]; then
-      printf 'would also create Vulkan equivalent metadata/launcher/shortcut\n'
-    fi
-    return 0
-  fi
+	if [[ "$dry_run" == true ]]; then
+		printf 'Accept plan\n'
+		printf 'repo=%s\n' "$repo"
+		printf 'family=%s\n' "$family"
+		printf 'alias=%s\n' "$alias"
+		printf 'target=%s\n' "$target"
+		printf 'profile=%s\n' "$profile"
+		printf 'launcher_file=%s\n' "$launcher_file"
+		printf 'Dry-run actions:\n'
+		printf 'would create %s\n' "$launcher_file"
+		printf 'would write accepted metadata under %s\n' "$runs_dir/accepted"
+		if [[ "$create_vulkan" == true ]]; then
+			printf 'would also create Vulkan equivalent metadata/launcher/shortcut\n'
+		fi
+		return 0
+	fi
 
-  validate_launcher_write_target "$launcher_file" || return 1
-  if [[ -e "$launcher_file" ]]; then
-    printf 'accept launcher already exists: %s\n' "$launcher_file" >&2
-    return 1
-  fi
-  mkdir -p "${launcher_file%/*}"
+	validate_launcher_write_target "$launcher_file" || return 1
+	if [[ -e "$launcher_file" ]]; then
+		printf 'accept launcher already exists: %s\n' "$launcher_file" >&2
+		return 1
+	fi
+	mkdir -p "${launcher_file%/*}"
 
-  python3 - "$launcher_file" "$repo" "$family" "$alias" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" <<'PY'
+	python3 - "$launcher_file" "$repo" "$family" "$alias" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" <<'PY'
 import shlex
 import sys
 import re
@@ -4605,6 +4682,10 @@ else:
 lines.extend([
     "  --host 0.0.0.0 \\",
     "  --port 8080 \\",
+    "  --timeout 600 \\",
+    "  --threads-http 2 \\",
+    "  --parallel 1 \\",
+    "  --no-cont-batching \\",
     '  -ngl "$ngl" \\',
 ])
 if backend:
@@ -4622,17 +4703,32 @@ if cache_type_v:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", cache_type_v):
         raise SystemExit("cache_type_v must be a safe llama.cpp cache type")
     lines.append(f"  -ctv {shlex.quote(cache_type_v)} \\")
+sampler_temp = "0.6"
+sampler_top_p = "0.95"
+sampler_top_k = "20"
+repo_family_alias_lower = f"{repo} {family} {alias}".lower()
+if family.lower().startswith("gemma") or alias.lower().startswith("gemma") or "gemma" in repo.lower():
+    sampler_temp = "1.0"
+    sampler_top_p = "0.95"
+    sampler_top_k = "64"
 lines.extend([
+    "  --cache-ram 16384 \\",
+    "  --ctx-checkpoints 64 \\",
+    "  --checkpoint-every-n-tokens 4096 \\",
     '  -c "$ctx" \\',
     "  --flash-attn on \\",
     '  -ub "$ubatch" \\',
     '  -b "$batch" \\',
+])
+if "gemma-4-12b" in repo_family_alias_lower:
+    lines.append("  --no-mmproj \\")
+lines.extend([
     '  --threads "$(nproc)" \\',
     "  --prio 2 \\",
     "  --no-warmup \\",
-    "  --temp 0.6 \\",
-    "  --top-p 0.95 \\",
-    "  --top-k 20 \\",
+    f"  --temp {sampler_temp} \\",
+    f"  --top-p {sampler_top_p} \\",
+    f"  --top-k {sampler_top_k} \\",
     "  --min-p 0.0 \\",
     "  --presence-penalty 0.0 \\",
     f"  --alias {shlex.quote(alias)} \\",
@@ -4642,129 +4738,129 @@ with open(path, "w", encoding="utf-8") as handle:
     handle.write("\n".join(lines))
     handle.write("\n")
 PY
-  chmod +x "$launcher_file"
-  local removed_selection_count
-  removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
-  accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target")"
+	chmod +x "$launcher_file"
+	local removed_selection_count
+	removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
+	accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "$launcher_file" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target")"
 
-  printf 'Accepted benchmark\n'
-  printf 'repo=%s\n' "$repo"
-  printf 'family=%s\n' "$family"
-  printf 'alias=%s\n' "$alias"
-  printf 'target=%s\n' "$target"
-  printf 'profile=%s\n' "$profile"
-  printf 'ctx=%s\n' "$ctx"
-  printf 'batch=%s\n' "$batch"
-  printf 'ubatch=%s\n' "$ubatch"
-  printf 'ngl=%s\n' "$ngl"
-  printf 'launcher_file=%s\n' "$launcher_file"
-  printf 'start_script=%s\n' "$start_script"
-  printf 'accepted_metadata_file=%s\n' "$accepted_metadata_file"
-  if [[ "$create_vulkan" == true ]]; then
-    write_vulkan_equivalent_for_accepted "$accepted_metadata_file"
-  fi
-  printf 'removed_selection_count=%s\n' "$removed_selection_count"
+	printf 'Accepted benchmark\n'
+	printf 'repo=%s\n' "$repo"
+	printf 'family=%s\n' "$family"
+	printf 'alias=%s\n' "$alias"
+	printf 'target=%s\n' "$target"
+	printf 'profile=%s\n' "$profile"
+	printf 'ctx=%s\n' "$ctx"
+	printf 'batch=%s\n' "$batch"
+	printf 'ubatch=%s\n' "$ubatch"
+	printf 'ngl=%s\n' "$ngl"
+	printf 'launcher_file=%s\n' "$launcher_file"
+	printf 'start_script=%s\n' "$start_script"
+	printf 'accepted_metadata_file=%s\n' "$accepted_metadata_file"
+	if [[ "$create_vulkan" == true ]]; then
+		write_vulkan_equivalent_for_accepted "$accepted_metadata_file"
+	fi
+	printf 'removed_selection_count=%s\n' "$removed_selection_count"
 }
 
 cmd_deploy() {
-  local target=''
-  local dry_run=false
-  local yes=false
-  local remote_dir="${OC_LOCAL_REMOTE_DIR:-~/llama.cpp}"
+	local target=''
+	local dry_run=false
+	local yes=false
+	local remote_dir="${OC_LOCAL_REMOTE_DIR:-~/llama.cpp}"
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --target)
-        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--target requires remote:<host>' >&2
-          return 2
-        fi
-        target="$2"
-        shift 2
-        ;;
-      --dry-run)
-        dry_run=true
-        shift
-        ;;
-      --yes)
-        yes=true
-        shift
-        ;;
-      -h | --help)
-        printf '%s\n' 'Usage: model-manager deploy --target remote:<host> [--dry-run|--yes]'
-        return 0
-        ;;
-      --*)
-        printf 'Unknown deploy option: %s\n' "$1" >&2
-        return 2
-        ;;
-      *)
-        printf 'deploy accepts options only, got: %s\n' "$1" >&2
-        return 2
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--target)
+			if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+				printf '%s\n' '--target requires remote:<host>' >&2
+				return 2
+			fi
+			target="$2"
+			shift 2
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--yes)
+			yes=true
+			shift
+			;;
+		-h | --help)
+			printf '%s\n' 'Usage: model-manager deploy --target remote:<host> [--dry-run|--yes]'
+			return 0
+			;;
+		--*)
+			printf 'Unknown deploy option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			printf 'deploy accepts options only, got: %s\n' "$1" >&2
+			return 2
+			;;
+		esac
+	done
 
-  if [[ "$yes" == true && "$dry_run" == true ]]; then
-    printf '%s\n' 'choose either --dry-run or --yes, not both' >&2
-    return 2
-  fi
-  case "$target" in
-    remote:*)
-      if [[ -z "${target#remote:}" ]]; then
-        printf 'remote target requires a host: %s\n' "$target" >&2
-        return 2
-      fi
-      if [[ "${target#remote:}" == -* ]]; then
-        printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
-        return 2
-      fi
-      ;;
-    '')
-      printf '%s\n' 'deploy requires --target remote:<host>' >&2
-      return 2
-      ;;
-    *)
-      printf '%s\n' 'deploy currently requires --target remote:<host>' >&2
-      return 2
-      ;;
-  esac
-  if [[ ! "$target" =~ ^remote:[A-Za-z0-9_.:-]+$ ]]; then
-    printf '%s\n' 'invalid target: use remote:<host> with letters, digits, dot, underscore, colon, and hyphen' >&2
-    return 2
-  fi
+	if [[ "$yes" == true && "$dry_run" == true ]]; then
+		printf '%s\n' 'choose either --dry-run or --yes, not both' >&2
+		return 2
+	fi
+	case "$target" in
+	remote:*)
+		if [[ -z "${target#remote:}" ]]; then
+			printf 'remote target requires a host: %s\n' "$target" >&2
+			return 2
+		fi
+		if [[ "${target#remote:}" == -* ]]; then
+			printf 'remote target host must not start with '\''-'\'': %s\n' "$target" >&2
+			return 2
+		fi
+		;;
+	'')
+		printf '%s\n' 'deploy requires --target remote:<host>' >&2
+		return 2
+		;;
+	*)
+		printf '%s\n' 'deploy currently requires --target remote:<host>' >&2
+		return 2
+		;;
+	esac
+	if [[ ! "$target" =~ ^remote:[A-Za-z0-9_.:-]+$ ]]; then
+		printf '%s\n' 'invalid target: use remote:<host> with letters, digits, dot, underscore, colon, and hyphen' >&2
+		return 2
+	fi
 
-  local -a accepted_files=()
-  if [[ -L "$runs_dir" ]]; then
-    printf 'model-manager refuses symlinked runs dir: %s\n' "$runs_dir" >&2
-    return 1
-  fi
-  if [[ -e "$runs_dir" && ! -d "$runs_dir" ]]; then
-    printf 'model-manager state path is not a directory: %s\n' "$runs_dir" >&2
-    return 1
-  fi
-  if [[ -L "$runs_dir/accepted" ]]; then
-    printf 'model-manager refuses symlinked accepted dir: %s\n' "$runs_dir/accepted" >&2
-    return 1
-  fi
-  if [[ -L "$generated_launcher_dir" ]]; then
-    printf 'model-manager refuses symlinked launchers dir: %s\n' "$generated_launcher_dir" >&2
-    return 1
-  fi
-  if [[ -d "$runs_dir/accepted" ]]; then
-    shopt -s nullglob
-    accepted_files=("$runs_dir"/accepted/*.json)
-    shopt -u nullglob
-  fi
+	local -a accepted_files=()
+	if [[ -L "$runs_dir" ]]; then
+		printf 'model-manager refuses symlinked runs dir: %s\n' "$runs_dir" >&2
+		return 1
+	fi
+	if [[ -e "$runs_dir" && ! -d "$runs_dir" ]]; then
+		printf 'model-manager state path is not a directory: %s\n' "$runs_dir" >&2
+		return 1
+	fi
+	if [[ -L "$runs_dir/accepted" ]]; then
+		printf 'model-manager refuses symlinked accepted dir: %s\n' "$runs_dir/accepted" >&2
+		return 1
+	fi
+	if [[ -L "$generated_launcher_dir" ]]; then
+		printf 'model-manager refuses symlinked launchers dir: %s\n' "$generated_launcher_dir" >&2
+		return 1
+	fi
+	if [[ -d "$runs_dir/accepted" ]]; then
+		shopt -s nullglob
+		accepted_files=("$runs_dir"/accepted/*.json)
+		shopt -u nullglob
+	fi
 
-  if ((${#accepted_files[@]} == 0)); then
-    printf '%s\n' 'Nothing to deploy: no accepted models or generated launcher state found.'
-    return 0
-  fi
+	if ((${#accepted_files[@]} == 0)); then
+		printf '%s\n' 'Nothing to deploy: no accepted models or generated launcher state found.'
+		return 0
+	fi
 
-  local plan_rows
-  if ! plan_rows="$(
-    python3 - "$runs_dir" "$remote_dir" "${accepted_files[@]}" <<'PY'
+	local plan_rows
+	if ! plan_rows="$(
+		python3 - "$runs_dir" "$remote_dir" "${accepted_files[@]}" <<'PY'
 import json
 import pathlib
 import re
@@ -4837,208 +4933,444 @@ for raw_path in sys.argv[3:]:
     mtime = path.stat().st_mtime
     print(f"accepted={path.name}\tfamily={family}\talias={alias}\tlauncher={launcher_path}\tremote={remote_dir}/{launcher_name}\tprofile={profile}\tmtime={mtime}")
 PY
-  )"; then
-    printf '%s\n' 'deploy plan generation failed' >&2
-    return 1
-  fi
+	)"; then
+		printf '%s\n' 'deploy plan generation failed' >&2
+		return 1
+	fi
 
-  if [[ -z "$plan_rows" ]]; then
-    printf '%s\n' 'Nothing to deploy: no accepted models with generated launcher files found.'
-    return 0
-  fi
+	if [[ -z "$plan_rows" ]]; then
+		printf '%s\n' 'Nothing to deploy: no accepted models with generated launcher files found.'
+		return 0
+	fi
 
-  local host="${target#remote:}"
-  local support_dir="${LOCAL_LLM_SUPPORT_DIR:-}"
-  if [[ -z "$support_dir" ]]; then
-    if [[ -f "$repo_root/scripts/run-current-model.sh" ]]; then
-      support_dir="$repo_root/scripts"
-    else
-      support_dir="${LOCAL_LLM_SHARE_DIR:-$HOME/.local/share/local_llm}/scripts"
-    fi
-  fi
-  for support_file in run-current-model.sh local-llm-switcher.py Caddyfile.local-llm run-local-llm-caddy-container.sh local-llm-switcher.service opencode-web.service; do
-    if [[ ! -f "$support_dir/$support_file" ]]; then
-      printf 'deploy support file missing: %s\n' "$support_dir/$support_file" >&2
-      return 1
-    fi
-  done
+	local host="${target#remote:}"
+	local support_dir="${LOCAL_LLM_SUPPORT_DIR:-}"
+	if [[ -z "$support_dir" ]]; then
+		if [[ -f "$repo_root/scripts/run-current-model.sh" ]]; then
+			support_dir="$repo_root/scripts"
+		else
+			support_dir="${LOCAL_LLM_SHARE_DIR:-$HOME/.local/share/local_llm}/scripts"
+		fi
+	fi
+	for support_file in run-current-model.sh local-llm-switcher.py Caddyfile.local-llm run-local-llm-caddy-container.sh local-llm-switcher.service opencode-web.service; do
+		if [[ ! -f "$support_dir/$support_file" ]]; then
+			printf 'deploy support file missing: %s\n' "$support_dir/$support_file" >&2
+			return 1
+		fi
+	done
 
-  local env_remote_dir="$remote_dir"
-  local env_remote_dir_warning=false
-  if [[ "$env_remote_dir" == "~" || "$env_remote_dir" == \~/* || "$env_remote_dir" != /* ]]; then
-    env_remote_dir='/home/<user>/llama.cpp'
-    env_remote_dir_warning=true
-  fi
-  printf 'Deploy plan\n'
-  printf 'target=%s\n' "$target"
-  printf 'remote_dir=%s\n' "$remote_dir"
-  printf 'Generated launchers:\n'
-  while IFS=$'\t' read -r accepted family alias launcher remote_path profile mtime; do
-    printf '  %s %s %s\n' "$family" "$alias" "$accepted"
-    printf '    copy launcher: %s -> %s:%s\n' "${launcher#launcher=}" "$host" "${remote_path#remote=}"
-  done <<<"$plan_rows"
-  printf 'OpenCode support files:\n'
-  printf '  required env file: ~/.config/local_llm/opencode-web.env\n'
-  printf "    OPENCODE_WEB_COMMAND='<replace-with-your-opencode-web-command> --host 127.0.0.1 --port 3002'\n"
-  printf '  required env file: ~/.config/local_llm/local-llm-switcher.env\n'
-  if [[ "$env_remote_dir_warning" == true ]]; then
-    printf '    warning: replace /home/<user>/llama.cpp with the absolute path on the GPU host\n'
-  fi
-  printf '    LLAMA_DIR=%s\n' "$env_remote_dir"
-  printf '    LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002\n'
-  printf '    LOCAL_LLM_INJECT_TARGET=opencode\n'
-  printf '  copy support: %s/run-current-model.sh -> %s:%s/run-current-model.sh\n' "$support_dir" "$host" "$remote_dir"
-  printf '  copy support: %s/local-llm-switcher.py -> %s:%s/local-llm-switcher.py\n' "$support_dir" "$host" "$remote_dir"
-  printf '  copy support: %s/Caddyfile.local-llm -> %s:%s/Caddyfile.local-llm\n' "$support_dir" "$host" "$remote_dir"
-  printf '  copy support: %s/run-local-llm-caddy-container.sh -> %s:%s/run-local-llm-caddy-container.sh\n' "$support_dir" "$host" "$remote_dir"
-  printf '  copy service: %s/local-llm-switcher.service -> %s:~/.config/systemd/user/local-llm-switcher.service\n' "$support_dir" "$host"
-  printf '  copy service: %s/opencode-web.service -> %s:~/.config/systemd/user/opencode-web.service\n' "$support_dir" "$host"
-  if [[ "$dry_run" == true ]]; then
-    printf '%s\n' 'Dry-run only: no files copied.'
-    return 0
-  fi
+	local env_remote_dir="$remote_dir"
+	local env_remote_dir_warning=false
+	if [[ "$env_remote_dir" == "~" || "$env_remote_dir" == \~/* || "$env_remote_dir" != /* ]]; then
+		env_remote_dir='/home/<user>/llama.cpp'
+		env_remote_dir_warning=true
+	fi
+	printf 'Deploy plan\n'
+	printf 'target=%s\n' "$target"
+	printf 'remote_dir=%s\n' "$remote_dir"
+	printf 'Generated launchers:\n'
+	while IFS=$'\t' read -r accepted family alias launcher remote_path profile mtime; do
+		printf '  %s %s %s\n' "$family" "$alias" "$accepted"
+		printf '    copy launcher: %s -> %s:%s\n' "${launcher#launcher=}" "$host" "${remote_path#remote=}"
+	done <<<"$plan_rows"
+	printf 'OpenCode support files:\n'
+	printf '  required env file: ~/.config/local_llm/opencode-web.env\n'
+	printf "    OPENCODE_WEB_COMMAND='<replace-with-your-opencode-web-command> --host 127.0.0.1 --port 3002'\n"
+	printf '  required env file: ~/.config/local_llm/local-llm-switcher.env\n'
+	if [[ "$env_remote_dir_warning" == true ]]; then
+		printf '    warning: replace /home/<user>/llama.cpp with the absolute path on the GPU host\n'
+	fi
+	printf '    LLAMA_DIR=%s\n' "$env_remote_dir"
+	printf '    LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002\n'
+	printf '    LOCAL_LLM_INJECT_TARGET=opencode\n'
+	printf '  copy support: %s/run-current-model.sh -> %s:%s/run-current-model.sh\n' "$support_dir" "$host" "$remote_dir"
+	printf '  copy support: %s/local-llm-switcher.py -> %s:%s/local-llm-switcher.py\n' "$support_dir" "$host" "$remote_dir"
+	printf '  copy support: %s/Caddyfile.local-llm -> %s:%s/Caddyfile.local-llm\n' "$support_dir" "$host" "$remote_dir"
+	printf '  copy support: %s/run-local-llm-caddy-container.sh -> %s:%s/run-local-llm-caddy-container.sh\n' "$support_dir" "$host" "$remote_dir"
+	printf '  copy service: %s/local-llm-switcher.service -> %s:~/.config/systemd/user/local-llm-switcher.service\n' "$support_dir" "$host"
+	printf '  copy service: %s/opencode-web.service -> %s:~/.config/systemd/user/opencode-web.service\n' "$support_dir" "$host"
+	if [[ "$dry_run" == true ]]; then
+		printf '%s\n' 'Dry-run only: no files copied.'
+		return 0
+	fi
 
-  if [[ ! "$remote_dir" =~ ^(~|/)?[A-Za-z0-9_./-]+$ ]]; then
-    printf 'invalid remote dir: %s\n' "$remote_dir" >&2
-    return 2
-  fi
+	if [[ ! "$remote_dir" =~ ^(~|/)?[A-Za-z0-9_./-]+$ ]]; then
+		printf 'invalid remote dir: %s\n' "$remote_dir" >&2
+		return 2
+	fi
 
-  local q_remote_dir
-  printf -v q_remote_dir '%q' "$remote_dir"
-  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "mkdir -p $q_remote_dir ~/.config/systemd/user ~/.config/local_llm" || return 1
+	local q_remote_dir
+	printf -v q_remote_dir '%q' "$remote_dir"
+	ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "mkdir -p $q_remote_dir ~/.config/systemd/user ~/.config/local_llm" || return 1
 
-  local current_launcher=''
-  local current_profile='reliable'
-  local current_mtime='-1'
-  local launcher_path launcher_name remote_path profile_value mtime_value
-  while IFS=$'\t' read -r accepted family alias launcher remote_path profile mtime; do
-    launcher_path="${launcher#launcher=}"
-    launcher_name="${remote_path##*/}"
-    profile_value="${profile#profile=}"
-    mtime_value="${mtime#mtime=}"
-    scp "$launcher_path" "$host:$remote_dir/$launcher_name" || return 1
-    if python3 - "$mtime_value" "$current_mtime" <<'PY'; then
+	local current_launcher=''
+	local current_profile='reliable'
+	local current_mtime='-1'
+	local launcher_path launcher_name remote_path profile_value mtime_value
+	while IFS=$'\t' read -r accepted family alias launcher remote_path profile mtime; do
+		launcher_path="${launcher#launcher=}"
+		launcher_name="${remote_path##*/}"
+		profile_value="${profile#profile=}"
+		mtime_value="${mtime#mtime=}"
+		scp "$launcher_path" "$host:$remote_dir/$launcher_name" || return 1
+		if python3 - "$mtime_value" "$current_mtime" <<'PY'; then
 import sys
 raise SystemExit(0 if float(sys.argv[1]) > float(sys.argv[2]) else 1)
 PY
-      current_launcher="$launcher_name"
-      current_profile="$profile_value"
-      current_mtime="$mtime_value"
-    fi
-  done <<<"$plan_rows"
+			current_launcher="$launcher_name"
+			current_profile="$profile_value"
+			current_mtime="$mtime_value"
+		fi
+	done <<<"$plan_rows"
 
-  scp "$support_dir/run-current-model.sh" "$host:$remote_dir/run-current-model.sh" || return 1
-  scp "$support_dir/local-llm-switcher.py" "$host:$remote_dir/local-llm-switcher.py" || return 1
-  scp "$support_dir/Caddyfile.local-llm" "$host:$remote_dir/Caddyfile.local-llm" || return 1
-  scp "$support_dir/run-local-llm-caddy-container.sh" "$host:$remote_dir/run-local-llm-caddy-container.sh" || return 1
-  scp "$support_dir/local-llm-switcher.service" "$host:~/.config/systemd/user/local-llm-switcher.service" || return 1
-  scp "$support_dir/opencode-web.service" "$host:~/.config/systemd/user/opencode-web.service" || return 1
+	scp "$support_dir/run-current-model.sh" "$host:$remote_dir/run-current-model.sh" || return 1
+	scp "$support_dir/local-llm-switcher.py" "$host:$remote_dir/local-llm-switcher.py" || return 1
+	scp "$support_dir/Caddyfile.local-llm" "$host:$remote_dir/Caddyfile.local-llm" || return 1
+	scp "$support_dir/run-local-llm-caddy-container.sh" "$host:$remote_dir/run-local-llm-caddy-container.sh" || return 1
+	scp "$support_dir/local-llm-switcher.service" "$host:~/.config/systemd/user/local-llm-switcher.service" || return 1
+	scp "$support_dir/opencode-web.service" "$host:~/.config/systemd/user/opencode-web.service" || return 1
 
-  if [[ -z "$current_launcher" ]]; then
-    printf '%s\n' 'deploy could not determine current launcher' >&2
-    return 1
-  fi
-  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "cd $q_remote_dir && chmod +x *.sh local-llm-switcher.py 2>/dev/null || true; { printf '%s\\n' 'REMOTE_SCRIPT=./$current_launcher'; printf '%s\\n' 'REMOTE_PROFILE=$current_profile'; } > current-model.env; systemctl --user restart llama-server.service" || return 1
-  printf 'Deploy complete\n'
-  printf 'target=%s\n' "$target"
-  printf 'current=%s profile=%s\n' "$current_launcher" "$current_profile"
+	if [[ -z "$current_launcher" ]]; then
+		printf '%s\n' 'deploy could not determine current launcher' >&2
+		return 1
+	fi
+	ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "cd $q_remote_dir && chmod +x *.sh local-llm-switcher.py 2>/dev/null || true; { printf '%s\\n' 'REMOTE_SCRIPT=./$current_launcher'; printf '%s\\n' 'REMOTE_PROFILE=$current_profile'; } > current-model.env; systemctl --user restart llama-server.service" || return 1
+	printf 'Deploy complete\n'
+	printf 'target=%s\n' "$target"
+	printf 'current=%s profile=%s\n' "$current_launcher" "$current_profile"
+}
+
+cmd_update_launcher() {
+	local family=""
+	local yes=false
+	local dry_run=false
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--family)
+			if [[ $# -lt 2 || -z "$2" ]]; then
+				printf '%s\n' '--family requires a family name' >&2
+				return 2
+			fi
+			family="$2"
+			shift 2
+			;;
+		--yes)
+			yes=true
+			shift
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		-h | --help)
+			printf '%s\n' 'Usage: model-manager update-launcher --family <family> [--dry-run|--yes]'
+			return 0
+			;;
+		--*)
+			printf 'Unknown update-launcher option: %s\n' "$1" >&2
+			return 2
+			;;
+		*)
+			printf 'update-launcher accepts options only, got: %s\n' "$1" >&2
+			return 2
+			;;
+		esac
+	done
+
+	if [[ -z "$family" ]]; then
+		printf '%s\n' 'update-launcher requires --family <family>' >&2
+		return 2
+	fi
+
+	if [[ "$yes" == true && "$dry_run" == true ]]; then
+		printf '%s\n' 'choose either --dry-run or --yes, not both' >&2
+		return 2
+	fi
+
+	local metadata_file="$runs_dir/accepted/$family.json"
+	if [[ ! -f "$metadata_file" ]]; then
+		printf 'accepted metadata not found for family: %s\n' "$family"
+		return 1
+	fi
+
+	# Use Python to regenerate launcher from accepted metadata
+	python3 - "$metadata_file" "$generated_launcher_dir" "$dry_run" "$yes" <<'PY'
+import json
+import pathlib
+import re
+import shlex
+import sys
+
+metadata_path = pathlib.Path(sys.argv[1])
+launcher_dir = pathlib.Path(sys.argv[2])
+dry_run = sys.argv[3] == "true"
+yes = sys.argv[4] == "true"
+
+if metadata_path.is_symlink():
+    print("refuses symlinked accepted file", file=sys.stderr)
+    sys.exit(1)
+
+with metadata_path.open(encoding="utf-8") as f:
+    data = json.load(f)
+
+if not isinstance(data, dict):
+    print("accepted metadata must be an object", file=sys.stderr)
+    sys.exit(1)
+
+family = data.get("family") or metadata_path.stem
+alias = data.get("alias") or data.get("model_name") or "unknown"
+repo = data.get("repo") or data.get("hf_repo")
+quant = data.get("quant", "")
+hf_file = data.get("hf_file", "")
+config = data.get("config") or {}
+ctx = str(config.get("ctx", "131072"))
+batch = str(config.get("batch", "4096"))
+ubatch = str(config.get("ubatch", "256"))
+ngl = str(config.get("ngl", "999"))
+backend = str(config.get("backend", ""))
+visible_devices = str(config.get("visible_devices", ""))
+split_mode = str(config.get("split_mode", "layer"))
+tensor_split = str(config.get("tensor_split", "1,1"))
+cache_type_k = str(config.get("cache_type_k", ""))
+cache_type_v = str(config.get("cache_type_v", ""))
+ctx_shift = str(config.get("ctx_shift", ""))
+reasoning = config.get("reasoning", True)
+
+# Validate basics
+for name, value in (("repo", repo), ("family", family), ("alias", alias), ("quant", quant), ("hf_file", hf_file)):
+    if value and any(ord(c) < 32 or ord(c) == 127 for c in str(value)):
+        print(f"unsafe character in {name}", file=sys.stderr)
+        sys.exit(1)
+
+for name, value, minimum in (("ctx", ctx, 1), ("batch", batch, 1), ("ubatch", ubatch, 1), ("ngl", ngl, 0)):
+    if not str(value).isdigit():
+        print(f"missing numeric {name}", file=sys.stderr)
+        sys.exit(1)
+    if int(value) < minimum:
+        print(f"{name} too small", file=sys.stderr)
+        sys.exit(1)
+
+# Determine launcher file
+launcher_name = f"start_{family}.sh"
+launcher_path = launcher_dir / launcher_name
+
+if launcher_path.is_symlink():
+    print("refuses symlinked launcher", file=sys.stderr)
+    sys.exit(1)
+
+# Build awk filter
+awk_filter = "!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\\/\\\/github.com\\\/ggml-org\\\/llama.cpp\\\/pull\\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/erased invalidated context checkpoint/ && !/creating new checkpoint during processing/ && !/forcing full prompt re-processing due to lack of cache data/ && !/slot print_timing:.*prompt processing/"
+
+lines = [
+    "#!/usr/bin/env bash",
+    f"# local_llm_repo={repo}",
+    f"# local_llm_family={family}",
+    f"# local_llm_alias={alias}",
+    f"# local_llm_quant={quant}",
+    f"# local_llm_hf_file={hf_file}",
+    "set -euo pipefail",
+    'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+    'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"',
+    'mkdir -p "$(dirname "$log_file")"',
+    f'exec > >(stdbuf -oL -eL awk {shlex.quote(awk_filter)} | tee "$log_file") 2>&1',
+    'profile="${1:-reliable}"',
+    'case "$profile" in speed|fastlong|balanced|reliable|tiny) ;; *) echo "Usage: $0 {speed|fastlong|balanced|reliable|tiny}" >&2; exit 2 ;; esac',
+    f"ctx={ctx}",
+    f"batch={batch}",
+    f"ubatch={ubatch}",
+    f"ngl={ngl}",
+]
+
+if backend == "vulkan":
+    lines.append(f"export GGML_VK_VISIBLE_DEVICES={visible_devices}")
+elif visible_devices:
+    lines.append(f"export HIP_VISIBLE_DEVICES={visible_devices}")
+    lines.append(f"export ROCR_VISIBLE_DEVICES={visible_devices}")
+
+server_bin = "./build-vulkan/bin/llama-server" if backend == "vulkan" else "./build/bin/llama-server"
+
+lines.extend([
+    f"exec {server_bin} \\",
+    f"  -hf {shlex.quote(repo)} \\",
+])
+if hf_file:
+    lines.append(f"  --hf-file {shlex.quote(hf_file)} \\")
+else:
+    lines.append(f"  -hf {shlex.quote(repo + ':' + quant)} \\")
+
+lines.extend([
+    "  --host 0.0.0.0 \\",
+    "  --port 8080 \\",
+    "  --timeout 600 \\",
+    "  --threads-http 2 \\",
+    "  --parallel 1 \\",
+    "  --no-cont-batching \\",
+    '  -ngl "$ngl" \\','
+])
+if backend:
+    lines.extend([
+        f"  --split-mode {shlex.quote(split_mode)} \\",
+        f"  --tensor-split {shlex.quote(tensor_split)} \\",
+    ])
+if ctx_shift and ctx_shift not in {"off", "false", "0"}:
+    lines.append("  --context-shift \\")
+if cache_type_k:
+    lines.append(f"  -ctk {shlex.quote(cache_type_k)} \\")
+if cache_type_v:
+    lines.append(f"  -ctv {shlex.quote(cache_type_v)} \\")
+
+sampler_temp = "0.6"
+sampler_top_p = "0.95"
+sampler_top_k = "20"
+repo_family_alias_lower = f"{repo} {family} {alias}".lower()
+if family.lower().startswith("gemma") or alias.lower().startswith("gemma") or "gemma" in repo.lower():
+    sampler_temp = "1.0"
+    sampler_top_p = "0.95"
+    sampler_top_k = "64"
+
+lines.extend([
+    "  --cache-ram 16384 \\",
+    "  --ctx-checkpoints 64 \\",
+    "  --checkpoint-every-n-tokens 4096 \\",
+    '  -c "$ctx" \\','
+    "  --flash-attn on \\",
+    '  -ub "$ubatch" \\','
+    '  -b "$batch" \\','
+])
+if "gemma-4-12b" in repo_family_alias_lower:
+    lines.append("  --no-mmproj \\")
+
+lines.extend([
+    '  --threads "$(nproc)" \\','
+    "  --prio 2 \\",
+    "  --no-warmup \\",
+    f"  --temp {sampler_temp} \\",
+    f"  --top-p {sampler_top_p} \\",
+    f"  --top-k {sampler_top_k} \\",
+    "  --min-p 0.0 \\",
+    "  --presence-penalty 0.0 \\",
+    f"  --alias {shlex.quote(alias)} \\",
+])
+
+reasoning_flag = "on" if reasoning else "off"
+lines.append(f"  --reasoning {reasoning_flag}")
+
+content = "\n".join(lines) + "\n"
+
+if dry_run:
+    print("dry-run: would update launcher:")
+    print(f"  {launcher_path}")
+    print("content preview:")
+    for line in lines[:10]:
+        print(f"  {line}")
+    print("  ...")
+else:
+    launcher_dir.mkdir(parents=True, exist_ok=True)
+    with open(launcher_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"updated launcher: {launcher_path}")
+PY
 }
 
 main() {
-  local command_name="${1:-}"
+	local command_name="${1:-}"
 
-  case "$command_name" in
-    -h | --help | '')
-      usage
-      ;;
-    init)
-      # New simplified init — delegates to Python backend
-      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
-        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
-        return 1
-      fi
-      python3 -m scripts.model_manager init "${@:2}"
-      ;;
-    search)
-      # Delegates to Python backend
-      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
-        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
-        return 1
-      fi
-      python3 -m scripts.model_manager search "${@:2}"
-      ;;
-    install)
-      # New simplified install — delegates to Python backend
-      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
-        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
-        return 1
-      fi
-      python3 -m scripts.model_manager install "${@:2}"
-      ;;
-    bootstrap)
-      cmd_bootstrap "${@:2}"
-      ;;
-    status)
-      # Delegates to Python backend (reads both new and legacy state)
-      if [[ -d "$MODEL_MANAGER_PY" ]]; then
-        python3 -m scripts.model_manager status
-      else
-        cmd_status
-      fi
-      ;;
-    list)
-      # Delegates to Python backend (reads both new and legacy state)
-      if [[ -d "$MODEL_MANAGER_PY" ]]; then
-        python3 -m scripts.model_manager list
-      else
-        cmd_list "${@:2}"
-      fi
-      ;;
-    update)
-      cmd_update "${@:2}"
-      ;;
-    replace)
-      cmd_replace "${@:2}"
-      ;;
-    delete)
-      # Use bash implementation: full purge supports repo, profiles, remote cache, launchers.
-      cmd_delete "${@:2}"
-      ;;
-    discover)
-      cmd_discover "${@:2}"
-      ;;
-    select)
-      cmd_select "${@:2}"
-      ;;
-    benchmark)
-      cmd_benchmark "${@:2}"
-      ;;
-    accept)
-      cmd_accept "${@:2}"
-      ;;
-    deploy)
-      cmd_deploy "${@:2}"
-      ;;
-    export)
-      cmd_export "${@:2}"
-      ;;
-    restore)
-      cmd_restore "${@:2}"
-      ;;
-    tui)
-      # Launch interactive TUI
-      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
-        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
-        return 1
-      fi
-      python3 -m scripts.model_manager tui
-      ;;
-    *)
-      printf 'Unknown command: %s\n\n' "$command_name" >&2
-      usage >&2
-      return 1
-      ;;
-  esac
+	case "$command_name" in
+	-h | --help | '')
+		usage
+		;;
+	init)
+		# New simplified init — delegates to Python backend
+		if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+			printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+			return 1
+		fi
+		python3 -m scripts.model_manager init "${@:2}"
+		;;
+	search)
+		# Delegates to Python backend
+		if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+			printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+			return 1
+		fi
+		python3 -m scripts.model_manager search "${@:2}"
+		;;
+	install)
+		# New simplified install — delegates to Python backend
+		if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+			printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+			return 1
+		fi
+		python3 -m scripts.model_manager install "${@:2}"
+		;;
+	bootstrap)
+		cmd_bootstrap "${@:2}"
+		;;
+	status)
+		# Delegates to Python backend (reads both new and legacy state)
+		if [[ -d "$MODEL_MANAGER_PY" ]]; then
+			python3 -m scripts.model_manager status
+		else
+			cmd_status
+		fi
+		;;
+	list)
+		# Delegates to Python backend (reads both new and legacy state)
+		if [[ -d "$MODEL_MANAGER_PY" ]]; then
+			python3 -m scripts.model_manager list
+		else
+			cmd_list "${@:2}"
+		fi
+		;;
+	update)
+		cmd_update "${@:2}"
+		;;
+	replace)
+		cmd_replace "${@:2}"
+		;;
+	delete)
+		# Use bash implementation: full purge supports repo, profiles, remote cache, launchers.
+		cmd_delete "${@:2}"
+		;;
+	discover)
+		cmd_discover "${@:2}"
+		;;
+	select)
+		cmd_select "${@:2}"
+		;;
+	benchmark)
+		cmd_benchmark "${@:2}"
+		;;
+	accept)
+		cmd_accept "${@:2}"
+		;;
+	deploy)
+		cmd_deploy "${@:2}"
+		;;
+	update-launcher)
+		cmd_update_launcher "${@:2}"
+		;;
+	export)
+		cmd_export "${@:2}"
+		;;
+	restore)
+		cmd_restore "${@:2}"
+		;;
+	tui)
+		# Launch interactive TUI
+		if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+			printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+			return 1
+		fi
+		python3 -m scripts.model_manager tui
+		;;
+	*)
+		printf 'Unknown command: %s\n\n' "$command_name" >&2
+		usage >&2
+		return 1
+		;;
+	esac
 }
 
 main "$@"

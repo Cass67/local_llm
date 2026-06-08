@@ -66,6 +66,7 @@ history.jsonl
 sessions/
 log/
 /.repo-guard/reports/
+.pi/
 
 # OS and editor workspace noise.
 .DS_Store

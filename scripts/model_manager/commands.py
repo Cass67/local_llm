@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess  # noqa: S404 # nosec: B404
-from pathlib import Path
 
+from .config import (
+    MODEL_DISCOVERY,
+    MODEL_MANAGER,
+)
 from .state import (
     RUNS_DIR,
     delete_accepted,
@@ -19,13 +22,6 @@ from .state import (
     write_accepted,
     write_config,
 )
-
-# Resolve sibling scripts
-SCRIPT_DIR = Path(__file__).resolve().parent.parent
-MODEL_DISCOVERY = SCRIPT_DIR / "model-discovery.sh"
-
-# Profile names recognized by oc-local
-PROFILES = ("speed", "fastlong", "balanced", "reliable", "tiny")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -335,7 +331,7 @@ def _download_on_host(host: str, repo: str, hf_file: str) -> bool:
             + repo_dir
             + " -name "
             + repr(hf_file)
-            + " \( -type f -o -type l \) -print -quit | grep -q .",
+            + r" \( -type f -o -type l \) -print -quit | grep -q .",
         ]
         result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
@@ -401,8 +397,10 @@ def _run_benchmark(
     """Run benchmark on remote host, return path to benchmark result JSON."""
     # Call the bash model-manager benchmark command
     bench_cmd = [
-        "model-manager",
+        str(MODEL_MANAGER),
         "benchmark",
+        "--target",
+        f"remote:{host}",
         "--repo",
         repo,
         "--family",
@@ -424,7 +422,7 @@ def _run_benchmark(
             bench_cmd,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=900,
         )
         # Parse benchmark result file from output
         lines = result.stdout.strip().split("\n")
@@ -460,7 +458,7 @@ def _read_benchmark_summary(benchmark_file: str) -> dict:
 
 def _accept_benchmark(benchmark_file: str) -> bool:
     """Accept benchmark via bash pipeline."""
-    accept_cmd = ["model-manager", "accept", benchmark_file]
+    accept_cmd = [str(MODEL_MANAGER), "accept", benchmark_file]
     try:
         result = subprocess.run(
             accept_cmd,
@@ -481,7 +479,7 @@ def _accept_benchmark(benchmark_file: str) -> bool:
 
 def _deploy_accepted_to_remote(host: str) -> bool:
     """Copy accepted launcher state to remote after install."""
-    deploy_cmd = ["model-manager", "deploy", "--target", f"remote:{host}", "--yes"]
+    deploy_cmd = [str(MODEL_MANAGER), "deploy", "--target", f"remote:{host}", "--yes"]
     print(f"deploying launchers to {host}...")
     try:
         result = subprocess.run(
