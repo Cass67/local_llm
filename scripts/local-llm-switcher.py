@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 LLAMA_DIR = Path(os.environ.get("LLAMA_DIR", "~/llama.cpp")).expanduser()
+ACCEPTED_DIR = Path(os.environ.get("LOCAL_LLM_ACCEPTED_DIR", str(LLAMA_DIR / "accepted"))).expanduser()
 CURRENT_MODEL_ENV = Path(
     os.environ.get("LLAMA_CURRENT_MODEL_ENV", str(LLAMA_DIR / "current-model.env"))
 )
@@ -173,7 +174,60 @@ def format_context(context: int | None) -> str:
     return str(context)
 
 
+def accepted_model_from_json(path: Path, current_values: dict[str, str]) -> Model | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    remote_script = data.get("remote_start")
+    if not isinstance(remote_script, str) or not remote_script.startswith("./"):
+        return None
+    family = data.get("family") or path.stem
+    alias = data.get("alias") or data.get("model_name") or family
+    if not isinstance(family, str) or not isinstance(alias, str):
+        return None
+    config_obj = data.get("config")
+    config: dict[str, Any] = config_obj if isinstance(config_obj, dict) else {}
+    context_value = config.get("ctx") or config.get("context")
+    try:
+        context = int(context_value) if context_value else None
+    except (TypeError, ValueError):
+        context = None
+    reasoning = bool(config.get("reasoning", data.get("reasoning", False)))
+    profile_obj = data.get("profile")
+    profile = profile_obj if isinstance(profile_obj, str) else "reliable"
+    current_profile = current_values.get("REMOTE_PROFILE")
+    if current_values.get("REMOTE_SCRIPT") == remote_script and current_profile:
+        profile = current_profile
+    suffix = f"{profile} · {format_context(context)}"
+    if reasoning:
+        suffix += " · reasoning"
+    return Model(
+        family=family,
+        remote_script=remote_script,
+        alias=alias,
+        label=f"{alias} ({suffix})",
+        profile=profile,
+        context=context,
+        reasoning=reasoning,
+    )
+
+
 def load_models() -> list[Model]:
+    current_values = parse_env_file(CURRENT_MODEL_ENV)
+    accepted_models: list[Model] = []
+    if ACCEPTED_DIR.is_dir() and not ACCEPTED_DIR.is_symlink():
+        for path in sorted(ACCEPTED_DIR.glob("*.json")):
+            if path.name == "default.json":
+                continue
+            model = accepted_model_from_json(path, current_values)
+            if model:
+                accepted_models.append(model)
+    if accepted_models:
+        return accepted_models
+
     discovered: list[Model] = []
     seen: set[str] = set()
     for path in sorted(LLAMA_DIR.glob("start*.sh")):
@@ -185,25 +239,26 @@ def load_models() -> list[Model]:
         context = metadata.get("context")
         reasoning = bool(metadata.get("reasoning"))
         remote_script = "./" + path.name
-        for profile in metadata.get("profiles", ["reliable"]):
-            model_id = f"{family}:{profile}"
-            if model_id in seen:
-                continue
-            seen.add(model_id)
-            suffix = f"{profile} · {format_context(context)}"
-            if reasoning:
-                suffix += " · reasoning"
-            discovered.append(
-                Model(
-                    family=family,
-                    remote_script=remote_script,
-                    alias=alias,
-                    label=f"{alias} ({suffix})",
-                    profile=profile,
-                    context=context if isinstance(context, int) else None,
-                    reasoning=reasoning,
-                )
+        current_profile = current_values.get("REMOTE_PROFILE")
+        profile = current_profile if current_values.get("REMOTE_SCRIPT") == remote_script and current_profile else "reliable"
+        model_id = f"{family}:{profile}"
+        if model_id in seen:
+            continue
+        seen.add(model_id)
+        suffix = f"{profile} · {format_context(context)}"
+        if reasoning:
+            suffix += " · reasoning"
+        discovered.append(
+            Model(
+                family=family,
+                remote_script=remote_script,
+                alias=alias,
+                label=f"{alias} ({suffix})",
+                profile=profile,
+                context=context if isinstance(context, int) else None,
+                reasoning=reasoning,
             )
+        )
     if discovered:
         return discovered
     return MODELS
