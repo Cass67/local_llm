@@ -672,21 +672,30 @@ update_existing_launcher_runtime() {
   local batch="$3"
   local ubatch="$4"
   local ngl="$5"
+  local tensor_split="${6:-}"
 
   [[ -f "$launcher_file" && ! -L "$launcher_file" ]] || return 0
-  python3 - "$launcher_file" "$ctx" "$batch" "$ubatch" "$ngl" <<'PY'
+  python3 - "$launcher_file" "$ctx" "$batch" "$ubatch" "$ngl" "$tensor_split" <<'PY'
 import pathlib
 import re
 import sys
 
 path = pathlib.Path(sys.argv[1])
-ctx, batch, ubatch, ngl = sys.argv[2:]
+ctx, batch, ubatch, ngl, tensor_split = sys.argv[2:]
 for name, value in {"ctx": ctx, "batch": batch, "ubatch": ubatch, "ngl": ngl}.items():
     if not re.fullmatch(r"[0-9]+", value):
         raise SystemExit(f"invalid {name}")
+if tensor_split and not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
+    raise SystemExit("invalid tensor_split")
 text = path.read_text(encoding="utf-8")
 for name, value in (("ctx", ctx), ("batch", batch), ("ubatch", ubatch), ("ngl", ngl)):
     text = re.sub(rf"^{name}=[0-9]+$", f"{name}={value}", text, flags=re.MULTILINE)
+if tensor_split:
+    text = re.sub(
+        r"--tensor-split [^ \\\n]+",
+        f"--tensor-split {tensor_split}",
+        text,
+    )
 path.write_text(text, encoding="utf-8")
 PY
 }
@@ -849,6 +858,8 @@ if backend:
         raise SystemExit("accepted metadata split_mode must be layer or row")
     if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
         raise SystemExit("accepted metadata tensor_split must be comma-separated positive integers")
+    if backend == "vulkan" and visible_devices == "0,1" and tensor_split == "44,1":
+        tensor_split = "1,1"
     payload["config"].update({
         "backend": backend,
         "visible_devices": visible_devices,
@@ -3105,6 +3116,9 @@ if [[ "$backend" == vulkan ]]; then
   visible_devices="${visible_devices:-0,1}"
   split_mode="${split_mode:-layer}"
   tensor_split="${tensor_split:-1,1}"
+  if [[ "$visible_devices" == "0,1" && "$tensor_split" == "44,1" ]]; then
+    tensor_split="1,1"
+  fi
   export GGML_VK_VISIBLE_DEVICES="$visible_devices"
 elif [[ -n "$visible_devices" ]]; then
   split_mode="${split_mode:-row}"
@@ -3131,6 +3145,9 @@ server_cmd=(
   --no-cont-batching
   -ngl "$ngl"
 )
+if [[ "$backend" == vulkan && "$visible_devices" == "0,1" && "$tensor_split" == "44,1" ]]; then
+  tensor_split="1,1"
+fi
 if [[ -n "$split_mode" || -n "$tensor_split" ]]; then
   server_cmd+=(--split-mode "$split_mode" --tensor-split "$tensor_split")
 fi
@@ -4202,6 +4219,11 @@ result = {
     "timestamp": timestamp,
 }
 if backend:
+    if backend == "vulkan" and visible_devices == "0,1" and tensor_split == "44,1":
+        tensor_split = "1,1"
+        if command:
+            command = command.replace("--tensor-split 44,1", "--tensor-split 1,1")
+            result["command"] = command
     result["backend"] = backend
     result["visible_devices"] = visible_devices
     result["split_mode"] = split_mode
@@ -4421,6 +4443,9 @@ if backend:
         raise SystemExit("benchmark JSON split_mode must be layer or row")
     if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
         raise SystemExit("benchmark JSON tensor_split must be comma-separated positive integers")
+    if backend == "vulkan" and visible_devices == "0,1" and tensor_split == "44,1":
+        tensor_split = "1,1"
+        result["tensor_split"] = tensor_split
 values = [result[key] for key in required]
 values.extend(str(result.get(key) or "") for key in ("ctx", "batch", "ubatch", "ngl", "quant", "hf_file", "cache_type_k", "cache_type_v"))
 values.extend([backend, visible_devices, split_mode, tensor_split, ctx_shift])
@@ -4456,7 +4481,7 @@ PY
     local removed_selection_count
     removed_selection_count="$(remove_matching_selections "$repo" "$alias")"
     ensure_launcher_model_log_redirect "${existing_launcher%% *}"
-    update_existing_launcher_runtime "${existing_launcher%% *}" "$ctx" "$batch" "$ubatch" "$ngl"
+    update_existing_launcher_runtime "${existing_launcher%% *}" "$ctx" "$batch" "$ubatch" "$ngl" "$tensor_split"
     accepted_metadata_file="$(write_accepted_metadata "$repo" "$family" "$alias" "${existing_launcher%% *}" "$profile" "$ctx" "$batch" "$ubatch" "$ngl" "$quant" "$hf_file" "$backend" "$visible_devices" "$split_mode" "$tensor_split" "$cache_type_k" "$cache_type_v" "$ctx_shift" "$target")"
     printf 'Accepted benchmark already has launcher\n'
     printf 'repo=%s\n' "$repo"
@@ -4541,6 +4566,8 @@ if backend:
         raise SystemExit("split_mode must be layer or row")
     if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
         raise SystemExit("tensor_split must be comma-separated positive integers")
+    if backend == "vulkan" and visible_devices == "0,1" and tensor_split == "44,1":
+        tensor_split = "1,1"
 awk_filter = "!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/erased invalidated context checkpoint/ && !/creating new checkpoint during processing/ && !/forcing full prompt re-processing due to lack of cache data/ && !/slot print_timing:.*prompt processing/"
 lines = [
     "#!/usr/bin/env bash",
