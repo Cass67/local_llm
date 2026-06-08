@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import subprocess  # noqa: S404 # nosec: B404
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,7 +13,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Input, Label
+from textual.widgets import DataTable, Footer, Header, Input, Label, Markdown
 
 from .state import (
     get_target,
@@ -128,11 +130,60 @@ class InitScreen(Screen[None]):
         self.app.pop_screen()
 
 
+class HFCardScreen(Screen[None]):
+    """Show a Hugging Face model card."""
+
+    BINDINGS = [Binding("escape", "back", "Back")]
+
+    def __init__(self, repo: str) -> None:
+        super().__init__()
+        self.repo = repo
+
+    def compose(self) -> ComposeResult:
+        yield Label(f"[bold]Hugging Face Card[/bold]  {self.repo}")
+        yield Label("Loading...", id="hf-card-status")
+        yield Markdown("", id="hf-card-markdown")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        def _finish_ok(markdown: str) -> None:
+            self.query_one("#hf-card-status", Label).update(
+                f"[green]https://huggingface.co/{self.repo}[/green]"
+            )
+            self.query_one("#hf-card-markdown", Markdown).update(markdown)
+
+        def _finish_error(message: str) -> None:
+            self.query_one("#hf-card-status", Label).update(f"[red]{message}[/red]")
+            self.query_one("#hf-card-markdown", Markdown).update(
+                f"Open manually: https://huggingface.co/{self.repo}"
+            )
+
+        def _run() -> None:
+            encoded_repo = urllib.parse.quote(self.repo, safe="/")
+            url = f"https://huggingface.co/{encoded_repo}/raw/main/README.md"
+            try:
+                with urllib.request.urlopen(url, timeout=20) as response:  # nosec: B310
+                    body = response.read().decode("utf-8", errors="replace")
+                if not body.strip():
+                    self.app.call_from_thread(_finish_error, "Model card is empty")
+                    return
+                self.app.call_from_thread(_finish_ok, body)
+            except (OSError, UnicodeDecodeError) as e:
+                self.app.call_from_thread(_finish_error, f"Could not fetch card: {e}")
+
+        self.run_worker(_run, thread=True)
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
 class SearchScreen(Screen[None]):
     """Screen to search for models."""
 
     BINDINGS = [
         Binding("escape", "back", "Back"),
+        Binding("i", "hf_card", "HF Card"),
+        Binding("space", "hf_card", "HF Card"),
     ]
 
     def __init__(self) -> None:
@@ -143,7 +194,7 @@ class SearchScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         yield Label("[bold]Search Models[/bold]")
         yield Label("")
-        yield Label("  Enter search query:")
+        yield Label("  Enter search query (Enter installs result, i/Space opens HF card):")
         yield Input(placeholder="coding gguf", id="query-input")
         yield Label("", id="search-status")
         yield DataTable(id="results-table")
@@ -253,14 +304,32 @@ class SearchScreen(Screen[None]):
 
         self.run_worker(_run, thread=True)
 
+    def _selected_candidate(self) -> dict[str, Any] | None:
+        table = self.query_one("#results-table", DataTable)
+        candidates = load_candidates() or []
+        cursor = table.cursor_row
+        if cursor < 0 or cursor >= len(candidates):
+            return None
+        return candidates[cursor]
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "results-table":
             return
-        candidates = load_candidates() or []
-        cursor = event.cursor_row
-        if cursor < 0 or cursor >= len(candidates):
+        candidate = self._selected_candidate()
+        if not candidate:
             return
-        self.app.push_screen(InstallProgressScreen(cursor + 1, candidates[cursor]))
+        self.app.push_screen(InstallProgressScreen(event.cursor_row + 1, candidate))
+
+    def action_hf_card(self) -> None:
+        candidate = self._selected_candidate()
+        if not candidate:
+            self.app.notify("No search result selected", severity="warning")
+            return
+        repo = candidate.get("repo")
+        if not isinstance(repo, str) or not repo:
+            self.app.notify("Selected result has no repo", severity="error")
+            return
+        self.app.push_screen(HFCardScreen(repo))
 
     def action_back(self) -> None:
         self.app.pop_screen()
