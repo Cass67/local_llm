@@ -81,23 +81,28 @@ class Model:
     alias: str
     label: str
     profile: str = "reliable"
+    context: int | None = None
+    reasoning: bool = False
 
     @property
     def id(self) -> str:
         return f"{self.family}:{self.profile}"
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "family": self.family,
             "profile": self.profile,
             "alias": self.alias,
             "label": self.label,
+            "context": self.context,
+            "reasoning": self.reasoning,
         }
 
 
 MODELS: list[Model] = []
 MODELS_BY_ID = {model.id: model for model in MODELS}
+STANDARD_PROFILES = ("speed", "fastlong", "balanced", "reliable", "tiny")
 
 
 class ApiError(Exception):
@@ -133,10 +138,86 @@ def parse_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def launcher_metadata(path: Path) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return metadata
+    for line in text.splitlines():
+        if line.startswith("# local_llm_") and "=" in line:
+            key, value = line[2:].split("=", 1)
+            metadata[key.removeprefix("local_llm_")] = value.strip()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("ctx="):
+            try:
+                metadata["context"] = int(stripped.split("=", 1)[1].strip().strip('"'))
+            except ValueError:
+                pass
+            break
+    metadata["reasoning"] = "--reasoning on" in text
+    profiles = []
+    for profile in STANDARD_PROFILES:
+        if profile in text:
+            profiles.append(profile)
+    metadata["profiles"] = profiles or ["reliable"]
+    return metadata
+
+
+def format_context(context: int | None) -> str:
+    if not context:
+        return "?ctx"
+    if context >= 1000:
+        return f"{round(context / 1000):.0f}k"
+    return str(context)
+
+
+def load_models() -> list[Model]:
+    discovered: list[Model] = []
+    seen: set[str] = set()
+    for path in sorted(LLAMA_DIR.glob("start*.sh")):
+        if ".bak-" in path.name or not path.is_file():
+            continue
+        metadata = launcher_metadata(path)
+        family = metadata.get("family") or path.stem
+        alias = metadata.get("alias") or family
+        context = metadata.get("context")
+        reasoning = bool(metadata.get("reasoning"))
+        remote_script = "./" + path.name
+        for profile in metadata.get("profiles", ["reliable"]):
+            model_id = f"{family}:{profile}"
+            if model_id in seen:
+                continue
+            seen.add(model_id)
+            suffix = f"{profile} · {format_context(context)}"
+            if reasoning:
+                suffix += " · reasoning"
+            discovered.append(
+                Model(
+                    family=family,
+                    remote_script=remote_script,
+                    alias=alias,
+                    label=f"{alias} ({suffix})",
+                    profile=profile,
+                    context=context if isinstance(context, int) else None,
+                    reasoning=reasoning,
+                )
+            )
+    if discovered:
+        return discovered
+    return MODELS
+
+
+def models_by_id() -> dict[str, Model]:
+    models = load_models()
+    return {model.id: model for model in models}
+
+
 def model_from_env(values: dict[str, str]) -> Model | None:
     remote_script = values.get("REMOTE_SCRIPT")
     remote_profile = values.get("REMOTE_PROFILE")
-    for model in MODELS:
+    for model in load_models():
         if model.remote_script == remote_script and model.profile == remote_profile:
             return model
     return None
@@ -359,9 +440,10 @@ print(json.dumps({"updated": updated, "model_rows": model_rows, "alias": alias})
 
 
 def switch_to_model(model_id: object) -> dict[str, Any]:
-    if not isinstance(model_id, str) or model_id not in MODELS_BY_ID:
+    by_id = models_by_id()
+    if not isinstance(model_id, str) or model_id not in by_id:
         raise ApiError(400, "model id is not allowed")
-    model = MODELS_BY_ID[model_id]
+    model = by_id[model_id]
     with switch_lock:
         verify_launcher(model)
         write_current_model(model)
@@ -649,10 +731,11 @@ def widget_snippet() -> str:
 
 
 def fallback_html() -> bytes:
-    if MODELS:
+    models = load_models()
+    if models:
         options = "\n".join(
             f'<option value="{html.escape(model.id)}">{html.escape(model.label)}</option>'
-            for model in MODELS
+            for model in models
         )
     else:
         options = '<option value="">No local models configured</option>'
@@ -726,7 +809,7 @@ class SwitcherHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         try:
             if self.command == "GET" and path == "/api/local-llm/models":
-                self.send_json(200, {"models": [model.as_dict() for model in MODELS]})
+                self.send_json(200, {"models": [model.as_dict() for model in load_models()]})
             elif self.command == "GET" and path == "/api/local-llm/current":
                 self.send_json(200, current_model_payload())
             elif self.command == "POST" and path == "/api/local-llm/switch":
@@ -765,7 +848,7 @@ class SwitcherHandler(BaseHTTPRequestHandler):
 
     def proxy_web_upstream(self) -> None:
         upstream = urlsplit(WEB_UPSTREAM)
-        if upstream.scheme not in {"http", "https"}:
+        if upstream.scheme not in {"http", "https"} or not upstream.hostname:
             self.send_json(502, {"detail": "LOCAL_LLM_WEB_UPSTREAM must be http or https"})
             return
 
