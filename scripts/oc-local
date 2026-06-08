@@ -40,6 +40,10 @@ has_control_chars() {
 	[[ "$value" =~ [[:cntrl:]] ]]
 }
 
+lower_ascii() {
+	printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
 is_digits() {
 	local value="$1"
 	[[ "$value" =~ ^[0-9]+$ ]]
@@ -642,8 +646,24 @@ fi
 if [[ "${spec_draft_n_max:-none}" != none ]]; then
 	server_command+=" --spec-draft-n-max ${spec_draft_n_max}"
 fi
-server_command+=" --no-warmup --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0.0"
+sampler_temp="0.6"
+sampler_top_p="0.95"
+sampler_top_k="20"
+family_lower="$(lower_ascii "$family")"
+model_name_lower="$(lower_ascii "$model_name")"
+hf_repo_lower="$(lower_ascii "$hf_repo")"
+if [[ "$family_lower" == gemma* || "$model_name_lower" == gemma* || "$hf_repo_lower" == *gemma* ]]; then
+	sampler_temp="1.0"
+	sampler_top_p="0.95"
+	sampler_top_k="64"
+fi
+server_command+=" --no-warmup --temp ${sampler_temp} --top-p ${sampler_top_p} --top-k ${sampler_top_k} --min-p 0.0 --presence-penalty 0.0"
 server_command+=" --alias ${model_name}"
+if [[ "${reasoning_enabled:-false}" == true ]]; then
+	server_command+=" --reasoning on"
+else
+	server_command+=" --reasoning off"
+fi
 
 if [[ "$info" == true ]]; then
 	printf 'family=%s\n' "$family"
@@ -825,6 +845,7 @@ if entry is None:
 entry.update({
     "name": model_name,
     "reasoning": reasoning,
+    "compat": {"supportsReasoningEffort": False},
     "input": ["text"],
     "contextWindow": context,
     "maxTokens": output_limit,
