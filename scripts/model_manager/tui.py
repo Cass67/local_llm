@@ -515,6 +515,7 @@ class InstallProgressScreen(Screen[None]):
         self._phase = ""
         self._transfer = ""
         self._spinner_idx = 0
+        self._accepting = False
 
     def compose(self) -> ComposeResult:
         yield Container(
@@ -800,6 +801,9 @@ class InstallProgressScreen(Screen[None]):
             self.action_skip()
 
     def action_accept(self) -> None:
+        if self._accepting:
+            self.app.notify("Already accepting/deploying this model", severity="warning")
+            return
         if not self.result or self.result["status"] != "benchmark_done":
             self.app.notify("No benchmark result to accept", severity="error")
             return
@@ -810,33 +814,69 @@ class InstallProgressScreen(Screen[None]):
             self.app.notify("No remote host", severity="error")
             return
 
-        status = self.query_one("#status-label", Label)
-        status.update("[yellow]Accepting...[/yellow]")
+        benchmark_file = str(self.result["benchmark_file"])
+        family = str(self.result.get("family", "?"))
+        self._accepting = True
+        self._set_busy(True, "Accepting and deploying")
+        self.query_one("#detail-label", Label).update(
+            "  Writing accepted metadata, deploying launcher, and refreshing remote state..."
+        )
+        actions = self.query_one("#install-action-table", DataTable)
+        actions.clear(columns=True)
+        actions.add_columns("Status")
+        actions.add_row("accepting/deploying — please wait")
 
         from .commands import accept_model
 
-        try:
-            accept_result = accept_model(self.result["benchmark_file"], host)
-        except Exception as e:
-            accept_result = {"status": "error", "message": str(e)}
+        def _finish_accept(accept_result: dict[str, str]) -> None:
+            self._accepting = False
+            self._set_busy(False)
+            if accept_result.get("status") == "ok":
+                self.query_one("#status-label", Label).update(f"[green]Accepted: {family}[/green]")
+                self.app.notify(f"Accepted: {family}")
+                self.app.pop_screen()
+            else:
+                message = accept_result.get("message", "accept failed")
+                self.query_one("#status-label", Label).update(f"[red]Accept failed: {message}[/red]")
+                self.app.notify(f"Accept failed: {message}", severity="error")
+                actions.clear(columns=True)
+                actions.add_columns("Action", "Meaning")
+                actions.add_row("accept", "retry create launcher and metadata")
+                actions.add_row("reject", "discard this result")
+                actions.add_row("skip", "keep benchmark, decide later")
+                actions.cursor_type = "row"
+                actions.move_cursor(row=0, column=0)
+                actions.focus()
 
-        if accept_result["status"] == "ok":
-            self.app.notify(f"Accepted: {self.result.get('family', '?')}")
-        else:
-            self.app.notify(f"Accept failed: {accept_result['message']}", severity="error")
-        self.app.pop_screen()
+        def _run_accept() -> None:
+            try:
+                accept_result = accept_model(benchmark_file, host)
+            except Exception as e:
+                accept_result = {"status": "error", "message": str(e)}
+            self.app.call_from_thread(_finish_accept, accept_result)
+
+        self.run_worker(_run_accept, thread=True)
 
     def action_reject(self) -> None:
+        if self._accepting:
+            self.app.notify("Accept/deploy in progress", severity="warning")
+            return
         family = self.result.get("family", "?") if self.result else "?"
         self.app.notify(f"Rejected: {family}")
         self.app.pop_screen()
 
     def action_skip(self) -> None:
+        if self._accepting:
+            self.app.notify("Accept/deploy in progress", severity="warning")
+            return
         family = self.result.get("family", "?") if self.result else "?"
         self.app.notify(f"Skipped: {family}")
         self.app.pop_screen()
 
     def action_cancel(self) -> None:
+        if self._accepting:
+            self.app.notify("Cannot cancel while accept/deploy is in progress", severity="warning")
+            return
         self.cancelled = True
         self._busy = False
         target = get_target() or ""
@@ -877,7 +917,14 @@ class ListScreen(Screen[None]):
 
     BINDINGS = [
         Binding("escape", "back", "Back"),
+        Binding("i", "hf_card", "HF Card"),
+        Binding("space", "hf_card", "HF Card"),
     ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._accepted_repos: list[str] = []
+        self._disk_repos: list[str] = []
 
     def _disk_models(self) -> list[tuple[str, str]]:
         roots = [
@@ -898,7 +945,7 @@ class ListScreen(Screen[None]):
         return sorted(rows.items())
 
     def compose(self) -> ComposeResult:
-        yield Label("[bold]Accepted Models[/bold]")
+        yield Label("[bold]Accepted Models[/bold]  (i/Space opens HF card)")
         yield Label("")
         yield DataTable(id="accepted-table")
         yield Label("")
@@ -909,19 +956,51 @@ class ListScreen(Screen[None]):
 
     def on_mount(self) -> None:
         accepted_table = self.query_one("#accepted-table", DataTable)
-        accepted_table.add_columns("Family", "Alias", "Quant", "Profile", "Ctx")
+        accepted_table.add_columns("Family", "Alias", "Repo", "Quant", "Profile", "Ctx")
+        accepted_table.cursor_type = "row"
         accepted = list_accepted()
+        self._accepted_repos = []
         for family, data in accepted:
             alias = data.get("alias", "?")
+            repo = str(data.get("repo") or data.get("hf_repo") or "")
             quant = data.get("quant", "?")
             profile = data.get("profile", "?")
             ctx = data.get("config", {}).get("ctx", "?")
-            accepted_table.add_row(family, alias, quant, profile, ctx)
+            self._accepted_repos.append(repo)
+            accepted_table.add_row(family, alias, repo, quant, profile, ctx)
+        if self._accepted_repos:
+            accepted_table.move_cursor(row=0, column=0)
+            accepted_table.focus()
 
         disk_table = self.query_one("#disk-table", DataTable)
         disk_table.add_columns("Repo", "Path")
+        disk_table.cursor_type = "row"
+        self._disk_repos = []
         for repo, path in self._disk_models():
+            self._disk_repos.append(repo)
             disk_table.add_row(repo, path)
+
+    def _selected_repo(self) -> str | None:
+        focused = getattr(self.app, "focused", None)
+        table_id = getattr(focused, "id", None)
+        if table_id == "disk-table":
+            table = self.query_one("#disk-table", DataTable)
+            repos = self._disk_repos
+        else:
+            table = self.query_one("#accepted-table", DataTable)
+            repos = self._accepted_repos
+        cursor = table.cursor_row
+        if cursor is None or cursor < 0 or cursor >= len(repos):
+            return None
+        repo = repos[cursor]
+        return repo or None
+
+    def action_hf_card(self) -> None:
+        repo = self._selected_repo()
+        if not repo:
+            self.app.notify("No model repo selected", severity="warning")
+            return
+        self.app.push_screen(HFCardScreen(repo))
 
     def action_back(self) -> None:
         self.app.pop_screen()
