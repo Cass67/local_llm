@@ -133,7 +133,15 @@ class InitScreen(Screen[None]):
 class HFCardScreen(Screen[None]):
     """Show a Hugging Face model card."""
 
-    BINDINGS = [Binding("escape", "back", "Back")]
+    BINDINGS = [
+        Binding("escape", "back", "Back"),
+        Binding("up", "scroll_up", "Up", show=False),
+        Binding("down", "scroll_down", "Down", show=False),
+        Binding("pageup", "page_up", "Page Up", show=False),
+        Binding("pagedown", "page_down", "Page Down", show=False),
+        Binding("home", "scroll_home", "Top", show=False),
+        Binding("end", "scroll_end", "Bottom", show=False),
+    ]
 
     def __init__(self, repo: str) -> None:
         super().__init__()
@@ -142,7 +150,11 @@ class HFCardScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         yield Label(f"[bold]Hugging Face Card[/bold]  {self.repo}")
         yield Label("Loading...", id="hf-card-status")
-        yield Markdown("", id="hf-card-markdown")
+        card = Markdown("", id="hf-card-markdown")
+        card.can_focus = True
+        card.styles.height = "1fr"
+        card.styles.overflow_y = "scroll"
+        yield card
         yield Footer()
 
     def on_mount(self) -> None:
@@ -150,7 +162,9 @@ class HFCardScreen(Screen[None]):
             self.query_one("#hf-card-status", Label).update(
                 f"[green]https://huggingface.co/{self.repo}[/green]"
             )
-            self.query_one("#hf-card-markdown", Markdown).update(markdown)
+            card = self.query_one("#hf-card-markdown", Markdown)
+            card.update(markdown)
+            card.focus()
 
         def _finish_error(message: str) -> None:
             self.query_one("#hf-card-status", Label).update(f"[red]{message}[/red]")
@@ -171,7 +185,29 @@ class HFCardScreen(Screen[None]):
             except (OSError, UnicodeDecodeError) as e:
                 self.app.call_from_thread(_finish_error, f"Could not fetch card: {e}")
 
+        self.query_one("#hf-card-markdown", Markdown).focus()
         self.run_worker(_run, thread=True)
+
+    def _card(self) -> Markdown:
+        return self.query_one("#hf-card-markdown", Markdown)
+
+    def action_scroll_up(self) -> None:
+        self._card().scroll_up(animate=False)
+
+    def action_scroll_down(self) -> None:
+        self._card().scroll_down(animate=False)
+
+    def action_page_up(self) -> None:
+        self._card().scroll_page_up(animate=False)
+
+    def action_page_down(self) -> None:
+        self._card().scroll_page_down(animate=False)
+
+    def action_scroll_home(self) -> None:
+        self._card().scroll_home(animate=False)
+
+    def action_scroll_end(self) -> None:
+        self._card().scroll_end(animate=False)
 
     def action_back(self) -> None:
         self.app.pop_screen()
