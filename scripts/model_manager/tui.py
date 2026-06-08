@@ -1131,29 +1131,77 @@ class RunScreen(Screen[None]):
 
     def __init__(self) -> None:
         super().__init__()
-        self._rows: list[tuple[str, list[str], int]] = []
+        self._rows: list[dict[str, Any]] = []
         self._busy = False
         self._busy_text = ""
         self._spinner_idx = 0
 
     def compose(self) -> ComposeResult:
-        accepted = list_accepted()
         body: list[Any] = [Label("[bold]Run Model Server[/bold]"), Label("")]
-
-        if not accepted:
-            body.append(Label("  [red]No accepted models[/red]"))
-        else:
-            body.append(Label("  Accepted families:"))
-            body.append(Label(""))
-
+        body.append(
+            Label("  Accepted models run with Enter. Disk-only rows show remote GGUFs not accepted yet.")
+        )
+        body.append(Label(""))
         body.append(DataTable(id="run-table"))
         body.append(Label("", id="run-status"))
 
         yield Container(*body)
         yield Footer()
 
+    def _remote_disk_models(self) -> list[dict[str, str]]:
+        target = get_target() or ""
+        host = target.split(":", 1)[1] if target.startswith("remote:") else None
+        if not host:
+            return []
+        script = r"""
+import json, pathlib
+root=pathlib.Path.home()/'.cache'/'huggingface'/'hub'
+for repo_dir in sorted(root.glob('models--*')):
+    if not repo_dir.is_dir():
+        continue
+    repo=repo_dir.name.removeprefix('models--').replace('--','/')
+    ggufs=[]
+    for p in repo_dir.rglob('*.gguf'):
+        if p.name.lower().startswith('mmproj'):
+            continue
+        try:
+            size=p.stat().st_size
+        except OSError:
+            size=0
+        ggufs.append((size,p.name))
+    if not ggufs:
+        continue
+    ggufs.sort(reverse=True)
+    size,name=ggufs[0]
+    print(json.dumps({
+        'repo': repo,
+        'file': name,
+        'disk_gb': f'{sum(s for s, _ in ggufs)/1_000_000_000:.1f}',
+    }))
+"""
+        try:
+            result = subprocess.run(  # noqa: S603 # nosec: B603
+                ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, "python3", "-"],
+                input=script,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        rows = []
+        for line in result.stdout.splitlines():
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                rows.append({str(k): str(v) for k, v in item.items()})
+        return rows
+
     def _load_rows(self) -> None:
         self._rows = []
+        accepted_by_repo: set[str] = set()
         accepted = sorted(list_accepted(), key=lambda x: x[0])
         for family, data in accepted:
             profiles_raw = data.get("profiles", {})
@@ -1166,18 +1214,68 @@ class RunScreen(Screen[None]):
             current = str(data.get("profile") or "balanced")
             if current not in profiles:
                 profiles.insert(0, current)
-            idx = profiles.index(current)
-            self._rows.append((family, profiles, idx))
+            repo = str(data.get("repo") or data.get("hf_repo") or "")
+            if repo:
+                accepted_by_repo.add(repo)
+            self._rows.append(
+                {
+                    "source": "accepted",
+                    "family": family,
+                    "alias": str(data.get("alias") or "?"),
+                    "repo": repo,
+                    "file": str(data.get("hf_file") or data.get("quant") or "?"),
+                    "ctx": str((data.get("config") or {}).get("ctx") or "?"),
+                    "profiles": profiles,
+                    "profile_idx": profiles.index(current),
+                    "disk_gb": "-",
+                }
+            )
+        for disk in self._remote_disk_models():
+            repo = disk.get("repo", "")
+            if repo in accepted_by_repo:
+                for row in self._rows:
+                    if row.get("repo") == repo:
+                        row["disk_gb"] = disk.get("disk_gb", "-")
+                        break
+                continue
+            self._rows.append(
+                {
+                    "source": "disk-only",
+                    "family": repo,
+                    "alias": "not accepted",
+                    "repo": repo,
+                    "file": disk.get("file", "?"),
+                    "ctx": "-",
+                    "profiles": [],
+                    "profile_idx": 0,
+                    "disk_gb": disk.get("disk_gb", "-"),
+                }
+            )
 
     def _render_table(self) -> None:
         table = self.query_one("#run-table", DataTable)
+        cursor = table.cursor_row or 0
         table.clear(columns=True)
-        table.add_columns("#", "Family", "Profile")
+        table.add_columns(
+            "#", "Source", "Family/Repo", "Alias", "Profile", "Ctx", "Disk GB", "File"
+        )
         table.cursor_type = "row"
-        for i, (family, profiles, idx) in enumerate(self._rows, 1):
-            table.add_row(str(i), family, profiles[idx])
+        for i, row in enumerate(self._rows, 1):
+            profiles = row.get("profiles") or []
+            idx = int(row.get("profile_idx") or 0)
+            profile = profiles[idx] if profiles else "-"
+            table.add_row(
+                str(i),
+                str(row.get("source", "?")),
+                str(row.get("family", "?")),
+                str(row.get("alias", "?")),
+                profile,
+                str(row.get("ctx", "?")),
+                str(row.get("disk_gb", "-")),
+                str(row.get("file", "?")),
+            )
         if self._rows:
-            table.move_cursor(row=0, column=0)
+            table.move_cursor(row=min(cursor, len(self._rows) - 1), column=0)
 
     def on_mount(self) -> None:
         self._load_rows()
@@ -1215,9 +1313,13 @@ class RunScreen(Screen[None]):
             cursor = 0
         if cursor < 0 or cursor >= len(self._rows):
             return
-        family, profiles, idx = self._rows[cursor]
-        idx = (idx + 1) % len(profiles)
-        self._rows[cursor] = (family, profiles, idx)
+        row = self._rows[cursor]
+        profiles = row.get("profiles") or []
+        if not profiles:
+            self.app.notify("Disk-only row has no accepted profiles", severity="warning")
+            return
+        idx = (int(row.get("profile_idx") or 0) + 1) % len(profiles)
+        row["profile_idx"] = idx
         self._render_table()
         table.move_cursor(row=cursor, column=0)
 
@@ -1234,8 +1336,13 @@ class RunScreen(Screen[None]):
         if cursor < 0 or cursor >= len(self._rows):
             self.app.notify("No models available", severity="warning")
             return
-        family, profiles, idx = self._rows[cursor]
-        self._start_server(family, profiles[idx])
+        row = self._rows[cursor]
+        profiles = row.get("profiles") or []
+        if not profiles or row.get("source") != "accepted":
+            self.app.notify("Disk-only model must be installed/accepted before running", severity="warning")
+            return
+        profile = profiles[int(row.get("profile_idx") or 0)]
+        self._start_server(str(row.get("family")), profile)
 
     def _start_server(self, family: str, profile: str) -> None:
         """Start the model server using oc-local."""
