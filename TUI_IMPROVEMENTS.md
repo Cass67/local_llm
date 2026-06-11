@@ -60,5 +60,6 @@
 - Install logs: streaming tail, auto-scroll, line-count.
 - Architecture refactor: `service.py` extracted; `tui.py` no subprocess/SSH.
 - Config centralization: `config.py` single source of truth.
+- Removed DiffusionRunScreen / run_diffusion_prompt (no longer in scope).
 - Lint/typecheck: ruff clean, bandit low-severity only.
 - Tests: 32/32 passing.

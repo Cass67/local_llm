@@ -27,7 +27,6 @@ from .service import (
     get_remote_downloads,
     get_server_status,
     remote_inventory,
-    run_diffusion_prompt,
     run_model_discovery,
     select_best_quant,
     start_server,
@@ -105,7 +104,6 @@ class MainMenu(Screen[None]):
         Binding("5", "delete", "Delete"),
         Binding("6", "run", "Run"),
         Binding("7", "status", "Status"),
-        Binding("8", "diffusion", "Diffusion"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -123,7 +121,6 @@ class MainMenu(Screen[None]):
             Label("  [bold]5[/]  Delete        Delete an accepted model"),
             Label("  [bold]6[/]  Run           Run a model server"),
             Label("  [bold]7[/]  Status        Show model-manager status"),
-            Label("  [bold]8[/]  Diffusion     Run DiffusionGemma (prompt → text)"),
             Label("  [bold]q[/]  Quit"),
             id="menu-container",
         )
@@ -149,9 +146,6 @@ class MainMenu(Screen[None]):
 
     def action_status(self) -> None:
         self.app.push_screen(StatusScreen())
-
-    def action_diffusion(self) -> None:
-        self.app.push_screen(DiffusionRunScreen())
 
 
 class InitScreen(Screen[None]):
@@ -2071,132 +2065,6 @@ class StatusScreen(Screen[None]):
         threading.Thread(target=_do_restart, daemon=True).start()
 
     def action_back(self) -> None:
-        self.app.pop_screen()
-
-
-class DiffusionRunScreen(Screen[None]):
-    """Run DiffusionGemma: prompt in, generated text out."""
-
-    BINDINGS = [
-        Binding("escape", "back", "Back"),
-        Binding("ctrl+s", "run_prompt", "Run"),
-    ]
-
-    _CLI = "~/llama-diffusion/build-hip/bin/llama-diffusion-cli"
-    _MODEL = (
-        "~/.cache/huggingface/hub"
-        "/models--unsloth--diffusiongemma-26B-A4B-it-GGUF"
-        "/snapshots/a66693009d7540a6e3275908751a37ac929e6842"
-        "/diffusiongemma-26B-A4B-it-Q8_0.gguf"
-    )
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._running = False
-        self._spinner_idx = 0
-        self._step_current = 0
-        self._step_total = 0
-
-    def compose(self) -> ComposeResult:
-        yield _breadcrumb_label(["Home", "Diffusion"])
-        yield Label("[bold]DiffusionGemma 26B[/bold]  [dim]Q8_0 · 2×7900XT · Enter runs[/dim]")
-        yield Label("")
-        yield Label("  Prompt:")
-        yield Input(placeholder="Ask anything...", id="diff-prompt")
-        yield Label("  Tokens (default 512) / Steps (default 48):")
-        yield Input(placeholder="512", id="diff-n")
-        yield Input(placeholder="48", id="diff-steps")
-        yield Label("", id="diff-status")
-        yield Label("[dim]Output:[/dim]")
-        with VerticalScroll(id="diff-scroll"):
-            yield Label("", id="diff-output")
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self.query_one("#diff-prompt", Input).focus()
-        self.set_interval(0.15, self._tick_spinner)
-
-    def _tick_spinner(self) -> None:
-        if not self._running:
-            return
-        frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        self._spinner_idx = (self._spinner_idx + 1) % len(frames)
-        step_txt = f" step {self._step_current}/{self._step_total}" if self._step_total else ""
-        self.query_one("#diff-status", Label).update(
-            f"[yellow]{frames[self._spinner_idx]} Generating{step_txt}...[/yellow]"
-        )
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "diff-prompt":
-            self.query_one("#diff-n", Input).focus()
-        elif event.input.id == "diff-n":
-            self.query_one("#diff-steps", Input).focus()
-        else:
-            self.action_run_prompt()
-
-    def action_run_prompt(self) -> None:
-        if self._running:
-            self.app.notify("Already running", severity="warning")
-            return
-        prompt = (self.query_one("#diff-prompt", Input).value or "").strip()
-        if not prompt:
-            self.app.notify("Enter a prompt", severity="error")
-            return
-        n_text = (self.query_one("#diff-n", Input).value or "").strip()
-        steps_text = (self.query_one("#diff-steps", Input).value or "").strip()
-        n = int(n_text) if n_text.isdigit() else 512
-        steps = int(steps_text) if steps_text.isdigit() else 48
-
-        target = get_target()
-        host = target.split(":", 1)[1] if target and target.startswith("remote:") else None
-        if not host:
-            self.app.notify("Remote target required", severity="error")
-            return
-
-        self._running = True
-        self._step_current = 0
-        self._step_total = steps
-        self.query_one("#diff-output", Label).update("")
-        self.query_one("#diff-status", Label).update("[yellow]Starting...[/yellow]")
-
-        import re
-
-        step_pat = re.compile(r"diffusion step:\s+(\d+)/(\d+)")
-
-        def _on_line(line: str) -> None:
-            m = step_pat.search(line)
-            if m:
-                self._step_current = int(m.group(1))
-                self._step_total = int(m.group(2))
-
-        def _run() -> None:
-            text, code = run_diffusion_prompt(
-                prompt=prompt,
-                n=n,
-                steps=steps,
-                host=host,
-                cli=self._CLI,
-                model=self._MODEL,
-                on_line=_on_line,
-            )
-            if code != 0 and not text:
-                text = f"[red]exited {code}[/red]"
-
-            def _finish(text: str) -> None:
-                self._running = False
-                self.query_one("#diff-status", Label).update("[green]Done[/green]")
-                self.query_one("#diff-output", Label).update(text or "[dim](no output)[/dim]")
-
-            self.app.call_from_thread(_finish, text)
-
-        self.run_worker(_run, thread=True)
-
-    def action_back(self) -> None:
-        if self._running:
-            self.app.notify(
-                "Generation in progress — Escape again to force quit", severity="warning"
-            )
-            self._running = False
         self.app.pop_screen()
 
 
