@@ -69,10 +69,11 @@ Full commands:
   select     Select a candidate model (legacy — install replaces this)
   benchmark  Benchmark a selected model
   accept     Accept benchmark results
-  deploy     Preview generated state deployment
-  export     Export local model-manager state as JSON
-  restore    Restore local model-manager state from JSON
-  status     Show model-manager status
+  deploy           Preview generated state deployment
+  update-launcher  Regenerate launcher for an accepted model
+  export           Export local model-manager state as JSON
+  restore          Restore local model-manager state from JSON
+  status           Show model-manager status
 
 Options:
   -h, --help  Show this help
@@ -685,7 +686,7 @@ ctx, batch, ubatch, ngl, tensor_split = sys.argv[2:]
 for name, value in {"ctx": ctx, "batch": batch, "ubatch": ubatch, "ngl": ngl}.items():
     if not re.fullmatch(r"[0-9]+", value):
         raise SystemExit(f"invalid {name}")
-if tensor_split and not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
+if tensor_split and not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?(,[0-9]+(?:\.[0-9]+)?)*", tensor_split):
     raise SystemExit("invalid tensor_split")
 text = path.read_text(encoding="utf-8")
 for name, value in (("ctx", ctx), ("batch", batch), ("ubatch", ubatch), ("ngl", ngl)):
@@ -706,23 +707,29 @@ ensure_launcher_model_log_redirect() {
   [[ -f "$launcher_file" && ! -L "$launcher_file" ]] || return 0
   python3 - "$launcher_file" <<'PY'
 import pathlib
+import re
 import sys
 
 path = pathlib.Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-marker = 'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"'
-if marker in text:
-    raise SystemExit(0)
 needle = "set -euo pipefail\n"
-insert = (
-    'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
-    'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"\n'
-    'mkdir -p "$(dirname "$log_file")"\n'
-    'exec > >(stdbuf -oL -eL awk '\''!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/erased invalidated context checkpoint/ && !/creating new checkpoint during processing/'\'' | tee "$log_file") 2>&1\n'
-)
-if needle not in text:
-    raise SystemExit(f"launcher is missing expected shell strict-mode line: {path}")
-path.write_text(text.replace(needle, needle + insert, 1), encoding="utf-8")
+awk_filter = "!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/slot print_timing:.*prompt processing/"
+exec_line = f"exec > >(stdbuf -oL -eL awk '{awk_filter}' | tee \"$log_file\") 2>&1"
+if "exec > >(stdbuf -oL -eL awk " in text:
+    text = re.sub(r"^exec > >\(stdbuf -oL -eL awk '.*' \| tee \"\$log_file\"\) 2>&1$", exec_line, text, count=1, flags=re.MULTILINE)
+elif 'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"' in text:
+    text = text.replace('mkdir -p "$(dirname "$log_file")"\n', 'mkdir -p "$(dirname "$log_file")"\n' + exec_line + "\n", 1)
+else:
+    insert = (
+        'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
+        'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"\n'
+        'mkdir -p "$(dirname "$log_file")"\n'
+        f'{exec_line}\n'
+    )
+    if needle not in text:
+        raise SystemExit(f"launcher is missing expected shell strict-mode line: {path}")
+    text = text.replace(needle, needle + insert, 1)
+path.write_text(text, encoding="utf-8")
 PY
   chmod +x "$launcher_file"
 }
@@ -856,8 +863,8 @@ if backend:
         raise SystemExit("accepted metadata visible_devices must be comma-separated device indexes")
     if split_mode not in {"layer", "row"}:
         raise SystemExit("accepted metadata split_mode must be layer or row")
-    if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
-        raise SystemExit("accepted metadata tensor_split must be comma-separated positive integers")
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?(,[0-9]+(?:\.[0-9]+)?)*", tensor_split):
+        raise SystemExit("accepted metadata tensor_split must be comma-separated positive numbers")
     if backend == "vulkan" and visible_devices == "0,1" and tensor_split == "44,1":
         tensor_split = "1,1"
     payload["config"].update({
@@ -3057,8 +3064,14 @@ json_string() {
 
 stop_server() {
   systemctl --user stop llama-server.service >/dev/null 2>&1 || true
+  systemctl --user reset-failed llama-server.service >/dev/null 2>&1 || true
   pkill -u "$(id -u)" -f 'llama-server' >/dev/null 2>&1 || true
-  sleep 2
+  for _ in $(seq 1 30); do
+    if ! pgrep -u "$(id -u)" -f 'llama-server' >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
 }
 
 restore_service() {
@@ -3163,9 +3176,9 @@ if [[ -n "$cache_type_v" ]]; then
   server_cmd+=(-ctv "$cache_type_v")
 fi
 server_cmd+=(
-  --ctx-checkpoints 128
-  --checkpoint-every-n-tokens 1024
-  --cache-ram 32768
+  --cache-ram 16384
+  --ctx-checkpoints 64
+  --checkpoint-every-n-tokens 4096
   -c "$ctx"
   --flash-attn on
   -ub "$ubatch"
@@ -3177,10 +3190,21 @@ server_cmd+=(
 if [[ "$responsive" == true ]]; then
   : # responsive mode is now baked into default server args
 fi
+sampler_temp="0.6"
+sampler_top_p="0.95"
+sampler_top_k="20"
+if [[ "${family,,}" == gemma* || "${alias,,}" == gemma* || "${repo,,}" == *gemma* ]]; then
+  sampler_temp="1.0"
+  sampler_top_p="0.95"
+  sampler_top_k="64"
+fi
+case "${repo,,} ${family,,} ${alias,,}" in
+  *gemma-4-12b*) server_cmd+=(--no-mmproj) ;;
+esac
 server_cmd+=(
-  --temp 0.6
-  --top-p 0.95
-  --top-k 20
+  --temp "$sampler_temp"
+  --top-p "$sampler_top_p"
+  --top-k "$sampler_top_k"
   --min-p 0.0
   --presence-penalty 0.0
   --alias "$alias"
@@ -3240,9 +3264,9 @@ for _ in $(seq 1 180); do
 done
 
 if [[ "$load_status" == success ]]; then
-  prompt='Write a deterministic benchmark response of exactly 32 numbered lines. Each line must contain one concise sentence about local inference performance, queueing, memory bandwidth, and token generation. Do not stop early.'
-  request="{\"model\":$(json_string "$alias"),\"messages\":[{\"role\":\"user\",\"content\":$(json_string "$prompt")}],\"max_tokens\":512,\"temperature\":0}"
-  if ! curl -fsS --max-time 300 "http://127.0.0.1:${port}/v1/chat/completions" -H 'Content-Type: application/json' -d "$request" >"$response_file" 2>>"$log_file"; then
+  prompt='You are running a local model benchmark. Read this checklist: cache reuse, prompt prefill, decode throughput, memory pressure, tool-use responsiveness, and service health. Reply with exactly one word: ok'
+  request="{\"model\":$(json_string "$alias"),\"messages\":[{\"role\":\"user\",\"content\":$(json_string "$prompt")}],\"max_tokens\":128,\"temperature\":0}"
+  if ! curl -fsS --max-time 180 "http://127.0.0.1:${port}/v1/chat/completions" -H 'Content-Type: application/json' -d "$request" >"$response_file" 2>>"$log_file"; then
     load_status=error
   fi
 fi
@@ -3256,8 +3280,42 @@ prompt_tok_s="$(last_number_for 'prompt eval time' "$log_file")"
 decode_tok_s="$(last_number_for '(^|:)[[:space:]]+eval time' "$log_file")"
 prompt_tokens="$(last_tokens_for 'prompt eval time' "$log_file")"
 decode_tokens="$(last_tokens_for '(^|:)[[:space:]]+eval time' "$log_file")"
-if [[ "$load_status" == success && ( -z "$decode_tokens" || "$decode_tokens" -lt 128 ) ]]; then
-  load_status=too_short
+if [[ "$load_status" == success ]]; then
+  quality_status="$(python3 - "$prompt_tok_s" "$decode_tok_s" "$prompt_tokens" "$decode_tokens" <<'PY'
+import sys
+prompt_tps, decode_tps, prompt_tokens, decode_tokens = sys.argv[1:]
+
+def number(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+def integer(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+ptps = number(prompt_tps)
+dtps = number(decode_tps)
+ptok = integer(prompt_tokens)
+dtok = integer(decode_tokens)
+if dtok is None or dtok < 64:
+    print("too_short")
+elif ptok is None or ptok < 48:
+    print("prompt_probe_too_short")
+elif ptps is None or ptps < 25.0:
+    print("prompt_too_slow")
+elif dtps is None or dtps < 4.5:
+    print("decode_too_slow")
+else:
+    print("success")
+PY
+)"
+  if [[ "$quality_status" != success ]]; then
+    load_status="$quality_status"
+  fi
 fi
 printf 'load_status=%s\n' "$load_status"
 printf 'prompt_tok_s=%s\n' "$prompt_tok_s"
@@ -4038,8 +4096,12 @@ for line in raw:
 successful = [
     trial for trial in trials
     if trial["load_status"] == "success"
+    and trial.get("prompt_tok_s") is not None
+    and trial.get("prompt_tok_s") >= 25.0
     and trial.get("decode_tok_s") is not None
-    and (trial.get("decode_tokens") or 0) >= 128
+    and trial.get("decode_tok_s") >= 4.5
+    and (trial.get("prompt_tokens") or 0) >= 48
+    and (trial.get("decode_tokens") or 0) >= 64
 ]
 
 def copy_trial(trial):
@@ -4233,7 +4295,7 @@ with open(output_file, "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 
-    if [[ "$load_status" == success && -n "$prompt_tok_s" && -n "$decode_tok_s" && -n "$decode_tokens" && "$decode_tokens" -ge 128 ]]; then
+    if [[ "$load_status" == success && -n "$prompt_tok_s" && -n "$decode_tok_s" && -n "$prompt_tokens" && -n "$decode_tokens" && "$prompt_tokens" -ge 48 && "$decode_tokens" -ge 64 ]]; then
       printf 'Benchmark result\n'
     else
       printf 'Benchmark did not complete\n'
@@ -4248,8 +4310,8 @@ PY
     printf 'decode_tok_s=%s\n' "${decode_tok_s:-null}"
     printf 'prompt_tokens=%s\n' "${prompt_tokens:-null}"
     printf 'decode_tokens=%s\n' "${decode_tokens:-null}"
-    if [[ "$load_status" != success || -z "$prompt_tok_s" || -z "$decode_tok_s" || -z "$decode_tokens" || "$decode_tokens" -lt 128 ]]; then
-      printf 'reason=%s\n' 'model did not become ready or did not emit throughput metrics'
+    if [[ "$load_status" != success || -z "$prompt_tok_s" || -z "$decode_tok_s" || -z "$prompt_tokens" || -z "$decode_tokens" || "$prompt_tokens" -lt 48 || "$decode_tokens" -lt 64 ]]; then
+      printf 'reason=%s\n' 'model did not become ready, was too slow, or did not emit enough throughput metrics'
     fi
     printf 'log_file=%s\n' "${log_file:-unknown}"
     printf 'result_file=%s\n' "$output_file"
@@ -4387,6 +4449,21 @@ def has_control_chars(value):
 
 if result.get("load_status") != "success":
     raise SystemExit(f"benchmark JSON load_status is not success: {result.get('load_status')}")
+quality_checks = (
+    ("prompt_tokens", 48, "integer"),
+    ("decode_tokens", 64, "integer"),
+    ("prompt_tok_s", 25.0, "number"),
+    ("decode_tok_s", 4.5, "number"),
+)
+for key, minimum, kind in quality_checks:
+    value = result.get(key)
+    if kind == "integer":
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise SystemExit(f"benchmark JSON field must be an integer: {key}")
+    elif not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise SystemExit(f"benchmark JSON field must be a number: {key}")
+    if value < minimum:
+        raise SystemExit(f"benchmark JSON field below acceptance threshold: {key}={value} < {minimum}")
 for key, minimum in (("ctx", 1), ("batch", 1), ("ubatch", 1), ("ngl", 0)):
     if key in result and not isinstance(result[key], int):
         raise SystemExit(f"benchmark JSON field must be an integer: {key}")
@@ -4441,8 +4518,8 @@ if backend:
         raise SystemExit("benchmark JSON visible_devices must be comma-separated device indexes")
     if split_mode not in {"layer", "row"}:
         raise SystemExit("benchmark JSON split_mode must be layer or row")
-    if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
-        raise SystemExit("benchmark JSON tensor_split must be comma-separated positive integers")
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?(,[0-9]+(?:\.[0-9]+)?)*", tensor_split):
+        raise SystemExit("benchmark JSON tensor_split must be comma-separated positive numbers")
     if backend == "vulkan" and visible_devices == "0,1" and tensor_split == "44,1":
         tensor_split = "1,1"
         result["tensor_split"] = tensor_split
@@ -4564,11 +4641,11 @@ if backend:
         raise SystemExit("visible_devices must be comma-separated device indexes")
     if split_mode not in {"layer", "row"}:
         raise SystemExit("split_mode must be layer or row")
-    if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", tensor_split):
-        raise SystemExit("tensor_split must be comma-separated positive integers")
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?(,[0-9]+(?:\.[0-9]+)?)*", tensor_split):
+        raise SystemExit("tensor_split must be comma-separated positive numbers")
     if backend == "vulkan" and visible_devices == "0,1" and tensor_split == "44,1":
         tensor_split = "1,1"
-awk_filter = "!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/erased invalidated context checkpoint/ && !/creating new checkpoint during processing/ && !/forcing full prompt re-processing due to lack of cache data/ && !/slot print_timing:.*prompt processing/"
+awk_filter = "!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/slot print_timing:.*prompt processing/"
 lines = [
     "#!/usr/bin/env bash",
     f"# local_llm_repo={repo}",
@@ -4605,6 +4682,10 @@ else:
 lines.extend([
     "  --host 0.0.0.0 \\",
     "  --port 8080 \\",
+    "  --timeout 600 \\",
+    "  --threads-http 2 \\",
+    "  --parallel 1 \\",
+    "  --no-cont-batching \\",
     '  -ngl "$ngl" \\',
 ])
 if backend:
@@ -4622,17 +4703,32 @@ if cache_type_v:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", cache_type_v):
         raise SystemExit("cache_type_v must be a safe llama.cpp cache type")
     lines.append(f"  -ctv {shlex.quote(cache_type_v)} \\")
+sampler_temp = "0.6"
+sampler_top_p = "0.95"
+sampler_top_k = "20"
+repo_family_alias_lower = f"{repo} {family} {alias}".lower()
+if family.lower().startswith("gemma") or alias.lower().startswith("gemma") or "gemma" in repo.lower():
+    sampler_temp = "1.0"
+    sampler_top_p = "0.95"
+    sampler_top_k = "64"
 lines.extend([
+    "  --cache-ram 16384 \\",
+    "  --ctx-checkpoints 64 \\",
+    "  --checkpoint-every-n-tokens 4096 \\",
     '  -c "$ctx" \\',
     "  --flash-attn on \\",
     '  -ub "$ubatch" \\',
     '  -b "$batch" \\',
+])
+if "gemma-4-12b" in repo_family_alias_lower:
+    lines.append("  --no-mmproj \\")
+lines.extend([
     '  --threads "$(nproc)" \\',
     "  --prio 2 \\",
     "  --no-warmup \\",
-    "  --temp 0.6 \\",
-    "  --top-p 0.95 \\",
-    "  --top-k 20 \\",
+    f"  --temp {sampler_temp} \\",
+    f"  --top-p {sampler_top_p} \\",
+    f"  --top-k {sampler_top_k} \\",
     "  --min-p 0.0 \\",
     "  --presence-penalty 0.0 \\",
     f"  --alias {shlex.quote(alias)} \\",
@@ -4944,6 +5040,239 @@ PY
   printf 'current=%s profile=%s\n' "$current_launcher" "$current_profile"
 }
 
+cmd_update_launcher() {
+  local family=""
+  local yes=false
+  local dry_run=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --family)
+        if [[ $# -lt 2 || -z "$2" ]]; then
+          printf '%s\n' '--family requires a family name' >&2
+          return 2
+        fi
+        family="$2"
+        shift 2
+        ;;
+      --yes)
+        yes=true
+        shift
+        ;;
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      -h | --help)
+        printf '%s\n' 'Usage: model-manager update-launcher --family <family> [--dry-run|--yes]'
+        return 0
+        ;;
+      --*)
+        printf 'Unknown update-launcher option: %s\n' "$1" >&2
+        return 2
+        ;;
+      *)
+        printf 'update-launcher accepts options only, got: %s\n' "$1" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$family" ]]; then
+    printf '%s\n' 'update-launcher requires --family <family>' >&2
+    return 2
+  fi
+
+  if [[ "$yes" == true && "$dry_run" == true ]]; then
+    printf '%s\n' 'choose either --dry-run or --yes, not both' >&2
+    return 2
+  fi
+
+  local metadata_file="$runs_dir/accepted/$family.json"
+  if [[ ! -f "$metadata_file" ]]; then
+    printf 'accepted metadata not found for family: %s\n' "$family"
+    return 1
+  fi
+
+  # Use Python to regenerate launcher from accepted metadata
+  python3 - "$metadata_file" "$generated_launcher_dir" "$dry_run" "$yes" <<'PY'
+import json
+import pathlib
+import re
+import shlex
+import sys
+
+metadata_path = pathlib.Path(sys.argv[1])
+launcher_dir = pathlib.Path(sys.argv[2])
+dry_run = sys.argv[3] == "true"
+yes = sys.argv[4] == "true"
+
+if metadata_path.is_symlink():
+    print("refuses symlinked accepted file", file=sys.stderr)
+    sys.exit(1)
+
+with metadata_path.open(encoding="utf-8") as f:
+    data = json.load(f)
+
+if not isinstance(data, dict):
+    print("accepted metadata must be an object", file=sys.stderr)
+    sys.exit(1)
+
+family = data.get("family") or metadata_path.stem
+alias = data.get("alias") or data.get("model_name") or "unknown"
+repo = data.get("repo") or data.get("hf_repo")
+quant = data.get("quant", "")
+hf_file = data.get("hf_file", "")
+config = data.get("config") or {}
+ctx = str(config.get("ctx", "131072"))
+batch = str(config.get("batch", "4096"))
+ubatch = str(config.get("ubatch", "256"))
+ngl = str(config.get("ngl", "999"))
+backend = str(config.get("backend", ""))
+visible_devices = str(config.get("visible_devices", ""))
+split_mode = str(config.get("split_mode", "layer"))
+tensor_split = str(config.get("tensor_split", "1,1"))
+cache_type_k = str(config.get("cache_type_k", ""))
+cache_type_v = str(config.get("cache_type_v", ""))
+ctx_shift = str(config.get("ctx_shift", ""))
+reasoning = config.get("reasoning", True)
+
+# Validate basics
+for name, value in (("repo", repo), ("family", family), ("alias", alias), ("quant", quant), ("hf_file", hf_file)):
+    if value and any(ord(c) < 32 or ord(c) == 127 for c in str(value)):
+        print(f"unsafe character in {name}", file=sys.stderr)
+        sys.exit(1)
+
+for name, value, minimum in (("ctx", ctx, 1), ("batch", batch, 1), ("ubatch", ubatch, 1), ("ngl", ngl, 0)):
+    if not str(value).isdigit():
+        print(f"missing numeric {name}", file=sys.stderr)
+        sys.exit(1)
+    if int(value) < minimum:
+        print(f"{name} too small", file=sys.stderr)
+        sys.exit(1)
+
+# Determine launcher file
+launcher_name = f"start_{family}.sh"
+launcher_path = launcher_dir / launcher_name
+
+if launcher_path.is_symlink():
+    print("refuses symlinked launcher", file=sys.stderr)
+    sys.exit(1)
+
+# Build awk filter
+awk_filter = "!/stopping wait for next result due to should_stop condition/ && !/ref: https:\\\/\\\/github.com\\\/ggml-org\\\/llama.cpp\\\/pull\\\/22907/ && !/stop: cancel task/ && !/create_check/ && !/slot print_timing:.*prompt processing/"
+
+lines = [
+    "#!/usr/bin/env bash",
+    f"# local_llm_repo={repo}",
+    f"# local_llm_family={family}",
+    f"# local_llm_alias={alias}",
+    f"# local_llm_quant={quant}",
+    f"# local_llm_hf_file={hf_file}",
+    "set -euo pipefail",
+    'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+    'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"',
+    'mkdir -p "$(dirname "$log_file")"',
+    f'exec > >(stdbuf -oL -eL awk {shlex.quote(awk_filter)} | tee "$log_file") 2>&1',
+    'profile="${1:-reliable}"',
+    'case "$profile" in speed|fastlong|balanced|reliable|tiny) ;; *) echo "Usage: $0 {speed|fastlong|balanced|reliable|tiny}" >&2; exit 2 ;; esac',
+    f"ctx={ctx}",
+    f"batch={batch}",
+    f"ubatch={ubatch}",
+    f"ngl={ngl}",
+]
+
+if backend == "vulkan":
+    lines.append(f"export GGML_VK_VISIBLE_DEVICES={visible_devices}")
+elif visible_devices:
+    lines.append(f"export HIP_VISIBLE_DEVICES={visible_devices}")
+    lines.append(f"export ROCR_VISIBLE_DEVICES={visible_devices}")
+
+server_bin = "./build-vulkan/bin/llama-server" if backend == "vulkan" else "./build/bin/llama-server"
+
+lines.extend([
+    f"exec {server_bin} \\",
+    f"  -hf {shlex.quote(repo)} \\",
+])
+if hf_file:
+    lines.append(f"  --hf-file {shlex.quote(hf_file)} \\")
+else:
+    lines.append(f"  -hf {shlex.quote(repo + ':' + quant)} \\")
+
+lines.extend([
+    "  --host 0.0.0.0 \\",
+    "  --port 8080 \\",
+    "  --timeout 600 \\",
+    "  --threads-http 2 \\",
+    "  --parallel 1 \\",
+    "  --no-cont-batching \\",
+    '  -ngl "$ngl" \\','
+])
+if backend:
+    lines.extend([
+        f"  --split-mode {shlex.quote(split_mode)} \\",
+        f"  --tensor-split {shlex.quote(tensor_split)} \\",
+    ])
+if ctx_shift and ctx_shift not in {"off", "false", "0"}:
+    lines.append("  --context-shift \\")
+if cache_type_k:
+    lines.append(f"  -ctk {shlex.quote(cache_type_k)} \\")
+if cache_type_v:
+    lines.append(f"  -ctv {shlex.quote(cache_type_v)} \\")
+
+sampler_temp = "0.6"
+sampler_top_p = "0.95"
+sampler_top_k = "20"
+repo_family_alias_lower = f"{repo} {family} {alias}".lower()
+if family.lower().startswith("gemma") or alias.lower().startswith("gemma") or "gemma" in repo.lower():
+    sampler_temp = "1.0"
+    sampler_top_p = "0.95"
+    sampler_top_k = "64"
+
+lines.extend([
+    "  --cache-ram 16384 \\",
+    "  --ctx-checkpoints 64 \\",
+    "  --checkpoint-every-n-tokens 4096 \\",
+    '  -c "$ctx" \\','
+    "  --flash-attn on \\",
+    '  -ub "$ubatch" \\','
+    '  -b "$batch" \\','
+])
+if "gemma-4-12b" in repo_family_alias_lower:
+    lines.append("  --no-mmproj \\")
+
+lines.extend([
+    '  --threads "$(nproc)" \\','
+    "  --prio 2 \\",
+    "  --no-warmup \\",
+    f"  --temp {sampler_temp} \\",
+    f"  --top-p {sampler_top_p} \\",
+    f"  --top-k {sampler_top_k} \\",
+    "  --min-p 0.0 \\",
+    "  --presence-penalty 0.0 \\",
+    f"  --alias {shlex.quote(alias)} \\",
+])
+
+reasoning_flag = "on" if reasoning else "off"
+lines.append(f"  --reasoning {reasoning_flag}")
+
+content = "\n".join(lines) + "\n"
+
+if dry_run:
+    print("dry-run: would update launcher:")
+    print(f"  {launcher_path}")
+    print("content preview:")
+    for line in lines[:10]:
+        print(f"  {line}")
+    print("  ...")
+else:
+    launcher_dir.mkdir(parents=True, exist_ok=True)
+    with open(launcher_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"updated launcher: {launcher_path}")
+PY
+}
+
 main() {
   local command_name="${1:-}"
 
@@ -5018,6 +5347,9 @@ main() {
       ;;
     deploy)
       cmd_deploy "${@:2}"
+      ;;
+    update-launcher)
+      cmd_update_launcher "${@:2}"
       ;;
     export)
       cmd_export "${@:2}"
