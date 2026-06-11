@@ -369,8 +369,8 @@ def start_server(
                 last_stderr = stderr.strip()
                 break
             time.sleep(1)
-        if last_stderr:
-            return "error", last_stderr[:200]
+        if process.returncode != 0:
+            return "error", last_stderr[:200] if last_stderr else "oc-local exited with error"
         return "ok", "Server started"
     except (subprocess.SubprocessError, OSError) as e:
         return "error", str(e)
@@ -405,7 +405,7 @@ def delete_model(repo: str, target: str | None) -> str:
 
 def update_launcher(family: str) -> str:
     """Regenerate launcher for family via model-manager.sh update-launcher."""
-    result = subprocess.run(
+    result = subprocess.run(  # nosec: B603
         [
             str(MODEL_MANAGER),
             "update-launcher",
@@ -558,7 +558,7 @@ def select_best_quant(
     Returns (best_file, best_quant). Raises on failure.
     """
     payload = [{"id": repo, "tags": ["gguf"], "siblings": siblings}]
-    ranked = subprocess.check_output(
+    ranked = subprocess.check_output(  # nosec: B603, B607
         [
             "python3",
             str(MODEL_FIT),
