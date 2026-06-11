@@ -1928,14 +1928,17 @@ class StatusScreen(Screen[None]):
         self._target = config.get("target", "not set") if config else "not set"
         self._accepted = list_accepted()
         default_ok = has_default()
-        running = detect_running_model(self._target)
+        running, running_ctx = detect_running_model(self._target)
 
         self._running_family = None
         if running.startswith("active: ") and "(not in accepted)" not in running:
             self._running_family = running.removeprefix("active: ")
 
         self.query_one("#target-label", Label).update(f"  Target:    [bold]{self._target}[/bold]")
-        running_markup = f"[green]{running}[/green]" if running.startswith("active") else running
+        ctx_suffix = f" [dim](ctx {running_ctx:,})[/dim]" if running_ctx else ""
+        running_markup = (
+            f"[green]{running}[/green]{ctx_suffix}" if running.startswith("active") else running
+        )
         self.query_one("#running-label", Label).update(f"  Running:   {running_markup}")
         self.query_one("#accepted-label", Label).update(f"  Accepted:  {len(self._accepted)}")
         self.query_one("#default-label", Label).update(

@@ -6,6 +6,7 @@ TUI screens call these functions; no direct subprocess in screens.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess  # noqa: S404 # nosec: B404
 import time
@@ -195,10 +196,10 @@ def get_server_status(target: str | None) -> str:
     return result.stdout.strip() or "unknown"
 
 
-def detect_running_model(target: str | None) -> str:
+def detect_running_model(target: str | None) -> tuple[str, int | None]:
     """Detect which model is currently running via llama-server."""
     if not target or not target.startswith("remote:"):
-        return "local/unknown"
+        return "local/unknown", None
 
     host = target.split(":", 1)[1]
 
@@ -219,11 +220,11 @@ def detect_running_model(target: str | None) -> str:
             timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return "unreachable"
+        return "unreachable", None
 
     status = result.stdout.strip()
     if status != "active":
-        return "none"
+        return "none", None
 
     # Read full (untruncated) cmdline via /proc to get all args
     try:
@@ -243,13 +244,14 @@ def detect_running_model(target: str | None) -> str:
             timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return "active (details unknown)"
+        return "active (details unknown)", None
 
     args = result.stdout.splitlines()
     repo: str | None = None
     hf_file: str | None = None
     tensor_split: str | None = None
     split_mode: str | None = None
+    ctx_size: int | None = None
     i = 0
     while i < len(args):
         a = args[i]
@@ -263,10 +265,13 @@ def detect_running_model(target: str | None) -> str:
             tensor_split = args[i + 1]
         elif a == "--split-mode" and i + 1 < len(args):
             split_mode = args[i + 1]
+        elif a in ("--ctx-size", "-c") and i + 1 < len(args):
+            with contextlib.suppress(ValueError):
+                ctx_size = int(args[i + 1])
         i += 1
 
     if not repo:
-        return "active (repo unknown)"
+        return "active (repo unknown)", ctx_size
 
     from .state import list_accepted
 
@@ -285,7 +290,7 @@ def detect_running_model(target: str | None) -> str:
         d_repo = data.get("repo") or data.get("hf_repo") or ""
         d_file = data.get("hf_file") or ""
         if d_repo == repo and d_file == hf_file and _config_match(data, tensor_split, split_mode):
-            return f"active: {fam}"
+            return f"active: {fam}", ctx_size
 
     # repo + hf_file only
     if hf_file:
@@ -293,15 +298,15 @@ def detect_running_model(target: str | None) -> str:
             d_repo = data.get("repo") or data.get("hf_repo") or ""
             d_file = data.get("hf_file") or ""
             if d_repo == repo and d_file == hf_file:
-                return f"active: {fam}"
+                return f"active: {fam}", ctx_size
 
     # repo only
     for fam, data in accepted:
         d_repo = data.get("repo") or data.get("hf_repo") or ""
         if d_repo == repo:
-            return f"active: {fam}"
+            return f"active: {fam}", ctx_size
 
-    return f"active: {repo} (not in accepted)"
+    return f"active: {repo} (not in accepted)", ctx_size
 
 
 def stop_server(target: str | None) -> str:
