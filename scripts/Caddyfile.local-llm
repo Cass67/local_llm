@@ -3,13 +3,27 @@
 }
 
 :3001 {
-	# OpenCode web upstream is proxied by the switcher service for injection.
+	# Container API and UI routes
 	handle /api/local-llm/* {
-		reverse_proxy 127.0.0.1:3003
+		reverse_proxy 127.0.0.1:3100
+	}
+
+	handle /ui/* {
+		reverse_proxy 127.0.0.1:3100
 	}
 
 	handle /_switcher {
-		reverse_proxy 127.0.0.1:3003
+		reverse_proxy 127.0.0.1:3100
+	}
+
+	# Proxy chat completions through container to llama-server
+	handle /api/chat/* {
+		reverse_proxy 127.0.0.1:3100
+	}
+
+	# Log streaming
+	handle /api/logs/* {
+		reverse_proxy 127.0.0.1:3100
 	}
 
 	# OpenCode WebSocket upgrades bypass injection and go directly upstream.
@@ -25,6 +39,7 @@
 		reverse_proxy 127.0.0.1:3002
 	}
 
+	# Fallback: everything else to the old switcher (for now)
 	handle {
 		reverse_proxy 127.0.0.1:3003
 	}
