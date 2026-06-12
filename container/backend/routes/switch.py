@@ -1,4 +1,5 @@
 """Model switching endpoint."""
+
 import json
 import re
 from pathlib import Path
@@ -56,9 +57,7 @@ def _resolve_family_file(family: str, backend: str | None):
 
     metadata_file = config.ACCEPTED_DIR / f"{search_family}.json"
     if not metadata_file.exists():
-        raise HTTPException(
-            status_code=404, detail=f"model family '{search_family}' not found"
-        )
+        raise HTTPException(status_code=404, detail=f"model family '{search_family}' not found")
 
     data = _validate_accepted_path(metadata_file)
     if not data:
@@ -79,9 +78,7 @@ async def switch_model(req: SwitchRequest):
 
     # Write current-model.env in llama.cpp dir
     env_file = config.LLAMA_CPP_DIR / "current-model.env"
-    env_file.write_text(
-        f"REMOTE_SCRIPT={remote_start}\n" f"REMOTE_PROFILE={profile}\n"
-    )
+    env_file.write_text(f"REMOTE_SCRIPT={remote_start}\nREMOTE_PROFILE={profile}\n")
 
     # Restart llama-server
     if not restart_llama_server():

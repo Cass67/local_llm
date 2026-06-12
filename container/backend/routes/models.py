@@ -1,4 +1,5 @@
 """Model listing endpoint."""
+
 import json
 from fastapi import APIRouter
 from .. import config
