@@ -1,15 +1,14 @@
 """Pi models.json compatible endpoint."""
 
-from fastapi import APIRouter
-from ..config import LLAMA_SERVER_PORT
+from fastapi import APIRouter, Request
 from .models import _read_accepted_models
 
 router = APIRouter(prefix="/api/pi", tags=["pi"])
 
 
 @router.get("/models")
-async def pi_models_json():
-    base_url = f"http://127.0.0.1:{LLAMA_SERVER_PORT}/v1"
+async def pi_models_json(request: Request):
+    base_url = str(request.url.replace(path="/v1", query=""))
     models = _read_accepted_models()
 
     provider_models = []
@@ -19,6 +18,7 @@ async def pi_models_json():
                 "id": model.alias,
                 "name": model.model_name,
                 "context": model.context or 131072,
+                "contextWindow": model.context or 131072,
                 "reasoning": model.reasoning,
                 "backend": model.backend,
             }

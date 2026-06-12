@@ -48,9 +48,13 @@ Use placeholders literally as placeholders: replace `<host>`, `<source>`, and `<
 - Export/restore for moving accepted model state between machines.
 - OpenCode wrapper support through `oc-local <family> <profile> --info` and `--remote`.
 - User-systemd `llama-server.service` support through `run-current-model.sh`.
-- Planned OpenCode web switcher API and injected bottom-right `LLM` pill support.
-- Caddy routing for OpenCode web, WebSockets, switcher APIs, and HTML injection.
-- Guardrails for shell syntax, shellcheck, and smoke tests.
+- Containerized FastAPI + Svelte management UI for search, install, edit, launch, logs, and chat.
+- Project-owned Docker `llama-server` runner for launch, logs, stats, and OpenAI-compatible chat.
+- First-class MTP edit controls that render to llama.cpp speculative decoding flags.
+- Persistent web search/install state while navigating between pages.
+- Legacy OpenCode web switcher API and injected bottom-right `LLM` pill support.
+- Caddy routing for OpenCode web, management UI, switcher APIs, and WebSockets.
+- Guardrails for shell syntax, shellcheck, backend tests, and UI builds.
 
 Use this repo when you want an operator workflow for finding, benchmarking, accepting, backing up, and restoring models that are specific to your hardware.
 
@@ -94,23 +98,96 @@ Expected: fails with guidance until you accept a model.
 
 ## Architecture
 
-Runtime services on the GPU host:
+`local_llm` now has two supported layers:
 
-Default browser architecture:
+1. **Current containerized management path** — FastAPI + Svelte management UI on port `3100`, with inference handled by the project-owned `local-llm-runner` container on port `8080`.
+2. **Legacy switcher/OpenCode web path** — Caddy on port `3001` proxies legacy switcher/OpenCode routes and can also proxy the new management UI.
+
+### Current containerized management architecture
+
+The management container is the control plane. It downloads models, writes accepted metadata, launches the project-owned runner container through the Docker socket, and proxies OpenAI-compatible requests to that runner.
 
 ```text
-Cloudflare Access -> Caddy :3001 -> local-llm-switcher :3003 -> OpenCode web :3002 -> llama-server :8080
+Browser / Pi / API client
+        |
+        | http://ubt26:3100/ui/, /api/*, and /v1/*
+        v
+local-llm-mgmt container (:3100, host network)
+        |
+        | reads/writes mounted state; creates/stops runner container
+        v
+/state/runs                       /models
+accepted metadata + runner state  HF GGUF cache
+        |
+        | Docker socket launch + OpenAI-compatible proxy
+        v
+local-llm-runner container (:8080, host network)
+        |
+        | execs llama-server with accepted metadata flags
+        v
+llama.cpp Vulkan/ROCm runtime on GPU host
+```
+
+| Component | Type | Address / mount | Purpose |
+| --- | --- | --- | --- |
+| `local-llm-mgmt` | Docker container | host network, `:3100` | FastAPI management API plus built Svelte UI at `/ui/`. |
+| Management state | bind mount | `${HOME}/.local/share/local_llm:/state` | Accepted metadata, current selection, current runner state, launchers, and metrics. |
+| HF model cache | bind mount | `${HOME}/.cache/huggingface/hub:/models` | Shared GGUF cache used by management downloads and runner model paths. |
+| Docker socket | bind mount | `/var/run/docker.sock:/var/run/docker.sock` | Lets management create/stop `local-llm-runner`. Treat as privileged access. |
+| `local-llm-runner` | Docker container | host network, `:8080` | Project-owned llama.cpp `llama-server` runtime. |
+| Pi model extension | local Pi extension | discovers `http://ubt26:3100/v1/models` | Pi selects model IDs through the management API; management launches/proxies runner requests. |
+
+Important runtime details:
+
+- Source of truth is accepted metadata under `/state/runs/accepted`; runtime state is `/state/runs/current-runner.json`.
+- Management install downloads via `huggingface_hub` into `/models` and writes accepted metadata only. It does not patch external runtime configs.
+- Model edit writes accepted metadata. Later launches render structured controls such as MTP into `llama-server` args.
+- MTP controls are first-class in the web edit form and render to llama.cpp flags such as `--spec-type draft-mtp` and `--spec-draft-n-max`.
+- Search and install state is kept in the Svelte module store, so navigating away from Search does not clear results or in-flight install status.
+- `local-llm-runner` must have GPU device/group access. The backend runner spec adds `/dev/kfd`, `/dev/dri`, host networking, and the configured render group.
+
+### Caddy and Cloudflare status
+
+Caddy is plumbed to the new management container. The checked-in Caddyfile routes these paths on port `3001` to `127.0.0.1:3100`:
+
+- `/ui/*`
+- `/api/local-llm/*`
+- `/_switcher`
+- `/api/chat/*`
+- `/api/logs/*`
+
+Current verified `ubt26` status as of 2026-06-12:
+
+- `local-llm-caddy` Docker container is running on `:3001`.
+- `local-llm-mgmt` Docker container is running on `:3100`.
+- `local-llm-runner` Docker container is created on demand and serves active models on `:8080`.
+- `cloudflared` system service is **enabled but inactive**.
+
+So the management UI is plumbed into Caddy, but it is not currently exposed through an active Cloudflare tunnel until `cloudflared` is started and its tunnel config points the public hostname at `http://localhost:3001`.
+
+```text
+Cloudflare Access -> cloudflared -> Caddy :3001 -> local-llm-mgmt :3100 -> local-llm-runner :8080
+```
+
+Cloudflare Access should remain the public security boundary if public browser access is enabled. Do not expose `:3100` or `:8080` directly to the internet.
+
+### Legacy switcher architecture
+
+Older OpenCode-web switcher deployments used this path:
+
+```text
+Cloudflare Access -> Caddy :3001 -> local-llm-switcher :3003 -> OpenCode web :3002 -> llama-server.service :8080
 ```
 
 | Component | Type | Address | Purpose |
 | --- | --- | --- | --- |
-| `llama-server.service` | user systemd | `127.0.0.1:8080` | Runs the accepted generated launcher selected by `current-model.env`. |
-| `local-llm-switcher.service` | user systemd | `127.0.0.1:3003` | Serves switcher APIs and injects the OpenCode web pill. |
-| `opencode-web` | web service | `127.0.0.1:3002` | OpenCode web is the primary browser UI. |
-| `local-llm-caddy` | Docker container | `127.0.0.1:3001` | Public local front proxy to the switcher service. |
-| Cloudflare tunnel | external service | `llm.example.com -> http://localhost:3001` | Public entrypoint protected by Cloudflare Access. |
+| `llama-server.service` | user systemd | `127.0.0.1:8080` | Legacy generated-launcher runtime selected by `current-model.env`. |
+| `local-llm-switcher.service` | user systemd | `127.0.0.1:3003` | Legacy switcher APIs and injected OpenCode web pill. |
+| `opencode-web` | web service | `127.0.0.1:3002` | OpenCode web browser UI. |
+| `local-llm-caddy` | Docker container | `127.0.0.1:3001` | Front proxy for browser routes. |
+| Cloudflare tunnel | external service | `llm.example.com -> http://localhost:3001` | Optional public entrypoint protected by Cloudflare Access. |
 
-Cloudflare is the public security boundary. The tunnel publishes only Caddy on `localhost:3001`; OpenCode web, the switcher, and `llama-server` stay bound to local/private addresses. Cloudflare Access should enforce identity before a browser reaches OpenCode web.
+The legacy path remains documented for older installs, but current `ubt26` inference runtime is Docker `local-llm-runner`, not host `llama-server.service`.
 
 Primary browser UI defaults:
 
@@ -149,7 +226,9 @@ Server machine:
 - Linux host with user systemd.
 - `llama.cpp` built under the chosen `$REMOTE_DIR`.
 - GPU runtime configured for your hardware.
-- Docker installed for Caddy.
+- Docker installed for Caddy, `local-llm-mgmt`, `open-webui`, and `local-llm-runner`.
+- Docker Compose plugin for the management container (`docker compose`).
+- A built `local-llm-runner:latest` image from `runner/Dockerfile` when using the current runtime path.
 - Cloudflare tunnel routing the public hostname to `http://localhost:3001` if public browser access is wanted.
 
 Set these shell variables while following the examples:
@@ -171,6 +250,37 @@ Run from this repo on the client machine:
 ```
 
 This installs `oc-local`, `hardware-analyzer`, `model-discovery`, `model-manager`, and `update-manager` into `~/.local/bin`.
+
+### 2a. Management Container Install Status
+
+There is not yet a single one-shot installer for the current `local-llm-mgmt` + `local-llm-runner` architecture. Today the repeatable pieces are:
+
+- `container/docker-compose.yml` — management container definition.
+- `container/build.sh` — local build helper for the management image/UI bundle.
+- `scripts/migrate-to-container.sh` — migration checklist/helper for moving from legacy services to the container path.
+- `scripts/Caddyfile.local-llm` — Caddy routes that proxy management UI/API paths to `127.0.0.1:3100`.
+
+A proper installer would be useful. It should be a host-side script, not code inside the management container, because it must verify Docker/Compose, build the runner image, check GPU device groups, install/update the Caddy container, optionally install `cloudflared`, and avoid printing or copying Cloudflare credentials.
+
+Suggested future script:
+
+```text
+scripts/install-management-container.sh
+```
+
+Minimum responsibilities for that script:
+
+1. Verify `docker`, `docker compose`, and available disk space.
+2. Verify or create required directories:
+   - `$HOME/.local/share/local_llm`
+   - `$HOME/.cache/huggingface/hub`
+3. Check `/dev/kfd`, `/dev/dri`, and render/video group access for the runner.
+4. Build `local-llm-runner:latest` from `runner/Dockerfile`.
+5. Build and start `local-llm-mgmt` from `container/docker-compose.yml`.
+6. Start or refresh `local-llm-caddy` with `scripts/Caddyfile.local-llm`.
+7. Report whether `cloudflared` is active; do not read or print tunnel credentials.
+8. Verify `/api/health`, `/ui/`, management `/v1/models`, and Caddy `/ui/`.
+9. Print rollback commands and backup paths.
 
 Check wrapper resolution without starting a model:
 

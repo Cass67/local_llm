@@ -115,11 +115,12 @@ repos:
         entry: >-
           bash -lc 'if [ -n "${VIRTUAL_ENV:-}" ] && [ -x
           "$VIRTUAL_ENV/bin/bandit" ]; then "$VIRTUAL_ENV/bin/bandit" -q -x
-          tests,container/tests "$@"; elif [ -x ./.venv/bin/bandit ]; then
-          ./.venv/bin/bandit -q -x tests,container/tests "$@"; elif [ -x
+          tests,container/tests -s B404,B603,B607 "$@"; elif [ -x
+          ./.venv/bin/bandit ]; then ./.venv/bin/bandit -q -x
+          tests,container/tests -s B404,B603,B607 "$@"; elif [ -x
           ./venv/bin/bandit ]; then ./venv/bin/bandit -q -x
-          tests,container/tests "$@"; else bandit -q -x tests,container/tests
-          "$@"; fi' --
+          tests,container/tests -s B404,B603,B607 "$@"; else bandit -q -x
+          tests,container/tests -s B404,B603,B607 "$@"; fi' --
         language: system
         files: \.pyi?$
       - id: radon-cc

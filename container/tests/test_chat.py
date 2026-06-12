@@ -8,7 +8,12 @@ from backend.main import app
 
 
 @pytest.mark.asyncio
-async def test_chat_proxy_strips_provider_prefix_from_model():
+async def test_chat_proxy_strips_provider_prefix_from_model(tmp_path, monkeypatch):
+    import backend.config as cfg
+
+    monkeypatch.setattr(cfg, "RUNNER_URL", "http://runner.test:18080/v1")
+    monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
+    (tmp_path / "current-selection.json").write_text(json.dumps({"model": "qwen3.6-27b-q6"}))
     captured = {}
 
     class FakeUpstreamClient:
@@ -23,7 +28,7 @@ async def test_chat_proxy_strips_provider_prefix_from_model():
             return None
 
         async def post(self, url, content, headers):
-            assert url.endswith("/v1/chat/completions")
+            assert url == "http://runner.test:18080/v1/chat/completions"
             assert headers == {"Content-Type": "application/json"}
             captured["body"] = json.loads(content)
             return Response(200, json={"choices": [{"message": {"content": "ok"}}]})

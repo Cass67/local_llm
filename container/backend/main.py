@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from .config import VERSION
@@ -10,8 +11,18 @@ from .routes.chat import router as chat_router
 from .routes.search import router as search_router
 from .routes.manage import router as manage_router
 from .routes.init import router as init_router
+from .routes.openai import router as openai_router
+from .routes.stats import router as stats_router
 
 app = FastAPI(title="local-llm-server", version=VERSION)
+
+
+@app.middleware("http")
+async def local_llm_api_prefix(request, call_next):
+    if request.scope.get("path", "").startswith("/api/local-llm/"):
+        request.scope["path"] = "/api/" + request.scope["path"].removeprefix("/api/local-llm/")
+    return await call_next(request)
+
 
 app.include_router(models_router)
 app.include_router(switch_router)
@@ -21,11 +32,20 @@ app.include_router(chat_router)
 app.include_router(search_router)
 app.include_router(manage_router)
 app.include_router(init_router)
+app.include_router(openai_router)
+app.include_router(stats_router)
 
 
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": VERSION}
+
+
+@app.get("/chat/")
+@app.get("/chat")
+async def chat_redirect(request: Request):
+    host = request.url.hostname or "127.0.0.1"
+    return RedirectResponse(f"{request.url.scheme}://{host}:3001/chat/")
 
 
 # SPA fallback: mount UI dist at /ui/

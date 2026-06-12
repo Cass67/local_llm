@@ -1,52 +1,37 @@
 """Tests for logs endpoint."""
 
 import asyncio
-import json
-from io import BytesIO
 from unittest.mock import patch
-import urllib.request
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 
-@pytest.fixture
-def temp_log_dir(tmp_path, monkeypatch):
-    log_file = tmp_path / "model.log"
-    log_file.write_text("llama-server started\nmodel loaded\n")
-    import backend.config as cfg
-
-    monkeypatch.setattr(cfg, "LLAMA_CPP_DIR", tmp_path)
-    return tmp_path
-
-
 @pytest.mark.asyncio
-async def test_logs_endpoint_returns_recent_lines(temp_log_dir):
-    _ = temp_log_dir
-    from backend.main import app
+async def test_logs_endpoint_returns_recent_runner_lines():
+    with patch(
+        "backend.log_stream._docker_logs_tail",
+        return_value=["llama-server started", "model loaded"],
+    ):
+        from backend.main import app
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/logs?lines=50")
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/api/logs?lines=50")
 
     assert response.status_code == 200
     data = response.json()
-    assert "lines" in data
-    assert len(data["lines"]) == 2
-    assert "model loaded" in data["lines"][1]
+    assert data["lines"] == ["llama-server started", "model loaded"]
 
 
 @pytest.mark.asyncio
-async def test_logs_no_log_file_returns_empty(tmp_path, monkeypatch):
-    import backend.config as cfg
+async def test_logs_no_runner_logs_returns_empty():
+    with patch("backend.log_stream._docker_logs_tail", return_value=[]):
+        from backend.main import app
 
-    monkeypatch.setattr(cfg, "LLAMA_CPP_DIR", tmp_path)
-
-    from backend.main import app
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/logs?lines=50")
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/api/logs?lines=50")
 
     assert response.status_code == 200
     data = response.json()
@@ -54,28 +39,11 @@ async def test_logs_no_log_file_returns_empty(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_logs_endpoint_prefers_llama_swap_logs(monkeypatch):
-    import backend.config as cfg
-
-    monkeypatch.setattr(cfg, "LLAMA_SWAP_URL", "http://llama-swap")
-
-    class Response(BytesIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, _exc_type, _exc, _tb):
-            return None
-
-    log_body = (
-        "old line\n"
-        '[INFO] Request 127.0.0.1 "GET /logs HTTP/1.1" 200 1 "Python-urllib/3.12" 1us\n'
-        "live llama-swap line\n"
-    ).encode()
-    with patch.object(
-        urllib.request,
-        "urlopen",
-        return_value=Response(log_body),
-    ) as mock_urlopen:
+async def test_logs_endpoint_does_not_call_legacy_runtime():
+    with (
+        patch("backend.log_stream._docker_logs_tail", return_value=["runner line"]),
+        patch("urllib.request.urlopen") as urlopen,
+    ):
         from backend.main import app
 
         transport = ASGITransport(app=app)
@@ -83,39 +51,25 @@ async def test_logs_endpoint_prefers_llama_swap_logs(monkeypatch):
             response = await client.get("/api/logs?lines=1")
 
     assert response.status_code == 200
-    assert response.json()["lines"] == ["live llama-swap line"]
-    mock_urlopen.assert_called_once_with("http://llama-swap/logs", timeout=5)
+    assert response.json()["lines"] == ["runner line"]
+    urlopen.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_stream_log_tail_reads_llama_swap_events(monkeypatch):
-    import backend.config as cfg
+async def test_stream_log_tail_streams_runner_logs_without_legacy_runtime_events():
     from backend.log_stream import stream_log_tail
 
-    monkeypatch.setattr(cfg, "LLAMA_SWAP_URL", "http://llama-swap")
-    event_payload = {
-        "type": "logData",
-        "data": json.dumps(
-            {
-                "data": 'first line\n[INFO] Request 127.0.0.1 "GET /logs HTTP/1.1" 200 1 "Python-urllib/3.12" 1us\nsecond line\n',
-                "source": "proxy",
-            }
-        ),
-    }
-    stream = (f"event:message\ndata:{json.dumps(event_payload)}\n\n").encode()
-
-    class Response(BytesIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, _exc_type, _exc, _tb):
-            return None
-
-    with patch.object(urllib.request, "urlopen", return_value=Response(stream)) as mock_urlopen:
+    with patch(
+        "backend.log_stream._docker_logs_tail",
+        side_effect=[["first line"], ["first line", "second line"]],
+    ):
         disconnect = asyncio.Event()
         chunks = []
-        async for chunk in stream_log_tail(disconnect):
+        async for chunk in stream_log_tail(disconnect, poll_interval=0.01):
             chunks.append(chunk)
+            if len(chunks) == 2:
+                disconnect.set()
+                break
 
     assert chunks == ["data: first line\n\n", "data: second line\n\n"]
-    mock_urlopen.assert_called_once_with("http://llama-swap/api/events", timeout=30)
+    assert "llama-swap" not in "".join(chunks)

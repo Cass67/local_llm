@@ -1,8 +1,8 @@
 """Tests for current model endpoint."""
 
 import json
+
 import pytest
-from unittest.mock import patch
 from httpx import ASGITransport, AsyncClient
 
 
@@ -22,10 +22,10 @@ def temp_state(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_current_model_returns_selected_running_model(temp_state):
+async def test_current_model_returns_project_runner_state(temp_state):
     from backend.main import app
 
-    (temp_state / "current-selection.json").write_text(
+    (temp_state / "current-runner.json").write_text(
         json.dumps(
             {
                 "model": "qwen3.6-27b-q6",
@@ -36,10 +36,9 @@ async def test_current_model_returns_selected_running_model(temp_state):
         )
     )
 
-    with patch("backend.routes.switch.get_llama_swap_running_ids", return_value=["qwen3.6-27b-q6"]):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/models/current")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/models/current")
 
     assert response.status_code == 200
     data = response.json()
@@ -47,11 +46,11 @@ async def test_current_model_returns_selected_running_model(temp_state):
     assert data["alias"] == "qwen3.6-27b-q6"
     assert data["profile"] == "reliable"
     assert data["running"] is True
-    assert data["llama_server"]["status"] == "llama-swap"
+    assert data["llama_server"]["status"] == "local-llm-runner"
 
 
 @pytest.mark.asyncio
-async def test_current_model_prefers_actual_running_when_selection_stale(temp_state):
+async def test_current_model_falls_back_to_selection_when_runner_not_started(temp_state):
     from backend.main import app
 
     (temp_state / "current-selection.json").write_text(
@@ -65,62 +64,26 @@ async def test_current_model_prefers_actual_running_when_selection_stale(temp_st
         )
     )
 
-    with patch("backend.routes.switch.get_llama_swap_running_ids", return_value=["gemma-4-12b"]):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/models/current")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/models/current")
 
     assert response.status_code == 200
     data = response.json()
-    assert data["family"] == "gemma-4-12b"
-    assert data["alias"] == "gemma-4-12b"
-    assert data["profile"] == "unknown"
-    assert data["running"] is True
-
-
-@pytest.mark.asyncio
-async def test_current_model_uses_running_metadata_without_selection(temp_state):
-    from backend.main import app
-
-    accepted = temp_state / "accepted"
-    (accepted / "qwopus3.6-27b-v2-mtp-q5km.json").write_text(
-        json.dumps(
-            {
-                "family": "qwopus3.6-27b-v2-mtp-q5km",
-                "alias": "qwopus3.6-27b-v2-mtp-q5km",
-                "model_name": "Qwopus3.6-27B-v2-MTP",
-                "profile": "reliable",
-                "backend": "vulkan",
-                "config": {"backend": "vulkan", "quant": "q5km"},
-            }
-        )
-    )
-
-    with patch(
-        "backend.routes.switch.get_llama_swap_running_ids",
-        return_value=["qwopus3.6-27b-v2-mtp-q5km"],
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/models/current")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["family"] == "qwopus3.6-27b-v2-mtp-q5km"
-    assert data["alias"] == "qwopus3.6-27b-v2-mtp-q5km"
+    assert data["family"] == "qwen"
+    assert data["alias"] == "qwen3.6-27b-q6"
     assert data["profile"] == "reliable"
-    assert data["backend"] == "vulkan"
-    assert data["running"] is True
+    assert data["running"] is False
+    assert data["llama_server"]["running"] == []
 
 
 @pytest.mark.asyncio
 async def test_current_model_when_no_selection(temp_state):
     from backend.main import app
 
-    with patch("backend.routes.switch.get_llama_swap_running_ids", return_value=[]):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/models/current")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/models/current")
 
     assert response.status_code == 200
     data = response.json()
