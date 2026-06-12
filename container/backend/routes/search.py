@@ -1,4 +1,5 @@
 """Search and install endpoints."""
+
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from .. import cli

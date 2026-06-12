@@ -1,4 +1,5 @@
 """Tests for search endpoint."""
+
 import json
 import pytest
 from unittest.mock import patch, MagicMock
@@ -10,12 +11,24 @@ from backend.main import app
 async def test_search_returns_candidates():
     mock_result = MagicMock()
     mock_result.returncode = 0
-    mock_result.stdout = json.dumps({
-        "candidates": [
-            {"repo": "TheBloke/qwen-Q6_K-GGUF", "score": 85, "best_quant": "Q6_K", "best_file": "qwen.Q6_K.gguf"},
-            {"repo": "TheBloke/qwen-Q4_K_M-GGUF", "score": 72, "best_quant": "Q4_K_M", "best_file": "qwen.Q4_K_M.gguf"},
-        ]
-    })
+    mock_result.stdout = json.dumps(
+        {
+            "candidates": [
+                {
+                    "repo": "TheBloke/qwen-Q6_K-GGUF",
+                    "score": 85,
+                    "best_quant": "Q6_K",
+                    "best_file": "qwen.Q6_K.gguf",
+                },
+                {
+                    "repo": "TheBloke/qwen-Q4_K_M-GGUF",
+                    "score": 72,
+                    "best_quant": "Q4_K_M",
+                    "best_file": "qwen.Q4_K_M.gguf",
+                },
+            ]
+        }
+    )
     mock_result.stderr = ""
 
     with patch("backend.cli.subprocess.run", return_value=mock_result) as mock_run:
