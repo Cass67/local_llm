@@ -64,9 +64,10 @@ def detect_running_model() -> dict:
     except (OSError, urllib.error.URLError, json.JSONDecodeError):
         pass
 
-    family = selected or (running_ids[0] if running_ids else None)
-    if family and family in running_ids:
-        return {"status": "active", "family": family, "ctx": None}
-    if family:
-        return {"status": "selected", "family": family, "ctx": None}
+    if selected and selected in running_ids:
+        return {"status": "active", "family": selected, "ctx": None}
+    if running_ids:
+        return {"status": "active", "family": running_ids[0], "ctx": None}
+    if selected:
+        return {"status": "selected", "family": selected, "ctx": None}
     return {"status": "inactive", "family": None, "ctx": None}

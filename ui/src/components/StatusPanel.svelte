@@ -73,7 +73,7 @@
 						<td>{model.profile}</td>
 						<td>{model.backend}</td>
 						<td>{model.context ? model.context.toLocaleString() : "-"}</td>
-						<td><button onclick={() => restart(model)} disabled={restarting === model.family}>{restarting === model.family ? "Restarting..." : "Restart"}</button></td>
+						<td><button onclick={() => restart(model)} disabled={restarting === model.family}>{restarting === model.family ? "Launching..." : "Launch"}</button></td>
 					</tr>
 				{/each}
 			</tbody>

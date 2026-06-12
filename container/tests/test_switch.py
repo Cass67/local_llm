@@ -38,10 +38,13 @@ def temp_state(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_switch_model_selects_llama_swap_model_without_restarting_service(temp_state):
+async def test_switch_model_launches_llama_swap_model_without_restarting_service(temp_state):
     from backend.main import app
 
-    with patch("backend.routes.switch.get_llama_swap_model_ids", return_value=["qwen3.6-27b-q6"]):
+    with (
+        patch("backend.routes.switch.get_llama_swap_model_ids", return_value=["qwen3.6-27b-q6"]),
+        patch("backend.routes.switch.load_llama_swap_model", return_value=True) as mock_load,
+    ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
@@ -54,10 +57,11 @@ async def test_switch_model_selects_llama_swap_model_without_restarting_service(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "selected"
+    assert data["status"] == "loaded"
     assert data["family"] == "qwen"
     assert data["profile"] == "reliable"
     assert data["alias"] == "qwen3.6-27b-q6"
+    mock_load.assert_called_once_with("qwen3.6-27b-q6")
 
     selection_file = temp_state / "current-selection.json"
     assert selection_file.exists()
@@ -105,7 +109,12 @@ async def test_switch_model_with_backend_override(temp_state):
 
     from backend.main import app
 
-    with patch("backend.routes.switch.get_llama_swap_model_ids", return_value=["qwen3.6-27b-q6-vulkan"]):
+    with (
+        patch(
+            "backend.routes.switch.get_llama_swap_model_ids", return_value=["qwen3.6-27b-q6-vulkan"]
+        ),
+        patch("backend.routes.switch.load_llama_swap_model", return_value=True),
+    ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(

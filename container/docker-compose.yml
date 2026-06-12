@@ -8,8 +8,10 @@ services:
     volumes:
       - ${HOME}/.local/share/local_llm:/state
       - ${HOME}/llama.cpp:/llama.cpp:ro
-      - ${HOME}/.cache/huggingface:/models:ro
+      - ${HOME}/.cache/huggingface/hub:/models
+      - ${HOME}/llama-swap/config.yaml:/llama-swap/config.yaml
       - ${HOME}/git/local_llm/scripts:/scripts:ro
+      - /var/run/docker.sock:/var/run/docker.sock
       - /run/user/1000/systemd:/run/user/1000/systemd
       - ${XDG_RUNTIME_DIR:-/run/user/1000}/bus:/run/user/1000/bus
     environment:
@@ -18,5 +20,9 @@ services:
       - MODELS_CACHE_DIR=/models
       - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
       - XDG_RUNTIME_DIR=/run/user/1000
+      - LLAMA_SWAP_CONFIG=/llama-swap/config.yaml
+      - DOCKER_SOCKET=/var/run/docker.sock
     restart: unless-stopped
     user: "1000:1000"
+    group_add:
+      - "107"

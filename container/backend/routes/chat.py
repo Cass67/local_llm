@@ -1,4 +1,5 @@
 """Chat completion proxy to llama-swap."""
+
 import json
 
 import httpx
