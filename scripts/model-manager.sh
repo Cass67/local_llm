@@ -5153,9 +5153,12 @@ for name, value, minimum in (("ctx", ctx, 1), ("batch", batch, 1), ("ubatch", ub
         print(f"{name} too small", file=sys.stderr)
         sys.exit(1)
 
-# Determine launcher file
-launcher_name = f"start_{family}.sh"
-launcher_path = launcher_dir / launcher_name
+# Determine launcher file — prefer existing launcher_file from metadata
+existing_launcher = data.get("launcher_file")
+if existing_launcher:
+    launcher_path = pathlib.Path(existing_launcher)
+else:
+    launcher_path = launcher_dir / f"start_{family}.sh"
 
 if launcher_path.is_symlink():
     print("refuses symlinked launcher", file=sys.stderr)
