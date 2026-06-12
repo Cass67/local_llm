@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
+  import { scrollToBottom } from '../lib/scroll';
 
   let lines: string[] = $state([]);
   let connected: boolean = $state(false);
@@ -12,12 +13,17 @@
     lines = [];
     connected = false;
 
-    eventSource = new EventSource('/api/logs/stream');
+    eventSource = new EventSource('/api/local-llm/logs/stream');
     eventSource.onopen = () => { connected = true; };
 
     eventSource.addEventListener('log', (e: MessageEvent) => {
       lines = [...lines, e.data];
       if (lines.length > 500) lines = lines.slice(-500);
+      if (autoScroll) {
+        tick().then(() => {
+          if (autoScroll && logContainer) scrollToBottom(logContainer);
+        });
+      }
     });
 
     eventSource.onerror = () => {
@@ -26,12 +32,6 @@
       setTimeout(connect, 3000);
     };
   }
-
-  $effect(() => {
-    if (autoScroll && logContainer) {
-      logContainer.scrollTop = logContainer.scrollHeight;
-    }
-  });
 
   onMount(connect);
   onDestroy(() => eventSource?.close());

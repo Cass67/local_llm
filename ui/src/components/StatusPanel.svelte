@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { fetchStatus, fetchModels, switchModel } from "../lib/api";
-	import type { StatusResponse, ModelInfo } from "../lib/types";
+	import { fetchStatus, fetchModels, switchModel, fetchStats } from "../lib/api";
+	import type { StatusResponse, ModelInfo, StatsResponse } from "../lib/types";
 
 	let status: StatusResponse | null = $state(null);
 	let models: ModelInfo[] = $state([]);
+	let stats: StatsResponse = $state({});
 	let loading = $state(true);
 	let error = $state("");
 	let restarting: string | null = $state(null);
@@ -13,9 +14,10 @@
 		loading = true;
 		error = "";
 		try {
-			const [s, m] = await Promise.all([fetchStatus(), fetchModels()]);
+				const [s, m, runtimeStats] = await Promise.all([fetchStatus(), fetchModels(), fetchStats()]);
 			status = s;
 			models = m.models;
+			stats = runtimeStats;
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -59,6 +61,9 @@
 			<div class="status-card"><span>Context</span><strong>{status.running.ctx ? status.running.ctx.toLocaleString() : "-"}</strong></div>
 			<div class="status-card"><span>Accepted</span><strong>{status.accepted_count}</strong></div>
 			<div class="status-card"><span>Default</span><strong>{status.default_set ? "yes" : "no"}</strong></div>
+			<div class="status-card"><span>Tok/s</span><strong>{stats.predicted_per_second ? stats.predicted_per_second.toFixed(1) : "-"}</strong></div>
+			<div class="status-card"><span>Prompt tok/s</span><strong>{stats.prompt_per_second ? stats.prompt_per_second.toFixed(1) : "-"}</strong></div>
+			<div class="status-card"><span>Draft accepted</span><strong>{stats.draft_n_accepted ?? "-"}/{stats.draft_n ?? "-"}</strong></div>
 		</div>
 
 		<h3>Models</h3>

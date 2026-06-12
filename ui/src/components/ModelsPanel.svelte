@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { fetchModels, fetchCurrentModel, switchModel } from "../lib/api";
+	import { fetchModels, fetchCurrentModel, switchModel, copyModelBackend } from "../lib/api";
 	import type { ModelInfo, CurrentModelResponse } from "../lib/types";
 	import ModelCard from "./ModelCard.svelte";
 	import ModelDetail from "./ModelDetail.svelte";
@@ -28,6 +28,17 @@
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function handleCopyBackend(family: string, backend: "rocm" | "vulkan") {
+		error = "";
+		try {
+			await copyModelBackend(family, backend);
+			selectedBackend = backend;
+			await load();
+		} catch (e: unknown) {
+			error = e instanceof Error ? e.message : String(e);
 		}
 	}
 
@@ -78,6 +89,7 @@
 				isRunning={current?.alias === model.alias}
 				{switching}
 				onSwitch={(profile) => handleSwitch(model.family, profile, model.backend === "vulkan" ? "vulkan" : "rocm")}
+				onCopyBackend={(backend) => handleCopyBackend(model.family, backend)}
 				onDetail={() => (detailFamily = model.family)}
 				onEdit={() => (editFamily = model.family)}
 			/>

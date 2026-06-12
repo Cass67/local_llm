@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { editModel, fetchModelDetail } from "../lib/api";
+	import { normalizeMtpConfig } from "../lib/mtpFlags";
 
 	let { family, onClose, onSaved }: { family: string; onClose: () => void; onSaved: () => void } = $props();
 	let loading = $state(true);
@@ -12,6 +13,7 @@
 		try {
 			const data = await fetchModelDetail(family);
 			const cfg = data.config || {};
+			const normalizedMtp = normalizeMtpConfig(cfg.mtp, cfg.flags);
 			form = {
 				profile: data.profile || "balanced",
 				ctx: String(cfg.ctx || data.context || ""),
@@ -26,7 +28,11 @@
 				visible_devices: cfg.visible_devices || "",
 				split_mode: cfg.split_mode || "",
 				tensor_split: cfg.tensor_split || "",
-				flags: cfg.flags || "",
+				mtp_enabled: normalizedMtp.mtp.enabled ? "on" : "off",
+				mtp_draft_n_max: String(normalizedMtp.mtp.draft_n_max),
+				mtp_draft_n_min: String(normalizedMtp.mtp.draft_n_min),
+				mtp_draft_p_min: String(normalizedMtp.mtp.draft_p_min),
+				flags: normalizedMtp.flags,
 			};
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);
@@ -38,6 +44,11 @@
 	function num(name: string): number | undefined {
 		const v = form[name]?.trim();
 		return v ? Number(v) : undefined;
+	}
+
+	function mtpFloat(): number {
+		const value = Number(form.mtp_draft_p_min || "0.5");
+		return Number.isFinite(value) ? value : 0.5;
 	}
 
 	async function save() {
@@ -58,6 +69,12 @@
 				visible_devices: form.visible_devices || undefined,
 				split_mode: form.split_mode || undefined,
 				tensor_split: form.tensor_split || undefined,
+				mtp: {
+					enabled: form.mtp_enabled === "on",
+					draft_n_max: num("mtp_draft_n_max") ?? 3,
+					draft_n_min: num("mtp_draft_n_min") ?? 1,
+					draft_p_min: mtpFloat(),
+				},
 				flags: form.flags || undefined,
 			});
 			onSaved();
@@ -98,6 +115,23 @@
 					<label>Visible Devices<input bind:value={form.visible_devices} /></label>
 					<label>Split Mode<input bind:value={form.split_mode} /></label>
 					<label>Tensor Split<input bind:value={form.tensor_split} /></label>
+					<div class="mtp-section">
+						<label class="checkbox-row">
+							<input
+								type="checkbox"
+								checked={form.mtp_enabled === "on"}
+								onchange={(e) => (form.mtp_enabled = e.currentTarget.checked ? "on" : "off")}
+							/>
+							Enable MTP speculative decoding
+						</label>
+						{#if form.mtp_enabled === "on"}
+							<div class="form-grid mtp-grid">
+								<label>Draft max<input type="number" bind:value={form.mtp_draft_n_max} /></label>
+								<label>Draft min<input type="number" bind:value={form.mtp_draft_n_min} /></label>
+								<label>P min<input type="number" step="0.01" bind:value={form.mtp_draft_p_min} /></label>
+							</div>
+						{/if}
+					</div>
 					<label>Flags<input bind:value={form.flags} /></label>
 				</div>
 				<div class="actions"><button onclick={save} disabled={saving}>{saving ? "Saving..." : "Save + Regenerate Launcher"}</button></div>
@@ -114,7 +148,10 @@
 	.modal-header button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem; }
 	.modal-body { overflow-y: auto; padding: 1rem; }
 	.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.7rem; }
+	.mtp-section { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: 6px; padding: 0.7rem; }
+	.mtp-grid { margin-top: 0.7rem; }
 	label { display: flex; flex-direction: column; gap: 0.2rem; color: var(--text-muted); font-size: 0.8rem; }
+	.checkbox-row { flex-direction: row; align-items: center; color: var(--text); }
 	input, select { padding: 0.45rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
 	.actions { margin-top: 1rem; display: flex; justify-content: flex-end; }
 	.actions button { padding: 0.5rem 1rem; background: var(--accent); color: var(--text); border: none; border-radius: 4px; cursor: pointer; }

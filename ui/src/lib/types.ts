@@ -1,3 +1,10 @@
+export interface MtpConfig {
+	enabled: boolean;
+	draft_n_max: number;
+	draft_n_min: number;
+	draft_p_min: number;
+}
+
 export interface ModelConfig {
 	quant?: string;
 	batch: number;
@@ -6,6 +13,7 @@ export interface ModelConfig {
 	visible_devices?: string;
 	split_mode?: string;
 	tensor_split?: string;
+	mtp?: MtpConfig;
 }
 
 export interface ModelInfo {
@@ -48,6 +56,12 @@ export interface SwitchResponse {
 	backend: string;
 }
 
+export interface CopyBackendResponse {
+	status: string;
+	family: string;
+	backend: "rocm" | "vulkan";
+}
+
 export interface SearchCandidate {
 	repo: string;
 	score: number;
@@ -59,6 +73,20 @@ export interface SearchResponse {
 	candidates: SearchCandidate[];
 	error: string | null;
 }
+
+export interface InstallErrorDetail {
+	status: "error";
+	phase?: string;
+	repo?: string;
+	file?: string;
+	profile?: string;
+	detail: string;
+	logs?: string[];
+}
+
+export type InstallResult =
+	| { status: "installed"; family?: string; alias?: string; path?: string }
+	| InstallErrorDetail;
 
 export interface InventoryModel {
 	repo: string;
@@ -74,6 +102,14 @@ export interface StatusResponse {
 	accepted_count: number;
 	default_set: boolean;
 	downloads: Array<{ pid: string; repo: string }>;
+}
+
+export interface StatsResponse {
+	model?: string;
+	predicted_per_second?: number;
+	prompt_per_second?: number;
+	draft_n?: number;
+	draft_n_accepted?: number;
 }
 
 export interface DeleteResponse {
