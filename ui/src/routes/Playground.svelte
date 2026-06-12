@@ -1,4 +1,5 @@
-<div class="route">
-  <h2>Playground</h2>
-  <p>Coming soon.</p>
-</div>
+<script lang="ts">
+  import ChatInterface from '../components/playground/ChatInterface.svelte';
+</script>
+
+<ChatInterface />
