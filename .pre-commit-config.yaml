@@ -93,11 +93,11 @@ repos:
         name: ruff check
         entry: >-
           bash -lc 'if [ -n "${VIRTUAL_ENV:-}" ] && [ -x
-          "$VIRTUAL_ENV/bin/ruff" ]; then "$VIRTUAL_ENV/bin/ruff" check --ignore S606
+          "$VIRTUAL_ENV/bin/ruff" ]; then "$VIRTUAL_ENV/bin/ruff" check
           --fix "$@"; elif [ -x ./.venv/bin/ruff ]; then
-          ./.venv/bin/ruff check --ignore S606 --fix "$@"; elif [ -x
-          ./venv/bin/ruff ]; then ./venv/bin/ruff check --ignore S606 --fix
-          "$@"; else ruff check --ignore S606 --fix "$@"; fi' --
+          ./.venv/bin/ruff check --fix "$@"; elif [ -x ./venv/bin/ruff ];
+          then ./venv/bin/ruff check --fix "$@"; else ruff check --fix
+          "$@"; fi' --
         language: system
         files: \.pyi?$
       - id: ruff-format
@@ -114,10 +114,11 @@ repos:
         name: bandit
         entry: >-
           bash -lc 'if [ -n "${VIRTUAL_ENV:-}" ] && [ -x
-          "$VIRTUAL_ENV/bin/bandit" ]; then "$VIRTUAL_ENV/bin/bandit" -q -s
-          B606 "$@"; elif [ -x ./.venv/bin/bandit ]; then
-          ./.venv/bin/bandit -q -s B606 "$@"; elif [ -x ./venv/bin/bandit ];
-          then ./venv/bin/bandit -q -s B606 "$@"; else bandit -q -s B606
+          "$VIRTUAL_ENV/bin/bandit" ]; then "$VIRTUAL_ENV/bin/bandit" -q -x
+          tests,container/tests "$@"; elif [ -x ./.venv/bin/bandit ]; then
+          ./.venv/bin/bandit -q -x tests,container/tests "$@"; elif [ -x
+          ./venv/bin/bandit ]; then ./venv/bin/bandit -q -x
+          tests,container/tests "$@"; else bandit -q -x tests,container/tests
           "$@"; fi' --
         language: system
         files: \.pyi?$
@@ -146,14 +147,13 @@ repos:
       - id: pip-audit
         name: pip audit
         entry: >-
-          bash -lc 'if [ -f requirements.txt ]; then if [ -n
-          "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/pip-audit" ]; then
-          "$VIRTUAL_ENV/bin/pip-audit" -r requirements.txt; elif [ -x
-          ./.venv/bin/pip-audit ]; then ./.venv/bin/pip-audit -r
-          requirements.txt; elif [ -x ./venv/bin/pip-audit ]; then
-          ./venv/bin/pip-audit -r requirements.txt; else pip-audit -r
-          requirements.txt; fi; elif [ -f pyproject.toml ]; then pip-audit;
-          else echo "no Python dependency manifest found, skipping pip-audit";
+          bash -lc 'if [ -n "${VIRTUAL_ENV:-}" ] && [ -x
+          "$VIRTUAL_ENV/bin/pip-audit" ]; then audit="$VIRTUAL_ENV/bin/pip-audit";
+          elif [ -x ./.venv/bin/pip-audit ]; then audit=./.venv/bin/pip-audit;
+          elif [ -x ./venv/bin/pip-audit ]; then audit=./venv/bin/pip-audit;
+          else audit=pip-audit; fi; if [ -f requirements.txt ]; then
+          "$audit" -r requirements.txt; elif [ -f container/pyproject.toml ]; then
+          "$audit" container; else echo "no auditable Python dependency manifest found, skipping pip-audit";
           fi'
         language: system
         pass_filenames: false

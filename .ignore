@@ -78,3 +78,10 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 *~
+docs/
+
+# JS/TS build noise.
+node_modules/
+.eslintcache
+*.tsbuildinfo
+
