@@ -1,9 +1,10 @@
 services:
   local-llm:
-    build: .
+    build:
+      context: .
+      network: host
     container_name: local-llm-mgmt
-    ports:
-      - "127.0.0.1:3100:3100"
+    network_mode: host
     volumes:
       - ${HOME}/.local/share/local_llm:/state
       - ${HOME}/llama.cpp:/llama.cpp:ro
