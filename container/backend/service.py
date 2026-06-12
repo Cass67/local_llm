@@ -32,62 +32,41 @@ def get_llama_server_status() -> str:
 
 
 def detect_running_model() -> dict:
-    """Detect currently running model via llama-server process."""
+    """Detect selected/running model via llama-swap."""
     import json
+    import urllib.error
+    import urllib.request
     from . import config
 
-    status = get_llama_server_status()
-    if status != "active":
-        return {"status": "inactive", "family": None, "ctx": None}
-
-    try:
-        result = subprocess.run(
-            [
-                "bash",
-                "-c",
-                "pid=$(pgrep -f llama-server | head -1); "
-                '[ -n "$pid" ] && tr "\\0" "\\n" < /proc/$pid/cmdline || true',
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return {"status": "active", "family": None, "ctx": None}
-
-    args = result.stdout.splitlines()
-    repo = None
-    hf_file = None
-    ctx_size = None
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "-hf" and i + 1 < len(args):
-            repo = args[i + 1].split(":")[0]
-        elif a.startswith("-hf="):
-            repo = a.split("=", 1)[1].split(":")[0]
-        elif a == "--hf-file" and i + 1 < len(args):
-            hf_file = args[i + 1]
-        elif a in ("--ctx-size", "-c") and i + 1 < len(args):
-            try:
-                ctx_size = int(args[i + 1])
-            except ValueError:
-                pass
-        i += 1
-
-    if not repo:
-        return {"status": "active", "family": None, "ctx": ctx_size}
-
-    for path in sorted(config.ACCEPTED_DIR.glob("*.json")):
-        if path.name == "default.json" or path.is_symlink():
-            continue
+    selected = None
+    selection_file = config.RUNS_DIR / "current-selection.json"
+    if selection_file.exists() and not selection_file.is_symlink():
         try:
-            data = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            continue
-        d_repo = data.get("repo") or data.get("hf_repo") or ""
-        d_file = data.get("hf_file") or ""
-        if d_repo == repo and (not hf_file or d_file == hf_file):
-            return {"status": "active", "family": data.get("family", path.stem), "ctx": ctx_size}
+            selection = json.loads(selection_file.read_text())
+            if isinstance(selection, dict):
+                selected = selection.get("model")
+        except (OSError, json.JSONDecodeError):
+            selected = None
 
-    return {"status": "active", "family": repo, "ctx": ctx_size}
+    running_ids: list[str] = []
+    try:
+        with urllib.request.urlopen(f"{config.LLAMA_SWAP_URL}/running", timeout=5) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        running = body.get("running") if isinstance(body, dict) else []
+        if isinstance(running, list):
+            for item in running:
+                if isinstance(item, str):
+                    running_ids.append(item)
+                elif isinstance(item, dict) and item.get("id"):
+                    running_ids.append(str(item["id"]))
+                elif isinstance(item, dict) and item.get("model"):
+                    running_ids.append(str(item["model"]))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        pass
+
+    family = selected or (running_ids[0] if running_ids else None)
+    if family and family in running_ids:
+        return {"status": "active", "family": family, "ctx": None}
+    if family:
+        return {"status": "selected", "family": family, "ctx": None}
+    return {"status": "inactive", "family": None, "ctx": None}

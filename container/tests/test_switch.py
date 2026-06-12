@@ -38,12 +38,10 @@ def temp_state(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_switch_model_restarts_service(temp_state):
+async def test_switch_model_selects_llama_swap_model_without_restarting_service(temp_state):
     from backend.main import app
 
-    with patch("backend.routes.switch.restart_llama_server") as mock_restart:
-        mock_restart.return_value = True
-
+    with patch("backend.routes.switch.get_llama_swap_model_ids", return_value=["qwen3.6-27b-q6"]):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
@@ -56,15 +54,16 @@ async def test_switch_model_restarts_service(temp_state):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "switched"
+    assert data["status"] == "selected"
     assert data["family"] == "qwen"
     assert data["profile"] == "reliable"
+    assert data["alias"] == "qwen3.6-27b-q6"
 
-    env_file = temp_state / "current-model.env"
-    assert env_file.exists()
-    content = env_file.read_text()
-    assert "REMOTE_SCRIPT=./start-qwen.sh" in content
-    assert "REMOTE_PROFILE=reliable" in content
+    selection_file = temp_state / "current-selection.json"
+    assert selection_file.exists()
+    selection = json.loads(selection_file.read_text())
+    assert selection["model"] == "qwen3.6-27b-q6"
+    assert selection["profile"] == "reliable"
 
 
 @pytest.mark.asyncio
@@ -106,9 +105,7 @@ async def test_switch_model_with_backend_override(temp_state):
 
     from backend.main import app
 
-    with patch("backend.routes.switch.restart_llama_server") as mock_restart:
-        mock_restart.return_value = True
-
+    with patch("backend.routes.switch.get_llama_swap_model_ids", return_value=["qwen3.6-27b-q6-vulkan"]):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
@@ -123,9 +120,7 @@ async def test_switch_model_with_backend_override(temp_state):
     assert response.status_code == 200
     data = response.json()
     assert data["backend"] == "vulkan"
-    assert "vulkan" in data["alias"]
+    assert data["alias"] == "qwen3.6-27b-q6-vulkan"
 
-    env_file = temp_state / "current-model.env"
-    assert env_file.exists()
-    content = env_file.read_text()
-    assert "start-qwen-vulkan.sh" in content
+    selection = json.loads((temp_state / "current-selection.json").read_text())
+    assert selection["model"] == "qwen3.6-27b-q6-vulkan"

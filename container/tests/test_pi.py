@@ -2,7 +2,6 @@
 
 import json
 import pytest
-from unittest.mock import patch
 from httpx import ASGITransport, AsyncClient
 
 
@@ -45,10 +44,9 @@ def temp_state(tmp_path, monkeypatch):
 async def test_pi_models_json_endpoint(temp_state):
     from backend.main import app
 
-    with patch("backend.routes.switch.get_llama_server_status", return_value="active"):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/pi/models")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/pi/models")
 
     assert response.status_code == 200
     data = response.json()

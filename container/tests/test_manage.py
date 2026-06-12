@@ -150,7 +150,7 @@ async def test_delete_models(temp_state):
 @pytest.mark.asyncio
 async def test_status_returns_full_state(temp_state):
     with (
-        patch("backend.service.get_llama_server_status", return_value="active"),
+        patch("backend.routes.manage.detect_running_model", return_value={"status": "active", "family": "qwen3.6-27b-q6", "ctx": None}),
         patch("backend.routes.manage.subprocess.run") as mock_run,
     ):
         # mock for pgrep (downloads)
