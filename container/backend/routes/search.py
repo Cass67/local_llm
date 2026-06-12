@@ -30,35 +30,4 @@ class InstallRequest(BaseModel):
 @router.post("/install")
 async def install_model(req: InstallRequest):
     """Install a model candidate. Runs model-manager.sh install."""
-    import json
-    import subprocess
-
-    cmd = [
-        "bash",
-        str(cli.MODEL_MANAGER),
-        "install",
-        "--repo",
-        req.repo,
-        "--file",
-        req.file,
-        "--profile",
-        req.profile,
-        "--yes",
-    ]
-    try:
-        result = subprocess.run(  # noqa: S603
-            cmd, capture_output=True, text=True, timeout=600,
-        )
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "detail": "Install timed out (10 min)"}
-
-    if result.returncode != 0:
-        return {
-            "status": "error",
-            "detail": result.stderr.strip()[:300] or "install failed",
-        }
-
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return {"status": "ok", "detail": result.stdout.strip()[:200]}
+    return cli.run_install(req.repo, req.file, req.profile)
