@@ -1,127 +1,82 @@
 <script lang="ts">
-  import type { ModelInfo } from '../lib/types';
+	import type { ModelInfo } from "../lib/types";
 
-  let {
-    model,
-    isRunning = false,
-    switching = null as string | null,
-    onSwitch,
-  }: {
-    model: ModelInfo;
-    isRunning: boolean;
-    switching: string | null;
-    onSwitch: (profile: string) => void;
-  } = $props();
+	let {
+		model,
+		isRunning = false,
+		switching = null as string | null,
+		onSwitch,
+		onDetail,
+		onEdit,
+	}: {
+		model: ModelInfo;
+		isRunning: boolean;
+		switching: string | null;
+		onSwitch: (profile: string) => void;
+		onDetail?: () => void;
+		onEdit?: () => void;
+	} = $props();
 
-  let selectedProfile = $state(model.profile || 'reliable');
-  let isSwitching = $derived(switching === model.family);
+	let selectedProfile = $state("");
+	let isSwitching = $derived(switching === model.family);
+
+	$effect(() => {
+		if (!selectedProfile) selectedProfile = model.profile || "reliable";
+	});
 </script>
 
 <div class="model-card" class:running={isRunning}>
-  <div class="card-header">
-    <h3>{model.model_name}</h3>
-    <span class="backend-badge" class:rocm={model.backend === 'rocm'} class:vulkan={model.backend === 'vulkan'}>
-      {model.backend}
-    </span>
-  </div>
+	<div class="card-header">
+		<h3>{model.model_name}</h3>
+		<span class="backend-badge" class:rocm={model.backend === "rocm"} class:vulkan={model.backend === "vulkan"}>{model.backend}</span>
+	</div>
 
-  <div class="card-body">
-    <div class="info-row">
-      <span>Family:</span> <strong>{model.family}</strong>
-    </div>
-    <div class="info-row">
-      <span>Alias:</span> <code>{model.alias}</code>
-    </div>
-    {#if model.context}
-      <div class="info-row">
-        <span>Context:</span> {model.context.toLocaleString()}
-      </div>
-    {/if}
-    {#if model.config?.quant}
-      <div class="info-row">
-        <span>Quant:</span> {model.config.quant}
-      </div>
-    {/if}
-    {#if model.config?.visible_devices}
-      <div class="info-row">
-        <span>GPUs:</span> {model.config.visible_devices}
-      </div>
-    {/if}
+	<div class="card-body">
+		<div class="info-row"><span>Family:</span> <strong>{model.family}</strong></div>
+		<div class="info-row"><span>Alias:</span> <code>{model.alias}</code></div>
+		{#if model.context}<div class="info-row"><span>Context:</span> {model.context.toLocaleString()}</div>{/if}
+		{#if model.config?.quant}<div class="info-row"><span>Quant:</span> {model.config.quant}</div>{/if}
+		{#if model.config?.visible_devices}<div class="info-row"><span>GPUs:</span> {model.config.visible_devices}</div>{/if}
 
-    <div class="profile-select">
-      <label>Profile:</label>
-      <select bind:value={selectedProfile}>
-        <option value="speed">Speed</option>
-        <option value="fastlong">FastLong</option>
-        <option value="balanced">Balanced</option>
-        <option value="reliable">Reliable</option>
-        <option value="tiny">Tiny</option>
-      </select>
-    </div>
+		<div class="profile-select">
+			<label for={`profile-${model.family}`}>Profile:</label>
+			<select id={`profile-${model.family}`} bind:value={selectedProfile}>
+				<option value="speed">Speed</option>
+				<option value="fastlong">FastLong</option>
+				<option value="balanced">Balanced</option>
+				<option value="reliable">Reliable</option>
+				<option value="tiny">Tiny</option>
+			</select>
+		</div>
 
-    <button
-      class="switch-btn"
-      disabled={isSwitching || isRunning}
-      onclick={() => onSwitch(selectedProfile)}
-    >
-      {#if isSwitching}
-        Switching...
-      {:else if isRunning}
-        Running
-      {:else}
-        Switch
-      {/if}
-    </button>
-  </div>
+		<button class="switch-btn" disabled={isSwitching || isRunning} onclick={() => onSwitch(selectedProfile)}>
+			{#if isSwitching}Switching...{:else if isRunning}Running{:else}Switch{/if}
+		</button>
+
+		<div class="card-actions">
+			<button onclick={onDetail}>Detail</button>
+			<button onclick={onEdit}>Edit</button>
+		</div>
+	</div>
 </div>
 
 <style>
-  .model-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-  .model-card.running { border-color: var(--green); }
-  .card-header { display: flex; justify-content: space-between; align-items: flex-start; }
-  .card-header h3 { margin: 0; font-size: 1rem; }
-  .backend-badge {
-    font-size: 0.7rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 3px;
-    text-transform: uppercase;
-  }
-  .backend-badge.rocm { background: #e74c3c33; color: #e74c3c; }
-  .backend-badge.vulkan { background: #9b59b633; color: #9b59b6; }
-  .card-body { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
-  .info-row { display: flex; justify-content: space-between; }
-  .info-row span { color: var(--text-muted); }
-  code { font-size: 0.8rem; background: var(--bg); padding: 0.1rem 0.3rem; border-radius: 3px; }
-  .profile-select { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
-  .profile-select label { color: var(--text-muted); font-size: 0.85rem; }
-  .profile-select select {
-    flex: 1;
-    padding: 0.3rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--text);
-  }
-  .switch-btn {
-    margin-top: 0.5rem;
-    padding: 0.5rem;
-    border: none;
-    border-radius: 4px;
-    background: var(--accent);
-    color: var(--text);
-    cursor: pointer;
-    font-weight: bold;
-  }
-  .switch-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
+	.model-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+	.model-card.running { border-color: var(--green); }
+	.card-header { display: flex; justify-content: space-between; align-items: flex-start; }
+	.card-header h3 { margin: 0; font-size: 1rem; }
+	.backend-badge { font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px; text-transform: uppercase; }
+	.backend-badge.rocm { background: #e74c3c33; color: #e74c3c; }
+	.backend-badge.vulkan { background: #9b59b633; color: #9b59b6; }
+	.card-body { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
+	.info-row { display: flex; justify-content: space-between; gap: 0.5rem; }
+	.info-row span { color: var(--text-muted); }
+	code { font-size: 0.8rem; background: var(--bg); padding: 0.1rem 0.3rem; border-radius: 3px; word-break: break-all; }
+	.profile-select { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
+	.profile-select label { color: var(--text-muted); font-size: 0.85rem; }
+	.profile-select select { flex: 1; padding: 0.3rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
+	.switch-btn { margin-top: 0.5rem; padding: 0.5rem; border: none; border-radius: 4px; background: var(--accent); color: var(--text); cursor: pointer; font-weight: bold; }
+	.switch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.card-actions { display: flex; gap: 0.4rem; margin-top: 0.3rem; }
+	.card-actions button { flex: 1; padding: 0.35rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-muted); cursor: pointer; font-size: 0.8rem; }
 </style>

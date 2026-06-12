@@ -1,4 +1,5 @@
 """Tests for init endpoint."""
+
 import json
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -8,6 +9,7 @@ from backend.main import app
 @pytest.mark.asyncio
 async def test_init_sets_target(tmp_path):
     import backend.config as cfg
+
     old_runs = cfg.RUNS_DIR
     cfg.RUNS_DIR = tmp_path
     cfg.ACCEPTED_DIR = tmp_path / "accepted"
