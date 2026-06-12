@@ -10,7 +10,11 @@ cd "$PROJECT_ROOT/ui"
 npm ci
 npm run build
 
-echo "=== Building Docker image ==="
+echo "=== Building runner image ==="
+cd "$PROJECT_ROOT"
+docker build -t local-llm-runner:latest -f runner/Dockerfile runner
+
+echo "=== Building management Docker image ==="
 cd "$SCRIPT_DIR"
 docker compose build
 

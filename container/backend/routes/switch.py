@@ -2,13 +2,16 @@
 
 import json
 import re
+import time
+import http.client
 import urllib.error
-import urllib.request
+import urllib.parse
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .. import config
 from ..cli import run_stop_server
+from ..runtime import DockerRunner, DockerRunnerConfig, build_runner_container_spec
 
 router = APIRouter(prefix="/api/models", tags=["switch"])
 
@@ -39,98 +42,6 @@ def _validate_accepted_path(path: Path) -> dict | None:  # noqa: DOC502
     return data
 
 
-def get_llama_swap_model_ids() -> list[str]:
-    """Return llama-swap model IDs from /v1/models."""
-    try:
-        with urllib.request.urlopen(f"{config.LLAMA_SWAP_URL}/v1/models", timeout=5) as response:
-            body = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        return []
-    data = body.get("data") if isinstance(body, dict) else []
-    if not isinstance(data, list):
-        return []
-    return [str(item["id"]) for item in data if isinstance(item, dict) and item.get("id")]
-
-
-def get_llama_swap_running_ids() -> list[str]:
-    """Return running llama-swap model IDs from /running."""
-    try:
-        with urllib.request.urlopen(f"{config.LLAMA_SWAP_URL}/running", timeout=5) as response:
-            body = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        return []
-    running = body.get("running") if isinstance(body, dict) else []
-    if not isinstance(running, list):
-        return []
-    ids: list[str] = []
-    for item in running:
-        if isinstance(item, str):
-            ids.append(item)
-        elif isinstance(item, dict) and item.get("id"):
-            ids.append(str(item["id"]))
-        elif isinstance(item, dict) and item.get("model"):
-            ids.append(str(item["model"]))
-    return ids
-
-
-def load_llama_swap_model(model_id: str) -> bool:
-    """Trigger llama-swap to load a model with a minimal completion request."""
-    payload = json.dumps(
-        {
-            "model": model_id,
-            "messages": [{"role": "user", "content": "Reply with ok."}],
-            "max_tokens": 1,
-            "stream": False,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        f"{config.LLAMA_SWAP_URL}/v1/chat/completions",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=600) as response:
-            return 200 <= response.status < 300
-    except (OSError, urllib.error.URLError):
-        return False
-
-
-def _quant_suffix(data: dict) -> str | None:
-    raw = str(
-        data.get("quant") or (data.get("config") or {}).get("quant") or data.get("hf_file") or ""
-    ).lower()
-    if "q6" in raw:
-        return "q6"
-    if "q5_k_m" in raw or "q5km" in raw:
-        return "q5km"
-    if "q5_k_s" in raw or "q5ks" in raw:
-        return "q5ks"
-    return None
-
-
-def _llama_swap_id_for(data: dict, metadata_file: Path, available_ids: list[str]) -> str:
-    family = str(data.get("family") or metadata_file.stem)
-    alias = str(data.get("alias") or data.get("model_name") or family)
-    normalized_family = family.replace("-heretic", "")
-    normalized_alias = alias.replace("-heretic", "")
-    candidates = [family, alias, normalized_family, normalized_alias]
-    suffix = _quant_suffix(data)
-    if suffix and normalized_family == "qwen3.6-27b":
-        candidates.append(f"qwen3.6-27b-{suffix}")
-    if suffix and normalized_family.endswith("-1gpu"):
-        base = normalized_family.removesuffix("-1gpu")
-        if not base.endswith(f"-{suffix}"):
-            candidates.append(f"{base}-{suffix}-1gpu")
-    for candidate in candidates:
-        if candidate in available_ids:
-            return candidate
-    raise HTTPException(
-        status_code=409,
-        detail=f"model '{family}' is not configured in llama-swap; available: {', '.join(available_ids)}",
-    )
-
-
 def _write_selection(model_id: str, family: str, profile: str, backend: str) -> None:
     config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
     path = config.RUNS_DIR / "current-selection.json"
@@ -149,6 +60,45 @@ def _write_selection(model_id: str, family: str, profile: str, backend: str) -> 
     )
 
 
+def _write_runner_state(model_id: str, metadata: dict, profile: str, backend: str) -> None:
+    config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    spec = build_runner_container_spec(metadata, DockerRunnerConfig(), config.MODELS_CACHE_DIR)
+    path = config.RUNS_DIR / "current-runner.json"
+    path.write_text(
+        json.dumps(
+            {
+                "model": model_id,
+                "family": metadata.get("family", model_id),
+                "profile": profile,
+                "backend": backend,
+                "container": {
+                    "name": spec.name,
+                    "image": spec.image,
+                    "command": spec.command,
+                    "ports": spec.ports,
+                    "devices": spec.devices,
+                    "group_add": spec.group_add,
+                    "environment": spec.environment,
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
+def _read_runner_state() -> dict | None:
+    path = config.RUNS_DIR / "current-runner.json"
+    if not path.exists() or path.is_symlink():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _read_selection() -> dict | None:
     path = config.RUNS_DIR / "current-selection.json"
     if not path.exists() or path.is_symlink():
@@ -160,20 +110,67 @@ def _read_selection() -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _metadata_for_llama_swap_id(model_id: str) -> tuple[Path, dict] | None:
-    available_ids = [model_id]
-    for path in sorted(config.ACCEPTED_DIR.glob("*.json")):
-        if path.name == "default.json":
+def _wait_for_runner_ready(runner: DockerRunner, timeout_seconds: float = 120.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if not runner.is_running():
+            return False
+        try:
+            parsed = urllib.parse.urlparse(f"{config.RUNNER_URL}/models")
+            if parsed.scheme != "http" or not parsed.hostname:
+                return False
+            conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=2)
+            conn.request("GET", parsed.path)
+            response = conn.getresponse()
+            try:
+                if response.status == 200:
+                    return True
+            finally:
+                conn.close()
+        except (OSError, urllib.error.URLError):
+            pass
+        time.sleep(1)
+    return False
+
+
+def _resolve_model_id_file(model_id: str):
+    safe_name = re.compile(r"[A-Za-z0-9_.-]+")
+    if not safe_name.fullmatch(model_id) or ".." in model_id or model_id.startswith("-"):
+        raise HTTPException(status_code=400, detail="invalid model id")
+    for metadata_file in sorted(config.ACCEPTED_DIR.glob("*.json")):
+        if metadata_file.name == "default.json":
             continue
-        data = _validate_accepted_path(path)
+        data = _validate_accepted_path(metadata_file)
         if not data:
             continue
-        try:
-            if _llama_swap_id_for(data, path, available_ids) == model_id:
-                return path, data
-        except HTTPException:
-            continue
-    return None
+        aliases = {metadata_file.stem, str(data.get("family", "")), str(data.get("alias", ""))}
+        if model_id in aliases:
+            return metadata_file, data
+    raise HTTPException(status_code=404, detail=f"model '{model_id}' not found")
+
+
+def _launch_model(metadata_file: Path, data: dict, profile: str) -> str:
+    family = data.get("family", metadata_file.stem)
+    backend = str((data.get("config") or {}).get("backend") or data.get("backend", "rocm"))
+    model_id = str(data.get("alias") or family)
+    _write_selection(model_id, str(family), str(profile), backend)
+    runner = DockerRunner(
+        DockerRunnerConfig(image=config.RUNNER_IMAGE, socket_path=config.DOCKER_SOCKET),
+        models_dir=config.MODELS_CACHE_DIR,
+        host_models_dir=config.HOST_MODELS_CACHE_DIR,
+    )
+    runner.launch(data)
+    if not _wait_for_runner_ready(runner):
+        detail = "\n".join(runner.logs(40)) or "runner did not become ready"
+        raise RuntimeError(detail[-1000:])
+    _write_runner_state(model_id, data, str(profile), backend)
+    return model_id
+
+
+def switch_model_by_id(model_id: str) -> None:
+    metadata_file, data = _resolve_model_id_file(model_id)
+    profile = str(data.get("profile") or "reliable")
+    _launch_model(metadata_file, data, profile)
 
 
 def _resolve_family_file(family: str, backend: str | None):
@@ -212,13 +209,12 @@ async def switch_model(req: SwitchRequest):
     family = data.get("family", metadata_file.stem)
     profile = req.profile
     backend = str((data.get("config") or {}).get("backend") or data.get("backend", "rocm"))
-    available_ids = get_llama_swap_model_ids()
-    model_id = _llama_swap_id_for(data, metadata_file, available_ids)
-    _write_selection(model_id, str(family), str(profile), backend)
-    if not load_llama_swap_model(model_id):
+    try:
+        model_id = _launch_model(metadata_file, data, str(profile))
+    except (RuntimeError, ValueError) as exc:
         raise HTTPException(
-            status_code=502, detail=f"failed to launch llama-swap model: {model_id}"
-        )
+            status_code=502, detail=f"failed to launch local runner: {exc}"
+        ) from exc
 
     return SwitchResponse(
         status="loaded",
@@ -231,48 +227,28 @@ async def switch_model(req: SwitchRequest):
 
 @router.post("/stop")
 async def stop_model_server():
-    """Stop llama-server.service."""
+    """Stop host llama-server service if present."""
     return {"status": run_stop_server()}
 
 
 @router.get("/current")
 async def current_model():
-    """Return selected/running llama-swap model."""
+    """Return selected project-owned runner model."""
     selection = _read_selection() or {}
-    selected_model = str(selection.get("model") or "unknown")
-    running_ids = get_llama_swap_running_ids()
-    if selected_model != "unknown" and selected_model in running_ids:
-        current_model = selected_model
-        running = True
-        family = selection.get("family", selected_model)
-        profile = selection.get("profile", "unknown")
-        backend = selection.get("backend", "unknown")
-    elif running_ids:
-        current_model = running_ids[0]
-        running = True
-        metadata = _metadata_for_llama_swap_id(current_model)
-        if metadata:
-            metadata_file, data = metadata
-            family = data.get("family", metadata_file.stem)
-            profile = data.get("profile", "unknown")
-            backend = str(
-                (data.get("config") or {}).get("backend") or data.get("backend", "unknown")
-            )
-        else:
-            family = current_model
-            profile = "unknown"
-            backend = "unknown"
-    else:
-        current_model = selected_model
-        running = False
-        family = selection.get("family", selected_model)
-        profile = selection.get("profile", "unknown")
-        backend = selection.get("backend", "unknown")
+    runner = _read_runner_state() or {}
+    current_model = str(runner.get("model") or selection.get("model") or "unknown")
+    running = current_model != "unknown" and bool(runner)
+    family = runner.get("family") or selection.get("family", current_model)
+    profile = runner.get("profile") or selection.get("profile", "unknown")
+    backend = runner.get("backend") or selection.get("backend", "unknown")
     return {
         "family": family,
         "profile": profile,
         "alias": current_model,
         "backend": backend,
         "running": running,
-        "llama_server": {"status": "llama-swap", "running": running_ids},
+        "llama_server": {
+            "status": "local-llm-runner",
+            "running": [current_model] if running else [],
+        },
     }

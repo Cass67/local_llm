@@ -31,43 +31,28 @@ def get_llama_server_status() -> str:
         return "unknown"
 
 
-def detect_running_model() -> dict:
-    """Detect selected/running model via llama-swap."""
+def _read_state_json(path):
     import json
-    import urllib.error
-    import urllib.request
+
+    if not path.exists() or path.is_symlink():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def detect_running_model() -> dict:
+    """Detect selected/running model from project-owned runner state."""
     from . import config
 
-    selected = None
-    selection_file = config.RUNS_DIR / "current-selection.json"
-    if selection_file.exists() and not selection_file.is_symlink():
-        try:
-            selection = json.loads(selection_file.read_text())
-            if isinstance(selection, dict):
-                selected = selection.get("model")
-        except (OSError, json.JSONDecodeError):
-            selected = None
+    runner = _read_state_json(config.RUNS_DIR / "current-runner.json")
+    if runner and isinstance(runner.get("model"), str):
+        return {"status": "active", "family": runner["model"], "ctx": None}
 
-    running_ids: list[str] = []
-    try:
-        with urllib.request.urlopen(f"{config.LLAMA_SWAP_URL}/running", timeout=5) as response:
-            body = json.loads(response.read().decode("utf-8"))
-        running = body.get("running") if isinstance(body, dict) else []
-        if isinstance(running, list):
-            for item in running:
-                if isinstance(item, str):
-                    running_ids.append(item)
-                elif isinstance(item, dict) and item.get("id"):
-                    running_ids.append(str(item["id"]))
-                elif isinstance(item, dict) and item.get("model"):
-                    running_ids.append(str(item["model"]))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        pass
-
-    if selected and selected in running_ids:
-        return {"status": "active", "family": selected, "ctx": None}
-    if running_ids:
-        return {"status": "active", "family": running_ids[0], "ctx": None}
-    if selected:
+    selection = _read_state_json(config.RUNS_DIR / "current-selection.json")
+    selected = selection.get("model") if selection else None
+    if isinstance(selected, str) and selected:
         return {"status": "selected", "family": selected, "ctx": None}
     return {"status": "inactive", "family": None, "ctx": None}

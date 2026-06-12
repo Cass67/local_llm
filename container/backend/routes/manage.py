@@ -3,9 +3,11 @@
 import json
 import re
 import subprocess
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from .. import config, cli
+from ..model_variants import Backend, copy_backend_variant, migrate_backend_variant
 from ..service import detect_running_model
 
 router = APIRouter(prefix="/api", tags=["manage"])
@@ -62,6 +64,93 @@ for root in roots:
     return {"models": models}
 
 
+# --- Backend variants ---
+
+
+class CopyBackendRequest(BaseModel):
+    backend: Backend
+    overwrite: bool = False
+
+
+def _safe_family(family: str) -> None:
+    safe = re.compile(r"^[A-Za-z0-9_.-]+$")
+    if not safe.fullmatch(family) or ".." in family:
+        raise HTTPException(400, "invalid family name")
+
+
+def _read_metadata_file(path):
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        raise HTTPException(500, "corrupt metadata")
+    if not isinstance(data, dict):
+        raise HTTPException(500, "invalid metadata")
+    return data
+
+
+@router.post("/models/{family}/copy-backend")
+async def copy_model_backend(family: str, req: CopyBackendRequest):
+    _safe_family(family)
+    source_path = config.ACCEPTED_DIR / f"{family}.json"
+    if not source_path.exists():
+        raise HTTPException(404, f"family '{family}' not found")
+    source = _read_metadata_file(source_path)
+    copied = copy_backend_variant(source, req.backend)
+    target_family = str(copied["family"])
+    target_path = config.ACCEPTED_DIR / f"{target_family}.json"
+    if target_path.exists() and not req.overwrite:
+        raise HTTPException(409, f"backend variant '{target_family}' already exists")
+    target_path.write_text(json.dumps(copied, indent=2, sort_keys=True) + "\n")
+    return {"status": "copied", "family": target_family, "backend": req.backend}
+
+
+@router.post("/models/migrate-backend-names")
+async def migrate_backend_names():
+    config.ACCEPTED_DIR.mkdir(parents=True, exist_ok=True)
+    migrated: list[str] = []
+    skipped: list[str] = []
+    renamed: dict[str, str] = {}
+    for source_path in sorted(config.ACCEPTED_DIR.glob("*.json")):
+        if source_path.name == "default.json":
+            continue
+        source = _read_metadata_file(source_path)
+        migrated_data = migrate_backend_variant(source)
+        target_family = str(migrated_data["family"])
+        if source_path.stem == target_family:
+            skipped.append(target_family)
+            continue
+        target_path = config.ACCEPTED_DIR / f"{target_family}.json"
+        if target_path.exists():
+            skipped.append(source_path.stem)
+            continue
+        target_path.write_text(json.dumps(migrated_data, indent=2, sort_keys=True) + "\n")
+        source_path.unlink()
+        migrated.append(target_family)
+        renamed[source_path.stem] = target_family
+        old_alias = str(source.get("alias") or "")
+        if old_alias:
+            renamed[old_alias] = target_family
+    for state_name in ("current-selection.json", "current-runner.json"):
+        state_path = config.RUNS_DIR / state_name
+        if not state_path.exists() or state_path.is_symlink():
+            continue
+        try:
+            state = json.loads(state_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        changed = False
+        for field in ("model", "family"):
+            value = state.get(field)
+            if isinstance(value, str) and value in renamed:
+                state[field] = renamed[value]
+                changed = True
+        if changed:
+            state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+    return {"status": "ok", "migrated": migrated, "skipped": skipped}
+
+
 # --- Detail ---
 
 
@@ -86,6 +175,13 @@ async def model_detail(family: str):
 # --- Edit ---
 
 
+class MTPConfig(BaseModel):
+    enabled: bool = False
+    draft_n_max: int = 3
+    draft_n_min: int = 1
+    draft_p_min: float = 0.5
+
+
 class EditRequest(BaseModel):
     profile: str | None = None
     ctx: int | None = None
@@ -101,6 +197,7 @@ class EditRequest(BaseModel):
     split_mode: str | None = None
     tensor_split: str | None = None
     flags: str | None = None
+    mtp: MTPConfig | None = None
 
 
 @router.put("/models/{family}")
@@ -143,6 +240,8 @@ async def edit_model(family: str, req: EditRequest):
         cfg["reasoning"] = req.reasoning
     if req.backend is not None:
         cfg["backend"] = req.backend
+    if req.mtp is not None:
+        cfg["mtp"] = req.mtp.model_dump()
 
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
 
@@ -158,17 +257,69 @@ class DeleteRequest(BaseModel):
     repos: list[str]
 
 
+def _metadata_matches_delete_id(data: dict, metadata_path: Path, value: str) -> bool:
+    identifiers = {
+        metadata_path.stem,
+        str(data.get("family") or ""),
+        str(data.get("alias") or ""),
+        str(data.get("repo") or ""),
+        str(data.get("hf_repo") or ""),
+    }
+    return value in identifiers
+
+
+def _remove_model_state_references(family: str, alias: str) -> None:
+    for state_name in ("current-selection.json", "current-runner.json"):
+        state_path = config.RUNS_DIR / state_name
+        if not state_path.exists() or state_path.is_symlink():
+            continue
+        try:
+            state = json.loads(state_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        if state.get("family") == family or state.get("model") in {family, alias}:
+            state_path.unlink(missing_ok=True)
+    default_path = config.ACCEPTED_DIR / "default.json"
+    if default_path.exists() and not default_path.is_symlink():
+        try:
+            default_data = json.loads(default_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return
+        if isinstance(default_data, dict) and default_data.get("family") == family:
+            default_path.unlink(missing_ok=True)
+
+
+def _delete_accepted_model(value: str) -> dict:
+    for metadata_path in sorted(config.ACCEPTED_DIR.glob("*.json")):
+        if metadata_path.name == "default.json" or metadata_path.is_symlink():
+            continue
+        data = _read_metadata_file(metadata_path)
+        if not _metadata_matches_delete_id(data, metadata_path, value):
+            continue
+        family = str(data.get("family") or metadata_path.stem)
+        alias = str(data.get("alias") or family)
+        launcher = data.get("launcher_file")
+        metadata_path.unlink()
+        if isinstance(launcher, str) and launcher:
+            launcher_path = Path(launcher)
+            if launcher_path.exists() and not launcher_path.is_symlink():
+                launcher_path.unlink()
+        _remove_model_state_references(family, alias)
+        return {"repo": value, "status": "deleted", "family": family}
+    return {"repo": value, "status": "not_found"}
+
+
 @router.post("/models/delete")
 async def delete_models(req: DeleteRequest):
-    """Delete one or more model repos."""
-    target = "local"
+    """Delete one or more accepted models from local management state."""
     results = []
     for repo in req.repos:
         if not repo or len(repo) > 500:
             results.append({"repo": repo, "status": "error", "detail": "invalid repo"})
             continue
-        result = cli.run_delete(repo, target)
-        results.append({"repo": repo, "status": result})
+        results.append(_delete_accepted_model(repo))
     return {"results": results}
 
 

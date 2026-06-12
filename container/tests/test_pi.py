@@ -42,10 +42,11 @@ def temp_state(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pi_models_json_endpoint(temp_state):
+    assert temp_state.exists()
     from backend.main import app
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(transport=transport, base_url="http://ubt26:3100") as client:
         response = await client.get("/api/pi/models")
 
     assert response.status_code == 200
@@ -53,9 +54,10 @@ async def test_pi_models_json_endpoint(temp_state):
     assert "providers" in data
     assert "ubt26-llamacpp" in data["providers"]
     provider = data["providers"]["ubt26-llamacpp"]
-    assert provider["baseUrl"] == "http://127.0.0.1:8080/v1"
+    assert provider["baseUrl"] == "http://ubt26:3100/v1"
     assert len(provider["models"]) >= 1
     model = provider["models"][0]
     assert model["id"] == "qwen3.6-27b-q6"
     assert model["reasoning"] is True
     assert model["context"] == 131072
+    assert model["contextWindow"] == 131072

@@ -9,7 +9,6 @@ services:
       - ${HOME}/.local/share/local_llm:/state
       - ${HOME}/llama.cpp:/llama.cpp:ro
       - ${HOME}/.cache/huggingface/hub:/models
-      - ${HOME}/llama-swap/config.yaml:/llama-swap/config.yaml
       - ${HOME}/git/local_llm/scripts:/scripts:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - /run/user/1000/systemd:/run/user/1000/systemd
@@ -18,11 +17,32 @@ services:
       - LOCAL_LLM_STATE_DIR=/state
       - LLAMA_CPP_DIR=/llama.cpp
       - MODELS_CACHE_DIR=/models
+      - HOST_MODELS_CACHE_DIR=${HOME}/.cache/huggingface/hub
       - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
       - XDG_RUNTIME_DIR=/run/user/1000
-      - LLAMA_SWAP_CONFIG=/llama-swap/config.yaml
       - DOCKER_SOCKET=/var/run/docker.sock
+      - RUNNER_IMAGE=local-llm-runner:latest
     restart: unless-stopped
     user: "1000:1000"
     group_add:
       - "107"
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    network_mode: host
+    volumes:
+      - open-webui:/app/backend/data
+    environment:
+      - HOST=127.0.0.1
+      - PORT=3101
+      - OPENAI_API_BASE_URL=http://127.0.0.1:3100/v1
+      - OPENAI_API_KEY=local-llm
+      - WEBUI_AUTH=False
+      - WEBUI_URL=/chat/
+      - LOCAL_LLM_BACK_URL=/ui/
+    restart: unless-stopped
+
+volumes:
+  open-webui:
+    external: true

@@ -1,15 +1,12 @@
 """CLI wrapper: subprocess calls to model-manager scripts."""
 
-import http.client
 import importlib
 import json
 import os
 import re
-import socket
 import subprocess
 import time
 from pathlib import Path
-from urllib.parse import quote
 
 from . import config
 from .config import SCRIPTS_DIR
@@ -68,49 +65,9 @@ def _model_id(repo: str, file: str) -> str:
     return slug if slug.endswith(f"-{suffix}") else f"{slug}-{suffix}"
 
 
-def _llama_swap_model_block(model_id: str, name: str, model_path: Path, ctx: int) -> str:
-    return f'''
-  "{model_id}":
-    name: "{name}"
-    proxy: "http://127.0.0.1:${{PORT}}"
-    env:
-      - HIP_VISIBLE_DEVICES=0,1
-      - ROCR_VISIBLE_DEVICES=0,1
-    cmd: |
-      ${{llama}} --port ${{PORT}}
-      -m {model_path}
-      -ngl 999 --split-mode layer --tensor-split 1,1
-      --timeout 600 --threads-http 2 --parallel 1 --no-cont-batching
-      --cache-ram 16384
-      -c {ctx} --flash-attn on -ub 256 -b 4096
-      --threads 16 --prio 2 --no-warmup
-      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0
-      --presence-penalty 0.5 --repeat-penalty 1.0
-      --alias {model_id} --reasoning off
-'''
-
-
-def _add_llama_swap_model(model_id: str, repo: str, file: str, model_path: Path, ctx: int) -> None:
-    path = config.LLAMA_SWAP_CONFIG
-    text = path.read_text()
-    name = repo.rsplit("/", 1)[-1].removesuffix("-GGUF").replace("_", " ")
-    if f'  "{model_id}":' not in text:
-        marker = "\nrouting:\n"
-        if marker not in text:
-            raise RuntimeError("llama-swap config missing routing section")
-        text = text.replace(
-            marker, _llama_swap_model_block(model_id, name, model_path, ctx) + marker, 1
-        )
-    member = f"            - {model_id}\n"
-    if member not in text:
-        anchor = "            - gemma-4-31b\n"
-        if anchor not in text:
-            raise RuntimeError("llama-swap config missing dual-gpu member anchor")
-        text = text.replace(anchor, anchor + member, 1)
-    path.write_text(text)
-
-
-def _write_installed_metadata(model_id: str, repo: str, file: str, profile: str, ctx: int) -> None:
+def _write_installed_metadata(
+    model_id: str, repo: str, file: str, profile: str, ctx: int, model_path: Path
+) -> None:
     config.ACCEPTED_DIR.mkdir(parents=True, exist_ok=True)
     metadata = {
         "family": model_id,
@@ -119,6 +76,7 @@ def _write_installed_metadata(model_id: str, repo: str, file: str, profile: str,
         "repo": repo,
         "hf_repo": repo,
         "hf_file": file,
+        "model_path": str(model_path),
         "profile": profile,
         "context": ctx,
         "backend": "vulkan",
@@ -140,49 +98,50 @@ def _write_installed_metadata(model_id: str, repo: str, file: str, profile: str,
     )
 
 
-class _UnixHTTPConnection(http.client.HTTPConnection):
-    def __init__(self, socket_path: Path):
-        super().__init__("localhost")
-        self.socket_path = socket_path
-
-    def connect(self) -> None:
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.connect(str(self.socket_path))
-
-
-def _restart_llama_swap() -> None:
-    if not config.DOCKER_SOCKET.exists():
-        raise RuntimeError("docker socket not mounted")
-    conn = _UnixHTTPConnection(config.DOCKER_SOCKET)
-    try:
-        conn.request("POST", f"/containers/{quote('llama-swap')}/restart?t=30")
-        response = conn.getresponse()
-        response.read()
-        if response.status not in (200, 204):
-            raise RuntimeError(f"docker restart failed: HTTP {response.status}")
-    finally:
-        conn.close()
+def _install_error(
+    phase: str,
+    repo: str,
+    file: str,
+    profile: str,
+    detail: str,
+    logs: list[str],
+) -> dict:
+    clean_detail = detail[:500]
+    return {
+        "status": "error",
+        "phase": phase,
+        "repo": repo,
+        "file": file,
+        "profile": profile,
+        "detail": f"{phase} failed for {repo} / {file}: {clean_detail}",
+        "logs": [*logs, f"{phase} failed: {clean_detail}"],
+    }
 
 
 def run_install(repo: str, file: str, profile: str) -> dict:
-    """Install model into host HF cache, register with llama-swap, and restart router."""
+    """Install model into host HF cache and write project-owned accepted metadata."""
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    logs = [f"install {profile}: {repo} / {file}"]
     try:
         huggingface_hub = importlib.import_module("huggingface_hub")
         hf_hub_download = getattr(huggingface_hub, "hf_hub_download")
     except (ImportError, AttributeError):
-        return {"status": "error", "detail": "huggingface_hub is not installed"}
+        return _install_error(
+            "prepare", repo, file, profile, "huggingface_hub is not installed", logs
+        )
 
     ctx = 65536
     model_id = _model_id(repo, file)
     try:
         downloaded = hf_hub_download(repo_id=repo, filename=file, cache_dir=config.MODELS_CACHE_DIR)
         model_path = Path(downloaded)
-        _add_llama_swap_model(model_id, repo, file, model_path, ctx)
-        _write_installed_metadata(model_id, repo, file, profile, ctx)
-        _restart_llama_swap()
     except Exception as exc:
-        return {"status": "error", "detail": str(exc)[:500]}
+        return _install_error("download", repo, file, profile, str(exc), logs)
+
+    try:
+        _write_installed_metadata(model_id, repo, file, profile, ctx, model_path)
+    except Exception as exc:
+        return _install_error("metadata", repo, file, profile, str(exc), logs)
 
     return {
         "status": "installed",
