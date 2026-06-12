@@ -1,0 +1,20 @@
+services:
+  local-llm:
+    build: .
+    container_name: local-llm-mgmt
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ${HOME}/.local/share/local_llm:/state
+      - ${HOME}/llama.cpp:/llama.cpp:ro
+      - ${HOME}/.cache/huggingface:/models:ro
+      - /run/user/1000/systemd:/run/user/1000/systemd
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/bus:/run/user/1000/bus
+    environment:
+      - LOCAL_LLM_STATE_DIR=/state
+      - LLAMA_CPP_DIR=/llama.cpp
+      - MODELS_CACHE_DIR=/models
+      - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+      - XDG_RUNTIME_DIR=/run/user/1000
+    restart: unless-stopped
+    user: "1000:1000"
