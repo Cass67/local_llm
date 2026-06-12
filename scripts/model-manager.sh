@@ -5135,6 +5135,8 @@ tensor_split = str(config.get("tensor_split", "1,1"))
 cache_type_k = str(config.get("cache_type_k", ""))
 cache_type_v = str(config.get("cache_type_v", ""))
 ctx_shift = str(config.get("ctx_shift", ""))
+spec_type = str(config.get("spec_type", ""))
+spec_draft_n_max = config.get("spec_draft_n_max")
 reasoning = config.get("reasoning", True)
 
 # Validate basics
@@ -5206,7 +5208,7 @@ lines.extend([
     "  --threads-http 2 \\",
     "  --parallel 1 \\",
     "  --no-cont-batching \\",
-    '  -ngl "$ngl" \\','
+    '  -ngl "$ngl" \\',
 ])
 if backend:
     lines.extend([
@@ -5233,16 +5235,16 @@ lines.extend([
     "  --cache-ram 16384 \\",
     "  --ctx-checkpoints 64 \\",
     "  --checkpoint-every-n-tokens 4096 \\",
-    '  -c "$ctx" \\','
+    '  -c "$ctx" \\',
     "  --flash-attn on \\",
-    '  -ub "$ubatch" \\','
-    '  -b "$batch" \\','
+    '  -ub "$ubatch" \\',
+    '  -b "$batch" \\',
 ])
 if "gemma-4-12b" in repo_family_alias_lower:
     lines.append("  --no-mmproj \\")
 
 lines.extend([
-    '  --threads "$(nproc)" \\','
+    '  --threads "$(nproc)" \\',
     "  --prio 2 \\",
     "  --no-warmup \\",
     f"  --temp {sampler_temp} \\",
@@ -5252,6 +5254,12 @@ lines.extend([
     "  --presence-penalty 0.0 \\",
     f"  --alias {shlex.quote(alias)} \\",
 ])
+
+if spec_type and spec_type != "none":
+    lines[-1] += " \\"
+    lines.append(f"  --spec-type {shlex.quote(spec_type)} \\")
+    if spec_draft_n_max is not None:
+        lines.append(f"  --spec-draft-n-max {int(spec_draft_n_max)} \\")
 
 reasoning_flag = "on" if reasoning else "off"
 lines.append(f"  --reasoning {reasoning_flag}")
