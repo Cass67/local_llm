@@ -1,4 +1,5 @@
 """Tests for switch endpoint."""
+
 import json
 import pytest
 from unittest.mock import patch
@@ -97,9 +98,7 @@ async def test_switch_model_with_backend_override(temp_state):
         "remote_start": "./start-qwen-vulkan.sh",
         "reasoning": False,
     }
-    (cfg.ACCEPTED_DIR / "qwen-vulkan.json").write_text(
-        json.dumps(vulkan_data, indent=2)
-    )
+    (cfg.ACCEPTED_DIR / "qwen-vulkan.json").write_text(json.dumps(vulkan_data, indent=2))
     (cfg.LAUNCHERS_DIR / "start-qwen-vulkan.sh").write_text(
         "#!/usr/bin/env bash\nGGML_VK_VISIBLE_DEVICES=0,1 exec ./build-vulkan/bin/llama-server\n"
     )

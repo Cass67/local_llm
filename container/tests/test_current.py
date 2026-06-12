@@ -1,4 +1,5 @@
 """Tests for current model endpoint."""
+
 import json
 import pytest
 from unittest.mock import patch
@@ -43,9 +44,7 @@ def temp_state(tmp_path, monkeypatch):
 async def test_current_model_returns_running_model(temp_state):
     from backend.main import app
 
-    with patch(
-        "backend.routes.switch.get_llama_server_status", return_value="active"
-    ):
+    with patch("backend.routes.switch.get_llama_server_status", return_value="active"):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.get("/api/models/current")
@@ -75,9 +74,7 @@ async def test_current_model_when_no_env_file(tmp_path, monkeypatch):
 
     from backend.main import app
 
-    with patch(
-        "backend.routes.switch.get_llama_server_status", return_value="inactive"
-    ):
+    with patch("backend.routes.switch.get_llama_server_status", return_value="inactive"):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.get("/api/models/current")

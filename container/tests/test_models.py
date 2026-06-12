@@ -1,4 +1,5 @@
 """Tests for models endpoint."""
+
 import json
 import pytest
 from httpx import ASGITransport, AsyncClient
