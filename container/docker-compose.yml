@@ -9,6 +9,7 @@ services:
       - ${HOME}/.local/share/local_llm:/state
       - ${HOME}/llama.cpp:/llama.cpp:ro
       - ${HOME}/.cache/huggingface:/models:ro
+      - ${HOME}/git/local_llm/scripts:/scripts:ro
       - /run/user/1000/systemd:/run/user/1000/systemd
       - ${XDG_RUNTIME_DIR:-/run/user/1000}/bus:/run/user/1000/bus
     environment:

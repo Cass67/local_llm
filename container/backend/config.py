@@ -10,3 +10,4 @@ VERSION = "0.1.0"
 RUNS_DIR = STATE_DIR / "runs"
 ACCEPTED_DIR = RUNS_DIR / "accepted"
 LAUNCHERS_DIR = RUNS_DIR / "launchers"
+SCRIPTS_DIR = Path(os.environ.get("SCRIPTS_DIR", "/scripts"))
