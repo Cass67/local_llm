@@ -2,6 +2,7 @@
 
 import json
 
+import httpx
 from httpx import ASGITransport, AsyncClient, Response
 import pytest
 from unittest.mock import patch
@@ -120,6 +121,53 @@ async def test_v1_chat_switches_runner_when_requested_model_differs(tmp_path, mo
 
 
 @pytest.mark.asyncio
+async def test_v1_chat_stream_returns_503_when_runner_is_down(tmp_path, monkeypatch):
+    import backend.config as cfg
+
+    monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
+    (tmp_path / "current-selection.json").write_text(json.dumps({"model": "qwen"}))
+    monkeypatch.setattr(cfg, "RUNNER_URL", "http://runner.test:8080/v1")
+
+    class FailingStreamContext:
+        async def __aenter__(self):
+            raise httpx.ConnectError("All connection attempts failed")
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return None
+
+    class FakeUpstreamClient:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return None
+
+        async def aclose(self):
+            return None
+
+        def stream(self, _method, _url, content, headers):
+            assert json.loads(content)["model"] == "qwen"
+            assert headers["Content-Type"] == "application/json"
+            return FailingStreamContext()
+
+    monkeypatch.setattr("backend.routes.chat.httpx.AsyncClient", FakeUpstreamClient)
+    from backend.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/v1/chat/completions",
+            json={"model": "qwen", "messages": [{"role": "user", "content": "hi"}], "stream": True},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "runner unavailable"
+
+
+@pytest.mark.asyncio
 async def test_v1_chat_stream_preserves_finish_reason(tmp_path, monkeypatch):
     import backend.config as cfg
 
@@ -151,6 +199,9 @@ async def test_v1_chat_stream_preserves_finish_reason(tmp_path, monkeypatch):
             return self
 
         async def __aexit__(self, _exc_type, _exc, _tb):
+            return None
+
+        async def aclose(self):
             return None
 
         def stream(self, method, url, content, headers):
