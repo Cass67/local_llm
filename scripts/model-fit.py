@@ -98,10 +98,14 @@ def memory_for(params_b: float, quant_bpp: float, context: int) -> float:
     return weights + kv_cache
 
 
-def choose_quant(params_b: float, vram_gb: float, context: int) -> tuple[str, float]:
+def choose_quant(params_b: float, vram_gb: float | None, context: int) -> tuple[str, float]:
     # Match string token mapping safely
     fallback_q, fallback_bpp = QUANTS[-1]
     fallback = (fallback_q, memory_for(params_b, fallback_bpp, context))
+
+    # When VRAM is unknown, pick the smallest quant as safest option.
+    if vram_gb is None:
+        return QUANTS[0][0], memory_for(params_b, QUANTS[0][1], context)
 
     for quant, bpp in QUANTS:
         required = memory_for(params_b, bpp, context)
@@ -116,14 +120,46 @@ def quant_from_filename(filename: str) -> str | None:
     return match.group(1).upper() if match else None
 
 
+def _fetch_hf_tree(repo: str) -> list[dict[str, Any]] | None:
+    """Fetch HuggingFace tree for a repo as fallback when siblings aren't available."""
+    import http.client
+    import urllib.parse
+
+    url = f"https://huggingface.co/api/models/{urllib.parse.quote(repo, safe='/')}/tree/main"
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or parsed.netloc != "huggingface.co":
+        return None
+    try:
+        conn = http.client.HTTPSConnection(parsed.netloc, timeout=15)
+        conn.request("GET", parsed.path)
+        response = conn.getresponse()
+        try:
+            if response.status != 200:
+                return None
+            return json.loads(response.read().decode("utf-8"))
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
 def gguf_files(item: dict[str, Any]) -> list[dict[str, Any]]:
     raw_files = item.get("gguf_files") or item.get("siblings") or []
+    # If no siblings available, try fetching the tree API as fallback
+    if not raw_files and item.get("id"):
+        tree = _fetch_hf_tree(item["id"])
+        if tree:
+            raw_files = tree
     files = []
     for raw in raw_files:
         if not isinstance(raw, dict):
             continue
         name = str(raw.get("rfilename") or raw.get("path") or raw.get("name") or "")
         if not name.lower().endswith(".gguf"):
+            continue
+        # Skip auxiliary files (mmproj, text embeddings, etc.)
+        lower = name.lower()
+        if any(lower.startswith(skip) for skip in ("mmproj", "text", "embedding")):
             continue
         size = raw.get("size")
         if not isinstance(size, int | float) or size <= 0:
@@ -138,6 +174,10 @@ def choose_file(
     files = gguf_files(item)
     if not files:
         return None, None, None
+    # When VRAM is unknown (Apple Silicon), pick the smallest quant as safest option.
+    if vram_gb is None:
+        files.sort(key=lambda file: file["size"])
+        return files[0]["name"], files[0]["quant"], files[0]["size"] / 1073741824
     fit_limit = vram_gb * VRAM_RESERVE
     files.sort(key=lambda file: file["size"])
     fitting = [file for file in files if file["size"] / 1073741824 <= fit_limit]
@@ -145,7 +185,10 @@ def choose_file(
     return selected["name"], selected["quant"], selected["size"] / 1073741824
 
 
-def fit_level(required: float, available: float) -> str:
+def fit_level(required: float, available: float | None) -> str:
+    # When VRAM is unknown, assume reasonable fit.
+    if available is None:
+        return "good"
     if required > available:
         return "too_tight"
     if required <= available * 0.72:

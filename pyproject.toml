@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+ignore = [
+    "BLE001",  # broad Exception catches are intentional in TUI/subprocess wrappers
+    "C901",    # complexity limits unrealistic for install/detect workers
+    "S603",    # subprocess with trusted internal inputs
+    "S607",    # partial executable path — python3 resolved by PATH
+    "S110",    # try-except-pass is intentional for widget-query fallbacks
+]
