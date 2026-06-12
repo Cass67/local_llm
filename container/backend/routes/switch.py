@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from .. import config
+from .. import config, cli
 from ..service import restart_llama_server, get_llama_server_status
 
 router = APIRouter(prefix="/api/models", tags=["switch"])
@@ -91,6 +91,12 @@ async def switch_model(req: SwitchRequest):
         alias=str(alias),
         backend=str(backend),
     )
+
+
+@router.post("/stop")
+async def stop_model_server():
+    """Stop llama-server.service."""
+    return {"status": cli.run_stop_server()}
 
 
 @router.get("/current")

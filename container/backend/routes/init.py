@@ -1,4 +1,5 @@
 """Target initialization endpoint."""
+
 import json
 import re
 from fastapi import APIRouter, HTTPException
@@ -22,8 +23,14 @@ async def init_target(req: InitRequest):
 
     config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
     config_file = config.RUNS_DIR / "config.json"
-    config_file.write_text(json.dumps({
-        "target": req.target,
-    }, indent=2) + "\n")
+    config_file.write_text(
+        json.dumps(
+            {
+                "target": req.target,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
     return {"status": "ok", "target": req.target}
