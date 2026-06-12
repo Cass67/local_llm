@@ -1,4 +1,5 @@
 """CLI wrapper: subprocess calls to model-manager scripts."""
+
 import json
 import subprocess
 import time
@@ -20,7 +21,10 @@ def run_discovery(query: str, host: str | None = None, limit: int = 30) -> list[
     cmd.extend(["--query", query, "--limit", str(limit), "--json"])
 
     result = subprocess.run(  # noqa: S603
-        cmd, capture_output=True, text=True, timeout=120,
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip()[:300] or "discovery failed")
@@ -32,13 +36,23 @@ def run_discovery(query: str, host: str | None = None, limit: int = 30) -> list[
 def run_install(repo: str, file: str, profile: str) -> dict:
     """Install model via model-manager.sh install."""
     cmd = [
-        "bash", str(MODEL_MANAGER), "install",
-        "--repo", repo, "--file", file,
-        "--profile", profile, "--yes",
+        "bash",
+        str(MODEL_MANAGER),
+        "install",
+        "--repo",
+        repo,
+        "--file",
+        file,
+        "--profile",
+        profile,
+        "--yes",
     ]
     try:
         result = subprocess.run(  # noqa: S603
-            cmd, capture_output=True, text=True, timeout=600,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
         )
     except subprocess.TimeoutExpired:
         return {"status": "error", "detail": "Install timed out (10 min)"}
@@ -59,7 +73,10 @@ def run_delete(repo: str, target: str) -> str:
     """Delete model via model-manager.sh delete."""
     cmd = ["bash", str(MODEL_MANAGER), "delete", repo, "--target", target, "--yes"]
     result = subprocess.run(  # noqa: S603
-        cmd, capture_output=True, text=True, timeout=300,
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     if result.returncode == 0:
         return "ok"
@@ -70,7 +87,10 @@ def run_update_launcher(family: str) -> str:
     """Regenerate launcher for family."""
     cmd = [str(MODEL_MANAGER), "update-launcher", "--family", family, "--yes"]
     result = subprocess.run(  # noqa: S603
-        cmd, capture_output=True, text=True, timeout=30,
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if result.returncode == 0:
         return "ok"
@@ -88,7 +108,10 @@ def run_start_server(family: str, profile: str, ctx_override: str | None = None)
 
     try:
         process = subprocess.Popen(  # noqa: S603
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
         deadline = time.monotonic() + 120
         last_stderr = ""
@@ -110,7 +133,9 @@ def run_stop_server() -> str:
     try:
         result = subprocess.run(
             ["systemctl", "--user", "stop", "llama-server.service"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         return "ok" if result.returncode == 0 else f"error: {result.stderr.strip()[:200]}"
     except (OSError, subprocess.TimeoutExpired) as e:
