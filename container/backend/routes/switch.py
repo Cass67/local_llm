@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .. import config
-from ..service import restart_llama_server
+from ..service import restart_llama_server, get_llama_server_status
 
 router = APIRouter(prefix="/api/models", tags=["switch"])
 
@@ -94,3 +94,58 @@ async def switch_model(req: SwitchRequest):
         alias=str(alias),
         backend=str(backend),
     )
+
+
+@router.get("/current")
+async def current_model():
+    """Return currently running model from current-model.env."""
+    env_file = config.LLAMA_CPP_DIR / "current-model.env"
+
+    if not env_file.exists() or env_file.is_symlink():
+        return {
+            "family": "unknown",
+            "profile": "unknown",
+            "alias": "unknown",
+            "backend": "unknown",
+            "running": False,
+            "llama_server": {"status": get_llama_server_status()},
+        }
+
+    content = env_file.read_text()
+    remote_script = ""
+    remote_profile = "reliable"
+    for line in content.splitlines():
+        if line.startswith("REMOTE_SCRIPT="):
+            remote_script = line.split("=", 1)[1].strip()
+        elif line.startswith("REMOTE_PROFILE="):
+            remote_profile = line.split("=", 1)[1].strip()
+
+    # Find matching accepted model by remote_start
+    launcher_name = Path(remote_script).name if remote_script else ""
+    for path in sorted(config.ACCEPTED_DIR.glob("*.json")):
+        if path.name == "default.json":
+            continue
+        data = _validate_accepted_path(path)
+        if not data:
+            continue
+        rs = data.get("remote_start", "")
+        if rs == remote_script or Path(rs).name == launcher_name:
+            service_status = get_llama_server_status()
+            return {
+                "family": data.get("family", path.stem),
+                "profile": remote_profile,
+                "alias": data.get("alias", data.get("model_name", path.stem)),
+                "backend": data.get("backend", "rocm"),
+                "context": data.get("context"),
+                "running": service_status == "active",
+                "llama_server": {"status": service_status},
+            }
+
+    return {
+        "family": "unknown",
+        "profile": remote_profile,
+        "alias": launcher_name or "unknown",
+        "backend": "unknown",
+        "running": get_llama_server_status() == "active",
+        "llama_server": {"status": get_llama_server_status()},
+    }
