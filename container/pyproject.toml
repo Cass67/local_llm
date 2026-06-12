@@ -8,6 +8,7 @@ dependencies = [
   "sse-starlette>=2.1",
   "httpx>=0.28",
   "pydantic>=2.10",
+  "huggingface_hub>=0.36",
 ]
 
 [project.optional-dependencies]

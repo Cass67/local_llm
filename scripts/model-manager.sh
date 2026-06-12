@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$SCRIPT_DIR/.." && pwd)"
+export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
 MODEL_DISCOVERY_SCRIPT="$SCRIPT_DIR/model-discovery.sh"
 if [[ ! -f "$MODEL_DISCOVERY_SCRIPT" ]]; then
   MODEL_DISCOVERY_SCRIPT="$SCRIPT_DIR/model-discovery"
@@ -21,7 +22,12 @@ if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
   MODEL_MANAGER_PY="$repo_root/scripts/model_manager"
 fi
 
-runs_dir="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
+if [[ -z "${LOCAL_LLM_RUNS_DIR:-}" && -n "${LOCAL_LLM_STATE_DIR:-}" ]]; then
+  runs_dir="$LOCAL_LLM_STATE_DIR/runs"
+else
+  runs_dir="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
+fi
+export LOCAL_LLM_RUNS_DIR="$runs_dir"
 generated_launcher_dir="$runs_dir/launchers"
 
 default_target() {

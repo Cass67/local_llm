@@ -73,8 +73,33 @@ def get_llama_swap_running_ids() -> list[str]:
     return ids
 
 
+def load_llama_swap_model(model_id: str) -> bool:
+    """Trigger llama-swap to load a model with a minimal completion request."""
+    payload = json.dumps(
+        {
+            "model": model_id,
+            "messages": [{"role": "user", "content": "Reply with ok."}],
+            "max_tokens": 1,
+            "stream": False,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{config.LLAMA_SWAP_URL}/v1/chat/completions",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=600) as response:
+            return 200 <= response.status < 300
+    except (OSError, urllib.error.URLError):
+        return False
+
+
 def _quant_suffix(data: dict) -> str | None:
-    raw = str(data.get("quant") or (data.get("config") or {}).get("quant") or data.get("hf_file") or "").lower()
+    raw = str(
+        data.get("quant") or (data.get("config") or {}).get("quant") or data.get("hf_file") or ""
+    ).lower()
     if "q6" in raw:
         return "q6"
     if "q5_k_m" in raw or "q5km" in raw:
@@ -109,12 +134,19 @@ def _llama_swap_id_for(data: dict, metadata_file: Path, available_ids: list[str]
 def _write_selection(model_id: str, family: str, profile: str, backend: str) -> None:
     config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
     path = config.RUNS_DIR / "current-selection.json"
-    path.write_text(json.dumps({
-        "model": model_id,
-        "family": family,
-        "profile": profile,
-        "backend": backend,
-    }, indent=2, sort_keys=True) + "\n")
+    path.write_text(
+        json.dumps(
+            {
+                "model": model_id,
+                "family": family,
+                "profile": profile,
+                "backend": backend,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def _read_selection() -> dict | None:
@@ -126,6 +158,22 @@ def _read_selection() -> dict | None:
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _metadata_for_llama_swap_id(model_id: str) -> tuple[Path, dict] | None:
+    available_ids = [model_id]
+    for path in sorted(config.ACCEPTED_DIR.glob("*.json")):
+        if path.name == "default.json":
+            continue
+        data = _validate_accepted_path(path)
+        if not data:
+            continue
+        try:
+            if _llama_swap_id_for(data, path, available_ids) == model_id:
+                return path, data
+        except HTTPException:
+            continue
+    return None
 
 
 def _resolve_family_file(family: str, backend: str | None):
@@ -167,9 +215,13 @@ async def switch_model(req: SwitchRequest):
     available_ids = get_llama_swap_model_ids()
     model_id = _llama_swap_id_for(data, metadata_file, available_ids)
     _write_selection(model_id, str(family), str(profile), backend)
+    if not load_llama_swap_model(model_id):
+        raise HTTPException(
+            status_code=502, detail=f"failed to launch llama-swap model: {model_id}"
+        )
 
     return SwitchResponse(
-        status="selected",
+        status="loaded",
         family=str(family),
         profile=str(profile),
         alias=model_id,
@@ -189,12 +241,38 @@ async def current_model():
     selection = _read_selection() or {}
     selected_model = str(selection.get("model") or "unknown")
     running_ids = get_llama_swap_running_ids()
-    running = selected_model in running_ids if selected_model != "unknown" else bool(running_ids)
+    if selected_model != "unknown" and selected_model in running_ids:
+        current_model = selected_model
+        running = True
+        family = selection.get("family", selected_model)
+        profile = selection.get("profile", "unknown")
+        backend = selection.get("backend", "unknown")
+    elif running_ids:
+        current_model = running_ids[0]
+        running = True
+        metadata = _metadata_for_llama_swap_id(current_model)
+        if metadata:
+            metadata_file, data = metadata
+            family = data.get("family", metadata_file.stem)
+            profile = data.get("profile", "unknown")
+            backend = str(
+                (data.get("config") or {}).get("backend") or data.get("backend", "unknown")
+            )
+        else:
+            family = current_model
+            profile = "unknown"
+            backend = "unknown"
+    else:
+        current_model = selected_model
+        running = False
+        family = selection.get("family", selected_model)
+        profile = selection.get("profile", "unknown")
+        backend = selection.get("backend", "unknown")
     return {
-        "family": selection.get("family", selected_model),
-        "profile": selection.get("profile", "unknown"),
-        "alias": selected_model,
-        "backend": selection.get("backend", "unknown"),
+        "family": family,
+        "profile": profile,
+        "alias": current_model,
+        "backend": backend,
         "running": running,
         "llama_server": {"status": "llama-swap", "running": running_ids},
     }

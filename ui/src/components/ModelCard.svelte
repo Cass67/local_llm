@@ -50,7 +50,7 @@
 		</div>
 
 		<button class="switch-btn" disabled={isSwitching || isRunning} onclick={() => onSwitch(selectedProfile)}>
-			{#if isSwitching}Switching...{:else if isRunning}Running{:else}Switch{/if}
+			{#if isSwitching}Launching...{:else if isRunning}Running{:else}Launch{/if}
 		</button>
 
 		<div class="card-actions">
