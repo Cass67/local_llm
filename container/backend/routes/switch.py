@@ -231,13 +231,48 @@ async def stop_model_server():
     return {"status": run_stop_server()}
 
 
+def _runner_api_model_ids() -> set[str]:
+    """Return model IDs from live runner API, or empty set when unavailable."""
+    runner_url = urllib.parse.urlsplit(config.RUNNER_URL)
+    if runner_url.scheme not in {"http", "https"} or not runner_url.hostname:
+        return set()
+    path = urllib.parse.urljoin(runner_url.path.rstrip("/") + "/", "models")
+    connection_cls = (
+        http.client.HTTPSConnection if runner_url.scheme == "https" else http.client.HTTPConnection
+    )
+    connection = connection_cls(runner_url.hostname, runner_url.port, timeout=1.0)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        if response.status != 200:
+            return set()
+        payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, http.client.HTTPException, json.JSONDecodeError):
+        return set()
+    finally:
+        connection.close()
+
+    ids: set[str] = set()
+    for item in payload.get("data", []):
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            ids.add(item["id"])
+    for item in payload.get("models", []):
+        if not isinstance(item, dict):
+            continue
+        for key in ("name", "model"):
+            value = item.get(key)
+            if isinstance(value, str):
+                ids.add(value)
+    return ids
+
+
 @router.get("/current")
 async def current_model():
     """Return selected project-owned runner model."""
     selection = _read_selection() or {}
     runner = _read_runner_state() or {}
     current_model = str(runner.get("model") or selection.get("model") or "unknown")
-    running = current_model != "unknown" and bool(runner)
+    running = current_model != "unknown" and current_model in _runner_api_model_ids()
     family = runner.get("family") or selection.get("family", current_model)
     profile = runner.get("profile") or selection.get("profile", "unknown")
     backend = runner.get("backend") or selection.get("backend", "unknown")

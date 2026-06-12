@@ -4,7 +4,7 @@ import json
 
 import httpx
 from fastapi import APIRouter, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from .. import config
 from . import switch as switch_routes
 
@@ -90,17 +90,26 @@ async def proxy_chat_completions(request: Request):
     }
 
     if _is_stream_request(body):
+        client = httpx.AsyncClient(timeout=300.0)
+        stream_context = client.stream(
+            "POST",
+            f"{config.RUNNER_URL}/chat/completions",
+            content=body,
+            headers=headers,
+        )
+        try:
+            upstream = await stream_context.__aenter__()
+        except httpx.HTTPError:
+            await client.aclose()
+            return JSONResponse({"detail": "runner unavailable"}, status_code=503)
 
         async def stream_runner():
-            async with httpx.AsyncClient(timeout=300.0) as client:
-                async with client.stream(
-                    "POST",
-                    f"{config.RUNNER_URL}/chat/completions",
-                    content=body,
-                    headers=headers,
-                ) as upstream:
-                    async for chunk in upstream.aiter_raw():
-                        yield chunk
+            try:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+            finally:
+                await stream_context.__aexit__(None, None, None)
+                await client.aclose()
 
         return StreamingResponse(stream_runner(), media_type="text/event-stream")
 
