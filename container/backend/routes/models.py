@@ -45,7 +45,7 @@ def _read_accepted_models() -> list[ModelInfo]:
                 model_name=str(data.get("model_name", family)),
                 profile=str(data.get("profile", "reliable")),
                 context=data.get("context"),
-                backend=str(data.get("backend", "rocm")),
+                backend=str(data.get("backend") or config_data.get("backend", "rocm")),
                 reasoning=bool(data.get("reasoning", False)),
                 config=model_cfg,
                 launcher_file=str(launcher_file) if launcher_file else None,

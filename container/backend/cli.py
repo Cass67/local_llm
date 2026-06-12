@@ -29,6 +29,32 @@ def run_discovery(query: str, host: str | None = None, limit: int = 30) -> list[
     return data.get("candidates", [])
 
 
+def run_install(repo: str, file: str, profile: str) -> dict:
+    """Install model via model-manager.sh install."""
+    cmd = [
+        "bash", str(MODEL_MANAGER), "install",
+        "--repo", repo, "--file", file,
+        "--profile", profile, "--yes",
+    ]
+    try:
+        result = subprocess.run(  # noqa: S603
+            cmd, capture_output=True, text=True, timeout=600,
+        )
+    except subprocess.TimeoutExpired:
+        return {"status": "error", "detail": "Install timed out (10 min)"}
+
+    if result.returncode != 0:
+        return {
+            "status": "error",
+            "detail": result.stderr.strip()[:300] or "install failed",
+        }
+
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"status": "ok", "detail": result.stdout.strip()[:200]}
+
+
 def run_delete(repo: str, target: str) -> str:
     """Delete model via model-manager.sh delete."""
     cmd = ["bash", str(MODEL_MANAGER), "delete", repo, "--target", target, "--yes"]
