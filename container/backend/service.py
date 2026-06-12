@@ -43,11 +43,14 @@ def detect_running_model() -> dict:
     try:
         result = subprocess.run(
             [
-                "bash", "-c",
-                'pid=$(pgrep -f llama-server | head -1); '
+                "bash",
+                "-c",
+                "pid=$(pgrep -f llama-server | head -1); "
                 '[ -n "$pid" ] && tr "\\0" "\\n" < /proc/$pid/cmdline || true',
             ],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):
         return {"status": "active", "family": None, "ctx": None}

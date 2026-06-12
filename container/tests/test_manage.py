@@ -1,4 +1,5 @@
 """Tests for manage endpoints: inventory, detail, edit, delete, status."""
+
 import json
 import pytest
 from unittest.mock import patch, MagicMock
@@ -36,6 +37,7 @@ def temp_state(tmp_path):
     (launchers / "start-qwen.sh").chmod(0o755)
 
     import backend.config as cfg
+
     old_runs = cfg.RUNS_DIR
     old_llama = cfg.LLAMA_CPP_DIR
     cfg.RUNS_DIR = tmp_path
@@ -103,11 +105,14 @@ async def test_edit_model_updates_config(temp_state):
     with patch("backend.cli.subprocess.run", return_value=mock_launcher):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.put("/api/models/qwen", json={
-                "ctx": 65536,
-                "batch": 2048,
-                "backend": "vulkan",
-            })
+            response = await client.put(
+                "/api/models/qwen",
+                json={
+                    "ctx": 65536,
+                    "batch": 2048,
+                    "backend": "vulkan",
+                },
+            )
 
     assert response.status_code == 200
     data = response.json()
@@ -130,9 +135,12 @@ async def test_delete_models(temp_state):
     with patch("backend.cli.subprocess.run", return_value=mock_result):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post("/api/models/delete", json={
-                "repos": ["TheBloke/qwen-GGUF"],
-            })
+            response = await client.post(
+                "/api/models/delete",
+                json={
+                    "repos": ["TheBloke/qwen-GGUF"],
+                },
+            )
 
     assert response.status_code == 200
     data = response.json()
@@ -141,8 +149,10 @@ async def test_delete_models(temp_state):
 
 @pytest.mark.asyncio
 async def test_status_returns_full_state(temp_state):
-    with patch("backend.service.get_llama_server_status", return_value="active"), \
-         patch("backend.routes.manage.subprocess.run") as mock_run:
+    with (
+        patch("backend.service.get_llama_server_status", return_value="active"),
+        patch("backend.routes.manage.subprocess.run") as mock_run,
+    ):
         # mock for pgrep (downloads)
         mock_run.return_value = MagicMock(stdout="", returncode=1)
 
