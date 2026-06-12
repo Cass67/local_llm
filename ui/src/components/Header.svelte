@@ -18,7 +18,7 @@
 		<a href="#/models" class:active={currentRoute === "/models"}>Models</a>
 		<a href="#/search" class:active={currentRoute === "/search"}>Search</a>
 		<a href="#/status" class:active={currentRoute === "/status"}>Status</a>
-		<a href="#/playground" class:active={currentRoute === "/playground"}>Chat</a>
+		<a href="/chat/">Chat</a>
 		<a href="#/logs" class:active={currentRoute === "/logs"}>Logs</a>
 	</nav>
 </header>

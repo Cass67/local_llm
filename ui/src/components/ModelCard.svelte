@@ -6,6 +6,7 @@
 		isRunning = false,
 		switching = null as string | null,
 		onSwitch,
+		onCopyBackend,
 		onDetail,
 		onEdit,
 	}: {
@@ -13,12 +14,14 @@
 		isRunning: boolean;
 		switching: string | null;
 		onSwitch: (profile: string) => void;
+		onCopyBackend?: (backend: "rocm" | "vulkan") => void;
 		onDetail?: () => void;
 		onEdit?: () => void;
 	} = $props();
 
 	let selectedProfile = $state("");
 	let isSwitching = $derived(switching === model.family);
+	let oppositeBackend: "rocm" | "vulkan" = $derived(model.backend === "vulkan" ? "rocm" : "vulkan");
 
 	$effect(() => {
 		if (!selectedProfile) selectedProfile = model.profile || "reliable";
@@ -56,6 +59,7 @@
 		<div class="card-actions">
 			<button onclick={onDetail}>Detail</button>
 			<button onclick={onEdit}>Edit</button>
+			<button onclick={() => onCopyBackend?.(oppositeBackend)}>Copy to {oppositeBackend === "rocm" ? "ROCm" : "Vulkan"}</button>
 		</div>
 	</div>
 </div>

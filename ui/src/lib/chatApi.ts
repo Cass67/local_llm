@@ -8,7 +8,7 @@ export async function* streamChat(
 	messages: ChatMessage[],
 	signal?: AbortSignal,
 ): AsyncGenerator<string> {
-	const res = await fetch("/api/chat/completions", {
+	const res = await fetch("/api/local-llm/chat/completions", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({

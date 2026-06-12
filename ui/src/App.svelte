@@ -1,7 +1,6 @@
 <script lang="ts">
   import Router from 'svelte-spa-router';
   import Models from './routes/Models.svelte';
-  import Playground from './routes/Playground.svelte';
   import Logs from './routes/Logs.svelte';
   import Search from './routes/Search.svelte';
   import Status from './routes/Status.svelte';
@@ -11,7 +10,6 @@
     '/': Models,
     '/models': Models,
     '/search': Search,
-    '/playground': Playground,
     '/logs': Logs,
     '/status': Status,
   };
