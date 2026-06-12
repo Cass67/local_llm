@@ -1,4 +1,5 @@
 """Model management: inventory, detail, edit, delete, status, hfcard."""
+
 import json
 import re
 import subprocess
@@ -11,6 +12,7 @@ router = APIRouter(prefix="/api", tags=["manage"])
 
 
 # --- Inventory ---
+
 
 @router.get("/inventory")
 async def get_inventory():
@@ -41,7 +43,9 @@ for root in roots:
     try:
         result = subprocess.run(
             ["python3", "-c", script],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):
         return {"models": []}
@@ -59,6 +63,7 @@ for root in roots:
 
 
 # --- Detail ---
+
 
 @router.get("/models/{family}/detail")
 async def model_detail(family: str):
@@ -79,6 +84,7 @@ async def model_detail(family: str):
 
 
 # --- Edit ---
+
 
 class EditRequest(BaseModel):
     profile: str | None = None
@@ -118,8 +124,17 @@ async def edit_model(family: str, req: EditRequest):
         data["profile"] = req.profile
     cfg = data.setdefault("config", {})
     for field in (
-        "ctx", "batch", "ubatch", "ngl", "cache_type_k", "cache_type_v",
-        "ctx_shift", "visible_devices", "split_mode", "tensor_split", "flags",
+        "ctx",
+        "batch",
+        "ubatch",
+        "ngl",
+        "cache_type_k",
+        "cache_type_v",
+        "ctx_shift",
+        "visible_devices",
+        "split_mode",
+        "tensor_split",
+        "flags",
     ):
         val = getattr(req, field, None)
         if val is not None:
@@ -137,6 +152,7 @@ async def edit_model(family: str, req: EditRequest):
 
 
 # --- Delete ---
+
 
 class DeleteRequest(BaseModel):
     repos: list[str]
@@ -158,6 +174,7 @@ async def delete_models(req: DeleteRequest):
 
 # --- Status ---
 
+
 @router.get("/status")
 async def full_status():
     """Full status dashboard: target, running model, accepted count, downloads."""
@@ -175,7 +192,8 @@ async def full_status():
     accepted_count = 0
     if config.ACCEPTED_DIR.exists():
         accepted_count = sum(
-            1 for p in config.ACCEPTED_DIR.glob("*.json")
+            1
+            for p in config.ACCEPTED_DIR.glob("*.json")
             if p.name != "default.json" and not p.is_symlink()
         )
 
@@ -184,7 +202,9 @@ async def full_status():
     try:
         result = subprocess.run(
             ["pgrep", "-af", "[h]f download|[h]uggingface.*download"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         for line in result.stdout.splitlines():
             parts = line.split()
@@ -209,16 +229,23 @@ async def full_status():
 
 # --- HF Card ---
 
+
 @router.get("/hfcard")
 async def hf_card(repo: str = Query(..., min_length=1, max_length=500)):
     """Fetch HuggingFace model card as markdown."""
     try:
         result = subprocess.run(
             [
-                "curl", "-s", "-L", "-H", "Accept: text/markdown",
+                "curl",
+                "-s",
+                "-L",
+                "-H",
+                "Accept: text/markdown",
                 f"https://huggingface.co/{repo}/raw/main/README.md",
             ],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
     except (OSError, subprocess.TimeoutExpired):
         return {"markdown": "Failed to fetch model card.", "error": True}

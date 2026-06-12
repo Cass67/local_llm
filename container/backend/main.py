@@ -9,6 +9,7 @@ from .routes.pi import router as pi_router
 from .routes.chat import router as chat_router
 from .routes.search import router as search_router
 from .routes.manage import router as manage_router
+from .routes.init import router as init_router
 
 app = FastAPI(title="local-llm-server", version=VERSION)
 
@@ -19,6 +20,7 @@ app.include_router(pi_router)
 app.include_router(chat_router)
 app.include_router(search_router)
 app.include_router(manage_router)
+app.include_router(init_router)
 
 
 @app.get("/api/health")
