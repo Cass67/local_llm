@@ -121,6 +121,86 @@ async def test_v1_chat_switches_runner_when_requested_model_differs(tmp_path, mo
 
 
 @pytest.mark.asyncio
+async def test_v1_chat_injects_thinking_off_when_client_omits_setting(tmp_path, monkeypatch):
+    import backend.config as cfg
+
+    monkeypatch.setattr(cfg, "RUNNER_URL", "http://runner.test:8080/v1")
+    monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
+    (tmp_path / "current-selection.json").write_text(json.dumps({"model": "qwen"}))
+    captured = {}
+
+    class FakeUpstreamClient:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return None
+
+        async def post(self, _url, content, headers):
+            assert headers["Content-Type"] == "application/json"
+            captured["body"] = json.loads(content)
+            return Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("backend.routes.chat.httpx.AsyncClient", FakeUpstreamClient)
+    from backend.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/v1/chat/completions",
+            json={"model": "qwen", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert response.status_code == 200
+    assert captured["body"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+@pytest.mark.asyncio
+async def test_v1_chat_preserves_explicit_thinking_setting(tmp_path, monkeypatch):
+    import backend.config as cfg
+
+    monkeypatch.setattr(cfg, "RUNNER_URL", "http://runner.test:8080/v1")
+    monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
+    (tmp_path / "current-selection.json").write_text(json.dumps({"model": "qwen"}))
+    captured = {}
+
+    class FakeUpstreamClient:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return None
+
+        async def post(self, _url, content, headers):
+            assert headers["Content-Type"] == "application/json"
+            captured["body"] = json.loads(content)
+            return Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("backend.routes.chat.httpx.AsyncClient", FakeUpstreamClient)
+    from backend.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "qwen",
+                "messages": [{"role": "user", "content": "hi"}],
+                "chat_template_kwargs": {"enable_thinking": True},
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured["body"]["chat_template_kwargs"] == {"enable_thinking": True}
+
+
+@pytest.mark.asyncio
 async def test_v1_chat_stream_returns_503_when_runner_is_down(tmp_path, monkeypatch):
     import backend.config as cfg
 

@@ -41,6 +41,7 @@ services:
       - WEBUI_AUTH=False
       - WEBUI_URL=/chat/
       - LOCAL_LLM_BACK_URL=/ui/
+      - ENABLE_EVALUATION_ARENA_MODELS=False
     restart: unless-stopped
 
 volumes:
