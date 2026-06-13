@@ -11,18 +11,32 @@ from . import switch as switch_routes
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
-def _normalize_model_name(body: bytes) -> bytes:
-    """Strip provider prefix before forwarding to runner."""
+def _prepare_runner_payload(body: bytes) -> bytes:
+    """Normalize model names and default OpenWebUI-style requests to visible answers."""
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
         return body
-    if isinstance(payload, dict) and isinstance(payload.get("model"), str):
-        model = payload["model"]
-        if "/" in model:
-            payload["model"] = model.rsplit("/", 1)[1]
-        return json.dumps(payload).encode("utf-8")
-    return body
+    if not isinstance(payload, dict):
+        return body
+
+    changed = False
+    model = payload.get("model")
+    if isinstance(model, str) and "/" in model:
+        payload["model"] = model.rsplit("/", 1)[1]
+        changed = True
+
+    template_kwargs = payload.get("chat_template_kwargs")
+    if config.DISABLE_THINKING_BY_DEFAULT:
+        if not isinstance(template_kwargs, dict):
+            template_kwargs = {}
+            payload["chat_template_kwargs"] = template_kwargs
+            changed = True
+        if "enable_thinking" not in template_kwargs:
+            template_kwargs["enable_thinking"] = False
+            changed = True
+
+    return json.dumps(payload).encode("utf-8") if changed else body
 
 
 def _is_stream_request(body: bytes) -> bool:
@@ -83,7 +97,7 @@ def _record_metrics(body: bytes, response_body: bytes) -> None:
 
 async def proxy_chat_completions(request: Request):
     """Proxy chat completion requests to project-owned runner."""
-    body = _normalize_model_name(await request.body())
+    body = _prepare_runner_payload(await request.body())
     _ensure_requested_model(body)
     headers = {
         "Content-Type": request.headers.get("content-type", "application/json"),
