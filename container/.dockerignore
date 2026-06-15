@@ -5,3 +5,4 @@ __pycache__
 node_modules
 ui-svelte/node_modules
 ui-svelte/.svelte-kit
+scripts/model_manager

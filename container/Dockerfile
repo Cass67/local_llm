@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm AS base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -e ".[dev]"
 
 COPY backend/ ./backend/
 COPY ui-dist/ ./ui-dist/
+COPY scripts/ /scripts/
 COPY entrypoint.sh .
 
 EXPOSE 3100
