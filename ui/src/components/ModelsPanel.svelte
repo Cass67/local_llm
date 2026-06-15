@@ -74,6 +74,12 @@
 		</div>
 	</div>
 
+	{#if current?.native_process_warning}
+		<div class="native-warning">
+			⚠ A native llama-server process is running on port 8080 outside the container runner. Stop it before switching models: <code>kill $(lsof -ti :8080)</code>
+		</div>
+	{/if}
+
 	{#if current}
 		<div class="current-status">
 			{current.running ? "Running:" : "Last used:"} <strong>{current.alias}</strong> ({current.backend})
@@ -106,6 +112,8 @@
 <style>
 	.models-panel { display: flex; flex-direction: column; gap: 1rem; }
 	.error { background: var(--red); color: white; padding: 0.5rem; border-radius: 4px; }
+	.native-warning { background: #f59e0b22; border: 1px solid #f59e0b66; color: #f59e0b; padding: 0.6rem 1rem; border-radius: 8px; font-size: 0.85rem; }
+	.native-warning code { background: #0004; padding: 0.1rem 0.3rem; border-radius: 4px; font-size: 0.82rem; }
 	.toolbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
 	.toolbar-actions { display: flex; gap: 0.5rem; }
 	.backend-toggle { display: flex; gap: 0; }

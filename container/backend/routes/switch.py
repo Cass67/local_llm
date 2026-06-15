@@ -266,6 +266,31 @@ def _runner_api_model_ids() -> set[str]:
     return ids
 
 
+def _docker_runner_running() -> bool:
+    """Return True if the managed Docker runner container is up."""
+    try:
+        runner = DockerRunner(DockerRunnerConfig(), config.MODELS_CACHE_DIR)
+        return runner.is_running()
+    except Exception:
+        return False
+
+
+def _native_process_on_runner_port() -> bool:
+    """Return True if something is on the runner port but the Docker container is not running."""
+    import socket as _socket
+
+    port = DockerRunnerConfig().port
+    occupied = False
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        try:
+            s.connect(("127.0.0.1", port))
+            occupied = True
+        except OSError:
+            pass
+    return occupied and not _docker_runner_running()
+
+
 @router.get("/current")
 async def current_model():
     """Return selected project-owned runner model."""
@@ -276,12 +301,14 @@ async def current_model():
     family = runner.get("family") or selection.get("family", current_model)
     profile = runner.get("profile") or selection.get("profile", "unknown")
     backend = runner.get("backend") or selection.get("backend", "unknown")
+    native_warning = _native_process_on_runner_port()
     return {
         "family": family,
         "profile": profile,
         "alias": current_model,
         "backend": backend,
         "running": running,
+        "native_process_warning": native_warning,
         "llama_server": {
             "status": "local-llm-runner",
             "running": [current_model] if running else [],

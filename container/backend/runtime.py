@@ -7,6 +7,7 @@ container spec from accepted metadata without touching Docker or live services.
 import http.client
 import json
 import socket
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -193,8 +194,26 @@ class DockerRunner:
         self._docker_json("POST", f"/containers/{self.config.name}/stop?t=30")
         self._docker_json("DELETE", f"/containers/{self.config.name}?force=true")
 
+    def _port_free(self) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            try:
+                s.connect(("127.0.0.1", self.config.port))
+                return False
+            except OSError:
+                return True
+
     def launch(self, metadata: dict[str, Any]) -> None:
         self.stop()
+        deadline = time.monotonic() + 8.0
+        while not self._port_free():
+            if time.monotonic() > deadline:
+                raise RuntimeError(
+                    f"port {self.config.port} is still occupied after stopping the runner container — "
+                    "a native llama-server process is likely running on the host; "
+                    f"stop it before switching models (kill $(lsof -ti :{self.config.port}))"
+                )
+            time.sleep(0.25)
         spec = build_runner_container_spec(metadata, self.config, self.models_dir)
         env = [f"{key}={value}" for key, value in spec.environment.items()]
         payload = {
