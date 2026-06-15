@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4 \
     libgomp1 \
     libvulkan1 \
+    mesa-vulkan-drivers \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
