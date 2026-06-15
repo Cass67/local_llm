@@ -154,10 +154,15 @@ export async function runBenchmark(req: {
 	endpoint_id: number;
 	model: string;
 	prompt_text: string;
+	system_prompt?: string;
 	prompt_id?: number | null;
 	prompt_name?: string | null;
 	temperature?: number;
 	max_tokens?: number;
+	seed?: number;
+	top_p?: number;
+	top_k?: number;
+	repeat_penalty?: number;
 }): Promise<BenchmarkRun> {
 	const res = await fetch(`${BASE}/runs`, {
 		method: "POST",

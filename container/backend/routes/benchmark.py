@@ -37,10 +37,15 @@ class BenchmarkRunRequest(BaseModel):
     endpoint_id: int
     model: str = Field(min_length=1, max_length=500)
     prompt_text: str = Field(min_length=1, max_length=20000)
+    system_prompt: str = Field(default="", max_length=20000)
     prompt_id: int | None = None
     prompt_name: str | None = Field(default=None, max_length=120)
     temperature: float = Field(default=0.2, ge=0, le=2)
-    max_tokens: int = Field(default=256, ge=1, le=8192)
+    max_tokens: int = Field(default=512, ge=1, le=8192)
+    seed: int | None = Field(default=None, ge=0)
+    top_p: float | None = Field(default=None, ge=0, le=1)
+    top_k: int | None = Field(default=None, ge=0, le=200)
+    repeat_penalty: float | None = Field(default=None, ge=1, le=2)
 
 
 @lru_cache(maxsize=1)
@@ -181,15 +186,28 @@ async def run_benchmark(req: BenchmarkRunRequest):
     status = "ok"
     error: str | None = None
     try:
+        messages: list[dict[str, str]] = []
+        if req.system_prompt:
+            messages.append({"role": "system", "content": req.system_prompt})
+        messages.append({"role": "user", "content": req.prompt_text})
+        body: dict[str, Any] = {
+            "model": req.model,
+            "messages": messages,
+            "temperature": req.temperature,
+            "max_tokens": req.max_tokens,
+        }
+        if req.seed is not None:
+            body["seed"] = req.seed
+        if req.top_p is not None:
+            body["top_p"] = req.top_p
+        if req.top_k is not None:
+            body["top_k"] = req.top_k
+        if req.repeat_penalty is not None:
+            body["repeat_penalty"] = req.repeat_penalty
         async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 f"{endpoint['base_url'].rstrip('/')}/chat/completions",
-                json={
-                    "model": req.model,
-                    "messages": [{"role": "user", "content": req.prompt_text}],
-                    "temperature": req.temperature,
-                    "max_tokens": req.max_tokens,
-                },
+                json=body,
                 headers=_auth_headers(endpoint),
             )
             response.raise_for_status()
