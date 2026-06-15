@@ -1,0 +1,860 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+	cat >&2 <<'EOF'
+Usage: oc-local [family] [profile] [--lean] [--dry-run] [--info] [--remote HOST] [--user USER] [-k] [pi args...]
+
+Profiles must match the llama.cpp profile that this wrapper starts remotely.
+Profiles are family-specific. Use --info to see exact context, quant, batch, and command.
+
+Options:
+  --lean     remove OpenCode plugins for a smaller starting prompt
+  --dry-run  print actions and generated override config without running them
+  --info     print resolved server and OpenCode settings, then exit
+  --remote HOST
+  --user USER
+  -k         allow SSH password prompt when key auth is not configured.
+EOF
+}
+
+lean=false
+dry_run=false
+info=false
+remote_host="${OC_LOCAL_REMOTE_HOST:-}"
+remote_user="${OC_LOCAL_REMOTE_USER:-}"
+ssh_password_prompt=false
+
+is_safe_family_name() {
+	local value="$1"
+	[[ "$value" =~ ^[A-Za-z0-9_.-]+$ && "$value" != *..* && "$value" != -* ]]
+}
+
+is_safe_model_name() {
+	local value="$1"
+	[[ "$value" =~ ^[A-Za-z0-9_.-]+$ && "$value" != *..* && "$value" != -* ]]
+}
+
+has_control_chars() {
+	local value="$1"
+	[[ "$value" =~ [[:cntrl:]] ]]
+}
+
+lower_ascii() {
+	printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+is_digits() {
+	local value="$1"
+	[[ "$value" =~ ^[0-9]+$ ]]
+}
+
+is_safe_remote_script() {
+	local value="$1"
+	[[ "$value" =~ ^\./[A-Za-z0-9_.-]+\.sh$ ]]
+}
+
+is_profile_name() {
+	case "$1" in
+	speed | fastlong | balanced | reliable | tiny) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+fail_no_accepted_model() {
+	local lookup_family="$1"
+	printf 'no accepted model for family: %s\n' "$lookup_family" >&2
+	printf 'Run model-manager discover, model-manager benchmark, and model-manager accept to generate accepted metadata.\n' >&2
+	exit 1
+}
+
+fail_no_accepted_default_model() {
+	printf 'no accepted default model\n' >&2
+	printf 'Pass an explicit family, or create runs/accepted/default.json after accepting a benchmark.\n' >&2
+	printf 'Run model-manager discover, model-manager benchmark, and model-manager accept to generate accepted metadata.\n' >&2
+	exit 1
+}
+
+reject_unsafe_accepted_lookup() {
+	local lookup_family="$1"
+	local accepted_dir="$runs_dir/accepted"
+	local metadata_file="$accepted_dir/$lookup_family.json"
+
+	if [[ -L "$runs_dir" ]]; then
+		printf 'oc-local refuses symlinked runs dir: %s\n' "$runs_dir" >&2
+		return 1
+	fi
+	if [[ -L "$accepted_dir" ]]; then
+		printf 'oc-local refuses symlinked accepted dir: %s\n' "$accepted_dir" >&2
+		return 1
+	fi
+	if [[ -L "$metadata_file" ]]; then
+		printf 'oc-local refuses symlinked accepted metadata file: %s\n' "$metadata_file" >&2
+		return 1
+	fi
+}
+
+default_family_from_accepted_metadata() {
+	local accepted_dir="$runs_dir/accepted"
+	local default_file="$accepted_dir/default.json"
+
+	if [[ -L "$runs_dir" ]]; then
+		printf 'oc-local refuses symlinked runs dir: %s\n' "$runs_dir" >&2
+		return 1
+	fi
+	if [[ -L "$accepted_dir" ]]; then
+		printf 'oc-local refuses symlinked accepted dir: %s\n' "$accepted_dir" >&2
+		return 1
+	fi
+	if [[ -L "$default_file" ]]; then
+		printf 'oc-local refuses symlinked accepted metadata file: %s\n' "$default_file" >&2
+		return 1
+	fi
+	[[ -f "$default_file" ]] || return 2
+
+	python3 - "$default_file" <<'PY'
+import json
+import re
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, json.JSONDecodeError) as exc:
+    print(f"invalid accepted metadata {path}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+if not isinstance(data, dict):
+    print(f"invalid accepted metadata {path}: top-level JSON must be an object", file=sys.stderr)
+    raise SystemExit(1)
+family = data.get("family")
+if not isinstance(family, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", family) or ".." in family or family.startswith("-"):
+    print(f"invalid accepted metadata {path}: family contains unsafe characters", file=sys.stderr)
+    raise SystemExit(1)
+print(family)
+PY
+}
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	--lean)
+		lean=true
+		shift
+		;;
+	--dry-run)
+		dry_run=true
+		shift
+		;;
+	--info)
+		info=true
+		shift
+		;;
+	--remote)
+		if [[ $# -lt 2 || "$2" == -* ]]; then
+			printf 'missing value for --remote\n' >&2
+			usage
+			exit 2
+		fi
+		remote_host="$2"
+		shift 2
+		;;
+	--user)
+		if [[ $# -lt 2 || "$2" == -* ]]; then
+			printf 'missing value for --user\n' >&2
+			usage
+			exit 2
+		fi
+		remote_user="$2"
+		shift 2
+		;;
+	-k)
+		ssh_password_prompt=true
+		shift
+		;;
+	--help | -h)
+		usage
+		exit 0
+		;;
+	--)
+		shift
+		break
+		;;
+	-*)
+		printf 'unknown option: %s\n' "$1" >&2
+		usage
+		exit 2
+		;;
+	*)
+		break
+		;;
+	esac
+done
+
+default_profile=''
+default_family=''
+script_name="$(basename "$0")"
+case "$script_name" in
+oc-speed) default_profile=speed ;;
+oc-fastlong) default_profile=fastlong ;;
+oc-balanced) default_profile=balanced ;;
+oc-reliable) default_profile=reliable ;;
+oc-tiny) default_profile=tiny ;;
+oc-*-speed) default_profile=speed ;;
+oc-*-fastlong) default_profile=fastlong ;;
+oc-*-balanced) default_profile=balanced ;;
+oc-*-reliable) default_profile=reliable ;;
+oc-*-tiny) default_profile=tiny ;;
+esac
+
+runs_dir="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
+family="$default_family"
+if [[ $# -gt 0 ]]; then
+	if [[ -z "$family" ]]; then
+		if is_profile_name "$1"; then
+			:
+		else
+			if ! is_safe_family_name "$1"; then
+				printf 'invalid model family: %s\n' "$1" >&2
+				exit 2
+			fi
+			family="$1"
+			shift
+		fi
+	fi
+fi
+
+if [[ -z "$family" ]]; then
+	if [[ -n "$default_profile" ]]; then
+		:
+	elif [[ $# -eq 0 ]]; then
+		usage
+		exit 2
+	else
+		if ! is_safe_family_name "$1"; then
+			printf 'invalid model family: %s\n' "$1" >&2
+			exit 2
+		fi
+		if ! is_profile_name "$1"; then
+			family="$1"
+			shift
+		fi
+	fi
+fi
+
+if [[ $# -lt 1 ]]; then
+	if [[ -z "$default_profile" ]]; then
+		usage
+		exit 2
+	fi
+	profile="$default_profile"
+else
+	profile="$1"
+	shift
+fi
+
+if [[ -z "$family" ]]; then
+	default_family_output=''
+	status=0
+	default_family_output="$(default_family_from_accepted_metadata)" || status=$?
+	if [[ "$status" -ne 0 ]]; then
+		if [[ "$status" -eq 2 ]]; then
+			fail_no_accepted_default_model
+		fi
+		exit 1
+	fi
+	family="$default_family_output"
+fi
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	--lean)
+		lean=true
+		shift
+		;;
+	--dry-run)
+		dry_run=true
+		shift
+		;;
+	--info)
+		info=true
+		shift
+		;;
+	--remote)
+		if [[ $# -lt 2 || "$2" == -* ]]; then
+			printf 'missing value for --remote\n' >&2
+			usage
+			exit 2
+		fi
+		remote_host="$2"
+		shift 2
+		;;
+	--user)
+		if [[ $# -lt 2 || "$2" == -* ]]; then
+			printf 'missing value for --user\n' >&2
+			usage
+			exit 2
+		fi
+		remote_user="$2"
+		shift 2
+		;;
+	-k)
+		ssh_password_prompt=true
+		shift
+		;;
+	--)
+		shift
+		break
+		;;
+	*)
+		break
+		;;
+	esac
+done
+
+remote_dir="${OC_LOCAL_REMOTE_DIR:-~/llama.cpp}"
+reasoning_effort=none
+generated_profile=false
+ssh_target="$remote_host"
+if [[ -n "$remote_user" ]]; then
+	ssh_target="$remote_user@$remote_host"
+fi
+ssh_options=(-o BatchMode=yes)
+if [[ "$ssh_password_prompt" == true ]]; then
+	ssh_options=(-o BatchMode=no)
+fi
+if ! is_safe_family_name "$family"; then
+	printf 'invalid model family: %s\n' "$family" >&2
+	exit 2
+fi
+reject_unsafe_accepted_lookup "$family" || exit 1
+accepted_model_file="$runs_dir/accepted/$family.json"
+if [[ -f "$accepted_model_file" ]]; then
+	if ! generated_profile_output="$(
+		python3 - "$accepted_model_file" "$family" "$profile" <<'PY'
+import json
+import re
+import sys
+
+path, requested_family, requested_profile = sys.argv[1:]
+def fail(message):
+    print(f"invalid accepted metadata {path}: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+def safe_generated_name(value):
+    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", value) and ".." not in value and not value.startswith("-")
+
+def reject_control_chars(label, value):
+    if isinstance(value, str) and re.search(r"[\x00-\x1f\x7f]", value):
+        fail(f"{label} contains control characters")
+    return value
+
+def metadata_integer(container, key, *, minimum):
+    value = container.get(key)
+    if isinstance(value, bool):
+        fail(f"config.{key} must be an integer")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        parsed = int(value)
+    else:
+        fail(f"config.{key} must be an integer")
+    if parsed < minimum:
+        if minimum == 1:
+            fail(f"config.{key} must be a positive integer")
+        fail(f"config.{key} must be a non-negative integer")
+    return parsed
+
+def metadata_context(container):
+    if container.get("context") not in (None, ""):
+        return metadata_integer(container, "context", minimum=1)
+    return metadata_integer(container, "ctx", minimum=1)
+
+def metadata_optional_vulkan_fields(container):
+    backend = container.get("backend") or "default"
+    visible_devices = container.get("visible_devices") or ""
+    split_mode = container.get("split_mode") or ""
+    tensor_split = container.get("tensor_split") or ""
+    for label, value in (
+        ("config.backend", backend),
+        ("config.visible_devices", visible_devices),
+        ("config.split_mode", split_mode),
+        ("config.tensor_split", tensor_split),
+    ):
+        reject_control_chars(label, value)
+    if backend == "default":
+        return backend, "none", "none", "none"
+    if backend not in {"vulkan", "rocm"}:
+        fail("config.backend must be rocm or vulkan when set")
+    if not isinstance(visible_devices, str) or not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
+        fail("config.visible_devices must be comma-separated device indexes")
+    if split_mode not in {"layer", "row"}:
+        fail("config.split_mode must be layer or row")
+    if not isinstance(tensor_split, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?(,[0-9]+(?:\.[0-9]+)?)*", tensor_split):
+        fail("config.tensor_split must be comma-separated positive numbers")
+    return backend, visible_devices, split_mode, tensor_split
+
+try:
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, json.JSONDecodeError) as exc:
+    fail(str(exc))
+
+if not isinstance(data, dict):
+    fail("top-level JSON must be an object")
+
+for key in (
+    "family",
+    "alias",
+    "model_name",
+    "repo",
+    "hf_repo",
+    "remote_start",
+    "launcher_file",
+    "quant",
+    "hf_file",
+    "mmproj",
+    "reasoning_effort",
+    "profile",
+):
+    reject_control_chars(key, data.get(key))
+
+accepted_family = data.get("family") or requested_family
+if not safe_generated_name(accepted_family):
+    fail("family contains unsafe characters")
+if accepted_family != requested_family:
+    fail(f"family {accepted_family} does not match requested family {requested_family}")
+
+for key in ("alias", "model_name"):
+    value = data.get(key)
+    if value is not None and not safe_generated_name(value):
+        fail(f"{key} contains unsafe characters")
+model_name = data.get("model_name") or data.get("alias") or requested_family
+if not safe_generated_name(model_name):
+    fail("model_name contains unsafe characters")
+
+profile = None
+config = data.get("config")
+profiles = data.get("profiles")
+if isinstance(profiles, dict):
+    candidate = profiles.get(requested_profile)
+    if isinstance(candidate, dict):
+        profile = candidate
+if profile is None and isinstance(config, dict):
+    # Generated launchers accept all standard profile names; when accepted metadata
+    # has one shared config, use it for any requested profile.
+    profile = config
+
+if profile is None:
+    fail(f"missing profile {requested_profile!r}")
+for key in ("mmproj", "reasoning_effort"):
+    reject_control_chars(f"config.{key}", profile.get(key))
+
+remote_start = data.get("remote_start")
+if remote_start is None:
+    launcher_file = data.get("launcher_file")
+    if isinstance(launcher_file, str) and launcher_file.startswith("./"):
+        remote_start = launcher_file
+if not isinstance(remote_start, str) or not re.fullmatch(r"\./[A-Za-z0-9_.-]+\.sh", remote_start):
+    fail("remote_start must be a relative ./start-script.sh path")
+
+if not re.fullmatch(r"[A-Za-z0-9_.-]+", requested_profile):
+    fail("profile contains unsafe characters")
+
+fields = [
+    reject_control_chars("family", accepted_family),
+    reject_control_chars("model_name", model_name),
+    reject_control_chars("hf_repo", data.get("hf_repo") or data.get("repo")),
+    reject_control_chars("remote_start", remote_start),
+    reject_control_chars("quant", data.get("hf_file") or data.get("quant")),
+    metadata_context(profile),
+    metadata_integer(profile, "batch", minimum=1),
+    metadata_integer(profile, "ubatch", minimum=1),
+    metadata_integer(profile, "ngl", minimum=0),
+    reject_control_chars("mmproj", profile.get("mmproj") or data.get("mmproj") or "none"),
+    reject_control_chars("reasoning_effort", profile.get("reasoning_effort") or data.get("reasoning_effort") or "none"),
+]
+fields.extend(metadata_optional_vulkan_fields(profile))
+reasoning_value = profile.get("reasoning", data.get("reasoning", True))
+if isinstance(reasoning_value, str):
+    reasoning_value = reasoning_value.lower() in {"1", "true", "yes", "on"}
+elif not isinstance(reasoning_value, bool):
+    reasoning_value = False
+fields.append("true" if reasoning_value else "false")
+fields.extend([
+    reject_control_chars("cache_type_k", profile.get("cache_type_k") or "none"),
+    reject_control_chars("cache_type_v", profile.get("cache_type_v") or "none"),
+    reject_control_chars("ctx_shift", profile.get("ctx_shift") or "none"),
+    reject_control_chars("cache_ram", str(profile.get("cache_ram") or "none")),
+    reject_control_chars("spec_type", str(profile.get("spec_type") or "none")),
+    reject_control_chars("spec_draft_n_max", str(profile.get("spec_draft_n_max") or "none")),
+    reject_control_chars("threads", str(profile.get("threads") or "none")),
+    reject_control_chars("threads_batch", str(profile.get("threads_batch") or "none")),
+])
+if any(value is None or value == "" for value in fields):
+    required_fields = fields[:11]
+    if any(value is None or value == "" for value in required_fields):
+        fail("missing required fields")
+print("\n".join(str(value) for value in fields))
+PY
+	)"; then
+		exit 1
+	fi
+	generated_profile=true
+fi
+
+if [[ "$generated_profile" == true ]]; then
+	{
+		IFS= read -r family
+		IFS= read -r model_name
+		IFS= read -r hf_repo
+		IFS= read -r remote_script
+		IFS= read -r quant
+		IFS= read -r context
+		IFS= read -r batch
+		IFS= read -r ubatch
+		IFS= read -r ngl
+		IFS= read -r mmproj_mode
+		IFS= read -r reasoning_effort
+		IFS= read -r backend
+		IFS= read -r visible_devices
+		IFS= read -r split_mode
+		IFS= read -r tensor_split
+		IFS= read -r reasoning_enabled
+		IFS= read -r cache_type_k
+		IFS= read -r cache_type_v
+		IFS= read -r ctx_shift
+		IFS= read -r cache_ram
+		IFS= read -r spec_type
+		IFS= read -r spec_draft_n_max
+		IFS= read -r threads
+		IFS= read -r threads_batch
+	} <<<"$generated_profile_output"
+	if ! is_safe_remote_script "$remote_script"; then
+		printf 'invalid generated remote script: %s\n' "$remote_script" >&2
+		exit 1
+	fi
+	for numeric_field in context batch ubatch ngl; do
+		if ! is_digits "${!numeric_field}"; then
+			printf 'invalid generated numeric field %s: %s\n' "$numeric_field" "${!numeric_field}" >&2
+			exit 1
+		fi
+	done
+	for string_field in family model_name hf_repo quant mmproj_mode reasoning_effort reasoning_enabled; do
+		if has_control_chars "${!string_field}"; then
+			printf 'invalid generated string field %s contains control characters\n' "$string_field" >&2
+			exit 1
+		fi
+	done
+	if [[ "$backend" != default && "$backend" != vulkan && "$backend" != rocm ]]; then
+		printf 'invalid generated backend: %s\n' "$backend" >&2
+		exit 1
+	fi
+	if [[ "$reasoning_enabled" != true && "$reasoning_enabled" != false ]]; then
+		printf 'invalid generated reasoning flag: %s\n' "$reasoning_enabled" >&2
+		exit 1
+	fi
+	for string_field in visible_devices split_mode tensor_split cache_type_k cache_type_v ctx_shift cache_ram spec_type spec_draft_n_max threads threads_batch; do
+		if has_control_chars "${!string_field}"; then
+			printf 'invalid generated string field %s contains control characters\n' "$string_field" >&2
+			exit 1
+		fi
+	done
+	remote_profile="$profile"
+else
+	fail_no_accepted_model "$family"
+fi
+remote_start="$remote_script $remote_profile"
+if ! is_safe_model_name "$model_name"; then
+	printf 'invalid model name: %s\n' "$model_name" >&2
+	exit 2
+fi
+default_output_limit=4096
+output_limit="${OC_LOCAL_OUTPUT_LIMIT:-$default_output_limit}"
+reserved="${OC_LOCAL_RESERVED:-4096}"
+if [[ -n "${OC_LOCAL_BASE_URL:-}" ]]; then
+	base_url="$OC_LOCAL_BASE_URL"
+elif [[ -n "$remote_host" ]]; then
+	base_url="http://$remote_host:8080/v1"
+else
+	base_url="http://localhost:8080/v1"
+fi
+api_key="${OC_LOCAL_API_KEY:-dummy-local-llm}"
+model="${OC_LOCAL_MODEL:-ubt26-llamacpp/$model_name}"
+wait_seconds="${OC_LOCAL_WAIT_SECONDS:-180}"
+
+plugin_json=''
+plugin_mode=normal
+if [[ "$lean" == true ]]; then
+	plugin_json='"plugin":[],'
+	plugin_mode=lean
+fi
+reasoning_json=''
+if [[ "${reasoning_enabled:-false}" == true ]]; then
+	reasoning_json='"reasoning":true,'
+fi
+
+server_bin="./build/bin/llama-server"
+if [[ "$backend" == vulkan ]]; then
+	server_bin="./build-vulkan/bin/llama-server"
+fi
+server_command="${server_bin} -hf ${hf_repo}"
+if [[ "$quant" == *.gguf ]]; then
+	server_command+=" --hf-file ${quant}"
+else
+	server_command+=":${quant}"
+fi
+if [[ "$mmproj_mode" == enabled ]]; then
+	server_command+=" --mmproj-auto"
+elif [[ "$mmproj_mode" == disabled ]]; then
+	server_command+=" --no-mmproj"
+fi
+if [[ "$backend" == vulkan ]]; then
+	server_command="GGML_VK_VISIBLE_DEVICES=${visible_devices} ${server_command}"
+elif [[ "$backend" == rocm ]]; then
+	server_command="HIP_VISIBLE_DEVICES=${visible_devices} ROCR_VISIBLE_DEVICES=${visible_devices} ${server_command}"
+fi
+server_command+=" --host 0.0.0.0 --port 8080 -ngl ${ngl}"
+if [[ "$backend" == vulkan || "$backend" == rocm ]]; then
+	server_command+=" --split-mode ${split_mode} --tensor-split ${tensor_split}"
+fi
+case "${ctx_shift:-none}" in
+none | off | false | 0) ;;
+*) server_command+=" --context-shift" ;;
+esac
+if [[ "${cache_ram:-none}" != none ]]; then
+	server_command+=" --cache-ram ${cache_ram}"
+fi
+if [[ "${cache_type_k:-none}" != none ]]; then
+	server_command+=" -ctk ${cache_type_k}"
+fi
+if [[ "${cache_type_v:-none}" != none ]]; then
+	server_command+=" -ctv ${cache_type_v}"
+fi
+server_command+=" -c ${context} --flash-attn on -ub ${ubatch} -b ${batch}"
+if [[ "${threads:-none}" != none ]]; then
+	server_command+=" --threads ${threads}"
+else
+	server_command+=" --threads \"\$(nproc)\""
+fi
+if [[ "${threads_batch:-none}" != none ]]; then
+	server_command+=" --threads-batch ${threads_batch}"
+fi
+server_command+=" --prio 2"
+if [[ "${spec_type:-none}" != none ]]; then
+	server_command+=" --spec-type ${spec_type}"
+fi
+if [[ "${spec_draft_n_max:-none}" != none ]]; then
+	server_command+=" --spec-draft-n-max ${spec_draft_n_max}"
+fi
+sampler_temp="0.6"
+sampler_top_p="0.95"
+sampler_top_k="20"
+family_lower="$(lower_ascii "$family")"
+model_name_lower="$(lower_ascii "$model_name")"
+hf_repo_lower="$(lower_ascii "$hf_repo")"
+if [[ "$family_lower" == gemma* || "$model_name_lower" == gemma* || "$hf_repo_lower" == *gemma* ]]; then
+	sampler_temp="1.0"
+	sampler_top_p="0.95"
+	sampler_top_k="64"
+fi
+server_command+=" --no-warmup --temp ${sampler_temp} --top-p ${sampler_top_p} --top-k ${sampler_top_k} --min-p 0.0 --presence-penalty 0.0"
+server_command+=" --alias ${model_name}"
+if [[ "${reasoning_enabled:-false}" == true ]]; then
+	server_command+=" --reasoning on"
+else
+	server_command+=" --reasoning off"
+fi
+
+if [[ "$info" == true ]]; then
+	printf 'family=%s\n' "$family"
+	printf 'profile=%s\n' "$profile"
+	printf 'model=%s\n' "$model"
+	printf 'model_name=%s\n' "$model_name"
+	printf 'remote_host=%s\n' "$remote_host"
+	printf 'remote_user=%s\n' "$remote_user"
+	printf 'remote_dir=%s\n' "$remote_dir"
+	printf 'remote_start=%s\n' "$remote_start"
+	printf 'hf_repo=%s\n' "$hf_repo"
+	printf 'quant=%s\n' "$quant"
+	printf 'ctx=%s\n' "$context"
+	printf 'batch=%s\n' "$batch"
+	printf 'ubatch=%s\n' "$ubatch"
+	printf 'ngl=%s\n' "$ngl"
+	printf 'mmproj=%s\n' "$mmproj_mode"
+	printf 'reasoning=%s\n' "${reasoning_enabled:-false}"
+	printf 'reasoning_effort=%s\n' "$reasoning_effort"
+	printf 'backend=%s\n' "$backend"
+	if [[ "$backend" == vulkan || "$backend" == rocm ]]; then
+		printf 'visible_devices=%s\n' "$visible_devices"
+		printf 'split_mode=%s\n' "$split_mode"
+		printf 'tensor_split=%s\n' "$tensor_split"
+	fi
+	if [[ "${cache_type_k:-none}" != none ]]; then
+		printf 'cache_type_k=%s\n' "$cache_type_k"
+	fi
+	if [[ "${cache_type_v:-none}" != none ]]; then
+		printf 'cache_type_v=%s\n' "$cache_type_v"
+	fi
+	if [[ "${ctx_shift:-none}" != none ]]; then
+		printf 'ctx_shift=%s\n' "$ctx_shift"
+	fi
+	if [[ "${threads:-none}" != none ]]; then
+		printf 'threads=%s\n' "$threads"
+	fi
+	if [[ "${threads_batch:-none}" != none ]]; then
+		printf 'threads_batch=%s\n' "$threads_batch"
+	fi
+	printf 'alias=%s\n' "$model_name"
+	printf 'plugin_mode=%s\n' "$plugin_mode"
+	if [[ "$ssh_password_prompt" == true ]]; then
+		printf 'ssh_password_prompt=enabled\n'
+	else
+		printf 'ssh_password_prompt=disabled\n'
+	fi
+	printf 'output_limit=%s\n' "$output_limit"
+	printf 'reserved=%s\n' "$reserved"
+	printf 'base_url=%s\n' "$base_url"
+	printf 'wait_seconds=%s\n' "$wait_seconds"
+	printf 'command=%s\n' "$server_command"
+	printf 'pi_model=%s\n' "$model"
+	exit 0
+fi
+
+if [[ "$dry_run" == true ]]; then
+	printf 'family=%s\n' "$family"
+	printf 'profile=%s\n' "$profile"
+	printf 'context=%s\n' "$context"
+	printf 'plugin_mode=%s\n' "$plugin_mode"
+	printf 'remote_host=%s\n' "$remote_host"
+	printf 'remote_user=%s\n' "$remote_user"
+	printf 'remote_start=%s\n' "$remote_start"
+	printf 'model=%s\n' "$model"
+	if [[ "$ssh_password_prompt" == true ]]; then
+		printf 'ssh_password_prompt=enabled\n'
+	else
+		printf 'ssh_password_prompt=disabled\n'
+	fi
+	printf 'wait_seconds=%s\n' "$wait_seconds"
+	printf 'pi_model=%s\n' "$model"
+	exit 0
+fi
+
+if [[ -z "$remote_host" ]]; then
+	printf '%s\n' 'remote host is required; pass --remote HOST or set OC_LOCAL_REMOTE_HOST' >&2
+	exit 2
+fi
+ssh_target="$remote_host"
+if [[ -n "$remote_user" ]]; then
+	ssh_target="$remote_user@$remote_host"
+fi
+
+printf 'Restarting remote llama.cpp %s profile %s (%s context) on %s...\n' "$family" "$profile" "$context" "$ssh_target" >&2
+ssh "${ssh_options[@]}" "$ssh_target" bash -s -- "$remote_dir" "$remote_script" "$remote_profile" <<'REMOTE_START'
+set -euo pipefail
+remote_dir="$1"
+remote_script="$2"
+remote_profile="$3"
+if [[ "$remote_dir" == "~" || "$remote_dir" == "~/"* ]]; then
+  remote_dir="$HOME${remote_dir#\~}"
+fi
+cd "$remote_dir"
+tmp="current-model.env.tmp"
+{
+  printf 'REMOTE_SCRIPT=%q\n' "$remote_script"
+  printf 'REMOTE_PROFILE=%q\n' "$remote_profile"
+} >"$tmp"
+mv "$tmp" current-model.env
+systemctl --user restart llama-server.service
+REMOTE_START
+
+printf 'Waiting for llama.cpp API on %s...\n' "$ssh_target" >&2
+deadline=$((SECONDS + wait_seconds))
+until ssh "${ssh_options[@]}" "$ssh_target" 'curl -fsS http://127.0.0.1:8080/v1/models >/dev/null 2>&1'; do
+	if ((SECONDS >= deadline)); then
+		printf 'timed out waiting for remote llama.cpp API after %s seconds\n' "$wait_seconds" >&2
+		printf 'check remote log: ssh %s %q\n' "$ssh_target" "tail -80 $remote_dir/model.log" >&2
+		exit 1
+	fi
+	sleep 2
+done
+
+printf 'Waiting for llama.cpp API at %s/models...\n' "$base_url" >&2
+until curl -fsS "$base_url/models" >/dev/null 2>&1; do
+	if ((SECONDS >= deadline)); then
+		printf 'remote API is ready, but %s/models is not reachable from this machine\n' "$base_url" >&2
+		exit 1
+	fi
+	sleep 2
+done
+
+provider_id="${model%%/*}"
+model_id="${model#*/}"
+if [[ "$provider_id" == "$model" ]]; then
+	provider_id="localllm"
+	model_id="$model"
+fi
+models_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+models_file="$models_dir/models.json"
+mkdir -p "$models_dir"
+python3 - "$models_file" "$provider_id" "$model_id" "$model_name" "$base_url" "$api_key" "$context" "$output_limit" "${reasoning_enabled:-false}" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]).expanduser()
+provider_id, model_id, model_name, base_url, api_key = sys.argv[2:7]
+context = int(sys.argv[7])
+output_limit = int(sys.argv[8])
+reasoning = sys.argv[9] == "true"
+if path.exists() and not path.is_symlink():
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        raise SystemExit(f"invalid models.json: {path}")
+else:
+    data = {}
+if not isinstance(data, dict):
+    raise SystemExit(f"models.json must be an object: {path}")
+providers = data.setdefault("providers", {})
+if not isinstance(providers, dict):
+    raise SystemExit("models.json providers must be an object")
+provider = providers.setdefault(provider_id, {})
+if not isinstance(provider, dict):
+    raise SystemExit(f"models.json provider must be an object: {provider_id}")
+provider.update({
+    "baseUrl": base_url,
+    "api": "openai-completions",
+    "apiKey": api_key,
+    "compat": {
+        "supportsDeveloperRole": False,
+        "supportsReasoningEffort": False,
+    },
+})
+models = provider.setdefault("models", [])
+if not isinstance(models, list):
+    raise SystemExit(f"models.json provider models must be a list: {provider_id}")
+entry = None
+for item in models:
+    if isinstance(item, dict) and item.get("id") == model_id:
+        entry = item
+        break
+if entry is None:
+    entry = {"id": model_id}
+    models.append(entry)
+entry.update({
+    "name": model_name,
+    "reasoning": reasoning,
+    "compat": {"supportsReasoningEffort": False},
+    "input": ["text"],
+    "contextWindow": context,
+    "maxTokens": output_limit,
+    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+})
+tmp = path.with_suffix(path.suffix + ".tmp")
+tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(tmp, path)
+PY
+
+printf 'Starting pi with %s context (%s plugins)...\n' "$context" "$plugin_mode" >&2
+exec pi --model "$model" "$@"
