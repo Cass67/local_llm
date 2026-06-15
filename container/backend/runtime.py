@@ -48,6 +48,8 @@ def _model_path(metadata: dict[str, Any], models_dir: Path | None = None) -> str
         matches = sorted((models_dir / repo_dir / "snapshots").glob(f"*/{filename}"))
         if matches:
             return str(matches[-1])
+    if repo and filename:
+        raise ValueError(f"model file not downloaded: {filename} (from {repo})")
     raise ValueError("accepted metadata missing model_path")
 
 
