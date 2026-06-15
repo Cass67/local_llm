@@ -53,16 +53,16 @@
 </div>
 
 <style>
-	.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
-	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; width: 90%; max-width: 900px; max-height: 85vh; display: flex; flex-direction: column; }
-	.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); }
-	.modal-header h3 { margin: 0; }
+	.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
+	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; width: 90%; max-width: 900px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+	.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); background: var(--bg); }
+	.modal-header h3 { margin: 0; font-size: 0.9rem; font-weight: bold; }
 	.modal-header button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem; }
-	.modal-body { overflow-y: auto; padding: 1rem; }
+	.modal-body { flex: 1; overflow-y: auto; padding: 1rem; }
 	.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.7rem; }
-	.grid div { background: var(--bg); padding: 0.5rem; border-radius: 4px; }
+	.grid div { background: var(--bg); padding: 0.6rem; border-radius: 6px; border: 1px solid var(--border); }
 	span { display: block; color: var(--text-muted); font-size: 0.75rem; margin-bottom: 0.2rem; }
-	code { word-break: break-all; }
-	pre { background: var(--bg); padding: 0.7rem; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; }
+	code { word-break: break-all; font-family: 'JetBrains Mono', monospace; background: var(--bg-card); padding: 0.1rem 0.3rem; border-radius: 3px; border: 1px solid var(--border); }
+	pre { background: var(--bg); padding: 0.7rem; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; border: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; }
 	.error { color: var(--red); }
 </style>

@@ -65,22 +65,88 @@
 </div>
 
 <style>
-	.model-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+	.model-card { 
+		background: var(--bg-card); 
+		border: 1px solid var(--border); 
+		border-radius: 8px; 
+		padding: 1rem; 
+		display: flex; 
+		flex-direction: column; 
+		gap: 0.5rem; 
+		transition: transform 0.1s ease, border-color 0.1s ease;
+		cursor: default;
+	}
+	.model-card:hover { 
+		transform: translateY(-2px); 
+		border-color: var(--accent); 
+	}
 	.model-card.running { border-color: var(--green); }
 	.card-header { display: flex; justify-content: space-between; align-items: flex-start; }
 	.card-header h3 { margin: 0; font-size: 1rem; }
-	.backend-badge { font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px; text-transform: uppercase; }
-	.backend-badge.rocm { background: #e74c3c33; color: #e74c3c; }
-	.backend-badge.vulkan { background: #9b59b633; color: #9b59b6; }
+	.backend-badge { 
+		font-size: 0.7rem; 
+		padding: 0.1rem 0.4rem; 
+		border-radius: 3px; 
+		text-transform: uppercase; 
+		font-weight: bold;
+	}
+	.backend-badge.rocm { background: #ef444422; color: #ef4444; box-shadow: 0 0 8px #ef444433; }
+	.backend-badge.vulkan { background: #8b5cf622; color: #8b5cf6; box-shadow: 0 0 8px #8b5cf633; }
 	.card-body { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
 	.info-row { display: flex; justify-content: space-between; gap: 0.5rem; }
 	.info-row span { color: var(--text-muted); }
-	code { font-size: 0.8rem; background: var(--bg); padding: 0.1rem 0.3rem; border-radius: 3px; word-break: break-all; }
-	.profile-select { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
-	.profile-select label { color: var(--text-muted); font-size: 0.85rem; }
-	.profile-select select { flex: 1; padding: 0.3rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
-	.switch-btn { margin-top: 0.5rem; padding: 0.5rem; border: none; border-radius: 4px; background: var(--accent); color: var(--text); cursor: pointer; font-weight: bold; }
+	code { 
+		font-family: 'JetBrains Mono', 'Fira Code', monospace; 
+		font-size: 0.8rem; 
+		background: var(--bg); 
+		padding: 0.1rem 0.3rem; 
+		border-radius: 3px; 
+		word-break: break-all; 
+	}
+	.profile-select { 
+		display: flex; 
+		align-items: center; 
+		gap: 0.5rem; 
+		margin-top: 0.8rem; 
+		padding: 0.5rem; 
+		background: var(--bg); 
+		border-radius: 6px; 
+		border: 1px solid var(--border);
+	}
+	.profile-select label { color: var(--text-muted); font-size: 0.8rem; }
+	.profile-select select { 
+		flex: 1; 
+		padding: 0.2rem; 
+		border: none; 
+		background: transparent; 
+		color: var(--text); 
+		font-family: inherit;
+		cursor: pointer;
+	}
+	.switch-btn { 
+		margin-top: 0.8rem; 
+		padding: 0.6rem; 
+		border: none; 
+		border-radius: 6px; 
+		background: var(--accent); 
+		color: var(--text); 
+		cursor: pointer; 
+		font-weight: bold; 
+		transition: filter 0.1s;
+	}
+	.switch-btn:hover:not(:disabled) { filter: brightness(1.2); }
 	.switch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-	.card-actions { display: flex; gap: 0.4rem; margin-top: 0.3rem; }
-	.card-actions button { flex: 1; padding: 0.35rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-muted); cursor: pointer; font-size: 0.8rem; }
+	.card-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
+	.card-actions button { 
+		flex: 1; 
+		padding: 0.35rem; 
+		border: 1px solid var(--border); 
+		border-radius: 4px; 
+		background: var(--bg); 
+		color: var(--text-muted); 
+		cursor: pointer; 
+		font-size: 0.75rem; 
+		transition: all 0.1s;
+	}
+	.card-actions button:hover { border-color: var(--text-muted); color: var(--text); }
 </style>

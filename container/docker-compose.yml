@@ -38,6 +38,7 @@ services:
       - PORT=3101
       - OPENAI_API_BASE_URL=http://127.0.0.1:3100/v1
       - OPENAI_API_KEY=local-llm
+      - ENABLE_OLLAMA_API=False
       - WEBUI_AUTH=False
       - WEBUI_URL=/chat/
       - LOCAL_LLM_BACK_URL=/ui/

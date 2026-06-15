@@ -107,22 +107,31 @@
     display: flex;
     flex-direction: column;
     height: calc(100vh - 6rem);
+    height: calc(100dvh - 6rem);
     gap: 0.5rem;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    box-sizing: border-box;
   }
   .error { background: var(--red); color: white; padding: 0.5rem; border-radius: 4px; font-size: 0.85rem; }
   .model-bar {
-    padding: 0.3rem 0.5rem;
-    background: var(--bg-card);
-    border-radius: 4px;
+    padding: 0.4rem 0.6rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
     font-size: 0.85rem;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
   }
   .backend-tag {
-    margin-left: 0.5rem;
+    margin-left: 0.6rem;
     font-size: 0.7rem;
-    padding: 0.1rem 0.3rem;
+    padding: 0.1rem 0.4rem;
     border-radius: 3px;
     background: var(--accent);
+    color: var(--text);
+    font-weight: bold;
+    box-shadow: 0 0 6px var(--accent33);
   }
   .messages {
     flex: 1;
@@ -135,27 +144,51 @@
   .input-area {
     flex-shrink: 0;
     display: flex;
-    gap: 0.5rem;
+    gap: 0.6rem;
+    align-items: flex-end;
   }
   textarea {
     flex: 1;
-    padding: 0.5rem;
+    padding: 0.6rem;
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 6px;
     background: var(--bg-card);
     color: var(--text);
     font-family: inherit;
     resize: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent33);
   }
   .input-actions { display: flex; align-items: flex-end; }
   .send-btn, .stop-btn {
-    padding: 0.5rem 1rem;
+    padding: 0.6rem 1.2rem;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
     font-weight: bold;
+    transition: filter 0.1s;
   }
   .send-btn { background: var(--accent); color: var(--text); }
+  .send-btn:hover:not(:disabled) { filter: brightness(1.2); }
   .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .stop-btn { background: var(--red); color: white; }
+  .stop-btn:hover { filter: brightness(1.2); }
+
+  @media (max-width: 700px) {
+    .chat-interface {
+      height: calc(100vh - 5rem);
+      height: calc(100dvh - 5rem);
+      gap: 0.35rem;
+      padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    }
+    .model-bar { padding: 0.3rem 0.45rem; font-size: 0.78rem; }
+    .messages { gap: 0.35rem; }
+    .input-area { gap: 0.4rem; align-items: stretch; }
+    textarea { padding: 0.5rem; min-height: 2.7rem; max-height: 5.5rem; }
+    .send-btn, .stop-btn { padding: 0.5rem 0.75rem; min-width: 4rem; }
+  }
 </style>

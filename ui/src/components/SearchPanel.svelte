@@ -237,40 +237,54 @@
 {/if}
 
 <style>
-	.search-panel { display: flex; flex-direction: column; gap: 0.5rem; }
 	.search-bar { display: flex; gap: 0.5rem; }
-	.search-bar input { flex: 1; padding: 0.5rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--text); }
-	.search-bar button { padding: 0.5rem 1rem; background: var(--accent); color: var(--text); border: none; border-radius: 4px; cursor: pointer; }
-	.toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-	.toolbar input { flex: 1; min-width: 150px; padding: 0.3rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--text); }
-	.toolbar button { padding: 0.3rem 0.6rem; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+	.search-bar input { 
+		flex: 1; 
+		padding: 0.6rem; 
+		border: 1px solid var(--border); 
+		border-radius: 6px; 
+		background: var(--bg); 
+		color: var(--text); 
+		transition: border-color 0.2s, box-shadow 0.2s;
+	}
+	.search-bar input:focus { 
+		outline: none; 
+		border-color: var(--accent); 
+		box-shadow: 0 0 0 2px var(--accent33);
+	}
+	.search-bar button { padding: 0.6rem 1rem; background: var(--accent); color: var(--text); border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+	.toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+	.toolbar input { flex: 1; min-width: 150px; padding: 0.3rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
+	.toolbar button { padding: 0.3rem 0.6rem; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.1s; }
+	.toolbar button:hover { border-color: var(--text-muted); color: var(--text); }
 	.page-info { color: var(--text-muted); font-size: 0.8rem; }
 	table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-	th { text-align: left; padding: 0.4rem; border-bottom: 1px solid var(--border); color: var(--text-muted); }
-	td { padding: 0.4rem; border-bottom: 1px solid var(--border); }
-	.repo-cell { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	th { text-align: left; padding: 0.6rem 0.4rem; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: normal; }
+	td { padding: 0.6rem 0.4rem; border-bottom: 1px solid var(--border); }
+	.repo-cell { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'JetBrains Mono', monospace; }
 	.score { color: var(--green); font-weight: bold; }
-	code { background: var(--bg); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.8rem; }
+	code { font-family: 'JetBrains Mono', monospace; background: var(--bg); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.8rem; }
 	.actions { display: flex; gap: 0.3rem; align-items: center; }
-	.install-btn { padding: 0.2rem 0.5rem; background: var(--accent); color: var(--text); border: none; border-radius: 3px; cursor: pointer; font-size: 0.75rem; }
-	.card-btn, .details-btn { padding: 0.2rem 0.5rem; background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; font-size: 0.75rem; }
-	.installed { color: var(--green); font-size: 0.8rem; }
+	.install-btn { padding: 0.2rem 0.5rem; background: var(--accent); color: var(--text); border: none; border-radius: 3px; cursor: pointer; font-size: 0.75rem; font-weight: bold; }
+	.card-btn, .details-btn { padding: 0.2rem 0.5rem; background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; font-size: 0.75rem; transition: all 0.1s; }
+	.card-btn:hover, .details-btn:hover { border-color: var(--text-muted); color: var(--text); }
+	.installed { color: var(--green); font-size: 0.8rem; font-weight: bold; }
 	.installing { color: var(--yellow); font-size: 0.8rem; }
 	.err { color: var(--red); font-size: 0.8rem; max-width: 360px; display: inline-block; }
 	.fail-reason { color: var(--text-muted); }
 	.empty { text-align: center; color: var(--text-muted); padding: 2rem; }
 	.error { background: var(--red); color: white; padding: 0.5rem; border-radius: 4px; }
-	.install-error-card { display: flex; align-items: center; gap: 0.75rem; background: #f443361a; border: 1px solid var(--red); color: var(--text); padding: 0.75rem; border-radius: 6px; }
+	.install-error-card { display: flex; align-items: center; gap: 0.75rem; background: #ef44441a; border: 1px solid var(--red); color: var(--text); padding: 0.75rem; border-radius: 6px; }
 	.install-error-card span { flex: 1; color: var(--text-muted); }
-	.install-error-card button { padding: 0.25rem 0.6rem; background: var(--red); color: white; border: none; border-radius: 3px; cursor: pointer; }
-	.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
-	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; width: 90%; max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; }
-	.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 1rem; border-bottom: 1px solid var(--border); }
-	.modal-header h3 { margin: 0; font-size: 0.9rem; }
+	.install-error-card button { padding: 0.25rem 0.6rem; background: var(--red); color: white; border: none; border-radius: 3px; cursor: pointer; font-weight: bold; }
+	.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
+	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; width: 90%; max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+	.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); background: var(--bg); }
+	.modal-header h3 { margin: 0; font-size: 0.9rem; font-weight: bold; }
 	.modal-header button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem; }
 	.modal-body { flex: 1; overflow-y: auto; padding: 1rem; }
-	.modal-body pre { white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; line-height: 1.5; }
-	.error-details { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 0.75rem; font-size: 0.85rem; }
+	.modal-body pre { white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; line-height: 1.5; font-family: 'JetBrains Mono', monospace; background: var(--bg); padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
+	.error-details { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 0.75rem; font-size: 0.85rem; margin-bottom: 1rem; }
 	.error-details dt { color: var(--text-muted); }
 	.error-details dd { margin: 0; word-break: break-word; }
 </style>

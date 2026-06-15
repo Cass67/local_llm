@@ -5,6 +5,7 @@
   let lines: string[] = $state([]);
   let connected: boolean = $state(false);
   let autoScroll: boolean = $state(true);
+  let source: 'runner' | 'mgmt' = $state('mgmt');
   let eventSource: EventSource | null = null;
   let logContainer: HTMLDivElement | undefined = $state();
 
@@ -13,7 +14,7 @@
     lines = [];
     connected = false;
 
-    eventSource = new EventSource('/api/local-llm/logs/stream');
+    eventSource = new EventSource(`/api/local-llm/logs/stream?source=${source}`);
     eventSource.onopen = () => { connected = true; };
 
     eventSource.addEventListener('log', (e: MessageEvent) => {
@@ -43,6 +44,10 @@
       {connected ? '● Live' : '○ Disconnected'}
     </span>
     <span class="line-count">{lines.length} lines</span>
+    <select bind:value={source} onchange={connect}>
+      <option value="runner">Runner logs</option>
+      <option value="mgmt">Management/API logs</option>
+    </select>
     <button onclick={connect} disabled={connected}>Reconnect</button>
     <label>
       <input type="checkbox" bind:checked={autoScroll} />
@@ -78,7 +83,7 @@
   .status { color: var(--red); }
   .status.connected { color: var(--green); }
   .line-count { color: var(--text-muted); }
-  .log-toolbar button {
+  .log-toolbar button, .log-toolbar select {
     padding: 0.2rem 0.5rem;
     border: 1px solid var(--border);
     background: var(--bg);
@@ -90,9 +95,9 @@
   .log-container {
     flex: 1;
     overflow-y: auto;
-    background: #0a0a1a;
+    background: #000;
     padding: 0.5rem;
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 0.8rem;
     line-height: 1.4;
   }
