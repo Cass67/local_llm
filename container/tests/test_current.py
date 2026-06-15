@@ -11,12 +11,9 @@ def temp_state(tmp_path, monkeypatch):
     import backend.config as cfg
 
     accepted = tmp_path / "accepted"
-    launchers = tmp_path / "launchers"
     accepted.mkdir(parents=True)
-    launchers.mkdir(parents=True)
     monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
     monkeypatch.setattr(cfg, "ACCEPTED_DIR", accepted)
-    monkeypatch.setattr(cfg, "LAUNCHERS_DIR", launchers)
     monkeypatch.setattr(cfg, "LLAMA_CPP_DIR", tmp_path)
     return tmp_path
 

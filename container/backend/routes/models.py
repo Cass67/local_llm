@@ -48,7 +48,6 @@ def _read_accepted_models() -> list[ModelInfo]:
             tensor_split=config_data.get("tensor_split"),
         )
 
-        launcher_file = data.get("launcher_file")
         downloaded = _is_downloaded(data)
 
         models.append(
@@ -61,7 +60,6 @@ def _read_accepted_models() -> list[ModelInfo]:
                 backend=str(data.get("backend") or config_data.get("backend", "rocm")),
                 reasoning=bool(data.get("reasoning", False)),
                 config=model_cfg,
-                launcher_file=str(launcher_file) if launcher_file else None,
                 running=False,
                 downloaded=downloaded,
             )

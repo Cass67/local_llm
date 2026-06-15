@@ -43,7 +43,6 @@
 					<div><span>Profile</span><code>{data.profile || "-"}</code></div>
 					<div><span>Backend</span><code>{data.config?.backend || data.backend || "-"}</code></div>
 					<div><span>Ctx</span><code>{data.config?.ctx || data.context || "-"}</code></div>
-					<div><span>Launcher</span><code>{data.launcher_file || data.remote_start || "-"}</code></div>
 				</div>
 				<h4>Raw Metadata</h4>
 				<pre>{JSON.stringify(data, null, 2)}</pre>

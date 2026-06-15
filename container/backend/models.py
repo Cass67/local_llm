@@ -20,7 +20,6 @@ class ModelInfo(BaseModel):
     backend: str = "rocm"
     reasoning: bool = False
     config: ModelConfig = ModelConfig()
-    launcher_file: str | None = None
     running: bool = False
     downloaded: bool = True
 

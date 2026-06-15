@@ -10,9 +10,7 @@ from httpx import ASGITransport, AsyncClient
 @pytest.fixture
 def temp_state(tmp_path, monkeypatch):
     accepted = tmp_path / "accepted"
-    launchers = tmp_path / "launchers"
     accepted.mkdir(parents=True)
-    launchers.mkdir(parents=True)
     model_file = tmp_path / "models--Test--Qwen" / "snapshots" / "abc" / "qwen.gguf"
     model_file.parent.mkdir(parents=True)
     model_file.write_text("fake")
@@ -24,8 +22,6 @@ def temp_state(tmp_path, monkeypatch):
         "profile": "reliable",
         "context": 131072,
         "backend": "rocm",
-        "launcher_file": str(launchers / "start-qwen.sh"),
-        "remote_start": "./start-qwen.sh",
         "reasoning": False,
         "repo": "Test/Qwen",
         "hf_repo": "Test/Qwen",
@@ -33,14 +29,11 @@ def temp_state(tmp_path, monkeypatch):
         "config": {"ctx": 131072, "batch": 4096, "ubatch": 256, "ngl": 999},
     }
     (accepted / "qwen.json").write_text(json.dumps(model_data, indent=2))
-    (launchers / "start-qwen.sh").write_text("#!/usr/bin/env bash\necho ok\n")
-    (launchers / "start-qwen.sh").chmod(0o755)
 
     import backend.config as cfg
 
     monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
     monkeypatch.setattr(cfg, "ACCEPTED_DIR", accepted)
-    monkeypatch.setattr(cfg, "LAUNCHERS_DIR", launchers)
     monkeypatch.setattr(cfg, "LLAMA_CPP_DIR", tmp_path)
     monkeypatch.setattr(cfg, "MODELS_CACHE_DIR", tmp_path)
     return tmp_path
@@ -122,17 +115,11 @@ async def test_switch_model_with_backend_override(temp_state):
         "profile": "reliable",
         "context": 65536,
         "backend": "vulkan",
-        "launcher_file": str(cfg.LAUNCHERS_DIR / "start-qwen-vulkan.sh"),
-        "remote_start": "./start-qwen-vulkan.sh",
         "reasoning": False,
         "model_path": "/models/qwen-vulkan.gguf",
         "config": {"backend": "vulkan"},
     }
     (cfg.ACCEPTED_DIR / "qwen-vulkan.json").write_text(json.dumps(vulkan_data, indent=2))
-    (cfg.LAUNCHERS_DIR / "start-qwen-vulkan.sh").write_text(
-        "#!/usr/bin/env bash\nGGML_VK_VISIBLE_DEVICES=0,1 exec ./build-vulkan/bin/llama-server\n"
-    )
-    (cfg.LAUNCHERS_DIR / "start-qwen-vulkan.sh").chmod(0o755)
 
     from backend.main import app
 

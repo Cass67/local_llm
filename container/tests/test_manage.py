@@ -10,9 +10,7 @@ from backend.main import app
 @pytest.fixture
 def temp_state(tmp_path):
     accepted = tmp_path / "accepted"
-    launchers = tmp_path / "launchers"
     accepted.mkdir(parents=True)
-    launchers.mkdir(parents=True)
 
     model_data = {
         "family": "qwen",
@@ -20,8 +18,6 @@ def temp_state(tmp_path):
         "model_name": "Qwen Test Q6_K",
         "profile": "reliable",
         "backend": "rocm",
-        "launcher_file": str(launchers / "start-qwen.sh"),
-        "remote_start": "./start-qwen.sh",
         "reasoning": True,
         "config": {
             "quant": "Q6_K",
@@ -33,8 +29,6 @@ def temp_state(tmp_path):
         },
     }
     (accepted / "qwen.json").write_text(json.dumps(model_data, indent=2))
-    (launchers / "start-qwen.sh").write_text("#!/usr/bin/env bash\necho ok\n")
-    (launchers / "start-qwen.sh").chmod(0o755)
 
     import backend.config as cfg
 
@@ -42,12 +36,10 @@ def temp_state(tmp_path):
     old_llama = cfg.LLAMA_CPP_DIR
     cfg.RUNS_DIR = tmp_path
     cfg.ACCEPTED_DIR = accepted
-    cfg.LAUNCHERS_DIR = launchers
     cfg.LLAMA_CPP_DIR = tmp_path
     yield tmp_path
     cfg.RUNS_DIR = old_runs
     cfg.ACCEPTED_DIR = old_runs / "accepted"
-    cfg.LAUNCHERS_DIR = old_runs / "launchers"
     cfg.LLAMA_CPP_DIR = old_llama
 
 
@@ -97,28 +89,21 @@ async def test_detail_unknown_family_returns_404(temp_state):
 
 @pytest.mark.asyncio
 async def test_edit_model_updates_config(temp_state):
-    mock_launcher = MagicMock()
-    mock_launcher.returncode = 0
-    mock_launcher.stdout = "ok"
-    mock_launcher.stderr = ""
-
-    with patch("backend.cli.subprocess.run", return_value=mock_launcher):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.put(
-                "/api/models/qwen",
-                json={
-                    "ctx": 65536,
-                    "batch": 2048,
-                    "backend": "vulkan",
-                },
-            )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.put(
+            "/api/models/qwen",
+            json={
+                "ctx": 65536,
+                "batch": 2048,
+                "backend": "vulkan",
+            },
+        )
 
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
 
-    # Verify file was updated
     updated = json.loads((temp_state / "accepted" / "qwen.json").read_text())
     assert updated["config"]["ctx"] == 65536
     assert updated["config"]["batch"] == 2048
@@ -127,20 +112,19 @@ async def test_edit_model_updates_config(temp_state):
 
 @pytest.mark.asyncio
 async def test_edit_model_saves_structured_mtp_config(temp_state):
-    with patch("backend.cli.subprocess.run", return_value=MagicMock(returncode=0, stdout="ok")):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.put(
-                "/api/models/qwen",
-                json={
-                    "mtp": {
-                        "enabled": True,
-                        "draft_n_max": 3,
-                        "draft_n_min": 1,
-                        "draft_p_min": 0.5,
-                    }
-                },
-            )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.put(
+            "/api/models/qwen",
+            json={
+                "mtp": {
+                    "enabled": True,
+                    "draft_n_max": 3,
+                    "draft_n_min": 1,
+                    "draft_p_min": 0.5,
+                }
+            },
+        )
 
     assert response.status_code == 200
     updated = json.loads((temp_state / "accepted" / "qwen.json").read_text())
@@ -154,15 +138,14 @@ async def test_edit_model_saves_structured_mtp_config(temp_state):
 
 @pytest.mark.asyncio
 async def test_edit_model_stores_raw_flags_in_metadata_only(temp_state):
-    with patch("backend.cli.subprocess.run", return_value=MagicMock(returncode=0, stdout="ok")):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.put(
-                "/api/models/qwen",
-                json={
-                    "flags": "--spec-type draft-mtp --spec-draft-n-max 3 --spec-draft-n-min 1 --spec-draft-p-min 0.5",
-                },
-            )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.put(
+            "/api/models/qwen",
+            json={
+                "flags": "--spec-type draft-mtp --spec-draft-n-max 3 --spec-draft-n-min 1 --spec-draft-p-min 0.5",
+            },
+        )
 
     assert response.status_code == 200
     updated = json.loads((temp_state / "accepted" / "qwen.json").read_text())
@@ -173,20 +156,19 @@ async def test_edit_model_stores_raw_flags_in_metadata_only(temp_state):
 
 @pytest.mark.asyncio
 async def test_edit_model_stores_structured_mtp_in_metadata_only(temp_state):
-    with patch("backend.cli.subprocess.run", return_value=MagicMock(returncode=0, stdout="ok")):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.put(
-                "/api/models/qwen",
-                json={
-                    "mtp": {
-                        "enabled": True,
-                        "draft_n_max": 4,
-                        "draft_n_min": 2,
-                        "draft_p_min": 0.25,
-                    }
-                },
-            )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.put(
+            "/api/models/qwen",
+            json={
+                "mtp": {
+                    "enabled": True,
+                    "draft_n_max": 4,
+                    "draft_n_min": 2,
+                    "draft_p_min": 0.25,
+                }
+            },
+        )
 
     assert response.status_code == 200
     updated = json.loads((temp_state / "accepted" / "qwen.json").read_text())
@@ -200,13 +182,12 @@ async def test_edit_model_stores_structured_mtp_in_metadata_only(temp_state):
 
 @pytest.mark.asyncio
 async def test_edit_model_disabled_mtp_updates_metadata_only(temp_state):
-    with patch("backend.cli.subprocess.run", return_value=MagicMock(returncode=0, stdout="ok")):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.put(
-                "/api/models/qwen",
-                json={"mtp": {"enabled": False}},
-            )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.put(
+            "/api/models/qwen",
+            json={"mtp": {"enabled": False}},
+        )
 
     assert response.status_code == 200
     updated = json.loads((temp_state / "accepted" / "qwen.json").read_text())
@@ -224,16 +205,13 @@ async def test_delete_models_removes_accepted_metadata_by_family(temp_state):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
             "/api/models/delete",
-            json={
-                "repos": ["qwen"],
-            },
+            json={"repos": ["qwen"]},
         )
 
     assert response.status_code == 200
     data = response.json()
     assert data["results"] == [{"repo": "qwen", "status": "deleted", "family": "qwen"}]
     assert not (temp_state / "accepted" / "qwen.json").exists()
-    assert not (temp_state / "launchers" / "start-qwen.sh").exists()
 
 
 @pytest.mark.asyncio
@@ -242,9 +220,7 @@ async def test_delete_models_removes_accepted_metadata_by_alias(temp_state):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
             "/api/models/delete",
-            json={
-                "repos": ["qwen-test-q6"],
-            },
+            json={"repos": ["qwen-test-q6"]},
         )
 
     assert response.status_code == 200
@@ -260,9 +236,7 @@ async def test_delete_models_does_not_call_remote_only_model_manager(temp_state)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
                 "/api/models/delete",
-                json={
-                    "repos": ["qwen"],
-                },
+                json={"repos": ["qwen"]},
             )
 
     assert response.status_code == 200
@@ -278,7 +252,6 @@ async def test_status_returns_full_state(temp_state):
         ),
         patch("backend.routes.manage.subprocess.run") as mock_run,
     ):
-        # mock for pgrep (downloads)
         mock_run.return_value = MagicMock(stdout="", returncode=1)
 
         transport = ASGITransport(app=app)

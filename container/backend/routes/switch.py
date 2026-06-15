@@ -10,7 +10,6 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .. import config
-from ..cli import run_stop_server
 from ..runtime import DockerRunner, DockerRunnerConfig, build_runner_container_spec
 
 router = APIRouter(prefix="/api/models", tags=["switch"])
@@ -223,12 +222,6 @@ async def switch_model(req: SwitchRequest):
         alias=model_id,
         backend=backend,
     )
-
-
-@router.post("/stop")
-async def stop_model_server():
-    """Stop host llama-server service if present."""
-    return {"status": run_stop_server()}
 
 
 def _runner_api_model_ids() -> set[str]:
