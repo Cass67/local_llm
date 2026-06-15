@@ -10,6 +10,7 @@ from .config import (
     MODEL_DISCOVERY,
     MODEL_MANAGER,
 )
+from .service import check_updates
 from .state import (
     RUNS_DIR,
     delete_accepted,
@@ -22,6 +23,13 @@ from .state import (
     write_accepted,
     write_config,
 )
+
+
+def cmd_check_updates(args: argparse.Namespace) -> int:
+    """Check for recommended model updates."""
+    result = check_updates(dry_run=not args.apply)
+    print(result)
+    return 0
 
 
 def cmd_init(args: argparse.Namespace) -> int:

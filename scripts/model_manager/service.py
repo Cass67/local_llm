@@ -408,6 +408,22 @@ def delete_model(repo: str, target: str | None) -> str:
     return f"error: {message}"
 
 
+def check_updates(dry_run: bool = True) -> str:
+    """Check for recommended model updates via model-manager.sh update."""
+    flags = ["update", "--dry-run"] if dry_run else ["update", "--yes"]
+    result = subprocess.run(  # nosec: B603
+        [str(MODEL_MANAGER)] + flags,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    output = (result.stdout or "").strip()
+    if result.returncode != 0:
+        msg = (result.stderr or "").strip().splitlines()[0]
+        return f"error: {msg}"
+    return output or "no updates needed"
+
+
 def update_launcher(family: str) -> str:
     """Regenerate launcher for family via model-manager.sh update-launcher."""
     result = subprocess.run(  # nosec: B603
