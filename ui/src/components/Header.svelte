@@ -20,6 +20,7 @@
 		<a href="#/status" class:active={currentRoute === "/status"}>Status</a>
 		<a href="#/benchmarks" class:active={currentRoute === "/benchmarks"}>Benchmarks</a>
 		<a href="/chat/">Chat</a>
+		<a href="/traces/" target="_blank" rel="noreferrer">Traces</a>
 		<a href="#/logs" class:active={currentRoute === "/logs"}>Logs</a>
 	</nav>
 </header>

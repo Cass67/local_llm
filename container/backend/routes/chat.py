@@ -1,12 +1,16 @@
 """Chat completion proxy to project-owned runner."""
 
 import json
+import time
 
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+
 from .. import config
+from .. import tracing
 from . import switch as switch_routes
+from .stats import append_chat_metric
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -93,6 +97,7 @@ def _record_metrics(body: bytes, response_body: bytes) -> None:
     }
     config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
     (config.RUNS_DIR / "latest-metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
+    append_chat_metric(metrics)
 
 
 async def proxy_chat_completions(request: Request):
@@ -104,6 +109,9 @@ async def proxy_chat_completions(request: Request):
     }
 
     if _is_stream_request(body):
+        generation = tracing.open_generation(body, stream=True)
+        req_start = time.perf_counter()
+
         client = httpx.AsyncClient(timeout=300.0)
         stream_context = client.stream(
             "POST",
@@ -115,27 +123,89 @@ async def proxy_chat_completions(request: Request):
             upstream = await stream_context.__aenter__()
         except httpx.HTTPError:
             await client.aclose()
+            tracing.close_generation(generation, "", error="runner unavailable")
             return JSONResponse({"detail": "runner unavailable"}, status_code=503)
 
         async def stream_runner():
+            first_token = True
+            ttft_ms: float | None = None
+            parts: list[str] = []
+            prompt_tokens: int | None = None
+            completion_tokens: int | None = None
+
             try:
-                async for chunk in upstream.aiter_raw():
-                    yield chunk
+                async for raw in upstream.aiter_raw():
+                    if first_token and raw.strip():
+                        ttft_ms = (time.perf_counter() - req_start) * 1000
+                        first_token = False
+                    for line in raw.decode("utf-8", errors="ignore").splitlines():
+                        if not line.startswith("data: ") or line == "data: [DONE]":
+                            continue
+                        try:
+                            data = json.loads(line[6:])
+                            delta = (data.get("choices") or [{}])[0].get("delta", {})
+                            if delta.get("content"):
+                                parts.append(delta["content"])
+                            usage = data.get("usage")
+                            if isinstance(usage, dict):
+                                prompt_tokens = usage.get("prompt_tokens")
+                                completion_tokens = usage.get("completion_tokens")
+                        except (json.JSONDecodeError, IndexError, KeyError):
+                            pass
+                    yield raw
             finally:
+                tracing.close_generation(
+                    generation,
+                    "".join(parts),
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    ttft_ms=ttft_ms,
+                    duration_ms=(time.perf_counter() - req_start) * 1000,
+                )
                 await stream_context.__aexit__(None, None, None)
                 await client.aclose()
 
         return StreamingResponse(stream_runner(), media_type="text/event-stream")
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        upstream = await client.post(
-            f"{config.RUNNER_URL}/chat/completions",
-            content=body,
-            headers=headers,
-        )
+    generation = tracing.open_generation(body, stream=False)
+    req_start = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            upstream = await client.post(
+                f"{config.RUNNER_URL}/chat/completions",
+                content=body,
+                headers=headers,
+            )
+    except Exception as exc:
+        tracing.close_generation(generation, "", error=str(exc))
+        raise
 
+    duration_ms = (time.perf_counter() - req_start) * 1000
     content_type = upstream.headers.get("content-type", "application/json")
     _record_metrics(body, upstream.content)
+
+    if upstream.status_code == 200:
+        try:
+            resp = json.loads(upstream.content)
+            choices = resp.get("choices") or []
+            resp_text = (choices[0].get("message") or {}).get("content", "") if choices else ""
+            usage = resp.get("usage") or {}
+            timings = resp.get("timings") or {}
+            tracing.close_generation(
+                generation,
+                resp_text,
+                prompt_tokens=usage.get("prompt_tokens"),
+                completion_tokens=usage.get("completion_tokens"),
+                duration_ms=duration_ms,
+                predicted_per_second=timings.get("predicted_per_second"),
+            )
+        except (json.JSONDecodeError, IndexError):
+            tracing.close_generation(generation, "", duration_ms=duration_ms)
+    else:
+        tracing.close_generation(
+            generation, "", error=f"HTTP {upstream.status_code}", duration_ms=duration_ms
+        )
+
     return Response(
         content=upstream.content,
         status_code=upstream.status_code,

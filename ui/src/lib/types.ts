@@ -187,6 +187,24 @@ export interface BenchmarkSummary {
 	>;
 }
 
+export interface ChatMetric {
+	id: number;
+	ts: number;
+	model: string | null;
+	predicted_per_second: number | null;
+	prompt_per_second: number | null;
+	draft_n: number | null;
+	draft_n_accepted: number | null;
+}
+
+export interface RunnerHealth {
+	error?: string;
+	// llama.cpp /health fields
+	status?: string;
+	slots_idle?: number;
+	slots_processing?: number;
+}
+
 export interface BenchmarkRunFilters {
 	endpoint_id?: number | "";
 	model?: string;

@@ -16,6 +16,8 @@ import type {
 	BenchmarkRun,
 	BenchmarkRunFilters,
 	BenchmarkSummary,
+	ChatMetric,
+	RunnerHealth,
 } from "./types";
 
 const BASE = "/api/local-llm";
@@ -118,6 +120,18 @@ export async function fetchStatus(): Promise<StatusResponse> {
 export async function fetchStats(): Promise<StatsResponse> {
 	const res = await fetch(`${BASE}/stats`);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchStatsHistory(limit = 50): Promise<{ metrics: ChatMetric[] }> {
+	const res = await fetch(`${BASE}/stats/history?limit=${limit}`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchRunnerHealth(): Promise<RunnerHealth> {
+	const res = await fetch(`${BASE}/runner/health`);
+	if (!res.ok) return { error: `HTTP ${res.status}` };
 	return res.json();
 }
 
