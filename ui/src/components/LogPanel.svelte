@@ -5,7 +5,7 @@
   let lines: string[] = $state([]);
   let connected: boolean = $state(false);
   let autoScroll: boolean = $state(true);
-  let source: 'runner' | 'mgmt' = $state('mgmt');
+  let source: 'runner' | 'mgmt' = $state('runner');
   let eventSource: EventSource | null = null;
   let logContainer: HTMLDivElement | undefined = $state();
 
