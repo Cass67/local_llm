@@ -61,42 +61,49 @@ local-llm-runner  :8080  (llama-server, GPU access)
 - `/dev/kfd`, `/dev/dri` accessible to your user (render group).
 - Python 3.11+ available on the host for `huggingface_hub` downloads inside the mgmt container.
 
-### 1. Build the runner image
+### 1. Configure
 
 ```bash
-cd runner
-./build.sh
+cp .env.example .env
+# Edit .env — at minimum verify RENDER_GROUP matches your system:
+getent group render | cut -d: -f3
+```
+
+### 2. Build the runner image
+
+```bash
+cd runner && ./build.sh && cd ..
 ```
 
 This builds `local-llm-runner:latest` — a minimal Ubuntu image with llama.cpp compiled for ROCm and Vulkan. The build stage compiles from source; the runtime stage is stripped down with only the binary and GPU libs.
 
-### 2. Build and start the management container
+### 3. Start everything
 
 ```bash
-cd container
-docker compose build local-llm
-docker compose up -d local-llm
+docker compose up -d
 ```
 
-The management UI is now at **http://localhost:3100/ui/**.
+| Service | URL | Purpose |
+|---|---|---|
+| `local-llm-mgmt` | http://localhost:3100/ui/ | Management UI (direct) |
+| `local-llm-caddy` | http://localhost:3001/ui/ | All services via Caddy |
+| `open-webui` | http://localhost:3001/ | Open WebUI chat (optional) |
 
-### 3. Start Caddy (optional, for unified port access)
+To start without Open WebUI:
 
 ```bash
-docker run -d --name local-llm-caddy --network host \
-  -v "$PWD/scripts/Caddyfile.local-llm:/etc/caddy/Caddyfile:ro" \
-  caddy:2
+docker compose up -d local-llm-mgmt local-llm-caddy
 ```
 
-All services are then available through **http://localhost:3001/**.
+### 4. Update
 
-### 4. Start Open WebUI (optional)
+After pulling changes or editing the UI:
 
 ```bash
-docker compose up -d open-webui
+cd ui && bun run build && cd ..
+docker compose build local-llm-mgmt
+docker compose up -d local-llm-mgmt
 ```
-
-Accessible at **http://localhost:3001/** (root) or **/chat/** via Caddy. Backed by the management container's `/v1` proxy, so it uses whatever model the runner is serving.
 
 ---
 
@@ -228,16 +235,16 @@ Svelte 5 app. Components in `ui/src/components/`. Routes (panels) in `ui/src/rou
 After UI or backend changes:
 
 ```bash
-cd ui && bun run build
-cd ../container && docker compose build local-llm && docker compose up -d local-llm
+cd ui && bun run build && cd ..
+docker compose build local-llm-mgmt
+docker compose up -d local-llm-mgmt
 ```
 
 To deploy to a remote host (replace `ubt26` with your host):
 
 ```bash
-rsync -av container/ ubt26:~/git/local_llm/container/
-rsync -av runner/ ubt26:~/git/local_llm/runner/
-ssh ubt26 "cd ~/git/local_llm/container && docker compose build local-llm && docker compose up -d local-llm"
+rsync -av container/ runner/ scripts/ ubt26:~/git/local_llm/
+ssh ubt26 "cd ~/git/local_llm && docker compose build local-llm-mgmt && docker compose up -d"
 ```
 
 ### Runner image
