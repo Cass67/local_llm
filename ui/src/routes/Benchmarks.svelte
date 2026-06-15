@@ -141,8 +141,12 @@
 	async function loadModels() {
 		if (!selectedEndpointId) return;
 		error = "";
-		models = (await loadBenchmarkModels(Number(selectedEndpointId))).models;
-		selectedModel = models[0] || "";
+		try {
+			models = (await loadBenchmarkModels(Number(selectedEndpointId))).models;
+			selectedModel = models[0] || "";
+		} catch (e: unknown) {
+			error = e instanceof Error ? e.message : String(e);
+		}
 	}
 
 	async function applyFilters() {
