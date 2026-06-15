@@ -72,7 +72,7 @@
 				draft_n_min: num("mtp_draft_n_min") ?? 1,
 				draft_p_min: mtpFloat(),
 			},
-			flags: form.flags || undefined,
+			flags: form.flags,
 		});
 	}
 
