@@ -9,17 +9,19 @@
 		listBenchmarkEndpoints,
 		listBenchmarkPrompts,
 		listBenchmarkRuns,
-		loadBenchmarkModels,
 		runBenchmark,
 	} from "../lib/benchmarkApi";
+	import { fetchModels, fetchCurrentModel, switchModel } from "../lib/api";
 	import { formatMs, formatThroughput, runDelta } from "../lib/benchmarkMetrics";
 	import type { BenchmarkEndpoint, BenchmarkPrompt, BenchmarkRun, BenchmarkSummary } from "../lib/benchmarkApi";
+	import type { ModelInfo } from "../lib/types";
 
 	let endpoints: BenchmarkEndpoint[] = $state([]);
 	let prompts: BenchmarkPrompt[] = $state([]);
 	let runs: BenchmarkRun[] = $state([]);
 	let summary: BenchmarkSummary | null = $state(null);
-	let models: string[] = $state([]);
+	let installedModels: ModelInfo[] = $state([]);
+	let activeFamily = $state("");
 	let latest: BenchmarkRun | null = $state(null);
 	let selectedRun: BenchmarkRun | null = $state(null);
 	let loading = $state(false);
@@ -146,17 +148,23 @@
 		loading = true;
 		error = "";
 		try {
-			const [endpointResult, promptResult, runResult, summaryResult] = await Promise.all([
-				listBenchmarkEndpoints(),
-				listBenchmarkPrompts(),
-				listBenchmarkRuns({ limit: 100 }),
-				fetchBenchmarkSummary(),
-			]);
+			const [endpointResult, promptResult, runResult, summaryResult, modelResult, currentResult] =
+				await Promise.all([
+					listBenchmarkEndpoints(),
+					listBenchmarkPrompts(),
+					listBenchmarkRuns({ limit: 100 }),
+					fetchBenchmarkSummary(),
+					fetchModels(),
+					fetchCurrentModel(),
+				]);
 			endpoints = endpointResult.endpoints;
 			prompts = promptResult.prompts;
 			runs = runResult.runs;
 			summary = summaryResult;
+			installedModels = modelResult.models;
+			activeFamily = currentResult.family;
 			if (!selectedEndpointId && endpoints[0]) selectedEndpointId = String(endpoints[0].id);
+			if (!selectedModel && currentResult.running) selectedModel = currentResult.alias;
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -186,16 +194,6 @@
 		await loadAll();
 	}
 
-	async function loadModels() {
-		if (!selectedEndpointId) return;
-		error = "";
-		try {
-			models = (await loadBenchmarkModels(Number(selectedEndpointId))).models;
-			selectedModel = models[0] || "";
-		} catch (e: unknown) {
-			error = e instanceof Error ? e.message : String(e);
-		}
-	}
 
 	async function applyFilters() {
 		const result = await listBenchmarkRuns({
@@ -215,6 +213,13 @@
 		running = true;
 		error = "";
 		try {
+			const model = installedModels.find((m) => m.alias === selectedModel || m.family === selectedModel);
+			if (model && model.family !== activeFamily) {
+				error = `Switching to ${model.alias}…`;
+				await switchModel({ family: model.family, profile: model.profile, backend: model.backend as "rocm" | "vulkan" });
+				activeFamily = model.family;
+				error = "";
+			}
 			const prompt = selectedPrompt();
 			const req = {
 				endpoint_id: Number(selectedEndpointId),
@@ -310,10 +315,11 @@
 				<option value="">Endpoint</option>
 				{#each endpoints as endpoint}<option value={String(endpoint.id)}>{endpoint.name}</option>{/each}
 			</select>
-			<button onclick={loadModels} disabled={!selectedEndpointId}>Load models</button>
 			<select bind:value={selectedModel}>
-				<option value="">Model</option>
-				{#each models as model}<option value={model}>{model}</option>{/each}
+				<option value="">Select model</option>
+				{#each installedModels as m}
+					<option value={m.alias}>{m.alias}{m.family === activeFamily ? " ★" : ""}</option>
+				{/each}
 			</select>
 			<button onclick={executeRun} disabled={running || !selectedEndpointId || !selectedModel}>{running ? "Running…" : "Run"}</button>
 		</div>
