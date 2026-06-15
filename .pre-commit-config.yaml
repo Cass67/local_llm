@@ -9,6 +9,7 @@ repos:
             status=0
             for f in "$@"; do
               case "$f" in
+                .env.example) ;;
                 .env|.env.*|*.env|*env*|*.local|*.secret|*.secrets|*.token|*.tokens)
                   printf "refusing risky path=%s\n" "$f"
                   status=1

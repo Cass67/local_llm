@@ -1,23 +1,72 @@
 services:
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    restart: unless-stopped
-    network_mode: host
-    environment:
-      PORT: "3002"
-    volumes:
-      - open-webui:/app/backend/data
 
+  # ── Management UI + API ──────────────────────────────────────────────────────
+  # Builds the FastAPI backend + Svelte UI. Manages model metadata, downloads,
+  # and creates/stops the local-llm-runner container on demand via Docker socket.
+  local-llm-mgmt:
+    build:
+      context: ./container
+      network: host
+    image: local-llm-mgmt:latest
+    container_name: local-llm-mgmt
+    network_mode: host
+    restart: unless-stopped
+    user: "${LOCAL_LLM_UID:-1000}:${LOCAL_LLM_GID:-1000}"
+    group_add:
+      - "${RENDER_GROUP:-991}"
+    volumes:
+      - ${LOCAL_LLM_STATE_DIR:-${HOME}/.local/share/local_llm}:/state
+      - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface/hub}:/models
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      LOCAL_LLM_STATE_DIR: /state
+      MODELS_CACHE_DIR: /models
+      HOST_MODELS_CACHE_DIR: ${HF_CACHE_DIR:-${HOME}/.cache/huggingface/hub}
+      DOCKER_SOCKET: /var/run/docker.sock
+      RUNNER_IMAGE: ${RUNNER_IMAGE:-local-llm-runner:latest}
+      LLAMA_SERVER_PORT: ${LLAMA_SERVER_PORT:-8080}
+
+  # ── Caddy reverse proxy ──────────────────────────────────────────────────────
+  # Single public entrypoint on :3001.
+  # Routes /ui/, /api/local-llm/, /v1/ → local-llm-mgmt :3100
+  # Routes / (root) → open-webui :3101
   local-llm-caddy:
     image: caddy:2
     container_name: local-llm-caddy
-    restart: unless-stopped
     network_mode: host
+    restart: unless-stopped
     depends_on:
-      - open-webui
+      - local-llm-mgmt
     volumes:
       - ${LOCAL_LLM_CADDYFILE:-./scripts/Caddyfile.local-llm}:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # ── Open WebUI (optional) ────────────────────────────────────────────────────
+  # Full chat interface backed by local-llm-mgmt's /v1 proxy.
+  # Accessible at http://localhost:3001/ (root) via Caddy, or :3101 directly.
+  # Remove or comment out this service if you don't want it.
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - local-llm-mgmt
+    volumes:
+      - open-webui:/app/backend/data
+    environment:
+      HOST: "127.0.0.1"
+      PORT: "3101"
+      OPENAI_API_BASE_URL: "http://127.0.0.1:3100/v1"
+      OPENAI_API_KEY: "local-llm"
+      ENABLE_OLLAMA_API: "False"
+      WEBUI_AUTH: "False"
+      WEBUI_URL: "/chat/"
+      LOCAL_LLM_BACK_URL: "/ui/"
+      ENABLE_EVALUATION_ARENA_MODELS: "False"
 
 volumes:
   open-webui:
+  caddy-data:
+  caddy-config:
