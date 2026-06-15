@@ -143,7 +143,10 @@ export async function loadBenchmarkModels(
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ endpoint_id }),
 	});
-	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
 	return res.json();
 }
 
