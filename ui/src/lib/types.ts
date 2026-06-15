@@ -40,6 +40,7 @@ export interface CurrentModelResponse {
 	alias: string;
 	backend: string;
 	running: boolean;
+	native_process_warning: boolean;
 	llama_server: { status: string };
 }
 
