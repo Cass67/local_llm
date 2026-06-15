@@ -25,7 +25,6 @@ export interface ModelInfo {
 	backend: "rocm" | "vulkan";
 	reasoning: boolean;
 	config: ModelConfig;
-	launcher_file?: string;
 	running: boolean;
 	downloaded: boolean;
 }

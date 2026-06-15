@@ -8,9 +8,7 @@ from httpx import ASGITransport, AsyncClient
 @pytest.fixture
 def temp_state(tmp_path, monkeypatch):
     accepted = tmp_path / "accepted"
-    launchers = tmp_path / "launchers"
     accepted.mkdir(parents=True)
-    launchers.mkdir(parents=True)
 
     model_data = {
         "family": "qwen",
@@ -19,23 +17,14 @@ def temp_state(tmp_path, monkeypatch):
         "profile": "reliable",
         "context": 131072,
         "backend": "rocm",
-        "launcher_file": str(launchers / "start-qwen.sh"),
-        "remote_start": "./start-qwen.sh",
         "reasoning": True,
     }
     (accepted / "qwen.json").write_text(json.dumps(model_data, indent=2))
-    (launchers / "start-qwen.sh").write_text("#!/usr/bin/env bash\necho ok\n")
-    (launchers / "start-qwen.sh").chmod(0o755)
-
-    (tmp_path / "current-model.env").write_text(
-        "REMOTE_SCRIPT=./start-qwen.sh\nREMOTE_PROFILE=reliable\n"
-    )
 
     import backend.config as cfg
 
     monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
     monkeypatch.setattr(cfg, "ACCEPTED_DIR", accepted)
-    monkeypatch.setattr(cfg, "LAUNCHERS_DIR", launchers)
     monkeypatch.setattr(cfg, "LLAMA_CPP_DIR", tmp_path)
     return tmp_path
 

@@ -9,9 +9,7 @@ from httpx import ASGITransport, AsyncClient
 def temp_state(tmp_path, monkeypatch):
     """Set up temp state dir with accepted metadata."""
     accepted = tmp_path / "accepted"
-    launchers = tmp_path / "launchers"
     accepted.mkdir(parents=True)
-    launchers.mkdir(parents=True)
 
     model_data = {
         "family": "qwen",
@@ -20,8 +18,6 @@ def temp_state(tmp_path, monkeypatch):
         "profile": "reliable",
         "context": 131072,
         "backend": "rocm",
-        "launcher_file": str(launchers / "start-qwen.sh"),
-        "remote_start": "./start-qwen.sh",
         "config": {
             "quant": "Q6_K",
             "batch": 4096,
@@ -34,15 +30,10 @@ def temp_state(tmp_path, monkeypatch):
     }
     (accepted / "qwen.json").write_text(json.dumps(model_data, indent=2))
 
-    # Create empty launcher file
-    (launchers / "start-qwen.sh").write_text("#!/usr/bin/env bash\necho ok\n")
-    (launchers / "start-qwen.sh").chmod(0o755)
-
     import backend.config as cfg
 
     monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
     monkeypatch.setattr(cfg, "ACCEPTED_DIR", accepted)
-    monkeypatch.setattr(cfg, "LAUNCHERS_DIR", launchers)
     return tmp_path
 
 
@@ -66,15 +57,12 @@ async def test_list_models_returns_accepted_models(temp_state):
 @pytest.mark.asyncio
 async def test_list_models_empty_returns_empty_list(tmp_path, monkeypatch):
     accepted = tmp_path / "accepted"
-    launchers = tmp_path / "launchers"
     accepted.mkdir(parents=True)
-    launchers.mkdir(parents=True)
 
     import backend.config as cfg
 
     monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
     monkeypatch.setattr(cfg, "ACCEPTED_DIR", accepted)
-    monkeypatch.setattr(cfg, "LAUNCHERS_DIR", launchers)
 
     from backend.main import app
 

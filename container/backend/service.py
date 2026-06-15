@@ -1,39 +1,10 @@
-"""Service layer: systemd interaction for llama-server on host."""
+"""Service layer: project-owned runner state helpers."""
 
-import subprocess
-
-
-def restart_llama_server() -> bool:
-    """Restart llama-server via host systemd --user."""
-    try:
-        result = subprocess.run(
-            ["systemctl", "--user", "restart", "llama-server.service"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return False
+import json
+from pathlib import Path
 
 
-def get_llama_server_status() -> str:
-    """Get llama-server service status."""
-    try:
-        result = subprocess.run(
-            ["systemctl", "--user", "is-active", "llama-server.service"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return "unknown"
-
-
-def _read_state_json(path):
-    import json
-
+def _read_state_json(path: Path) -> dict | None:
     if not path.exists() or path.is_symlink():
         return None
     try:

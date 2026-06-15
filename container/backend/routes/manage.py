@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from .. import config, cli
+from .. import config
 from ..model_variants import Backend, copy_backend_variant, migrate_backend_variant
 from ..service import detect_running_model
 
@@ -202,7 +202,7 @@ class EditRequest(BaseModel):
 
 @router.put("/models/{family}")
 async def edit_model(family: str, req: EditRequest):
-    """Edit accepted model config. Writes metadata + regenerates launcher."""
+    """Edit accepted model config."""
     safe = re.compile(r"^[A-Za-z0-9_.-]+$")
     if not safe.fullmatch(family) or ".." in family:
         raise HTTPException(400, "invalid family name")
@@ -244,10 +244,7 @@ async def edit_model(family: str, req: EditRequest):
         cfg["mtp"] = req.mtp.model_dump()
 
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
-
-    # Regenerate launcher
-    launcher_result = cli.run_update_launcher(family)
-    return {"status": "ok", "launcher": launcher_result}
+    return {"status": "ok"}
 
 
 # --- Delete ---
@@ -300,12 +297,7 @@ def _delete_accepted_model(value: str) -> dict:
             continue
         family = str(data.get("family") or metadata_path.stem)
         alias = str(data.get("alias") or family)
-        launcher = data.get("launcher_file")
         metadata_path.unlink()
-        if isinstance(launcher, str) and launcher:
-            launcher_path = Path(launcher)
-            if launcher_path.exists() and not launcher_path.is_symlink():
-                launcher_path.unlink()
         _remove_model_state_references(family, alias)
         return {"repo": value, "status": "deleted", "family": family}
     return {"repo": value, "status": "not_found"}
