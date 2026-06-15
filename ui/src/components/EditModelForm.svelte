@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { editModel, fetchModelDetail } from "../lib/api";
+	import { editModel, fetchModelDetail, switchModel } from "../lib/api";
 	import { normalizeMtpConfig } from "../lib/mtpFlags";
 
 	let { family, onClose, onSaved }: { family: string; onClose: () => void; onSaved: () => void } = $props();
@@ -51,32 +51,51 @@
 		return Number.isFinite(value) ? value : 0.5;
 	}
 
+	async function doSave() {
+		await editModel(family, {
+			profile: form.profile,
+			ctx: num("ctx"),
+			batch: num("batch"),
+			ubatch: num("ubatch"),
+			ngl: num("ngl"),
+			cache_type_k: form.cache_type_k || undefined,
+			cache_type_v: form.cache_type_v || undefined,
+			ctx_shift: form.ctx_shift || undefined,
+			reasoning: form.reasoning === "on",
+			backend: form.backend || undefined,
+			visible_devices: form.visible_devices || undefined,
+			split_mode: form.split_mode || undefined,
+			tensor_split: form.tensor_split || undefined,
+			mtp: {
+				enabled: form.mtp_enabled === "on",
+				draft_n_max: num("mtp_draft_n_max") ?? 3,
+				draft_n_min: num("mtp_draft_n_min") ?? 1,
+				draft_p_min: mtpFloat(),
+			},
+			flags: form.flags || undefined,
+		});
+	}
+
 	async function save() {
 		saving = true;
 		error = "";
 		try {
-			await editModel(family, {
-				profile: form.profile,
-				ctx: num("ctx"),
-				batch: num("batch"),
-				ubatch: num("ubatch"),
-				ngl: num("ngl"),
-				cache_type_k: form.cache_type_k || undefined,
-				cache_type_v: form.cache_type_v || undefined,
-				ctx_shift: form.ctx_shift || undefined,
-				reasoning: form.reasoning === "on",
-				backend: form.backend || undefined,
-				visible_devices: form.visible_devices || undefined,
-				split_mode: form.split_mode || undefined,
-				tensor_split: form.tensor_split || undefined,
-				mtp: {
-					enabled: form.mtp_enabled === "on",
-					draft_n_max: num("mtp_draft_n_max") ?? 3,
-					draft_n_min: num("mtp_draft_n_min") ?? 1,
-					draft_p_min: mtpFloat(),
-				},
-				flags: form.flags || undefined,
-			});
+			await doSave();
+			onSaved();
+			onClose();
+		} catch (e: unknown) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			saving = false;
+		}
+	}
+
+	async function saveAndRestart() {
+		saving = true;
+		error = "";
+		try {
+			await doSave();
+			await switchModel({ family, profile: form.profile, backend: form.backend as "rocm" | "vulkan" });
 			onSaved();
 			onClose();
 		} catch (e: unknown) {
@@ -134,7 +153,10 @@
 					</div>
 					<label>Flags<input bind:value={form.flags} /></label>
 				</div>
-				<div class="actions"><button onclick={save} disabled={saving}>{saving ? "Saving..." : "Save + Regenerate Launcher"}</button></div>
+				<div class="actions">
+					<button onclick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</button>
+					<button class="restart" onclick={saveAndRestart} disabled={saving}>{saving ? "Saving..." : "Save & Restart"}</button>
+				</div>
 			{/if}
 		</div>
 	</div>
@@ -154,8 +176,9 @@
 	.checkbox-row { flex-direction: row; align-items: center; color: var(--text); gap: 0.5rem; }
 	input, select { padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text); transition: border-color 0.1s; }
 	input:focus, select:focus { outline: none; border-color: var(--accent); }
-	.actions { margin-top: 1.2rem; display: flex; justify-content: flex-end; }
+	.actions { margin-top: 1.2rem; display: flex; justify-content: flex-end; gap: 0.5rem; }
 	.actions button { padding: 0.6rem 1.2rem; background: var(--accent); color: var(--text); border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: filter 0.1s; }
 	.actions button:hover:not(:disabled) { filter: brightness(1.2); }
+	.actions button.restart { background: var(--green); }
 	.error { background: var(--red); color: white; padding: 0.5rem; border-radius: 4px; margin-bottom: 0.7rem; }
 </style>
