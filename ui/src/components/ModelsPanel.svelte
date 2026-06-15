@@ -76,7 +76,7 @@
 
 	{#if current}
 		<div class="current-status">
-			Running: <strong>{current.alias}</strong> ({current.backend})
+			{current.running ? "Running:" : "Last used:"} <strong>{current.alias}</strong> ({current.backend})
 			<span class="status-dot" class:active={current.running} class:inactive={!current.running}></span>
 			<span class="service-status">{current.llama_server.status}</span>
 		</div>
@@ -86,7 +86,7 @@
 		{#each filteredModels as model (model.family + "-" + model.backend)}
 			<ModelCard
 				{model}
-				isRunning={current?.alias === model.alias}
+				isRunning={current?.running === true && current?.alias === model.alias}
 				{switching}
 				onSwitch={(profile) => handleSwitch(model.family, profile, model.backend === "vulkan" ? "vulkan" : "rocm")}
 				onCopyBackend={(backend) => handleCopyBackend(model.family, backend)}
