@@ -18,3 +18,4 @@ RUNS_DIR = STATE_DIR / "runs"
 ACCEPTED_DIR = RUNS_DIR / "accepted"
 LAUNCHERS_DIR = RUNS_DIR / "launchers"
 SCRIPTS_DIR = Path(os.environ.get("SCRIPTS_DIR", "/scripts"))
+LLAMA_SWAP_CONFIG = Path(os.environ.get("LLAMA_SWAP_CONFIG", "/home/cass/llama-swap/config.yaml"))

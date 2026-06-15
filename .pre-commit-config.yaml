@@ -1,6 +1,5 @@
 repos:
-
-# repo-guard:base:start
+  # repo-guard:base:start
   - repo: local
     hooks:
       - id: risky-filenames
@@ -84,9 +83,9 @@ repos:
         entry: gitleaks git --pre-commit --staged --redact
         language: system
         pass_filenames: false
-# repo-guard:base:end
+  # repo-guard:base:end
 
-# repo-guard:python:start
+  # repo-guard:python:start
   - repo: local
     hooks:
       - id: ruff-check
@@ -158,9 +157,9 @@ repos:
           fi'
         language: system
         pass_filenames: false
-# repo-guard:python:end
+  # repo-guard:python:end
 
-# repo-guard:bash:start
+  # repo-guard:bash:start
   - repo: local
     hooks:
       - id: shfmt

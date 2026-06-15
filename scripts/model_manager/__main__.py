@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from .commands import (
+    cmd_check_updates,
     cmd_delete,
     cmd_init,
     cmd_install,
@@ -67,6 +68,11 @@ def main() -> int:
     p_delete = sub.add_parser("delete", help="Delete an accepted model family")
     p_delete.add_argument("--family", required=True, help="family to delete")
     p_delete.set_defaults(func=cmd_delete)
+
+    # check-updates
+    p_check = sub.add_parser("check-updates", help="Check for recommended model updates (dry-run)")
+    p_check.add_argument("--apply", action="store_true", help="Apply updates (--yes)")
+    p_check.set_defaults(func=cmd_check_updates)
 
     # tui
     sub.add_parser("tui", help="Launch interactive TUI")

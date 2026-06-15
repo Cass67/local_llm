@@ -104,6 +104,7 @@ class MainMenu(Screen[None]):
         Binding("5", "delete", "Delete"),
         Binding("6", "run", "Run"),
         Binding("7", "status", "Status"),
+        Binding("8", "check_updates", "Check Updates"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -121,6 +122,7 @@ class MainMenu(Screen[None]):
             Label("  [bold]5[/]  Delete        Delete an accepted model"),
             Label("  [bold]6[/]  Run           Run a model server"),
             Label("  [bold]7[/]  Status        Show model-manager status"),
+            Label("  [bold]8[/]  Check Updates Check for model updates"),
             Label("  [bold]q[/]  Quit"),
             id="menu-container",
         )
@@ -146,6 +148,9 @@ class MainMenu(Screen[None]):
 
     def action_status(self) -> None:
         self.app.push_screen(StatusScreen())
+
+    def action_check_updates(self) -> None:
+        self.app.push_screen(CheckUpdatesScreen())
 
 
 class InitScreen(Screen[None]):
@@ -2066,6 +2071,61 @@ class StatusScreen(Screen[None]):
                 self._busy = False
 
         threading.Thread(target=_do_restart, daemon=True).start()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class CheckUpdatesScreen(Screen[None]):
+    """Check for recommended model updates, apply if desired."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back"),
+        Binding("backspace", "back", "Back"),
+        Binding("enter", "apply", "Apply"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Container(
+            Label("[bold]Checking for Updates...[/bold]"),
+            id="result",
+        )
+        yield Footer()
+
+    def on_mount(self) -> None:
+        import threading
+
+        threading.Thread(target=self._do_check, daemon=True).start()
+
+    def _do_check(self) -> None:
+        from .service import check_updates
+
+        try:
+            result = check_updates(dry_run=True)
+            self.app.call_from_thread(self._show_result, result)
+        except Exception as e:
+            self.app.call_from_thread(self._show_result, f"[red]Error: {e}[/red]")
+
+    def _show_result(self, text: str) -> None:
+        self.query_one("#result", Label).update(
+            f"[bold]Updates Check[/bold]\n\n{text}\n\n[dim]enter = apply  ·  escape = back[/dim]"
+        )
+
+    def action_apply(self) -> None:
+        import threading
+
+        self.query_one("#result", Label).update("[bold]Applying Updates...[/bold]")
+        threading.Thread(target=self._do_apply, daemon=True).start()
+
+    def _do_apply(self) -> None:
+        from .service import check_updates
+
+        try:
+            result = check_updates(dry_run=False)
+            self.app.call_from_thread(self._show_result, result)
+        except Exception as e:
+            self.app.call_from_thread(self._show_result, f"[red]Error: {e}[/red]")
 
     def action_back(self) -> None:
         self.app.pop_screen()
