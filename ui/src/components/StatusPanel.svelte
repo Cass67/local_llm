@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { fetchStatus, fetchModels, switchModel, fetchStats } from "../lib/api";
-	import type { StatusResponse, ModelInfo, StatsResponse } from "../lib/types";
+	import { fetchStatus, fetchModels, switchModel, fetchStats, fetchStatsHistory, fetchRunnerHealth } from "../lib/api";
+	import type { StatusResponse, ModelInfo, StatsResponse, ChatMetric, RunnerHealth } from "../lib/types";
+
+	const HISTORY_LIMIT = 30;
 
 	let status: StatusResponse | null = $state(null);
 	let models: ModelInfo[] = $state([]);
 	let stats: StatsResponse = $state({});
+	let tpsHistory: ChatMetric[] = $state([]);
+	let runnerHealth: RunnerHealth = $state({});
 	let loading = $state(true);
 	let error = $state("");
 	let restarting: string | null = $state(null);
@@ -14,15 +18,40 @@
 		loading = true;
 		error = "";
 		try {
-				const [s, m, runtimeStats] = await Promise.all([fetchStatus(), fetchModels(), fetchStats()]);
+			const [s, m, runtimeStats, hist, health] = await Promise.all([
+				fetchStatus(),
+				fetchModels(),
+				fetchStats(),
+				fetchStatsHistory(HISTORY_LIMIT),
+				fetchRunnerHealth(),
+			]);
 			status = s;
 			models = m.models;
 			stats = runtimeStats;
+			tpsHistory = [...hist.metrics].reverse();
+			runnerHealth = health;
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
 			loading = false;
 		}
+	}
+
+	function sparklinePoints(metrics: ChatMetric[]): string {
+		const vals = metrics
+			.map((m) => m.predicted_per_second)
+			.filter((v): v is number => v != null && !Number.isNaN(v));
+		if (vals.length < 2) return "";
+		const min = Math.min(...vals);
+		const max = Math.max(...vals);
+		const spread = Math.max(max - min, 0.1);
+		return vals
+			.map((v, i) => {
+				const x = (i / (vals.length - 1)) * 100;
+				const y = 90 - ((v - min) / spread) * 80;
+				return `${x.toFixed(1)},${y.toFixed(1)}`;
+			})
+			.join(" ");
 	}
 
 	async function restart(model: ModelInfo) {
@@ -84,6 +113,28 @@
 			</tbody>
 		</table>
 
+		<div class="telemetry">
+			<div class="telem-block">
+				<span class="label">TPS history ({tpsHistory.filter(m => m.predicted_per_second != null).length} requests)</span>
+				{#if sparklinePoints(tpsHistory)}
+					<svg class="sparkline" viewBox="0 0 100 100" preserveAspectRatio="none">
+						<polyline points={sparklinePoints(tpsHistory)} />
+					</svg>
+				{:else}
+					<div class="spark-empty">no data yet</div>
+				{/if}
+			</div>
+			{#if !runnerHealth.error}
+				<div class="telem-block runner-info">
+					<span class="label">Runner</span>
+					<span class="runner-status">{runnerHealth.status ?? "unknown"}</span>
+					{#if runnerHealth.slots_idle != null}
+						<span class="muted">idle slots: {runnerHealth.slots_idle} / processing: {runnerHealth.slots_processing ?? 0}</span>
+					{/if}
+				</div>
+			{/if}
+		</div>
+
 		<h3>Active Downloads</h3>
 		<table>
 			<thead><tr><th>PID</th><th>Repo</th></tr></thead>
@@ -122,4 +173,13 @@
 	th { color: var(--text-muted); font-weight: normal; }
 	tr.active { background: var(--green11); }
 	.error { background: var(--red); color: white; padding: 0.5rem; border-radius: 4px; }
+	.telemetry { display: flex; gap: 1rem; flex-wrap: wrap; }
+	.telem-block { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 0.3rem; }
+	.label { color: var(--text-muted); font-size: 0.8rem; }
+	.sparkline { width: 100%; height: 60px; background: #000; border-radius: 4px; border: 1px solid var(--border); display: block; }
+	.sparkline polyline { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+	.spark-empty { height: 60px; background: #000; border-radius: 4px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.8rem; }
+	.runner-info { justify-content: center; }
+	.runner-status { font-size: 1.1rem; font-weight: bold; }
+	.muted { color: var(--text-muted); font-size: 0.8rem; }
 </style>

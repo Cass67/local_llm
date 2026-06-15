@@ -1,6 +1,6 @@
 # local_llm
 
-A self-hosted LLM management system for AMD GPU workstations. Models run in an isolated Docker container with full GPU access; a Svelte web UI handles search, install, configuration, model switching, benchmarking, and chat.
+A self-hosted LLM management system for AMD GPU workstations. Models run in an isolated Docker container with full GPU access; a Svelte web UI handles search, install, configuration, model switching, benchmarking, chat, and observability.
 
 ![local_llm architecture](docs/assets/local-llm-architecture.svg)
 
@@ -9,10 +9,11 @@ A self-hosted LLM management system for AMD GPU workstations. Models run in an i
 - **Search and install** GGUF models from HuggingFace, downloading directly into the local HF cache.
 - **Switch models** on demand — the management container creates and replaces the runner container via the Docker socket.
 - **Benchmark** models with configurable llama.cpp parameters (temperature, seed, top-p, top-k, repeat penalty, system prompt) and track latency/throughput trends across runs.
-- **Chat** directly in the browser through an OpenAI-compatible proxy.
+- **Chat** directly in the browser through an OpenAI-compatible proxy, or via Open WebUI.
 - **Stream logs** from the runner or management container in real time.
 - **Edit model configs** — context size, batch, ngl, tensor split, MTP speculative decoding — without touching JSON by hand.
-- **Open WebUI** is optionally available through Caddy as a full chat interface.
+- **Monitor** TPS sparkline and runner slot health in the Status panel.
+- **Trace** LLM requests with Langfuse: TTFT, token throughput, prompt/completion tokens, per-request timeline.
 
 All model serving goes through the `local-llm-runner` Docker container. There are no host-side launcher scripts or systemd services for inference.
 
@@ -27,6 +28,7 @@ Browser
   ▼
 local-llm-caddy  ──/ui/*, /api/local-llm/*, /v1/*──▶  local-llm-mgmt  :3100
                  ──/*, /chat/*──────────────────────▶  open-webui       :3101
+                 ──/traces*─────────────────────────▶  local-llm-langfuse :3004
   │
   │  local-llm-mgmt creates/stops runner via Docker socket
   ▼
@@ -34,20 +36,25 @@ local-llm-runner  :8080  (llama-server, GPU access)
   │
   ├── /dev/kfd, /dev/dri  (ROCm or Vulkan)
   └── ~/.cache/huggingface/hub  (GGUF model files)
+
+local-llm-langfuse  :3004  (LLM request tracing)
+local-llm-postgres  :5433  (Langfuse database)
 ```
 
 | Container | Port | Purpose |
 |---|---|---|
 | `local-llm-mgmt` | `3100` | FastAPI backend + Svelte UI. Manages models, launches runner. |
 | `local-llm-runner` | `8080` | llama.cpp `llama-server`. Created on demand for the active model. |
-| `local-llm-caddy` | `3001` | Reverse proxy. Routes `/ui/`, `/api/`, `/v1/` to mgmt; root to Open WebUI. |
+| `local-llm-caddy` | `3001` | Reverse proxy. Single public entrypoint. |
 | `open-webui` | `3101` | Optional full chat interface backed by the mgmt `/v1` proxy. |
+| `local-llm-langfuse` | `3004` | Langfuse v2 — LLM request tracing UI. |
+| `local-llm-postgres` | `5433` | PostgreSQL for Langfuse (isolated from any other Postgres on the host). |
 
 **State** lives outside the containers:
 
 | Path | Purpose |
 |---|---|
-| `~/.local/share/local_llm/` | Accepted model metadata, current runner state, benchmark database. |
+| `~/.local/share/local_llm/` | Accepted model metadata, current runner state, benchmark and chat metrics databases. |
 | `~/.cache/huggingface/hub/` | Downloaded GGUF files (shared between mgmt download and runner mount). |
 
 ---
@@ -59,14 +66,14 @@ local-llm-runner  :8080  (llama-server, GPU access)
 - Linux host with an AMD GPU (ROCm or Vulkan).
 - Docker with Compose plugin.
 - `/dev/kfd`, `/dev/dri` accessible to your user (render group).
-- Python 3.11+ available on the host for `huggingface_hub` downloads inside the mgmt container.
 
 ### 1. Configure
 
 ```bash
 cp .env.example .env
-# Edit .env — at minimum verify RENDER_GROUP matches your system:
+# Verify RENDER_GROUP and DOCKER_GROUP match your system:
 getent group render | cut -d: -f3
+getent group docker | cut -d: -f3
 ```
 
 ### 2. Build the runner image
@@ -85,17 +92,31 @@ docker compose up -d
 
 | Service | URL | Purpose |
 |---|---|---|
-| `local-llm-mgmt` | http://localhost:3100/ui/ | Management UI (direct) |
-| `local-llm-caddy` | http://localhost:3001/ui/ | All services via Caddy |
-| `open-webui` | http://localhost:3001/ | Open WebUI chat (optional) |
+| Management UI | http://localhost:3001/ui/ | Main interface |
+| Open WebUI | http://localhost:3001/ | Full chat (optional) |
+| Langfuse | http://localhost:3004/ | Request tracing |
 
 To start without Open WebUI:
 
 ```bash
-docker compose up -d local-llm-mgmt local-llm-caddy
+docker compose up -d local-llm-mgmt local-llm-caddy local-llm-postgres local-llm-langfuse
 ```
 
-### 4. Update
+### 4. Langfuse first-time setup
+
+On first start, go to `http://<host>:3004/`, register an account, create an org and project, then generate API keys under **Settings → API Keys**. Add the keys to `docker-compose.yml` under `local-llm-mgmt`:
+
+```yaml
+LANGFUSE_PUBLIC_KEY: "pk-lf-..."
+LANGFUSE_SECRET_KEY: "sk-lf-..."
+LANGFUSE_HOST: "http://localhost:3004"
+```
+
+Restart mgmt to pick them up: `docker compose up -d local-llm-mgmt`
+
+If `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` are absent, tracing is silently disabled — everything else works normally.
+
+### 5. Update
 
 After pulling changes or editing the UI:
 
@@ -111,7 +132,7 @@ docker compose up -d local-llm-mgmt
 
 ### Installing a model
 
-1. Open **http://localhost:3100/ui/** → **Search** tab.
+1. Open **http://localhost:3001/ui/** → **Search** tab.
 2. Enter a search query (e.g. `qwen 30b gguf`).
 3. Click **Install** on a candidate. The model downloads into `~/.cache/huggingface/hub/`.
 
@@ -144,10 +165,17 @@ Changes take effect on the next model switch.
 
 **Benchmarks** tab. Select a model from the installed list, set parameters, enter or generate a prompt, and run. Results are stored in SQLite and trend graphs update across runs. The model auto-switches if the selected model is not currently loaded.
 
-### Chat / Playground
+### Chat
 
-**Playground** tab for a simple chat interface within the management UI.  
-**http://localhost:3001/** for Open WebUI (if running).
+**Chat** link in the nav opens Open WebUI in the same tab with a back link.
+
+### Traces
+
+**Traces** link in the nav opens Langfuse in a new tab. Every chat completion (streaming and non-streaming) is traced with TTFT, duration, token counts, and TPS. Traces appear within seconds of a request completing.
+
+### Status
+
+**Status** tab shows a live TPS sparkline (last 30 chat completions), runner slot health (idle/processing), and system stats from the Raspberry Pi agent if configured.
 
 ### Logs
 
@@ -157,25 +185,20 @@ Changes take effect on the next model switch.
 
 ## Configuration
 
-### docker-compose.yml mounts
-
-```yaml
-volumes:
-  - ${HOME}/.local/share/local_llm:/state      # accepted metadata, state files
-  - ${HOME}/.cache/huggingface/hub:/models      # GGUF cache
-  - /var/run/docker.sock:/var/run/docker.sock   # runner container management
-  - ${HOME}/git/local_llm/scripts:/scripts:ro   # model discovery scripts
-```
-
 ### Environment variables
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `RUNNER_IMAGE` | `local-llm-runner:latest` | Image used when launching the runner container. |
-| `LOCAL_LLM_STATE_DIR` | `/state` | Where accepted metadata and state files live (container path). |
+| `LOCAL_LLM_STATE_DIR` | `/state` | Accepted metadata and state files (container path). |
 | `MODELS_CACHE_DIR` | `/models` | GGUF cache path inside the container. |
 | `HOST_MODELS_CACHE_DIR` | same as above | Host-side path passed to the runner container bind mount. |
 | `LLAMA_SERVER_PORT` | `8080` | Port the runner listens on. |
+| `RENDER_GROUP` | `991` | GID of the render group — needed for GPU access. |
+| `DOCKER_GROUP` | `107` | GID of the docker group — needed for Docker socket access. |
+| `LANGFUSE_PUBLIC_KEY` | — | Langfuse project public key. Tracing disabled if absent. |
+| `LANGFUSE_SECRET_KEY` | — | Langfuse project secret key. |
+| `LANGFUSE_HOST` | `http://localhost:3004` | Langfuse server URL reachable from the mgmt container. |
 
 ### Accepted model metadata
 
@@ -243,7 +266,7 @@ docker compose up -d local-llm-mgmt
 To deploy to a remote host (replace `ubt26` with your host):
 
 ```bash
-rsync -av container/ runner/ scripts/ ubt26:~/git/local_llm/
+rsync -av container/ runner/ scripts/ docker-compose.yml ubt26:~/git/local_llm/
 ssh ubt26 "cd ~/git/local_llm && docker compose build local-llm-mgmt && docker compose up -d"
 ```
 
@@ -272,8 +295,9 @@ network_mode: host
 | Path | Upstream |
 |---|---|
 | `/ui/*`, `/api/local-llm/*`, `/v1/*` | `local-llm-mgmt :3100` |
-| `/chat/*` | Inline HTML frame (links back to `/ui/`) |
-| `/` (root), `/static/*`, `/api/*` | `open-webui :3101` |
+| `/chat/*` | Inline HTML frame with back link to `/ui/` |
+| `/traces*` | Redirect to `local-llm-langfuse :3004` (preserves client hostname) |
+| `/`, `/static/*`, `/api/*` | `open-webui :3101` |
 | `/_switcher` | `local-llm-mgmt :3100` |
 
 ---

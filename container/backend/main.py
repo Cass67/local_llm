@@ -14,6 +14,7 @@ from .routes.manage import router as manage_router
 from .routes.init import router as init_router
 from .routes.openai import router as openai_router
 from .routes.stats import router as stats_router
+from .routes.runner import router as runner_router
 
 benchmark_router = import_module("backend.routes.benchmark").router
 
@@ -37,6 +38,7 @@ app.include_router(manage_router)
 app.include_router(init_router)
 app.include_router(openai_router)
 app.include_router(stats_router)
+app.include_router(runner_router)
 app.include_router(benchmark_router)
 
 
@@ -50,6 +52,13 @@ async def health():
 async def chat_redirect(request: Request):
     host = request.url.hostname or "127.0.0.1"
     return RedirectResponse(f"{request.url.scheme}://{host}:3001/chat/")
+
+
+@app.get("/traces/")
+@app.get("/traces")
+async def traces_redirect(request: Request):
+    host = request.url.hostname or "127.0.0.1"
+    return RedirectResponse(f"{request.url.scheme}://{host}:3004/")
 
 
 # SPA fallback: mount UI dist at /ui/
