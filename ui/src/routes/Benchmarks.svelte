@@ -317,7 +317,7 @@
 			</select>
 			<select bind:value={selectedModel}>
 				<option value="">Select model</option>
-				{#each installedModels as m}
+				{#each installedModels.filter(m => m.downloaded) as m}
 					<option value={m.alias}>{m.alias}{m.family === activeFamily ? " ★" : ""}</option>
 				{/each}
 			</select>

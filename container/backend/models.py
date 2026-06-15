@@ -22,6 +22,7 @@ class ModelInfo(BaseModel):
     config: ModelConfig = ModelConfig()
     launcher_file: str | None = None
     running: bool = False
+    downloaded: bool = True
 
 
 class ModelListResponse(BaseModel):

@@ -27,6 +27,7 @@ export interface ModelInfo {
 	config: ModelConfig;
 	launcher_file?: string;
 	running: boolean;
+	downloaded: boolean;
 }
 
 export interface ModelListResponse {
