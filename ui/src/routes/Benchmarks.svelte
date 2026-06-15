@@ -82,10 +82,14 @@
 
 	function randomPrompt(size: "small" | "medium" | "large") {
 		const list = PROMPTS[size];
-		promptText = list[Math.floor(Math.random() * list.length)];
+		const candidates = list.filter((p) => p !== promptText);
+		promptText = (candidates.length ? candidates : list)[Math.floor(Math.random() * (candidates.length || list.length))];
 		if (size === "small") maxTokens = 128;
 		else if (size === "medium") maxTokens = 512;
 		else maxTokens = 1024;
+		latest = null;
+		selectedRun = null;
+		error = "";
 	}
 	let filterPromptId = $state("");
 	let filterModel = $state("");
