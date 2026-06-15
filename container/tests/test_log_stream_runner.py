@@ -1,8 +1,11 @@
 """Tests for runner-owned log streaming."""
 
 import asyncio
+import socket as _socket
+import struct
 from unittest.mock import patch
 
+import pytest
 from backend.log_stream import _decode_docker_log_bytes, read_log_tail, stream_log_tail
 
 
@@ -26,22 +29,38 @@ def test_read_log_tail_reads_local_runner_docker_logs_not_legacy_runtime(tmp_pat
         assert read_log_tail(10) == ["runner model loaded", "server is listening"]
 
 
-async def _collect_first_chunk():
+def _make_frame(text: str) -> bytes:
+    data = text.encode("utf-8")
+    return bytes([1, 0, 0, 0]) + struct.pack(">I", len(data)) + data
+
+
+async def _collect_via_socketpair(frames: bytes) -> list[str]:
+    server, client = _socket.socketpair(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    server.sendall(b"HTTP/1.0 200 OK\r\n\r\n" + frames)
+    server.close()
+
     disconnect = asyncio.Event()
-    chunks = []
-    async for chunk in stream_log_tail(disconnect, poll_interval=0.01):
-        chunks.append(chunk)
-        disconnect.set()
-        break
+    chunks: list[str] = []
+
+    with patch("backend.log_stream.config.DOCKER_SOCKET") as mock_path:
+        mock_path.exists.return_value = True
+        with patch("socket.socket", return_value=client):
+            loop = asyncio.get_running_loop()
+            saved = (loop.sock_connect, loop.sock_sendall)
+
+            loop.sock_connect = lambda _sock, _address: None  # type: ignore[assignment]
+            loop.sock_sendall = lambda _sock, _data: None  # type: ignore[assignment]
+            try:
+                async for chunk in stream_log_tail(disconnect):
+                    chunks.append(chunk)
+            finally:
+                loop.sock_connect, loop.sock_sendall = saved
+                client.close()
     return chunks
 
 
-def test_stream_log_tail_streams_runner_logs_without_legacy_runtime_error():
-    with patch(
-        "backend.log_stream._docker_logs_tail",
-        side_effect=[["runner model loaded"], ["runner model loaded", "ready"]],
-    ):
-        chunks = asyncio.run(_collect_first_chunk())
-
+@pytest.mark.asyncio
+async def test_stream_log_tail_streams_runner_logs_without_legacy_runtime_error():
+    chunks = await _collect_via_socketpair(_make_frame("runner model loaded\n"))
     assert chunks == ["data: runner model loaded\n\n"]
     assert "llama-swap" not in "".join(chunks)

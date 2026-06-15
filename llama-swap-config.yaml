@@ -1,0 +1,223 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
+#
+# llama-swap config for ubt26
+#
+# Start with:
+#   docker run -it --rm --runtime rocm -p 8080:8080 \
+#     -v /home/cass/.cache/huggingface/hub:/models \
+#     -v /home/cass/llama-swap/config.yaml:/etc/llama-swap/config/config.yaml \
+#     ghcr.io/mostlygeek/llama-swap:v224-rocm-b9592
+
+healthCheckTimeout: 500
+logLevel: info
+logToStdout: both
+startPort: 10001
+sendLoadingState: true
+
+macros:
+  llama: /usr/local/bin/llama-server
+
+  # Model snapshot paths (mounted from /home/cass/.cache/huggingface/hub)
+  qwen_heretic: "/models/models--DavidAU--Qwen3.6-27B-Heretic-Uncensored-FINETUNE-NEO-CODE-Di-IMatrix-MAX-GGUF/snapshots/af8c40cc94da8d4675a78e5578c293df3ac68226"
+  gemma12: "/models/models--unsloth--gemma-4-12B-it-qat-GGUF/snapshots/ceadd70e5c46c5a839a7fd622307dabe8fdea551"
+  gemma26: "/models/models--unsloth--gemma-4-26B-A4B-it-qat-GGUF/snapshots/61dfd106b8b04f14401f8051b8215773a2b2328d"
+  gemma31: "/models/models--unsloth--gemma-4-31B-it-qat-GGUF/snapshots/840527d199d2988bdf3656cd8d373e82ea50cb1e"
+
+models:
+
+  # ── Qwen3.6 27B Heretic — dual GPU ─────────────────────────────────────────
+
+  "qwen3.6-27b-q6":
+    name: "Qwen3.6 27B Heretic Q6_K"
+    proxy: "http://127.0.0.1:${PORT}"
+    env:
+      - HIP_VISIBLE_DEVICES=0,1
+      - ROCR_VISIBLE_DEVICES=0,1
+    cmd: |
+      ${llama} --port ${PORT}
+      -m ${qwen_heretic}/Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q6_K.gguf
+      -ngl 999 --split-mode tensor --tensor-split 1,1
+      --timeout 600 --threads-http 2 --parallel 1 --no-cont-batching
+      --cache-ram 16384
+      -c 65536 --flash-attn on -ub 256 -b 4096
+      --threads 16 --prio 2 --no-warmup
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0
+      --presence-penalty 0.5 --repeat-penalty 1.0
+      --alias qwen3.6-27b-q6 --reasoning off
+    aliases:
+      - default
+      - gpt-4o
+      - gpt-4o-mini
+      - gpt-4
+
+  "qwen3.6-27b-q5km":
+    name: "Qwen3.6 27B Heretic Q5_K_M"
+    proxy: "http://127.0.0.1:${PORT}"
+    env:
+      - HIP_VISIBLE_DEVICES=0,1
+      - ROCR_VISIBLE_DEVICES=0,1
+    cmd: |
+      ${llama} --port ${PORT}
+      -m ${qwen_heretic}/Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q5_K_M.gguf
+      -ngl 999 --split-mode layer --tensor-split 1,1
+      --timeout 600 --threads-http 2 --parallel 1 --no-cont-batching
+      --cache-ram 16384
+      -c 65536 --flash-attn on -ub 256 -b 4096
+      --threads 16 --prio 2 --no-warmup
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0
+      --presence-penalty 0.5 --repeat-penalty 1.0
+      --alias qwen3.6-27b-q5km --reasoning on
+
+  "qwen3.6-27b-q5ks":
+    name: "Qwen3.6 27B Heretic Q5_K_S"
+    proxy: "http://127.0.0.1:${PORT}"
+    env:
+      - HIP_VISIBLE_DEVICES=0,1
+      - ROCR_VISIBLE_DEVICES=0,1
+    cmd: |
+      ${llama} --port ${PORT}
+      -m ${qwen_heretic}/Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q5_K_S.gguf
+      -ngl 999 --split-mode layer --tensor-split 1,1
+      --timeout 600 --threads-http 2 --parallel 1 --no-cont-batching
+      --cache-ram 16384
+      -c 65536 --flash-attn on -ub 256 -b 4096
+      --threads 16 --prio 2 --no-warmup
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0
+      --presence-penalty 0.5 --repeat-penalty 1.0
+      --alias qwen3.6-27b-q5ks --reasoning on
+
+  # ── Qwen3.6 27B Heretic — single GPU ───────────────────────────────────────
+
+  "qwen3.6-27b-q6-1gpu":
+    name: "Qwen3.6 27B Heretic Q6_K (GPU 0)"
+    proxy: "http://127.0.0.1:${PORT}"
+    env:
+      - HIP_VISIBLE_DEVICES=0
+      - ROCR_VISIBLE_DEVICES=0
+    cmd: |
+      ${llama} --port ${PORT}
+      -m ${qwen_heretic}/Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q6_K.gguf
+      -ngl 999
+      --timeout 600 --threads-http 2 --parallel 1 --no-cont-batching
+      --cache-ram 16384
+      -c 65536 --flash-attn on -ub 256 -b 4096
+      --threads 16 --prio 2 --no-warmup
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0
+      --presence-penalty 0.5 --repeat-penalty 1.0
+      --alias qwen3.6-27b-q6-1gpu --reasoning on
+
+  "qwen3.6-27b-q5km-1gpu":
+    name: "Qwen3.6 27B Heretic Q5_K_M (GPU 0)"
+    proxy: "http://127.0.0.1:${PORT}"
+    env:
+      - HIP_VISIBLE_DEVICES=0
+      - ROCR_VISIBLE_DEVICES=0
+    cmd: |
+      ${llama} --port ${PORT}
+      -m ${qwen_heretic}/Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q5_K_M.gguf
+      -ngl 999
+      --timeout 600 --threads-http 2 --parallel 1 --no-cont-batching
+      --cache-ram 16384
+      -c 65536 --flash-attn on -ub 256 -b 4096
+      --threads 16 --prio 2 --no-warmup
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0
+      --presence-penalty 0.5 --repeat-penalty 1.0
+      --alias qwen3.6-27b-q5km-1gpu --reasoning on
+
+  "qwen3.6-27b-q5ks-1gpu":
+    name: "Qwen3.6 27B Heretic Q5_K_S (GPU 0)"
+    proxy: "http://127.0.0.1:${PORT}"
+    env:
+      - HIP_VISIBLE_DEVICES=0
+      - ROCR_VISIBLE_DEVICES=0
+    cmd: |
+      ${llama} --port ${PORT}
+      -m ${qwen_heretic}/Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q5_K_S.gguf
+      -ngl 999
+      --timeout 600 --threads-http 2 --parallel 1 --no-cont-batching
+      --cache-ram 16384
+      -c 65536 --flash-attn on -ub 256 -b 4096
+      --threads 16 --prio 2 --no-warmup
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0
+      --presence-penalty 0.5 --repeat-penalty 1.0
+      --alias qwen3.6-27b-q5ks-1gpu --reasoning on
+
+  # ── Gemma 4 — dual GPU ─────────────────────────────────────────────────────
+
+  "gemma-4-12b":
+    name: "Gemma 4 12B QAT Q4_K_XL"
+    proxy: "http://127.0.0.1:${PORT}"
+    env:
+      - HIP_VISIBLE_DEVICES=0,1
+      - ROCR_VISIBLE_DEVICES=0,1
+    cmd: |
+      ${llama} --port ${PORT}
+      -m ${gemma12}/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf
+      -ngl 999 --split-mode layer --tensor-split 1,1
+      --timeout 600 --threads-http 2 --parallel 1 --no-cont-batching
+      --cache-ram 16384
+      -c 131072 --flash-attn on -ub 256 -b 4096
+      --threads 16 --prio 2 --no-warmup --no-mmproj
+      --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.0
+      --presence-penalty 0.0 --repeat-penalty 1.0
+      --alias gemma-4-12b --reasoning on
+
+  "gemma-4-26b":
+    name: "Gemma 4 26B A4B QAT Q4_K_XL"
+    proxy: "http://127.0.0.1:${PORT}"
+    env:
+      - HIP_VISIBLE_DEVICES=0,1
+      - ROCR_VISIBLE_DEVICES=0,1
+    cmd: |
+      ${llama} --port ${PORT}
+      -m ${gemma26}/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+      -ngl 999 --split-mode layer --tensor-split 1,1
+      --timeout 600 --threads-http 2 --parallel 1 --no-cont-batching
+      --cache-ram 16384
+      -c 131072 --flash-attn on -ub 256 -b 4096
+      --threads 16 --prio 2 --no-warmup
+      --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.0
+      --presence-penalty 0.0 --repeat-penalty 1.0
+      --alias gemma-4-26b --reasoning on
+
+  "gemma-4-31b":
+    name: "Gemma 4 31B QAT Q4_K_XL"
+    proxy: "http://127.0.0.1:${PORT}"
+    env:
+      - HIP_VISIBLE_DEVICES=0,1
+      - ROCR_VISIBLE_DEVICES=0,1
+    cmd: |
+      ${llama} --port ${PORT}
+      -m ${gemma31}/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
+      -ngl 999 --split-mode layer --tensor-split 1,1
+      --timeout 600 --threads-http 2 --parallel 1 --no-cont-batching
+      --cache-ram 16384
+      -c 131072 --flash-attn on -ub 256 -b 4096
+      --threads 16 --prio 2 --no-warmup
+      --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.0
+      --presence-penalty 0.0 --repeat-penalty 1.0
+      --alias gemma-4-31b --reasoning on
+
+routing:
+  router:
+    use: group
+    settings:
+      groups:
+        "dual-gpu":
+          swap: true
+          exclusive: true
+          members:
+            - qwen3.6-27b-q6
+            - qwen3.6-27b-q5km
+            - qwen3.6-27b-q5ks
+            - gemma-4-12b
+            - gemma-4-26b
+            - gemma-4-31b
+
+        "single-gpu":
+          swap: true
+          exclusive: false
+          members:
+            - qwen3.6-27b-q6-1gpu
+            - qwen3.6-27b-q5km-1gpu
+            - qwen3.6-27b-q5ks-1gpu

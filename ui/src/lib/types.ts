@@ -120,3 +120,79 @@ export interface HFCardResponse {
 	markdown: string;
 	error: boolean;
 }
+
+export interface BenchmarkEndpoint {
+	id: number;
+	name: string;
+	base_url: string;
+	api_key_set: boolean;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface BenchmarkPrompt {
+	id: number;
+	name: string;
+	text: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface BenchmarkRun {
+	id: number;
+	endpoint_id: number | null;
+	endpoint_name: string;
+	endpoint_base_url: string;
+	model: string;
+	prompt_id: number | null;
+	prompt_name: string | null;
+	prompt_text: string;
+	response_text: string;
+	latency_ms: number | null;
+	duration_ms: number | null;
+	output_chars: number;
+	output_words: number;
+	prompt_tokens: number | null;
+	completion_tokens: number | null;
+	total_tokens: number | null;
+	throughput_tps: number | null;
+	throughput_cps: number | null;
+	status: string;
+	error: string | null;
+	created_at: string;
+}
+
+export interface BenchmarkSummary {
+	total_runs: number;
+	avg_latency_ms: number | null;
+	best_throughput_tps: number | null;
+	avg_throughput_tps: number | null;
+	error_rate: number;
+	best_run: BenchmarkRun | null;
+	worst_run: BenchmarkRun | null;
+	trends: Array<
+		Pick<
+			BenchmarkRun,
+			| "id"
+			| "created_at"
+			| "endpoint_name"
+			| "model"
+			| "prompt_name"
+			| "latency_ms"
+			| "throughput_tps"
+			| "throughput_cps"
+			| "status"
+		>
+	>;
+}
+
+export interface BenchmarkRunFilters {
+	endpoint_id?: number | "";
+	model?: string;
+	prompt_id?: number | "";
+	status?: string;
+	from_date?: string;
+	to_date?: string;
+	limit?: number;
+	offset?: number;
+}

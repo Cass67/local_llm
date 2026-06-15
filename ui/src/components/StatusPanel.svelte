@@ -105,11 +105,21 @@
 	.toolbar { display: flex; justify-content: flex-end; }
 	button { padding: 0.3rem 0.6rem; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); border-radius: 4px; cursor: pointer; }
 	.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.7rem; }
-	.status-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem; display: flex; flex-direction: column; gap: 0.2rem; }
+	.status-card { 
+		background: var(--bg-card); 
+		border: 1px solid var(--border); 
+		border-radius: 8px; 
+		padding: 0.8rem; 
+		display: flex; 
+		flex-direction: column; 
+		gap: 0.2rem; 
+		transition: border-color 0.1s ease;
+	}
+	.status-card:hover { border-color: var(--accent); }
 	.status-card span { color: var(--text-muted); font-size: 0.8rem; }
 	table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-	th, td { padding: 0.4rem; border-bottom: 1px solid var(--border); text-align: left; }
-	th { color: var(--text-muted); }
-	tr.active { background: #4caf501a; }
+	th, td { padding: 0.6rem 0.4rem; border-bottom: 1px solid var(--border); text-align: left; }
+	th { color: var(--text-muted); font-weight: normal; }
+	tr.active { background: var(--green11); }
 	.error { background: var(--red); color: white; padding: 0.5rem; border-radius: 4px; }
 </style>

@@ -1,13 +1,15 @@
 :root {
-	--bg: #1a1a2e;
-	--bg-card: #16213e;
-	--text: #e0e0e0;
-	--text-muted: #a0a0a0;
-	--accent: #0f3460;
+	--bg: #09090b;
+	--bg-card: #18181b;
+	--text: #fafafa;
+	--text-muted: #a1a1aa;
+	--accent: #6366f1;
+	--accent33: #6366f133;
 	--green: #4caf50;
+	--green11: #4caf5011;
 	--red: #f44336;
 	--yellow: #ff9800;
-	--border: #2a2a4a;
+	--border: #27272a;
 }
 
 * {

@@ -18,6 +18,7 @@
 		<a href="#/models" class:active={currentRoute === "/models"}>Models</a>
 		<a href="#/search" class:active={currentRoute === "/search"}>Search</a>
 		<a href="#/status" class:active={currentRoute === "/status"}>Status</a>
+		<a href="#/benchmarks" class:active={currentRoute === "/benchmarks"}>Benchmarks</a>
 		<a href="/chat/">Chat</a>
 		<a href="#/logs" class:active={currentRoute === "/logs"}>Logs</a>
 	</nav>
@@ -29,7 +30,9 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0.5rem 1rem;
-		background: var(--bg-card);
+		background: color-mix(in srgb, var(--bg-card), transparent 20%);
+		backdrop-filter: blur(12px);
+		-webkit-backdrop-filter: blur(12px);
 		border-bottom: 1px solid var(--border);
 		position: sticky;
 		top: 0;

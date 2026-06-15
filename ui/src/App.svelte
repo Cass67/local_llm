@@ -4,6 +4,7 @@
   import Logs from './routes/Logs.svelte';
   import Search from './routes/Search.svelte';
   import Status from './routes/Status.svelte';
+  import Benchmarks from './routes/Benchmarks.svelte';
   import Header from './components/Header.svelte';
 
   const routes = {
@@ -12,6 +13,7 @@
     '/search': Search,
     '/logs': Logs,
     '/status': Status,
+    '/benchmarks': Benchmarks,
   };
 </script>
 

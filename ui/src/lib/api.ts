@@ -11,6 +11,11 @@ import type {
 	DeleteResponse,
 	HFCardResponse,
 	InstallResult,
+	BenchmarkEndpoint,
+	BenchmarkPrompt,
+	BenchmarkRun,
+	BenchmarkRunFilters,
+	BenchmarkSummary,
 } from "./types";
 
 const BASE = "/api/local-llm";
@@ -112,6 +117,124 @@ export async function fetchStatus(): Promise<StatusResponse> {
 
 export async function fetchStats(): Promise<StatsResponse> {
 	const res = await fetch(`${BASE}/stats`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+// --- Benchmarks ---
+
+export async function listBenchmarkEndpoints(): Promise<{
+	endpoints: BenchmarkEndpoint[];
+}> {
+	const res = await fetch(`${BASE}/benchmark/endpoints`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function createBenchmarkEndpoint(req: {
+	name: string;
+	base_url: string;
+	api_key?: string;
+}): Promise<BenchmarkEndpoint> {
+	const res = await fetch(`${BASE}/benchmark/endpoints`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function deleteBenchmarkEndpoint(
+	id: number,
+): Promise<{ deleted: boolean }> {
+	const res = await fetch(`${BASE}/benchmark/endpoints/${id}`, {
+		method: "DELETE",
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function listBenchmarkPrompts(): Promise<{
+	prompts: BenchmarkPrompt[];
+}> {
+	const res = await fetch(`${BASE}/benchmark/prompts`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function createBenchmarkPrompt(req: {
+	name: string;
+	text: string;
+}): Promise<BenchmarkPrompt> {
+	const res = await fetch(`${BASE}/benchmark/prompts`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function deleteBenchmarkPrompt(
+	id: number,
+): Promise<{ deleted: boolean }> {
+	const res = await fetch(`${BASE}/benchmark/prompts/${id}`, {
+		method: "DELETE",
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function loadBenchmarkModels(
+	endpoint_id: number,
+): Promise<{ models: string[] }> {
+	const res = await fetch(`${BASE}/benchmark/models`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ endpoint_id }),
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function runBenchmark(req: {
+	endpoint_id: number;
+	model: string;
+	prompt_text: string;
+	prompt_id?: number | null;
+	prompt_name?: string | null;
+	temperature?: number;
+	max_tokens?: number;
+}): Promise<BenchmarkRun> {
+	const res = await fetch(`${BASE}/benchmark/runs`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function listBenchmarkRuns(
+	filters: BenchmarkRunFilters = {},
+): Promise<{
+	total: number;
+	runs: BenchmarkRun[];
+}> {
+	const params = new URLSearchParams();
+	for (const [key, value] of Object.entries(filters)) {
+		if (value !== undefined && value !== null && value !== "")
+			params.set(key, String(value));
+	}
+	const query = params.toString();
+	const res = await fetch(`${BASE}/benchmark/runs${query ? `?${query}` : ""}`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchBenchmarkSummary(): Promise<BenchmarkSummary> {
+	const res = await fetch(`${BASE}/benchmark/summary`);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.json();
 }

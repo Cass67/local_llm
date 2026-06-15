@@ -85,17 +85,19 @@
 </div>
 
 <style>
-	.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
-	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; width: 90%; max-width: 900px; max-height: 85vh; display: flex; flex-direction: column; }
-	.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); }
-	.modal-header h3 { margin: 0; }
+	.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
+	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; width: 90%; max-width: 900px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+	.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); background: var(--bg); }
+	.modal-header h3 { margin: 0; font-size: 0.9rem; font-weight: bold; }
 	.modal-header button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem; }
-	.modal-body { overflow-y: auto; padding: 1rem; }
+	.modal-body { flex: 1; overflow-y: auto; padding: 1rem; }
 	.actions { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; }
-	button { padding: 0.3rem 0.6rem; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 4px; cursor: pointer; }
-	button.danger { background: var(--red); color: white; border: none; }
+	button { padding: 0.3rem 0.6rem; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 0.8rem; transition: all 0.1s; }
+	button:hover { border-color: var(--text-muted); }
+	button.danger { background: var(--red); color: white; border: none; font-weight: bold; }
+	button.danger:hover { filter: brightness(1.2); }
 	table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-	th, td { text-align: left; padding: 0.4rem; border-bottom: 1px solid var(--border); }
-	th { color: var(--text-muted); }
+	th, td { text-align: left; padding: 0.6rem 0.4rem; border-bottom: 1px solid var(--border); }
+	th { color: var(--text-muted); font-weight: normal; }
 	.error { background: var(--red); color: white; padding: 0.5rem; border-radius: 4px; margin-bottom: 0.7rem; }
 </style>

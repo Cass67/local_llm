@@ -47,6 +47,8 @@ def test_caddy_routes_chat_to_open_webui_and_ui_to_management():
     assert "handle /static/*" in caddy
     assert "handle /_app/*" in caddy
     assert "handle /api/*" in caddy
+    assert "handle /ws/socket.io*" in caddy
+    assert caddy.index("handle /ws/socket.io*") < caddy.index("handle /ws/*")
     assert "reverse_proxy 127.0.0.1:3101" in caddy
     assert "handle /ui/*" in caddy
     assert "handle /api/local-llm/*" in caddy

@@ -10,9 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     cmake \
     git \
+    glslang-tools \
+    glslc \
     libcurl4-openssl-dev \
     libvulkan-dev \
     pkg-config \
+    spirv-headers \
     python3 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -24,6 +27,8 @@ RUN cmake -S . -B build \
     -DLLAMA_CURL=ON \
     -DGGML_VULKAN=ON \
     -DLLAMA_VULKAN=1 \
+    -DLLAMA_BUILD_UI=OFF \
+    -DLLAMA_USE_PREBUILT_UI=OFF \
     && cmake --build build --target llama-server -j"$(nproc)"
 
 FROM ubuntu:24.04

@@ -11,18 +11,21 @@
 
 <style>
   .message {
-    padding: 0.5rem 0.8rem;
-    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    border-radius: 12px;
     max-width: 85%;
+    margin-bottom: 0.5rem;
   }
   .message.user {
     align-self: flex-end;
     background: var(--accent);
+    border-bottom-right-radius: 2px;
   }
   .message.assistant {
     align-self: flex-start;
     background: var(--bg-card);
     border: 1px solid var(--border);
+    border-bottom-left-radius: 2px;
   }
   .role {
     font-size: 0.7rem;
