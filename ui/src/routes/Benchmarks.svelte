@@ -34,9 +34,57 @@
 	let selectedEndpointId = $state("");
 	let selectedPromptId = $state("");
 	let selectedModel = $state("");
-	let maxTokens = $state(256);
+	let maxTokens = $state(512);
 	let temperature = $state(0.2);
+	let seed = $state(-1);
+	let topP = $state(0.95);
+	let topK = $state(40);
+	let repeatPenalty = $state(1.0);
+	let systemPrompt = $state("");
+	let repeatCount = $state(1);
 	let filterEndpointId = $state("");
+
+	const PROMPTS = {
+		small: [
+			"What is a mutex?",
+			"Reverse a string in Python. One-liner only.",
+			"What does SOLID stand for?",
+			"Write a SQL query to count rows per group.",
+			"What is the difference between TCP and UDP?",
+			"What is a pointer in C?",
+			"Name three HTTP status codes and what they mean.",
+			"What is memoization?",
+		],
+		medium: [
+			"Write a Python function that finds all prime numbers up to n using the Sieve of Eratosthenes.",
+			"Explain how async/await works in JavaScript with a practical example.",
+			"Implement a binary search tree in Python with insert and in-order traversal.",
+			"Write a SQL query to find the top 5 customers by total order value from tables: orders(id, customer_id, amount) and customers(id, name).",
+			"Write a Dockerfile for a Python FastAPI app that runs on port 8080.",
+			"Implement a debounce function in TypeScript with a configurable delay.",
+			"Write a bash script that monitors CPU usage and alerts if it exceeds 90%.",
+			"Implement merge sort in Python and explain the time and space complexity.",
+			"Write a React hook that fetches data with loading and error states.",
+			"Implement an LRU cache in Python using only built-in data structures.",
+		],
+		large: [
+			"Design a distributed rate limiter that works across multiple servers. Cover the data structures, coordination strategy, failure modes, and trade-offs between accuracy and performance.",
+			"Explain how transformers work — cover self-attention, multi-head attention, positional encoding, the encoder/decoder structure, and why they replaced RNNs for most tasks. Include the intuition behind each component.",
+			"Implement a complete REST API in Python (FastAPI) for a task management system with users, projects, and tasks. Include authentication, pagination, filtering, and proper error handling. Show the models, routes, and key implementation decisions.",
+			"Explain the CAP theorem in depth: what consistency, availability, and partition tolerance mean, why you can only have two, real-world examples of databases that make each trade-off, and how modern systems blur these boundaries.",
+			"Write a production-ready Kubernetes deployment for a stateful application. Include the Deployment, Service, PersistentVolumeClaim, ConfigMap, HorizontalPodAutoscaler, and explain the key decisions around resource limits, health checks, and rolling updates.",
+			"Explain how modern language models are trained: pre-training objectives, tokenization, the transformer architecture, RLHF/DPO alignment, and the compute/data trade-offs. Include what happens at inference time with KV cache and speculative decoding.",
+			"Design a system to process 1 million events per second. Cover ingestion, stream processing, storage tiers, backpressure handling, exactly-once semantics, and monitoring. Compare Kafka + Flink vs a simpler approach.",
+		],
+	};
+
+	function randomPrompt(size: "small" | "medium" | "large") {
+		const list = PROMPTS[size];
+		promptText = list[Math.floor(Math.random() * list.length)];
+		if (size === "small") maxTokens = 128;
+		else if (size === "medium") maxTokens = 512;
+		else maxTokens = 1024;
+	}
 	let filterPromptId = $state("");
 	let filterModel = $state("");
 	let filterStatus = $state("");
@@ -81,7 +129,7 @@
 		const values = (summary?.trends || [])
 			.map((run) => run[field])
 			.filter((value): value is number => value != null && !Number.isNaN(value));
-		if (values.length === 0) return "";
+		if (values.length < 2) return "";
 		const min = Math.min(...values);
 		const max = Math.max(...values);
 		const spread = Math.max(max - min, 1);
@@ -168,15 +216,23 @@
 		error = "";
 		try {
 			const prompt = selectedPrompt();
-			latest = await runBenchmark({
+			const req = {
 				endpoint_id: Number(selectedEndpointId),
 				model: selectedModel,
 				prompt_id: prompt?.id ?? null,
 				prompt_name: prompt?.name ?? null,
 				prompt_text: prompt?.text || promptText,
+				system_prompt: systemPrompt || undefined,
 				max_tokens: maxTokens,
 				temperature,
-			});
+				seed: seed >= 0 ? seed : undefined,
+				top_p: topP,
+				top_k: topK,
+				repeat_penalty: repeatPenalty,
+			};
+			for (let i = 0; i < Math.max(1, repeatCount); i++) {
+				latest = await runBenchmark(req);
+			}
 			selectedRun = latest;
 			await loadAll();
 		} catch (e: unknown) {
@@ -194,7 +250,7 @@
 		<div>
 			<p class="eyebrow">Benchmarks</p>
 			<h2>LLM performance lab</h2>
-			<p>Save llama-swap endpoints, run prompt presets, compare models, and track trends.</p>
+			<p>Save endpoints, run prompt presets, compare models, and track trends.</p>
 		</div>
 		<button onclick={loadAll} disabled={loading}>{loading ? "Refreshing..." : "Refresh"}</button>
 	</div>
@@ -259,12 +315,27 @@
 				<option value="">Model</option>
 				{#each models as model}<option value={model}>{model}</option>{/each}
 			</select>
-			<input type="number" min="1" max="8192" bind:value={maxTokens} />
-			<input type="number" min="0" max="2" step="0.1" bind:value={temperature} />
-			<button onclick={executeRun} disabled={running || !selectedEndpointId || !selectedModel}>{running ? "Running..." : "Run"}</button>
+			<button onclick={executeRun} disabled={running || !selectedEndpointId || !selectedModel}>{running ? "Running…" : "Run"}</button>
+		</div>
+		<div class="form-row params">
+			<label>Max tokens<input type="number" min="1" max="8192" bind:value={maxTokens} /></label>
+			<label>Temperature<input type="number" min="0" max="2" step="0.05" bind:value={temperature} /></label>
+			<label>Seed (-1=rand)<input type="number" min="-1" bind:value={seed} /></label>
+			<label>Top-P<input type="number" min="0" max="1" step="0.05" bind:value={topP} /></label>
+			<label>Top-K<input type="number" min="0" max="200" bind:value={topK} /></label>
+			<label>Repeat penalty<input type="number" min="1" max="2" step="0.05" bind:value={repeatPenalty} /></label>
+			<label>Runs<input type="number" min="1" max="20" bind:value={repeatCount} /></label>
+		</div>
+		<textarea bind:value={systemPrompt} rows="2" placeholder="System prompt (optional)"></textarea>
+		<div class="prompt-header">
+			<span class="muted">Prompt</span>
+			<div class="prompt-sizes">
+				<button class="size-btn" onclick={() => randomPrompt("small")}>Small</button>
+				<button class="size-btn" onclick={() => randomPrompt("medium")}>Medium</button>
+				<button class="size-btn" onclick={() => randomPrompt("large")}>Large</button>
+			</div>
 		</div>
 		<textarea bind:value={promptText} rows="5" placeholder="Benchmark prompt"></textarea>
-		<p class="muted">Selected endpoint: {selectedEndpoint()?.name || "none"}</p>
 	</section>
 
 	{#if latest}
@@ -288,11 +359,19 @@
 	<div class="grid two">
 		<section class="panel chart">
 			<h3>Latency trend</h3>
-			<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={trendPoints("latency_ms")} /></svg>
+			{#if trendPoints("latency_ms")}
+				<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={trendPoints("latency_ms")} /></svg>
+			{:else}
+				<div class="chart-empty"><span class="muted">Need ≥2 runs to show trend</span></div>
+			{/if}
 		</section>
 		<section class="panel chart">
 			<h3>Throughput trend</h3>
-			<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={trendPoints("throughput_tps")} /></svg>
+			{#if trendPoints("throughput_tps")}
+				<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={trendPoints("throughput_tps")} /></svg>
+			{:else}
+				<div class="chart-empty"><span class="muted">Need ≥2 runs to show trend</span></div>
+			{/if}
 		</section>
 	</div>
 
@@ -352,7 +431,10 @@
 	button, input, select, textarea { border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 8px; padding: 0.55rem; }
 	button { cursor: pointer; background: var(--accent); color: white; }
 	button:disabled { opacity: 0.5; cursor: not-allowed; }
-	textarea { width: 100%; box-sizing: border-box; margin-top: 0.7rem; font-family: inherit; }
+	textarea { width: 100%; box-sizing: border-box; margin-top: 0.4rem; font-family: inherit; }
+	.prompt-header { display: flex; align-items: center; justify-content: space-between; margin-top: 0.7rem; }
+	.prompt-sizes { display: flex; gap: 0.3rem; }
+	.size-btn { background: var(--bg); color: var(--text); font-size: 0.78rem; padding: 0.25rem 0.6rem; }
 	.grid.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1rem; }
 	.panel { padding: 1rem; overflow: hidden; }
 	.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
@@ -370,7 +452,10 @@
 	.error { background: var(--red); color: white; padding: 0.75rem; border-radius: 8px; }
 	.compare { display: flex; gap: 0.8rem; flex-wrap: wrap; color: var(--text-muted); margin: 0.75rem 0; }
 	pre { background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; white-space: pre-wrap; max-height: 22rem; overflow: auto; }
-	.chart svg { width: 100%; height: 180px; background: #000; border: 1px solid var(--border); border-radius: 8px; }
+	.chart svg, .chart-empty { width: 100%; height: 180px; background: #000; border: 1px solid var(--border); border-radius: 8px; }
+	.chart-empty { display: flex; align-items: center; justify-content: center; }
+	.form-row.params label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.78rem; color: var(--text-muted); flex: 1; min-width: 90px; }
+	.form-row.params label input { width: 100%; }
 	polyline { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
 	table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 	th, td { padding: 0.6rem 0.4rem; border-bottom: 1px solid var(--border); text-align: left; }
