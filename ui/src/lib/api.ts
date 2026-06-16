@@ -1,4 +1,5 @@
 import type {
+	Backend,
 	ModelListResponse,
 	CurrentModelResponse,
 	SwitchRequest,
@@ -57,7 +58,7 @@ export async function stopServer(): Promise<{ status: string }> {
 
 export async function copyModelBackend(
 	family: string,
-	backend: "rocm" | "vulkan",
+	backend: Backend,
 ): Promise<CopyBackendResponse> {
 	const res = await fetch(
 		`${BASE}/models/${encodeURIComponent(family)}/copy-backend`,

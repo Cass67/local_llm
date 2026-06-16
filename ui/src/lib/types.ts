@@ -1,3 +1,5 @@
+export type Backend = "rocm" | "vulkan" | "cuda";
+
 export interface MtpConfig {
 	enabled: boolean;
 	draft_n_max: number;
@@ -22,7 +24,7 @@ export interface ModelInfo {
 	model_name: string;
 	profile: string;
 	context?: number;
-	backend: "rocm" | "vulkan";
+	backend: Backend;
 	reasoning: boolean;
 	config: ModelConfig;
 	running: boolean;
@@ -46,7 +48,7 @@ export interface CurrentModelResponse {
 export interface SwitchRequest {
 	family: string;
 	profile: string;
-	backend?: "rocm" | "vulkan";
+	backend?: Backend;
 }
 
 export interface SwitchResponse {
@@ -60,7 +62,7 @@ export interface SwitchResponse {
 export interface CopyBackendResponse {
 	status: string;
 	family: string;
-	backend: "rocm" | "vulkan";
+	backend: Backend;
 }
 
 export interface SearchCandidate {

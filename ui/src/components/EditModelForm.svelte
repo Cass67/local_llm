@@ -2,6 +2,7 @@
 	import { onMount } from "svelte";
 	import { editModel, fetchModelDetail, switchModel } from "../lib/api";
 	import { normalizeMtpConfig } from "../lib/mtpFlags";
+	import type { Backend } from "../lib/types";
 
 	let { family, onClose, onSaved }: { family: string; onClose: () => void; onSaved: () => void } = $props();
 	let loading = $state(true);
@@ -95,7 +96,7 @@
 		error = "";
 		try {
 			await doSave();
-			await switchModel({ family, profile: form.profile, backend: form.backend as "rocm" | "vulkan" });
+			await switchModel({ family, profile: form.profile, backend: form.backend as Backend });
 			onSaved();
 			onClose();
 		} catch (e: unknown) {
@@ -130,7 +131,7 @@
 					<label>Cache V<input bind:value={form.cache_type_v} /></label>
 					<label>Ctx Shift<input bind:value={form.ctx_shift} /></label>
 					<label>Reasoning<select bind:value={form.reasoning}><option value="on">on</option><option value="off">off</option></select></label>
-					<label>Backend<select bind:value={form.backend}><option value="rocm">rocm</option><option value="vulkan">vulkan</option></select></label>
+					<label>Backend<select bind:value={form.backend}><option value="rocm">rocm</option><option value="vulkan">vulkan</option><option value="cuda">cuda</option></select></label>
 					<label>Visible Devices<input bind:value={form.visible_devices} /></label>
 					<label>Split Mode<input bind:value={form.split_mode} /></label>
 					<label>Tensor Split<input bind:value={form.tensor_split} /></label>

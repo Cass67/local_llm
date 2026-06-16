@@ -220,7 +220,7 @@
 			const model = installedModels.find((m) => m.alias === selectedModel || m.family === selectedModel);
 			if (model && model.family !== activeFamily) {
 				error = `Switching to ${model.alias}…`;
-				await switchModel({ family: model.family, profile: model.profile, backend: model.backend as "rocm" | "vulkan" });
+				await switchModel({ family: model.family, profile: model.profile, backend: model.backend });
 				activeFamily = model.family;
 				error = "";
 			}
