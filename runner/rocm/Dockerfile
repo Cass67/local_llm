@@ -11,9 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     cmake \
     git \
+    hipblas-dev \
     libcurl4-openssl-dev \
     pkg-config \
     python3 \
+    rocblas-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -46,12 +48,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         > /etc/apt/sources.list.d/rocm.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         hip-runtime-amd \
+        hipblas \
         rocblas \
     && apt-get purge -y gnupg wget \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && echo "/opt/rocm/lib" > /etc/ld.so.conf.d/rocm.conf
 
 COPY --from=build /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=build /src/llama.cpp/build/bin/*.so /usr/local/lib/
+COPY --from=build /opt/rocm-6.3.0/lib/llvm/lib/libomp.so /usr/local/lib/
 RUN ldconfig
 ENTRYPOINT []
 CMD ["llama-server", "--help"]
