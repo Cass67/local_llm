@@ -307,7 +307,7 @@
 	.install-error-card span { flex: 1; color: var(--text-muted); }
 	.install-error-card button { padding: 0.25rem 0.6rem; background: var(--red); color: white; border: none; border-radius: 3px; cursor: pointer; font-weight: bold; }
 	.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
-	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; width: 90%; max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; width: 92vw; max-width: 1200px; height: 88vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); resize: both; }
 	.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); background: var(--bg); }
 	.modal-header h3 { margin: 0; font-size: 0.9rem; font-weight: bold; }
 	.modal-header button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem; }
