@@ -65,11 +65,18 @@ export interface CopyBackendResponse {
 	backend: Backend;
 }
 
+export type FitLevel = "perfect" | "good" | "marginal" | "too_tight";
+
 export interface SearchCandidate {
 	repo: string;
 	score: number;
 	best_quant: string;
 	best_file: string;
+	fit_level?: FitLevel;
+	memory_required_gb?: number;
+	memory_available_gb?: number;
+	size_class?: string;
+	params_b?: number | null;
 }
 
 export interface SearchResponse {
