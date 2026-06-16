@@ -1,9 +1,8 @@
-"""Tests for current model endpoint."""
-
-import json
+"""Tests for current model endpoint (cluster-based active runner state)."""
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from unittest.mock import patch
 
 
 @pytest.fixture
@@ -19,27 +18,28 @@ def temp_state(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_current_model_returns_project_runner_state(temp_state, monkeypatch):
-    monkeypatch.setattr(
-        "backend.routes.switch._runner_api_model_ids",
-        lambda: {"qwen3.6-27b-q6"},
-    )
+async def test_current_model_returns_active_cluster_state(temp_state):
+    _ = temp_state
     from backend.main import app
 
-    (temp_state / "current-runner.json").write_text(
-        json.dumps(
-            {
-                "model": "qwen3.6-27b-q6",
-                "family": "qwen",
-                "profile": "reliable",
-                "backend": "rocm",
-            }
-        )
-    )
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/models/current")
+    active = [
+        {
+            "cluster_id": "abc1",
+            "cluster_name": "dual-amd",
+            "model": "qwen3.6-27b-q6",
+            "family": "qwen",
+            "profile": "reliable",
+            "backend": "rocm",
+            "port": 8080,
+        }
+    ]
+    with (
+        patch("backend.routes.switch.active_runners.list_active", return_value=active),
+        patch("backend.routes.switch._native_process_on_runner_port", return_value=False),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/api/models/current")
 
     assert response.status_code == 200
     data = response.json()
@@ -48,79 +48,65 @@ async def test_current_model_returns_project_runner_state(temp_state, monkeypatc
     assert data["profile"] == "reliable"
     assert data["running"] is True
     assert data["llama_server"]["status"] == "local-llm-runner"
+    assert "qwen3.6-27b-q6" in data["llama_server"]["running"]
+    assert len(data["instances"]) == 1
 
 
 @pytest.mark.asyncio
-async def test_current_model_marks_saved_runner_state_not_running_when_runner_api_is_down(
-    temp_state, monkeypatch
-):
-    import backend.config as cfg
-
-    monkeypatch.setattr(cfg, "RUNNER_URL", "http://127.0.0.1:9/v1")
-    (temp_state / "current-runner.json").write_text(
-        json.dumps(
-            {
-                "model": "qwen3.6-27b-q6",
-                "family": "qwen",
-                "profile": "reliable",
-                "backend": "rocm",
-            }
-        )
-    )
-
+async def test_current_model_when_nothing_running(temp_state):
+    _ = temp_state
     from backend.main import app
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/models/current")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["family"] == "qwen"
-    assert data["alias"] == "qwen3.6-27b-q6"
-    assert data["profile"] == "reliable"
-    assert data["running"] is False
-    assert data["llama_server"]["running"] == []
-
-
-@pytest.mark.asyncio
-async def test_current_model_falls_back_to_selection_when_runner_not_started(temp_state):
-    from backend.main import app
-
-    (temp_state / "current-selection.json").write_text(
-        json.dumps(
-            {
-                "model": "qwen3.6-27b-q6",
-                "family": "qwen",
-                "profile": "reliable",
-                "backend": "rocm",
-            }
-        )
-    )
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/models/current")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["family"] == "qwen"
-    assert data["alias"] == "qwen3.6-27b-q6"
-    assert data["profile"] == "reliable"
-    assert data["running"] is False
-    assert data["llama_server"]["running"] == []
-
-
-@pytest.mark.asyncio
-async def test_current_model_when_no_selection(temp_state):
-    from backend.main import app
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/models/current")
+    with (
+        patch("backend.routes.switch.active_runners.list_active", return_value=[]),
+        patch("backend.routes.switch._native_process_on_runner_port", return_value=False),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/api/models/current")
 
     assert response.status_code == 200
     data = response.json()
     assert data["running"] is False
-    assert data["family"] == "unknown"
-    assert data["alias"] == "unknown"
+    assert data["alias"] == "none"
+    assert data["instances"] == []
+
+
+@pytest.mark.asyncio
+async def test_current_model_multiple_instances(temp_state):
+    _ = temp_state
+    from backend.main import app
+
+    active = [
+        {
+            "cluster_id": "c1",
+            "model": "qwen",
+            "family": "qwen",
+            "profile": "reliable",
+            "backend": "rocm",
+            "port": 8080,
+        },
+        {
+            "cluster_id": "c2",
+            "model": "llama",
+            "family": "llama",
+            "profile": "balanced",
+            "backend": "vulkan",
+            "port": 8081,
+        },
+    ]
+    with (
+        patch("backend.routes.switch.active_runners.list_active", return_value=active),
+        patch("backend.routes.switch._native_process_on_runner_port", return_value=False),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/api/models/current")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["running"] is True
+    assert len(data["instances"]) == 2
+    running_models = data["llama_server"]["running"]
+    assert "qwen" in running_models
+    assert "llama" in running_models

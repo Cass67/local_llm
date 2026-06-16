@@ -1,53 +1,52 @@
-"""Tests for project-owned OpenAI-compatible metadata endpoints."""
+"""Tests for project-owned OpenAI-compatible /v1/models endpoint."""
 
-import json
-
-from httpx import ASGITransport, AsyncClient
 import pytest
+from httpx import ASGITransport, AsyncClient
+from unittest.mock import patch
 
 
 @pytest.fixture
 def temp_state(tmp_path, monkeypatch):
-    accepted = tmp_path / "accepted"
-    accepted.mkdir(parents=True)
-    (accepted / "qwen.json").write_text(
-        json.dumps(
-            {
-                "family": "qwen",
-                "alias": "qwen3.6-27b-q6",
-                "model_name": "Qwen3.6 27B Q6",
-                "context": 65536,
-                "reasoning": False,
-                "config": {"backend": "vulkan"},
-            }
-        )
-    )
-
     import backend.config as cfg
 
+    accepted = tmp_path / "accepted"
+    accepted.mkdir(parents=True)
     monkeypatch.setattr(cfg, "ACCEPTED_DIR", accepted)
     monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
     return tmp_path
 
 
 @pytest.mark.asyncio
-async def test_v1_models_lists_accepted_models_without_legacy_runtime(temp_state):
+async def test_v1_models_lists_only_running_instances(temp_state):
+    _ = temp_state
     from backend.main import app
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/v1/models")
+    active = [
+        {"cluster_id": "c1", "model": "qwen-q6", "backend": "rocm", "port": 8080},
+        {"cluster_id": "c2", "model": "llama-q4", "backend": "vulkan", "port": 8081},
+    ]
+    with patch("backend.routes.openai.active_runners.list_active", return_value=active):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/v1/models")
 
     assert response.status_code == 200
     data = response.json()
     assert data["object"] == "list"
-    assert data["data"] == [
-        {
-            "id": "qwen3.6-27b-q6",
-            "object": "model",
-            "owned_by": "local_llm",
-            "context": 65536,
-            "backend": "vulkan",
-            "reasoning": False,
-        }
-    ]
+    ids = [m["id"] for m in data["data"]]
+    assert "qwen-q6" in ids
+    assert "llama-q4" in ids
+
+
+@pytest.mark.asyncio
+async def test_v1_models_empty_when_nothing_running(temp_state):
+    _ = temp_state
+    from backend.main import app
+
+    with patch("backend.routes.openai.active_runners.list_active", return_value=[]):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/v1/models")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == []

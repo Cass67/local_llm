@@ -1,46 +1,39 @@
 """Project-owned OpenAI-compatible endpoints."""
 
-import json
-
 from fastapi import APIRouter, Request
 
-from .. import config
+from .. import active_runners
 from .chat import proxy_chat_completions
-from .models import _read_accepted_models
 
 router = APIRouter(prefix="/v1", tags=["openai"])
 
 
 @router.get("/models")
 async def v1_models():
-    """List accepted models without querying an external runtime router."""
-    selected = None
-    selection_path = config.RUNS_DIR / "current-selection.json"
-    if selection_path.exists() and not selection_path.is_symlink():
-        try:
-            selection = json.loads(selection_path.read_text())
-            selected = selection.get("model") if isinstance(selection, dict) else None
-        except (OSError, json.JSONDecodeError):
-            selected = None
+    """List currently running models across all active clusters.
 
-    models = _read_accepted_models()
-    if selected:
-        models.sort(key=lambda model: 0 if model.alias == selected else 1)
-
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": model.alias,
-                "object": "model",
-                "owned_by": "local_llm",
-                "context": model.context,
-                "backend": model.backend,
-                "reasoning": model.reasoning,
-            }
-            for model in models
-        ],
-    }
+    Only models that are actually running are included here, since those are the
+    only ones that can answer chat requests. The full accepted-model catalog is
+    available via /api/models.
+    """
+    active = active_runners.list_active()
+    # deduplicate by model alias in case of race (same model running twice)
+    seen: set[str] = set()
+    data = []
+    for entry in active:
+        alias = str(entry.get("model") or "")
+        if alias and alias not in seen:
+            seen.add(alias)
+            data.append(
+                {
+                    "id": alias,
+                    "object": "model",
+                    "owned_by": "local_llm",
+                    "backend": entry.get("backend"),
+                    "cluster_id": entry.get("cluster_id"),
+                }
+            )
+    return {"object": "list", "data": data}
 
 
 @router.post("/chat/completions")

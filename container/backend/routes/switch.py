@@ -1,16 +1,14 @@
-"""Model switching endpoint."""
+"""Model lookup utilities and current-state endpoint."""
 
 import json
 import re
-import time
-import http.client
-import urllib.error
-import urllib.parse
 from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from .. import config
-from ..runtime import DockerRunner, DockerRunnerConfig, build_runner_container_spec
+
+from .. import active_runners, config
+from ..runtime import DockerRunnerConfig
 
 router = APIRouter(prefix="/api/models", tags=["switch"])
 
@@ -41,98 +39,6 @@ def _validate_accepted_path(path: Path) -> dict | None:  # noqa: DOC502
     return data
 
 
-def _write_selection(model_id: str, family: str, profile: str, backend: str) -> None:
-    config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    path = config.RUNS_DIR / "current-selection.json"
-    path.write_text(
-        json.dumps(
-            {
-                "model": model_id,
-                "family": family,
-                "profile": profile,
-                "backend": backend,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    )
-
-
-def _write_runner_state(model_id: str, metadata: dict, profile: str, backend: str) -> None:
-    config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    runner_config = DockerRunnerConfig(image=config.runner_image_for_backend(backend))
-    spec = build_runner_container_spec(metadata, runner_config, config.MODELS_CACHE_DIR)
-    path = config.RUNS_DIR / "current-runner.json"
-    path.write_text(
-        json.dumps(
-            {
-                "model": model_id,
-                "family": metadata.get("family", model_id),
-                "profile": profile,
-                "backend": backend,
-                "container": {
-                    "name": spec.name,
-                    "image": spec.image,
-                    "command": spec.command,
-                    "ports": spec.ports,
-                    "devices": spec.devices,
-                    "group_add": spec.group_add,
-                    "environment": spec.environment,
-                },
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    )
-
-
-def _read_runner_state() -> dict | None:
-    path = config.RUNS_DIR / "current-runner.json"
-    if not path.exists() or path.is_symlink():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _read_selection() -> dict | None:
-    path = config.RUNS_DIR / "current-selection.json"
-    if not path.exists() or path.is_symlink():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _wait_for_runner_ready(runner: DockerRunner, timeout_seconds: float = 120.0) -> bool:
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if not runner.is_running():
-            return False
-        try:
-            parsed = urllib.parse.urlparse(f"{config.RUNNER_URL}/models")
-            if parsed.scheme != "http" or not parsed.hostname:
-                return False
-            conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=2)
-            conn.request("GET", parsed.path)
-            response = conn.getresponse()
-            try:
-                if response.status == 200:
-                    return True
-            finally:
-                conn.close()
-        except (OSError, urllib.error.URLError):
-            pass
-        time.sleep(1)
-    return False
-
-
 def _resolve_model_id_file(model_id: str):
     safe_name = re.compile(r"[A-Za-z0-9_.-]+")
     if not safe_name.fullmatch(model_id) or ".." in model_id or model_id.startswith("-"):
@@ -147,32 +53,6 @@ def _resolve_model_id_file(model_id: str):
         if model_id in aliases:
             return metadata_file, data
     raise HTTPException(status_code=404, detail=f"model '{model_id}' not found")
-
-
-def _launch_model(metadata_file: Path, data: dict, profile: str) -> str:
-    family = data.get("family", metadata_file.stem)
-    backend = str((data.get("config") or {}).get("backend") or data.get("backend", "rocm"))
-    model_id = str(data.get("alias") or family)
-    _write_selection(model_id, str(family), str(profile), backend)
-    runner = DockerRunner(
-        DockerRunnerConfig(
-            image=config.runner_image_for_backend(backend), socket_path=config.DOCKER_SOCKET
-        ),
-        models_dir=config.MODELS_CACHE_DIR,
-        host_models_dir=config.HOST_MODELS_CACHE_DIR,
-    )
-    runner.launch(data)
-    if not _wait_for_runner_ready(runner):
-        detail = "\n".join(runner.logs(40)) or "runner did not become ready"
-        raise RuntimeError(detail[-1000:])
-    _write_runner_state(model_id, data, str(profile), backend)
-    return model_id
-
-
-def switch_model_by_id(model_id: str) -> None:
-    metadata_file, data = _resolve_model_id_file(model_id)
-    profile = str(data.get("profile") or "reliable")
-    _launch_model(metadata_file, data, profile)
 
 
 def _resolve_family_file(family: str, backend: str | None):
@@ -208,74 +88,28 @@ def _resolve_family_file(family: str, backend: str | None):
 
 
 @router.post("/switch", response_model=SwitchResponse)
-async def switch_model(req: SwitchRequest):
-    metadata_file, data = _resolve_family_file(req.family, req.backend)
-
-    family = data.get("family", metadata_file.stem)
-    profile = req.profile
-    backend = str((data.get("config") or {}).get("backend") or data.get("backend", "rocm"))
-    try:
-        model_id = _launch_model(metadata_file, data, str(profile))
-    except (RuntimeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=502, detail=f"failed to launch local runner: {exc}"
-        ) from exc
-
-    return SwitchResponse(
-        status="loaded",
-        family=str(family),
-        profile=str(profile),
-        alias=model_id,
-        backend=backend,
+async def switch_model(_req: SwitchRequest):
+    """Legacy single-model switch. Use POST /api/clusters/{id}/start instead."""
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "Direct model switching is no longer supported. "
+            "Create a GPU cluster on the Architecture tab and use "
+            "POST /api/clusters/{id}/start to launch a model on it."
+        ),
     )
 
 
-def _runner_api_model_ids() -> set[str]:
-    """Return model IDs from live runner API, or empty set when unavailable."""
-    runner_url = urllib.parse.urlsplit(config.RUNNER_URL)
-    if runner_url.scheme not in {"http", "https"} or not runner_url.hostname:
-        return set()
-    path = urllib.parse.urljoin(runner_url.path.rstrip("/") + "/", "models")
-    connection_cls = (
-        http.client.HTTPSConnection if runner_url.scheme == "https" else http.client.HTTPConnection
+def switch_model_by_id(model_id: str) -> None:
+    """No-op stub kept for import compatibility during transition."""
+    raise RuntimeError(
+        f"switch_model_by_id('{model_id}') called but global switching is removed. "
+        "Use active_runners.start() with a cluster instead."
     )
-    connection = connection_cls(runner_url.hostname, runner_url.port, timeout=1.0)
-    try:
-        connection.request("GET", path)
-        response = connection.getresponse()
-        if response.status != 200:
-            return set()
-        payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, http.client.HTTPException, json.JSONDecodeError):
-        return set()
-    finally:
-        connection.close()
-
-    ids: set[str] = set()
-    for item in payload.get("data", []):
-        if isinstance(item, dict) and isinstance(item.get("id"), str):
-            ids.add(item["id"])
-    for item in payload.get("models", []):
-        if not isinstance(item, dict):
-            continue
-        for key in ("name", "model"):
-            value = item.get(key)
-            if isinstance(value, str):
-                ids.add(value)
-    return ids
-
-
-def _docker_runner_running() -> bool:
-    """Return True if the managed Docker runner container is up."""
-    try:
-        runner = DockerRunner(DockerRunnerConfig(), config.MODELS_CACHE_DIR)
-        return runner.is_running()
-    except Exception:
-        return False
 
 
 def _native_process_on_runner_port() -> bool:
-    """Return True if something is on the runner port but the Docker container is not running."""
+    """Return True if something occupies the base runner port outside Docker."""
     import socket as _socket
 
     port = DockerRunnerConfig().port
@@ -287,29 +121,45 @@ def _native_process_on_runner_port() -> bool:
             occupied = True
         except OSError:
             pass
-    return occupied and not _docker_runner_running()
+    if not occupied:
+        return False
+    # Check if it's one of our managed runners
+    for entry in active_runners.list_active():
+        if entry.get("port") == port:
+            return False
+    return True
 
 
 @router.get("/current")
 async def current_model():
-    """Return selected project-owned runner model."""
-    selection = _read_selection() or {}
-    runner = _read_runner_state() or {}
-    current_model = str(runner.get("model") or selection.get("model") or "unknown")
-    running = current_model != "unknown" and current_model in _runner_api_model_ids()
-    family = runner.get("family") or selection.get("family", current_model)
-    profile = runner.get("profile") or selection.get("profile", "unknown")
-    backend = runner.get("backend") or selection.get("backend", "unknown")
-    native_warning = _native_process_on_runner_port()
+    """Return currently active model instances across all clusters."""
+    active = active_runners.list_active()
+    native_warning = _native_process_on_runner_port() if not active else False
+
+    if not active:
+        return {
+            "family": "none",
+            "profile": "none",
+            "alias": "none",
+            "backend": "none",
+            "running": False,
+            "native_process_warning": native_warning,
+            "llama_server": {"status": "idle", "running": []},
+            "instances": [],
+        }
+
+    # Backward-compat: expose the first active instance as the "current" model
+    first = active[0]
     return {
-        "family": family,
-        "profile": profile,
-        "alias": current_model,
-        "backend": backend,
-        "running": running,
+        "family": first.get("family", "unknown"),
+        "profile": first.get("profile", "unknown"),
+        "alias": first.get("model", "unknown"),
+        "backend": first.get("backend", "unknown"),
+        "running": True,
         "native_process_warning": native_warning,
         "llama_server": {
             "status": "local-llm-runner",
-            "running": [current_model] if running else [],
+            "running": [e.get("model") for e in active if e.get("model")],
         },
+        "instances": active,
     }
