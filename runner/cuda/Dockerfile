@@ -22,6 +22,7 @@ RUN cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLAMA_CURL=ON \
     -DGGML_CUDA=ON \
+    -DGGML_CUDA_NO_VMM=ON \
     -DLLAMA_BUILD_UI=OFF \
     -DLLAMA_USE_PREBUILT_UI=OFF \
     && cmake --build build --target llama-server -j"$(nproc)"
