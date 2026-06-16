@@ -1,42 +1,28 @@
-"""Tests for OpenAI model ordering."""
+"""Tests for OpenAI /v1/models reflects active runners."""
 
-import json
-
-from httpx import ASGITransport, AsyncClient
 import pytest
+from httpx import ASGITransport, AsyncClient
+from unittest.mock import patch
 
 
 @pytest.mark.asyncio
-async def test_v1_models_lists_current_selection_first(tmp_path, monkeypatch):
+async def test_v1_models_lists_active_runners_in_order(tmp_path, monkeypatch):
     import backend.config as cfg
 
-    accepted = tmp_path / "accepted"
-    accepted.mkdir(parents=True)
-    for family in ["gemma", "qwopus"]:
-        (accepted / f"{family}.json").write_text(
-            json.dumps(
-                {
-                    "family": family,
-                    "alias": family,
-                    "model_name": family,
-                    "profile": "reliable",
-                    "backend": "vulkan",
-                    "reasoning": False,
-                }
-            )
-        )
-    (tmp_path / "current-selection.json").write_text(
-        json.dumps({"model": "qwopus", "family": "qwopus"})
-    )
     monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
-    monkeypatch.setattr(cfg, "ACCEPTED_DIR", accepted)
+    monkeypatch.setattr(cfg, "ACCEPTED_DIR", tmp_path / "accepted")
 
+    active = [
+        {"cluster_id": "c1", "model": "qwopus", "backend": "rocm", "port": 8080},
+        {"cluster_id": "c2", "model": "gemma", "backend": "vulkan", "port": 8081},
+    ]
     from backend.main import app
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/v1/models")
+    with patch("backend.routes.openai.active_runners.list_active", return_value=active):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/v1/models")
 
     assert response.status_code == 200
-    ids = [model["id"] for model in response.json()["data"]]
+    ids = [m["id"] for m in response.json()["data"]]
     assert ids == ["qwopus", "gemma"]

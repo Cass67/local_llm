@@ -7,9 +7,7 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from .. import config
-from .. import tracing
-from . import switch as switch_routes
+from .. import active_runners, config, tracing
 from .stats import append_chat_metric
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -60,22 +58,25 @@ def _request_model(body: bytes) -> str | None:
     return model if isinstance(model, str) and model else None
 
 
-def _current_model_id() -> str | None:
-    path = config.RUNS_DIR / "current-selection.json"
-    if not path.exists() or path.is_symlink():
-        return None
-    try:
-        payload = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-    model = payload.get("model") if isinstance(payload, dict) else None
-    return model if isinstance(model, str) and model else None
+def _resolve_runner_url(body: bytes) -> str:
+    """Return the runner URL for the model requested in the body.
 
-
-def _ensure_requested_model(body: bytes) -> None:
+    Looks up whichever active cluster is running that model. Falls back to the
+    global RUNNER_URL for single-cluster backward compatibility (when only one
+    cluster is active and no specific model is requested).
+    """
     model = _request_model(body)
-    if model and model != _current_model_id():
-        switch_routes.switch_model_by_id(model)
+    if model:
+        url = active_runners.runner_url_for_model(model)
+        if url:
+            return url
+    # Backward-compat: use the first active cluster's port, or global default
+    active = active_runners.list_active()
+    if active:
+        port = active[0].get("port")
+        if isinstance(port, int):
+            return f"http://127.0.0.1:{port}/v1"
+    return config.RUNNER_URL
 
 
 def _record_metrics(body: bytes, response_body: bytes) -> None:
@@ -101,9 +102,9 @@ def _record_metrics(body: bytes, response_body: bytes) -> None:
 
 
 async def proxy_chat_completions(request: Request):
-    """Proxy chat completion requests to project-owned runner."""
+    """Proxy chat completion requests to the appropriate cluster runner."""
     body = _prepare_runner_payload(await request.body())
-    _ensure_requested_model(body)
+    runner_url = _resolve_runner_url(body)
     headers = {
         "Content-Type": request.headers.get("content-type", "application/json"),
     }
@@ -115,7 +116,7 @@ async def proxy_chat_completions(request: Request):
         client = httpx.AsyncClient(timeout=300.0)
         stream_context = client.stream(
             "POST",
-            f"{config.RUNNER_URL}/chat/completions",
+            f"{runner_url}/chat/completions",
             content=body,
             headers=headers,
         )
@@ -172,7 +173,7 @@ async def proxy_chat_completions(request: Request):
     try:
         async with httpx.AsyncClient(timeout=300.0) as client:
             upstream = await client.post(
-                f"{config.RUNNER_URL}/chat/completions",
+                f"{runner_url}/chat/completions",
                 content=body,
                 headers=headers,
             )
