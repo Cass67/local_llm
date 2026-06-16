@@ -21,15 +21,18 @@
 	let hfCardMarkdown = $state("");
 	let hfCardLoading = $state(false);
 	let installErrorDetail: InstallErrorDetail | null = $state(null);
+	let hideTooTight = $state(false);
 
 	let filtered = $derived(
-		$searchState.filter
-			? $searchState.candidates.filter(
-					(c) =>
-						c.repo.toLowerCase().includes($searchState.filter.toLowerCase()) ||
-						c.best_quant.toLowerCase().includes($searchState.filter.toLowerCase()),
-				)
-			: $searchState.candidates,
+		(
+			$searchState.filter
+				? $searchState.candidates.filter(
+						(c) =>
+							c.repo.toLowerCase().includes($searchState.filter.toLowerCase()) ||
+							c.best_quant.toLowerCase().includes($searchState.filter.toLowerCase()),
+					)
+				: $searchState.candidates
+		).filter((c) => !hideTooTight || c.fit_level !== "too_tight"),
 	);
 
 	function getSorted(): SearchCandidate[] {
@@ -134,6 +137,9 @@
 		<div class="toolbar">
 			<input type="text" value={$searchState.filter} oninput={(e) => searchStore.setFilter(e.currentTarget.value)} placeholder="Filter by repo/quant" />
 			<button onclick={cycleSort}>Sort: {$searchState.sortMode}</button>
+			<button class:active={hideTooTight} onclick={() => (hideTooTight = !hideTooTight)}>
+				{hideTooTight ? "Showing: fits VRAM" : "Showing: all"}
+			</button>
 			<button onclick={() => searchStore.setPage(Math.max(1, $searchState.page - 1))} disabled={$searchState.page <= 1}>← Prev</button>
 			<span class="page-info">{$searchState.page}/{totalPages} ({sorted.length})</span>
 			<button onclick={() => searchStore.setPage(Math.min(totalPages, $searchState.page + 1))} disabled={$searchState.page >= totalPages}>Next →</button>
@@ -146,6 +152,7 @@
 					<th>Repo</th>
 					<th>Score</th>
 					<th>Quant</th>
+					<th>Fit</th>
 					<th>Actions</th>
 				</tr>
 			</thead>
@@ -159,6 +166,20 @@
 						<td class="repo-cell" title={candidate.repo}>{candidate.repo}</td>
 						<td class="score">{candidate.score}</td>
 						<td><code>{candidate.best_quant}</code></td>
+						<td>
+							{#if candidate.fit_level}
+								<span
+									class="fit-badge"
+									class:perfect={candidate.fit_level === "perfect"}
+									class:good={candidate.fit_level === "good"}
+									class:marginal={candidate.fit_level === "marginal"}
+									class:too-tight={candidate.fit_level === "too_tight"}
+									title={candidate.memory_required_gb != null && candidate.memory_available_gb != null
+										? `${candidate.memory_required_gb} GB needed / ${candidate.memory_available_gb} GB available`
+										: undefined}
+								>{candidate.fit_level.replace("_", " ")}</span>
+							{/if}
+						</td>
 						<td class="actions">
 							{#if statusView?.label === "✓ Installed"}
 								<span class="installed">{statusView.label}</span>
@@ -257,6 +278,12 @@
 	.toolbar input { flex: 1; min-width: 150px; padding: 0.3rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
 	.toolbar button { padding: 0.3rem 0.6rem; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.1s; }
 	.toolbar button:hover { border-color: var(--text-muted); color: var(--text); }
+	.toolbar button.active { background: var(--accent); color: var(--text); border-color: var(--accent); font-weight: bold; }
+	.fit-badge { font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px; text-transform: capitalize; font-weight: bold; white-space: nowrap; }
+	.fit-badge.perfect { background: #22c55e22; color: #22c55e; }
+	.fit-badge.good { background: #22c55e22; color: #22c55e; }
+	.fit-badge.marginal { background: #f59e0b22; color: #f59e0b; }
+	.fit-badge.too-tight { background: #ef444422; color: #ef4444; }
 	.page-info { color: var(--text-muted); font-size: 0.8rem; }
 	table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 	th { text-align: left; padding: 0.6rem 0.4rem; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: normal; }

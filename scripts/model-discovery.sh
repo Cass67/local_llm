@@ -84,6 +84,25 @@ get_local_vram() {
   first_nonempty "$vram"
 }
 
+get_local_amd_gpu_names() {
+  rocminfo 2>/dev/null | grep -i 'Marketing Name' | grep -vi 'Intel' | sed 's/.*Marketing Name:[[:space:]]*//' || true
+}
+
+get_local_amd_vram_bytes() {
+  for f in /sys/class/drm/card*/device/mem_info_vram_total; do
+    [ -r "$f" ] && cat "$f"
+  done
+  return 0
+}
+
+get_local_nvidia_gpus() {
+  nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>/dev/null || true
+}
+
+get_local_vulkan_gpus() {
+  vulkaninfo --summary 2>/dev/null | sed -n 's/.*deviceName[[:space:]]*=[[:space:]]*//p' || true
+}
+
 get_remote_cpu_cores() {
   local host="$1"
   first_nonempty "$(ssh_probe "$host" 'nproc')"
@@ -185,10 +204,13 @@ for line in amd_vram_bytes.splitlines():
     line = line.strip()
     if re.fullmatch(r"[0-9]+", line):
         amd_vram_values.append(float(line) / 1073741824)
-if amd_names:
-    for index, name in enumerate(amd_names):
-        item_vram = amd_vram_values[index] if index < len(amd_vram_values) else None
+if amd_vram_values:
+    for index, item_vram in enumerate(amd_vram_values):
+        name = amd_names[index] if index < len(amd_names) else f"AMD GPU {index}"
         add_gpu(gpus, name=name, backend="rocm", vram_gb=item_vram, allow_duplicate=True)
+elif amd_names:
+    for name in amd_names:
+        add_gpu(gpus, name=name, backend="rocm", vram_gb=None, allow_duplicate=True)
 else:
     gpu_lower = (gpu or "").lower()
     if "amd" in gpu_lower or "radeon" in gpu_lower:
@@ -245,7 +267,7 @@ detect_hardware() {
   if [[ "$mode" == remote ]]; then
     hardware_json "remote:$host" "$(get_remote_cpu_cores "$host")" "$(get_remote_ram "$host")" "$(get_remote_gpu "$host")" "$(get_remote_vram "$host")" "$(get_remote_amd_gpu_names "$host")" "$(get_remote_amd_vram_bytes "$host")" "$(get_remote_nvidia_gpus "$host")" "$(get_remote_vulkan_gpus "$host")"
   else
-    hardware_json "local" "$(get_cpu_cores)" "$(get_ram)" "$(get_local_gpu)" "$(get_local_vram)"
+    hardware_json "local" "$(get_cpu_cores)" "$(get_ram)" "$(get_local_gpu)" "$(get_local_vram)" "$(get_local_amd_gpu_names)" "$(get_local_amd_vram_bytes)" "$(get_local_nvidia_gpus)" "$(get_local_vulkan_gpus)"
   fi
 }
 
