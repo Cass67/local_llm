@@ -1188,7 +1188,7 @@ class EditModelScreen(Screen[None]):
             yield Label("  Reasoning (on / off):")
             yield Input(placeholder="on", id="reasoning-input")
             yield Label("  Backend:")
-            yield Input(placeholder="vulkan / rocm", id="backend-input")
+            yield Input(placeholder="vulkan / rocm / cuda", id="backend-input")
             yield Label("  Visible devices (blank = all, e.g. 0,1):")
             yield Input(placeholder="0,1", id="visible-devs-input")
             yield Label("  Split mode:")
@@ -1257,8 +1257,8 @@ class EditModelScreen(Screen[None]):
             if val and not val.isdigit():
                 self.app.notify(f"{name} must be integer if set", severity="error")
                 return
-        if backend and backend not in ("rocm", "vulkan"):
-            self.app.notify("Backend: rocm, vulkan, or blank", severity="error")
+        if backend and backend not in ("rocm", "vulkan", "cuda"):
+            self.app.notify("Backend: rocm, vulkan, cuda, or blank", severity="error")
             return
         if backend:
             if not split_mode:

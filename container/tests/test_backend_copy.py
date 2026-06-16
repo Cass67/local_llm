@@ -46,6 +46,22 @@ async def test_copy_backend_creates_opposite_backend_metadata(temp_state):
 
 
 @pytest.mark.asyncio
+async def test_copy_backend_creates_cuda_metadata(temp_state):
+    from backend.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/models/qwen/copy-backend", json={"backend": "cuda"})
+
+    assert response.status_code == 200
+    assert response.json()["family"] == "qwen-cuda"
+    copied = json.loads((temp_state / "accepted" / "qwen-cuda.json").read_text())
+    assert copied["model_path"] == "/models/qwen.gguf"
+    assert copied["backend"] == "cuda"
+    assert copied["config"]["backend"] == "cuda"
+
+
+@pytest.mark.asyncio
 async def test_migrate_backend_names_writes_explicit_suffix(temp_state):
     from backend.main import app
 

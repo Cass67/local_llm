@@ -61,7 +61,8 @@ def _write_selection(model_id: str, family: str, profile: str, backend: str) -> 
 
 def _write_runner_state(model_id: str, metadata: dict, profile: str, backend: str) -> None:
     config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    spec = build_runner_container_spec(metadata, DockerRunnerConfig(), config.MODELS_CACHE_DIR)
+    runner_config = DockerRunnerConfig(image=config.runner_image_for_backend(backend))
+    spec = build_runner_container_spec(metadata, runner_config, config.MODELS_CACHE_DIR)
     path = config.RUNS_DIR / "current-runner.json"
     path.write_text(
         json.dumps(
@@ -154,7 +155,9 @@ def _launch_model(metadata_file: Path, data: dict, profile: str) -> str:
     model_id = str(data.get("alias") or family)
     _write_selection(model_id, str(family), str(profile), backend)
     runner = DockerRunner(
-        DockerRunnerConfig(image=config.RUNNER_IMAGE, socket_path=config.DOCKER_SOCKET),
+        DockerRunnerConfig(
+            image=config.runner_image_for_backend(backend), socket_path=config.DOCKER_SOCKET
+        ),
         models_dir=config.MODELS_CACHE_DIR,
         host_models_dir=config.HOST_MODELS_CACHE_DIR,
     )
@@ -176,12 +179,15 @@ def _resolve_family_file(family: str, backend: str | None):
     """Find accepted metadata for family, optionally overriding backend."""
     safe_name = re.compile(r"[A-Za-z0-9_.-]+")
 
-    if backend and backend not in ("rocm", "vulkan"):
+    if backend and backend not in ("rocm", "vulkan", "cuda"):
         raise HTTPException(status_code=400, detail=f"invalid backend: {backend}")
 
     search_family = family
-    if backend == "vulkan" and (config.ACCEPTED_DIR / f"{family}-vulkan.json").exists():
-        search_family = f"{family}-vulkan"
+    if (
+        backend in ("vulkan", "cuda")
+        and (config.ACCEPTED_DIR / f"{family}-{backend}.json").exists()
+    ):
+        search_family = f"{family}-{backend}"
 
     if (
         not safe_name.fullmatch(search_family)

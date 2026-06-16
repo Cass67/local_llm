@@ -10,9 +10,11 @@ cd "$PROJECT_ROOT/ui"
 npm ci
 npm run build
 
-echo "=== Building runner image ==="
+echo "=== Building runner images ==="
 cd "$PROJECT_ROOT"
-docker build -t local-llm-runner:latest -f runner/Dockerfile runner
+for backend in vulkan rocm cuda; do
+  docker build -t "local-llm-runner-${backend}:latest" -f "runner/${backend}/Dockerfile" "runner/${backend}"
+done
 
 echo "=== Building management Docker image ==="
 cd "$SCRIPT_DIR"

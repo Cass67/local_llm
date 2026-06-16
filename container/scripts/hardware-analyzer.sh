@@ -11,6 +11,8 @@ LIB_SH_SCRIPT_DIR="$SCRIPT_DIR" source "$SCRIPT_DIR/lib.sh"
 get_gpu_memory() {
   if command -v rocminfo &>/dev/null; then
     rocminfo 2>/dev/null | grep -i "memory" | head -1 | awk '{print $1}' || echo "unknown"
+  elif command -v nvidia-smi &>/dev/null; then
+    nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 || echo "unknown"
   else
     echo "unknown"
   fi

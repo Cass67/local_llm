@@ -1,5 +1,7 @@
 """Search and install endpoints."""
 
+import asyncio
+
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from .. import cli
@@ -14,7 +16,7 @@ async def search_models(
 ):
     """Search HuggingFace for GGUF models. Runs model-discovery.sh."""
     try:
-        candidates = cli.run_discovery(query, host=None, limit=limit)
+        candidates = await asyncio.to_thread(cli.run_discovery, query, None, limit)
     except RuntimeError as e:
         return {"candidates": [], "error": str(e)}
     except Exception as e:
@@ -31,4 +33,4 @@ class InstallRequest(BaseModel):
 @router.post("/install")
 async def install_model(req: InstallRequest):
     """Install a model candidate. Runs model-manager.sh install."""
-    return cli.run_install(req.repo, req.file, req.profile)
+    return await asyncio.to_thread(cli.run_install, req.repo, req.file, req.profile)

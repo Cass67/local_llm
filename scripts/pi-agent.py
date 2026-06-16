@@ -5,7 +5,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import urllib.request
 from pathlib import Path
 
@@ -44,17 +43,13 @@ _WRITE_RE = re.compile(r'<write\s+path="([^"]+)">(.*?)</write>', re.DOTALL)
 
 def _ask(messages: list) -> str:
     body = json.dumps({"messages": messages}).encode()
-    req = urllib.request.Request(
-        URL, data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    req = urllib.request.Request(URL, data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # nosec B310 -- internal URL
         return json.load(r)["choices"][0]["message"]["content"]
 
 
 def _tool_bash(cmd: str) -> str:
-    result = subprocess.run(
-        cmd, shell=True, capture_output=True, text=True, timeout=30
-    )
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)  # nosec B602 -- tool execution
     out = result.stdout + result.stderr
     return out.strip() or "(no output)"
 

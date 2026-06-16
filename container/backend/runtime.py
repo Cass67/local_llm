@@ -15,7 +15,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class DockerRunnerConfig:
-    image: str = "local-llm-runner:latest"
+    image: str = "local-llm-runner-rocm:latest"
     name: str = "local-llm-runner"
     port: int = 8080
     render_group: str = "991"
@@ -29,6 +29,7 @@ class DockerContainerSpec:
     command: list[str]
     ports: dict[str, int]
     devices: list[str] = field(default_factory=list)
+    device_requests: list[dict[str, Any]] = field(default_factory=list)
     group_add: list[str] = field(default_factory=list)
     environment: dict[str, str] = field(default_factory=dict)
 
@@ -137,20 +138,33 @@ def build_runner_container_spec(
     if models_dir and not (metadata.get("model_path") or metadata.get("path")):
         metadata = {**metadata, "model_path": _model_path(metadata, models_dir)}
     cfg = _config(metadata)
+    backend = str(cfg.get("backend") or "rocm")
     visible_devices = str(cfg.get("visible_devices") or "")
     environment: dict[str, str] = {}
-    if visible_devices:
-        environment["GGML_VK_VISIBLE_DEVICES"] = visible_devices
-        environment["HIP_VISIBLE_DEVICES"] = visible_devices
-        environment["ROCR_VISIBLE_DEVICES"] = visible_devices
+    devices: list[str] = []
+    device_requests: list[dict[str, Any]] = []
+    group_add: list[str] = []
+
+    if backend == "cuda":
+        device_requests = [{"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu"]]}]
+        if visible_devices:
+            environment["CUDA_VISIBLE_DEVICES"] = visible_devices
+    else:
+        devices = ["/dev/kfd", "/dev/dri"]
+        group_add = [config.render_group]
+        if visible_devices:
+            environment["GGML_VK_VISIBLE_DEVICES"] = visible_devices
+            environment["HIP_VISIBLE_DEVICES"] = visible_devices
+            environment["ROCR_VISIBLE_DEVICES"] = visible_devices
 
     return DockerContainerSpec(
         name=config.name,
         image=config.image,
         command=build_llama_server_args(metadata, port=config.port),
         ports={f"{config.port}/tcp": config.port},
-        devices=["/dev/kfd", "/dev/dri"],
-        group_add=[config.render_group],
+        devices=devices,
+        device_requests=device_requests,
+        group_add=group_add,
         environment=environment,
     )
 
@@ -216,19 +230,22 @@ class DockerRunner:
             time.sleep(0.25)
         spec = build_runner_container_spec(metadata, self.config, self.models_dir)
         env = [f"{key}={value}" for key, value in spec.environment.items()]
+        host_config: dict[str, Any] = {
+            "NetworkMode": "host",
+            "Binds": [f"{self.host_models_dir}:/models:rw"],
+            "Devices": [
+                {"PathOnHost": device, "PathInContainer": device, "CgroupPermissions": "rwm"}
+                for device in spec.devices
+            ],
+            "GroupAdd": spec.group_add,
+        }
+        if spec.device_requests:
+            host_config["DeviceRequests"] = spec.device_requests
         payload = {
             "Image": spec.image,
             "Cmd": spec.command,
             "Env": env,
-            "HostConfig": {
-                "NetworkMode": "host",
-                "Binds": [f"{self.host_models_dir}:/models:rw"],
-                "Devices": [
-                    {"PathOnHost": device, "PathInContainer": device, "CgroupPermissions": "rwm"}
-                    for device in spec.devices
-                ],
-                "GroupAdd": spec.group_add,
-            },
+            "HostConfig": host_config,
         }
         self._docker_json(
             "POST", f"/containers/create?name={self.config.name}", json.dumps(payload)

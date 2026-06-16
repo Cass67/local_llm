@@ -145,3 +145,47 @@ async def test_switch_model_with_backend_override(temp_state):
 
     selection = json.loads((temp_state / "current-selection.json").read_text())
     assert selection["model"] == "qwen3.6-27b-q6-vulkan"
+
+
+@pytest.mark.asyncio
+async def test_switch_model_with_cuda_backend_override(temp_state):
+    """Switching with backend=cuda uses the -cuda variant launcher."""
+    import backend.config as cfg
+
+    cuda_data = {
+        "family": "qwen-cuda",
+        "alias": "qwen3.6-27b-q6-cuda",
+        "model_name": "Qwen3.6 27B Heretic Q6_K (CUDA)",
+        "profile": "reliable",
+        "context": 65536,
+        "backend": "cuda",
+        "reasoning": False,
+        "model_path": "/models/qwen-cuda.gguf",
+        "config": {"backend": "cuda"},
+    }
+    (cfg.ACCEPTED_DIR / "qwen-cuda.json").write_text(json.dumps(cuda_data, indent=2))
+
+    from backend.main import app
+
+    with (
+        patch("backend.routes.switch.DockerRunner"),
+        patch("backend.routes.switch._wait_for_runner_ready", return_value=True),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/models/switch",
+                json={
+                    "family": "qwen",
+                    "profile": "reliable",
+                    "backend": "cuda",
+                },
+            )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["backend"] == "cuda"
+    assert data["alias"] == "qwen3.6-27b-q6-cuda"
+
+    selection = json.loads((temp_state / "current-selection.json").read_text())
+    assert selection["model"] == "qwen3.6-27b-q6-cuda"

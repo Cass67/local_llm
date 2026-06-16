@@ -863,8 +863,8 @@ if ctx_shift:
         raise SystemExit("accepted metadata ctx_shift must be on/off or a non-negative integer")
     payload["config"]["ctx_shift"] = ctx_shift
 if backend:
-    if backend not in {"vulkan", "rocm"}:
-        raise SystemExit("accepted metadata backend must be rocm or vulkan when set")
+    if backend not in {"vulkan", "rocm", "cuda"}:
+        raise SystemExit("accepted metadata backend must be rocm, vulkan, or cuda when set")
     if not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
         raise SystemExit("accepted metadata visible_devices must be comma-separated device indexes")
     if split_mode not in {"layer", "row"}:
@@ -3139,6 +3139,11 @@ if [[ "$backend" == vulkan ]]; then
     tensor_split="1,1"
   fi
   export GGML_VK_VISIBLE_DEVICES="$visible_devices"
+elif [[ "$backend" == cuda ]]; then
+  visible_devices="${visible_devices:-0,1}"
+  split_mode="${split_mode:-layer}"
+  tensor_split="${tensor_split:-1,1}"
+  export CUDA_VISIBLE_DEVICES="$visible_devices"
 elif [[ -n "$visible_devices" ]]; then
   split_mode="${split_mode:-row}"
   tensor_split="${tensor_split:-1,1}"
@@ -3148,6 +3153,8 @@ fi
 server_bin=./build/bin/llama-server
 if [[ "$backend" == vulkan ]]; then
   server_bin=./build-vulkan/bin/llama-server
+elif [[ "$backend" == cuda ]]; then
+  server_bin=./build-cuda/bin/llama-server
 fi
 model_args=(-hf "${repo}:${quant}")
 if [[ -n "$hf_file" ]]; then
@@ -3693,7 +3700,7 @@ cmd_benchmark() {
         ;;
       --backend)
         if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
-          printf '%s\n' '--backend requires auto, default, rocm, or vulkan' >&2
+          printf '%s\n' '--backend requires auto, default, rocm, vulkan, or cuda' >&2
           return 2
         fi
         backend="$2"
@@ -3833,7 +3840,7 @@ cmd_benchmark() {
   done
 
   case "$backend" in
-    auto | default | rocm | vulkan) ;;
+    auto | default | rocm | vulkan | cuda) ;;
     *)
       printf 'invalid benchmark backend: %s\n' "$backend" >&2
       return 2
@@ -4515,8 +4522,8 @@ if ctx_shift:
     if ctx_shift not in {"on", "true", "1", "off", "false", "0"} and not re.fullmatch(r"[0-9]+", ctx_shift):
         raise SystemExit("benchmark JSON ctx_shift must be on/off or a non-negative integer")
 if backend:
-    if backend not in {"vulkan", "rocm"}:
-        raise SystemExit("benchmark JSON backend must be rocm or vulkan when set")
+    if backend not in {"vulkan", "rocm", "cuda"}:
+        raise SystemExit("benchmark JSON backend must be rocm, vulkan, or cuda when set")
     for key, value in (("visible_devices", visible_devices), ("split_mode", split_mode), ("tensor_split", tensor_split)):
         if not isinstance(value, str) or has_control_chars(value):
             raise SystemExit(f"benchmark JSON field must be a safe string: {key}")
@@ -4641,8 +4648,8 @@ if ctx_shift:
     if ctx_shift not in {"on", "true", "1", "off", "false", "0"} and not re.fullmatch(r"[0-9]+", ctx_shift):
         raise SystemExit("ctx_shift must be on/off or a non-negative integer")
 if backend:
-    if backend not in {"vulkan", "rocm"}:
-        raise SystemExit("backend must be rocm or vulkan when set")
+    if backend not in {"vulkan", "rocm", "cuda"}:
+        raise SystemExit("backend must be rocm, vulkan, or cuda when set")
     if not re.fullmatch(r"[0-9]+(,[0-9]+)*", visible_devices):
         raise SystemExit("visible_devices must be comma-separated device indexes")
     if split_mode not in {"layer", "row"}:
@@ -4676,7 +4683,13 @@ if backend == "vulkan":
 elif visible_devices:
     lines.append(f"export HIP_VISIBLE_DEVICES={visible_devices}")
     lines.append(f"export ROCR_VISIBLE_DEVICES={visible_devices}")
-server_bin = "./build-vulkan/bin/llama-server" if backend == "vulkan" else "./build/bin/llama-server"
+server_bin = (
+    "./build-vulkan/bin/llama-server"
+    if backend == "vulkan"
+    else "./build-cuda/bin/llama-server"
+    if backend == "cuda"
+    else "./build/bin/llama-server"
+)
 lines.extend([
     f"exec {server_bin} \\",
     f"  -hf {shlex.quote(repo)} \\",
@@ -5199,7 +5212,13 @@ elif visible_devices:
     lines.append(f"export HIP_VISIBLE_DEVICES={visible_devices}")
     lines.append(f"export ROCR_VISIBLE_DEVICES={visible_devices}")
 
-server_bin = "./build-vulkan/bin/llama-server" if backend == "vulkan" else "./build/bin/llama-server"
+server_bin = (
+    "./build-vulkan/bin/llama-server"
+    if backend == "vulkan"
+    else "./build-cuda/bin/llama-server"
+    if backend == "cuda"
+    else "./build/bin/llama-server"
+)
 
 lines.extend([
     f"exec {server_bin} \\",

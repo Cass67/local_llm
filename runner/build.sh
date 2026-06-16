@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
-# Build (and optionally run) the local-llm-runner image.
+# Build (and optionally run) a local-llm-runner backend image.
 #
 # Usage:
-#   ./build.sh            # build only
-#   ./build.sh --run      # build then run with --help
-#   ./build.sh --no-cache # force fresh llama.cpp clone
+#   ./build.sh <vulkan|rocm|cuda>            # build only
+#   ./build.sh <vulkan|rocm|cuda> --run      # build then run with --help
+#   ./build.sh <vulkan|rocm|cuda> --no-cache # force fresh llama.cpp clone
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE="local-llm-runner:latest"
+BACKEND="${1:-}"
+case "$BACKEND" in
+  vulkan | rocm | cuda) ;;
+  *)
+    echo "Usage: $0 <vulkan|rocm|cuda> [--run] [--no-cache]"
+    exit 1
+    ;;
+esac
+shift
+
+IMAGE="local-llm-runner-${BACKEND}:latest"
 BUILD_ARGS=()
 RUN_AFTER=false
 
@@ -31,7 +41,7 @@ if [[ "$(uname)" == "Linux" ]]; then
 fi
 
 echo "Building $IMAGE ..."
-docker build "${NETWORK_FLAG[@]}" "${BUILD_ARGS[@]}" -t "$IMAGE" "$SCRIPT_DIR"
+docker build "${NETWORK_FLAG[@]}" "${BUILD_ARGS[@]}" -t "$IMAGE" "$SCRIPT_DIR/$BACKEND"
 
 echo ""
 docker run --rm "$IMAGE" llama-server --version
