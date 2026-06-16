@@ -7,6 +7,7 @@ def test_backend_variant_id_replaces_existing_backend_suffix():
     assert backend_variant_id("qwen-vulkan", "rocm") == "qwen-rocm"
     assert backend_variant_id("qwen-rocm", "vulkan") == "qwen-vulkan"
     assert backend_variant_id("qwen", "vulkan") == "qwen-vulkan"
+    assert backend_variant_id("qwen-vulkan", "cuda") == "qwen-cuda"
 
 
 def test_copy_backend_variant_preserves_model_source_and_changes_identity():
@@ -43,3 +44,13 @@ def test_migrate_backend_variant_adds_missing_suffix():
     assert migrated["alias"] == "qwen-vulkan"
     assert migrated["backend"] == "vulkan"
     assert migrated["config"]["backend"] == "vulkan"
+
+
+def test_copy_backend_variant_cuda_label():
+    source = {"family": "qwen", "alias": "qwen", "model_name": "Qwen", "backend": "rocm"}
+
+    copied = copy_backend_variant(source, "cuda")
+
+    assert copied["family"] == "qwen-cuda"
+    assert copied["model_name"] == "Qwen (CUDA)"
+    assert copied["config"]["backend"] == "cuda"

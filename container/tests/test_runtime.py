@@ -94,3 +94,21 @@ def test_build_runner_container_spec_uses_project_owned_runner_name_and_gpu_moun
     assert spec.group_add == ["991"]
     assert spec.environment["GGML_VK_VISIBLE_DEVICES"] == "0,1"
     assert spec.command[:3] == ["llama-server", "--port", "8080"]
+
+
+def test_build_runner_container_spec_uses_nvidia_device_requests_for_cuda():
+    metadata = {
+        "alias": "qwopus-q5km",
+        "model_path": "/models/qwopus.gguf",
+        "config": {"backend": "cuda", "visible_devices": "0,1"},
+    }
+    config = DockerRunnerConfig(image="local-llm-runner-cuda:latest", port=8080)
+
+    spec = build_runner_container_spec(metadata, config)
+
+    assert spec.devices == []
+    assert spec.group_add == []
+    assert spec.device_requests == [{"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu"]]}]
+    assert spec.environment == {"CUDA_VISIBLE_DEVICES": "0,1"}
+    assert "GGML_VK_VISIBLE_DEVICES" not in spec.environment
+    assert "HIP_VISIBLE_DEVICES" not in spec.environment

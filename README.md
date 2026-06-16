@@ -1,6 +1,6 @@
 # local_llm
 
-A self-hosted LLM management system for AMD GPU workstations. Models run in an isolated Docker container with full GPU access; a Svelte web UI handles search, install, configuration, model switching, benchmarking, chat, and observability.
+A self-hosted LLM management system for AMD and Nvidia GPU workstations. Models run in an isolated Docker container with full GPU access; a Svelte web UI handles search, install, configuration, model switching, benchmarking, chat, and observability.
 
 ![local_llm architecture](docs/assets/local-llm-architecture.svg)
 
@@ -34,7 +34,7 @@ local-llm-caddy  ──/ui/*, /api/local-llm/*, /v1/*──▶  local-llm-mgmt  
   ▼
 local-llm-runner  :8080  (llama-server, GPU access)
   │
-  ├── /dev/kfd, /dev/dri  (ROCm or Vulkan)
+  ├── /dev/kfd, /dev/dri  (ROCm or Vulkan) — or Nvidia device requests (CUDA)
   └── ~/.cache/huggingface/hub  (GGUF model files)
 
 local-llm-langfuse  :3004  (LLM request tracing)
@@ -63,9 +63,10 @@ local-llm-postgres  :5433  (Langfuse database)
 
 ### Prerequisites
 
-- Linux host with an AMD GPU (ROCm or Vulkan).
+- Linux host with an AMD GPU (ROCm or Vulkan) and/or an Nvidia GPU (CUDA).
 - Docker with Compose plugin.
-- `/dev/kfd`, `/dev/dri` accessible to your user (render group).
+- AMD: `/dev/kfd`, `/dev/dri` accessible to your user (render group).
+- Nvidia: [nvidia-container-toolkit](https://github.com/NVIDIA/nvidia-container-toolkit) installed on the host so Docker can grant GPU device requests.
 
 ### 1. Configure
 
@@ -76,13 +77,16 @@ getent group render | cut -d: -f3
 getent group docker | cut -d: -f3
 ```
 
-### 2. Build the runner image
+### 2. Build the runner images
 
 ```bash
-cd runner && ./build.sh && cd ..
+cd runner && ./build.sh vulkan && ./build.sh rocm && ./build.sh cuda && cd ..
 ```
 
-This builds `local-llm-runner:latest` — a minimal Ubuntu image with llama.cpp compiled for ROCm and Vulkan. The build stage compiles from source; the runtime stage is stripped down with only the binary and GPU libs.
+Each backend gets its own image — `local-llm-runner-vulkan:latest`, `local-llm-runner-rocm:latest`,
+`local-llm-runner-cuda:latest` — built from `runner/<backend>/Dockerfile`. Only build the backends
+your hardware supports; the build stage compiles llama.cpp from source for that backend, and the
+runtime stage is stripped down to the binary and the GPU libs it needs.
 
 ### 3. Start everything
 
@@ -189,7 +193,9 @@ Changes take effect on the next model switch.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `RUNNER_IMAGE` | `local-llm-runner:latest` | Image used when launching the runner container. |
+| `RUNNER_IMAGE_VULKAN` | `local-llm-runner-vulkan:latest` | Image used when launching a model with `backend: vulkan`. |
+| `RUNNER_IMAGE_ROCM` | `local-llm-runner-rocm:latest` | Image used when launching a model with `backend: rocm`. |
+| `RUNNER_IMAGE_CUDA` | `local-llm-runner-cuda:latest` | Image used when launching a model with `backend: cuda`. |
 | `LOCAL_LLM_STATE_DIR` | `/state` | Accepted metadata and state files (container path). |
 | `MODELS_CACHE_DIR` | `/models` | GGUF cache path inside the container. |
 | `HOST_MODELS_CACHE_DIR` | same as above | Host-side path passed to the runner container bind mount. |
@@ -270,21 +276,30 @@ rsync -av container/ runner/ scripts/ docker-compose.yml ubt26:~/git/local_llm/
 ssh ubt26 "cd ~/git/local_llm && docker compose build local-llm-mgmt && docker compose up -d"
 ```
 
-### Runner image
+### Runner images
 
-The runner is a multi-stage Docker build:
+Each backend is its own multi-stage Docker build under `runner/<backend>/Dockerfile`:
 
-- **Build stage**: clones llama.cpp at a pinned ref and compiles with ROCm (`-DGGML_HIPBLAS=ON`) and Vulkan (`-DGGML_VULKAN=ON`) support.
-- **Runtime stage**: copies only the `llama-server` binary and required `.so` files into a clean Ubuntu image with ROCm and Vulkan runtime libs.
+- **vulkan**: compiles llama.cpp with `-DGGML_VULKAN=ON`. Runtime stage is plain Ubuntu + Mesa Vulkan drivers.
+- **rocm**: compiles llama.cpp with `-DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1100` (override `AMDGPU_TARGETS`
+  for other RDNA/CDNA chips) using the ROCm devel image. Runtime stage installs only the HIP runtime libs.
+- **cuda**: compiles llama.cpp with `-DGGML_CUDA=ON` using Nvidia's `cuda:12.6.3-devel` image. Runtime
+  stage uses the matching `cuda:12.6.3-runtime` image.
 
-AMD GPU requirements in the runner container spec:
+GPU passthrough differs by backend in the runner container spec:
 
 ```
+# rocm / vulkan
 devices: ["/dev/kfd", "/dev/dri"]
 group_add: ["991"]   # render group
 environment: HIP_VISIBLE_DEVICES, ROCR_VISIBLE_DEVICES, GGML_VK_VISIBLE_DEVICES
-network_mode: host
+
+# cuda
+device_requests: [{"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu"]]}]
+environment: CUDA_VISIBLE_DEVICES
 ```
+
+`network_mode: host` applies to all three.
 
 ---
 
