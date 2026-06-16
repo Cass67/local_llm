@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { marked } from "marked";
+	import DOMPurify from "dompurify";
 	import { fetchHFCard } from "../lib/api";
 	import { installStatusView } from "../lib/installStatus";
 	import { searchStore } from "../lib/searchStore";
@@ -250,7 +252,7 @@
 				{#if hfCardLoading}
 					<p>Loading model card...</p>
 				{:else}
-					<pre>{hfCardMarkdown}</pre>
+					<div class="hf-card-body">{@html DOMPurify.sanitize(marked.parse(hfCardMarkdown) as string)}</div>
 				{/if}
 			</div>
 		</div>
@@ -311,6 +313,23 @@
 	.modal-header button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem; }
 	.modal-body { flex: 1; overflow-y: auto; padding: 1rem; }
 	.modal-body pre { white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; line-height: 1.5; font-family: 'JetBrains Mono', monospace; background: var(--bg); padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
+	.hf-card-body { font-size: 0.85rem; line-height: 1.6; color: var(--text); }
+	.hf-card-body :global(h1), .hf-card-body :global(h2), .hf-card-body :global(h3) { margin: 1rem 0 0.4rem; font-weight: bold; color: var(--text); }
+	.hf-card-body :global(h1) { font-size: 1.2rem; }
+	.hf-card-body :global(h2) { font-size: 1.05rem; }
+	.hf-card-body :global(h3) { font-size: 0.95rem; }
+	.hf-card-body :global(p) { margin: 0.4rem 0; }
+	.hf-card-body :global(ul), .hf-card-body :global(ol) { margin: 0.3rem 0 0.3rem 1.2rem; }
+	.hf-card-body :global(li) { margin: 0.15rem 0; }
+	.hf-card-body :global(code) { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; background: var(--bg); padding: 0.1rem 0.3rem; border-radius: 3px; border: 1px solid var(--border); }
+	.hf-card-body :global(pre) { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; overflow-x: auto; margin: 0.5rem 0; }
+	.hf-card-body :global(pre code) { background: none; border: none; padding: 0; }
+	.hf-card-body :global(table) { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.8rem; }
+	.hf-card-body :global(th), .hf-card-body :global(td) { border: 1px solid var(--border); padding: 0.3rem 0.5rem; text-align: left; }
+	.hf-card-body :global(th) { background: var(--bg); color: var(--text-muted); font-weight: bold; }
+	.hf-card-body :global(a) { color: var(--accent); text-decoration: underline; }
+	.hf-card-body :global(hr) { border: none; border-top: 1px solid var(--border); margin: 0.8rem 0; }
+	.hf-card-body :global(blockquote) { border-left: 3px solid var(--border); padding-left: 0.75rem; color: var(--text-muted); margin: 0.5rem 0; }
 	.error-details { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 0.75rem; font-size: 0.85rem; margin-bottom: 1rem; }
 	.error-details dt { color: var(--text-muted); }
 	.error-details dd { margin: 0; word-break: break-word; }

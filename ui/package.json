@@ -18,6 +18,9 @@
     "vitest": "^2.1.9"
   },
   "dependencies": {
+    "@types/dompurify": "^3.2.0",
+    "dompurify": "^3.4.10",
+    "marked": "^18.0.5",
     "svelte-spa-router": "^4.0.0"
   }
 }
