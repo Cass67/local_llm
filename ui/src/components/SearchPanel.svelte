@@ -252,7 +252,7 @@
 				{#if hfCardLoading}
 					<p>Loading model card...</p>
 				{:else}
-					<div class="hf-card-body">{@html DOMPurify.sanitize(marked.parse(hfCardMarkdown) as string)}</div>
+					<div class="hf-card-body">{@html DOMPurify.sanitize(marked.parse(hfCardMarkdown) as string, { FORBID_ATTR: ["style"] })}</div>
 				{/if}
 			</div>
 		</div>
@@ -325,8 +325,8 @@
 	.hf-card-body :global(pre) { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; overflow-x: auto; margin: 0.5rem 0; }
 	.hf-card-body :global(pre code) { background: none; border: none; padding: 0; }
 	.hf-card-body :global(table) { border-collapse: collapse; width: 100%; margin: 0.5rem 0; font-size: 0.8rem; }
-	.hf-card-body :global(th), .hf-card-body :global(td) { border: 1px solid var(--border); padding: 0.3rem 0.5rem; text-align: left; }
-	.hf-card-body :global(th) { background: var(--bg); color: var(--text-muted); font-weight: bold; }
+	.hf-card-body :global(th), .hf-card-body :global(td) { border: 1px solid var(--border); padding: 0.3rem 0.5rem; text-align: left; color: var(--text) !important; background: transparent !important; }
+	.hf-card-body :global(th) { background: var(--bg) !important; color: var(--text-muted) !important; font-weight: bold; }
 	.hf-card-body :global(a) { color: var(--accent); text-decoration: underline; }
 	.hf-card-body :global(hr) { border: none; border-top: 1px solid var(--border); margin: 0.8rem 0; }
 	.hf-card-body :global(blockquote) { border-left: 3px solid var(--border); padding-left: 0.75rem; color: var(--text-muted); margin: 0.5rem 0; }
