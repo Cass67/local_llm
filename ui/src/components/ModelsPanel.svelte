@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { fetchModels, fetchCurrentModel, switchModel, copyModelBackend } from "../lib/api";
-	import type { ModelInfo, CurrentModelResponse } from "../lib/types";
+	import type { Backend, ModelInfo, CurrentModelResponse } from "../lib/types";
 	import ModelCard from "./ModelCard.svelte";
 	import ModelDetail from "./ModelDetail.svelte";
 	import EditModelForm from "./EditModelForm.svelte";
@@ -10,7 +10,7 @@
 	let models: ModelInfo[] = $state([]);
 	let current: CurrentModelResponse | null = $state(null);
 	let switching: string | null = $state(null);
-	let selectedBackend: "rocm" | "vulkan" = $state("rocm");
+	let selectedBackend: Backend = $state("rocm");
 	let error: string = $state("");
 	let loading: boolean = $state(true);
 	let detailFamily: string | null = $state(null);
@@ -31,7 +31,7 @@
 		}
 	}
 
-	async function handleCopyBackend(family: string, backend: "rocm" | "vulkan") {
+	async function handleCopyBackend(family: string, backend: Backend) {
 		error = "";
 		try {
 			await copyModelBackend(family, backend);
@@ -42,7 +42,7 @@
 		}
 	}
 
-	async function handleSwitch(family: string, profile: string, backend: "rocm" | "vulkan") {
+	async function handleSwitch(family: string, profile: string, backend: Backend) {
 		switching = family;
 		error = "";
 		try {
@@ -67,6 +67,7 @@
 		<div class="backend-toggle">
 			<button class:active={selectedBackend === "rocm"} onclick={() => (selectedBackend = "rocm")}>ROCm</button>
 			<button class:active={selectedBackend === "vulkan"} onclick={() => (selectedBackend = "vulkan")}>Vulkan</button>
+			<button class:active={selectedBackend === "cuda"} onclick={() => (selectedBackend = "cuda")}>CUDA</button>
 		</div>
 		<div class="toolbar-actions">
 			<button class="delete" onclick={() => (deleteOpen = true)}>Delete</button>
@@ -94,7 +95,7 @@
 				{model}
 				isRunning={current?.running === true && current?.alias === model.alias}
 				{switching}
-				onSwitch={(profile) => handleSwitch(model.family, profile, model.backend === "vulkan" ? "vulkan" : "rocm")}
+				onSwitch={(profile) => handleSwitch(model.family, profile, model.backend)}
 				onCopyBackend={(backend) => handleCopyBackend(model.family, backend)}
 				onDetail={() => (detailFamily = model.family)}
 				onEdit={() => (editFamily = model.family)}

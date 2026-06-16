@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ModelInfo } from "../lib/types";
+	import type { Backend, ModelInfo } from "../lib/types";
 
 	let {
 		model,
@@ -14,14 +14,17 @@
 		isRunning: boolean;
 		switching: string | null;
 		onSwitch: (profile: string) => void;
-		onCopyBackend?: (backend: "rocm" | "vulkan") => void;
+		onCopyBackend?: (backend: Backend) => void;
 		onDetail?: () => void;
 		onEdit?: () => void;
 	} = $props();
 
+	const BACKEND_LABELS: Record<Backend, string> = { rocm: "ROCm", vulkan: "Vulkan", cuda: "CUDA" };
+	const ALL_BACKENDS: Backend[] = ["rocm", "vulkan", "cuda"];
+
 	let selectedProfile = $state("");
 	let isSwitching = $derived(switching === model.family);
-	let oppositeBackend: "rocm" | "vulkan" = $derived(model.backend === "vulkan" ? "rocm" : "vulkan");
+	let otherBackends = $derived(ALL_BACKENDS.filter((b) => b !== model.backend));
 
 	$effect(() => {
 		if (!selectedProfile) selectedProfile = model.profile || "reliable";
@@ -31,7 +34,12 @@
 <div class="model-card" class:running={isRunning}>
 	<div class="card-header">
 		<h3>{model.model_name}</h3>
-		<span class="backend-badge" class:rocm={model.backend === "rocm"} class:vulkan={model.backend === "vulkan"}>{model.backend}</span>
+		<span
+			class="backend-badge"
+			class:rocm={model.backend === "rocm"}
+			class:vulkan={model.backend === "vulkan"}
+			class:cuda={model.backend === "cuda"}
+		>{model.backend}</span>
 	</div>
 
 	<div class="card-body">
@@ -59,7 +67,9 @@
 		<div class="card-actions">
 			<button onclick={onDetail}>Detail</button>
 			<button onclick={onEdit}>Edit</button>
-			<button onclick={() => onCopyBackend?.(oppositeBackend)}>Copy to {oppositeBackend === "rocm" ? "ROCm" : "Vulkan"}</button>
+			{#each otherBackends as backend (backend)}
+				<button onclick={() => onCopyBackend?.(backend)}>Copy to {BACKEND_LABELS[backend]}</button>
+			{/each}
 		</div>
 	</div>
 </div>
@@ -92,6 +102,7 @@
 	}
 	.backend-badge.rocm { background: #ef444422; color: #ef4444; box-shadow: 0 0 8px #ef444433; }
 	.backend-badge.vulkan { background: #8b5cf622; color: #8b5cf6; box-shadow: 0 0 8px #8b5cf633; }
+	.backend-badge.cuda { background: #22c55e22; color: #22c55e; box-shadow: 0 0 8px #22c55e33; }
 	.card-body { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
 	.info-row { display: flex; justify-content: space-between; gap: 0.5rem; }
 	.info-row span { color: var(--text-muted); }
