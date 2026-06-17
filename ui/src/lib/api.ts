@@ -19,6 +19,8 @@ import type {
 	BenchmarkSummary,
 	ChatMetric,
 	RunnerHealth,
+	GpuInfo,
+	ClusterInfo,
 } from "./types";
 
 const BASE = "/api/local-llm";
@@ -289,6 +291,74 @@ export async function deleteModels(repos: string[]): Promise<DeleteResponse> {
 export async function fetchHFCard(repo: string): Promise<HFCardResponse> {
 	const res = await fetch(`${BASE}/hfcard?repo=${encodeURIComponent(repo)}`);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+// --- GPU Clusters ---
+
+export async function fetchGpus(): Promise<{ gpus: GpuInfo[] }> {
+	const res = await fetch(`${BASE}/gpus`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchClusters(): Promise<{ clusters: ClusterInfo[] }> {
+	const res = await fetch(`${BASE}/clusters`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function createCluster(req: {
+	name: string;
+	gpu_pci_ids: string[];
+	backend: Backend;
+}): Promise<ClusterInfo> {
+	const res = await fetch(`${BASE}/clusters`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function deleteCluster(id: string): Promise<{ status: string }> {
+	const res = await fetch(`${BASE}/clusters/${encodeURIComponent(id)}`, { method: "DELETE" });
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function startOnCluster(
+	clusterId: string,
+	family: string,
+	profile: string,
+): Promise<{ status: string }> {
+	const res = await fetch(`${BASE}/clusters/${encodeURIComponent(clusterId)}/start`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ family, profile }),
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function stopCluster(clusterId: string): Promise<{ status: string }> {
+	const res = await fetch(`${BASE}/clusters/${encodeURIComponent(clusterId)}/stop`, {
+		method: "POST",
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
 	return res.json();
 }
 

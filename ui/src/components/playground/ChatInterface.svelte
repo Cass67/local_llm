@@ -1,7 +1,7 @@
 <script lang="ts">
   import { streamChat, type ChatMessage } from '../../lib/chatApi';
-  import { fetchCurrentModel } from '../../lib/api';
-  import type { CurrentModelResponse } from '../../lib/types';
+  import { fetchClusters } from '../../lib/api';
+  import type { ClusterInfo } from '../../lib/types';
   import ChatMessageComponent from './ChatMessage.svelte';
   import { onMount } from 'svelte';
 
@@ -10,13 +10,18 @@
   ]);
   let input: string = $state('');
   let streaming: boolean = $state(false);
-  let currentModel: CurrentModelResponse | null = $state(null);
+  let runningClusters: ClusterInfo[] = $state([]);
+  let selectedModel: string = $state('');
   let error: string = $state('');
   let abortController: AbortController | null = null;
 
   onMount(async () => {
     try {
-      currentModel = await fetchCurrentModel();
+      const data = await fetchClusters();
+      runningClusters = data.clusters.filter((c) => c.active?.running);
+      if (runningClusters.length === 1 && runningClusters[0].active?.model) {
+        selectedModel = runningClusters[0].active.model;
+      }
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -24,7 +29,7 @@
 
   async function send() {
     const text = input.trim();
-    if (!text || streaming || !currentModel?.alias) return;
+    if (!text || streaming || !selectedModel) return;
 
     input = '';
     error = '';
@@ -36,7 +41,7 @@
     abortController = new AbortController();
 
     try {
-      const modelName = `ubt26-llamacpp/${currentModel.alias}`;
+      const modelName = `ubt26-llamacpp/${selectedModel}`;
       for await (const token of streamChat(modelName, messages.slice(0, -1), abortController.signal)) {
         messages = messages.map((m, i) =>
           i === assistantIdx ? { ...m, content: m.content + token } : m
@@ -69,9 +74,21 @@
   {/if}
 
   <div class="model-bar">
-    Model: <strong>{currentModel?.alias || 'none selected'}</strong>
-    {#if currentModel?.backend}
-      <span class="backend-tag">{currentModel.backend}</span>
+    {#if runningClusters.length === 0}
+      <span class="muted">No models running — start one on the <a href="#/architecture">Architecture tab</a></span>
+    {:else if runningClusters.length === 1}
+      Model: <strong>{selectedModel || 'none'}</strong>
+      <span class="backend-tag">{runningClusters[0].backend}</span>
+    {:else}
+      <label for="model-select">Model:</label>
+      <select id="model-select" bind:value={selectedModel}>
+        <option value="">— pick model —</option>
+        {#each runningClusters as c}
+          {#if c.active?.model}
+            <option value={c.active.model}>{c.active.model} ({c.name})</option>
+          {/if}
+        {/each}
+      </select>
     {/if}
   </div>
 
@@ -96,7 +113,7 @@
       {#if streaming}
         <button class="stop-btn" onclick={stop}>Stop</button>
       {:else}
-        <button class="send-btn" onclick={send} disabled={!input.trim()}>Send</button>
+        <button class="send-btn" onclick={send} disabled={!input.trim() || !selectedModel}>Send</button>
       {/if}
     </div>
   </div>
@@ -122,16 +139,25 @@
     flex-shrink: 0;
     display: flex;
     align-items: center;
+    gap: 0.5rem;
+  }
+  .muted { color: var(--text-muted); }
+  .muted a { color: var(--accent); }
+  #model-select {
+    padding: 0.15rem 0.3rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    font-size: 0.85rem;
   }
   .backend-tag {
-    margin-left: 0.6rem;
     font-size: 0.7rem;
     padding: 0.1rem 0.4rem;
     border-radius: 3px;
     background: var(--accent);
     color: var(--text);
     font-weight: bold;
-    box-shadow: 0 0 6px var(--accent33);
   }
   .messages {
     flex: 1;

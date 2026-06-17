@@ -54,6 +54,13 @@
 			.join(" ");
 	}
 
+	function statsAge(ts: number): string {
+		const secs = Math.round(Date.now() / 1000 - ts);
+		if (secs < 60) return `${secs}s ago`;
+		if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
+		return `${Math.round(secs / 3600)}h ago`;
+	}
+
 	async function restart(model: ModelInfo) {
 		restarting = model.family;
 		error = "";
@@ -90,7 +97,7 @@
 			<div class="status-card"><span>Context</span><strong>{status.running.ctx ? status.running.ctx.toLocaleString() : "-"}</strong></div>
 			<div class="status-card"><span>Accepted</span><strong>{status.accepted_count}</strong></div>
 			<div class="status-card"><span>Default</span><strong>{status.default_set ? "yes" : "no"}</strong></div>
-			<div class="status-card"><span>Tok/s</span><strong>{stats.predicted_per_second ? stats.predicted_per_second.toFixed(1) : "-"}</strong></div>
+			<div class="status-card"><span>Tok/s</span><strong>{stats.predicted_per_second ? stats.predicted_per_second.toFixed(1) : "-"}</strong>{#if stats.ts}<small class="stat-age">{statsAge(stats.ts)}</small>{/if}</div>
 			<div class="status-card"><span>Prompt tok/s</span><strong>{stats.prompt_per_second ? stats.prompt_per_second.toFixed(1) : "-"}</strong></div>
 			<div class="status-card"><span>Draft accepted</span><strong>{stats.draft_n_accepted ?? "-"}/{stats.draft_n ?? "-"}</strong></div>
 		</div>
@@ -168,6 +175,7 @@
 	}
 	.status-card:hover { border-color: var(--accent); }
 	.status-card span { color: var(--text-muted); font-size: 0.8rem; }
+	.stat-age { color: var(--text-muted); font-size: 0.7rem; margin-top: 0.1rem; }
 	table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 	th, td { padding: 0.6rem 0.4rem; border-bottom: 1px solid var(--border); text-align: left; }
 	th { color: var(--text-muted); font-weight: normal; }

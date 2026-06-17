@@ -75,6 +75,10 @@ def _build_launch_metadata(
     if n > 1:
         cfg.setdefault("tensor_split", tensor_split_for(n))
         cfg.setdefault("split_mode", "layer")
+    else:
+        # Single GPU: clear any multi-GPU settings from the accepted metadata
+        cfg.pop("tensor_split", None)
+        cfg.pop("split_mode", None)
 
     return meta
 

@@ -90,6 +90,24 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
             alias,
             "--reasoning",
             _bool_flag(cfg.get("reasoning", metadata.get("reasoning", False))),
+            "--context-shift",
+            "--cache-prompt",
+            "--cache-ram",
+            str(cfg.get("cache_ram", 16384)),
+            "--ctx-checkpoints",
+            str(cfg.get("ctx_checkpoints", 64)),
+            "--checkpoint-min-step",
+            str(cfg.get("checkpoint_min_step", 4096)),
+            "--timeout",
+            str(cfg.get("timeout", 600)),
+            "--threads-http",
+            str(cfg.get("threads_http", 2)),
+            "--parallel",
+            str(cfg.get("parallel", 1)),
+            "--no-cont-batching",
+            "--prio",
+            "2",
+            "--no-warmup",
         ]
     )
 
@@ -153,9 +171,10 @@ def build_runner_container_spec(
         devices = ["/dev/kfd", "/dev/dri"]
         group_add = [config.render_group]
         if visible_devices:
-            environment["GGML_VK_VISIBLE_DEVICES"] = visible_devices
-            environment["HIP_VISIBLE_DEVICES"] = visible_devices
-            environment["ROCR_VISIBLE_DEVICES"] = visible_devices
+            if backend == "vulkan":
+                environment["GGML_VK_VISIBLE_DEVICES"] = visible_devices
+            else:
+                environment["HIP_VISIBLE_DEVICES"] = visible_devices
 
     return DockerContainerSpec(
         name=config.name,

@@ -51,10 +51,10 @@ def test_models_and_run_api(tmp_path: Path, monkeypatch):
         def json(self):
             return self._payload
 
-    async def fake_get(self, _url, _headers=None):
+    async def fake_get(self, _url, **_kwargs):
         return FakeResponse({"data": [{"id": "model-a"}]})
 
-    async def fake_post(self, _url, json=None, _headers=None):
+    async def fake_post(self, _url, **_kwargs):
         return FakeResponse(
             {
                 "choices": [{"message": {"content": "hello world"}}],

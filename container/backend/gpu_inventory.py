@@ -174,10 +174,12 @@ def _vulkaninfo_devices() -> list[dict]:
     return devices
 
 
-def _match_vulkan(sysfs_devs: list[dict], vulkan_devs: list[dict]) -> dict[str, int]:
-    """Map PCI id → Vulkan device index, matched by vendor:device id pair."""
+def _match_vulkan(
+    sysfs_devs: list[dict], vulkan_devs: list[dict]
+) -> tuple[dict[str, int], dict[str, str]]:
+    """Map PCI id → (Vulkan device index, device name), matched by vendor:device id pair."""
     vk_index: dict[str, int] = {}
-    # Build a list of (vendor_id, device_id) for vulkan in order
+    vk_names: dict[str, str] = {}
     vk_pairs: list[tuple[str, str]] = []
     for v in vulkan_devs:
         vid = v.get("vendor_id", "").lower().lstrip("0x").zfill(4)
@@ -189,16 +191,16 @@ def _match_vulkan(sysfs_devs: list[dict], vulkan_devs: list[dict]) -> dict[str, 
     for sysfs in sysfs_devs:
         pair = (sysfs["vendor_id"].zfill(4), sysfs["device_id"].zfill(4))
         use_count = used.get(pair, 0)
-        # find the use_count-th occurrence of this pair in vk_pairs
         found = 0
         for vk_idx, vk_pair in enumerate(vk_pairs):
             if vk_pair == pair:
                 if found == use_count:
                     vk_index[sysfs["pci_id"]] = vk_idx
+                    vk_names[sysfs["pci_id"]] = vulkan_devs[vk_idx].get("name", "")
                     break
                 found += 1
         used[pair] = use_count + 1
-    return vk_index
+    return vk_index, vk_names
 
 
 def _sysfs_amd_vram() -> dict[str, int]:
@@ -234,7 +236,7 @@ def detect_gpus() -> list[GpuInfo]:
     rocm_map = _rocminfo_indices()
     nvidia_map = _nvidia_smi_indices()
     vulkan_devs = _vulkaninfo_devices()
-    vk_map = _match_vulkan(sysfs, vulkan_devs)
+    vk_map, vk_names = _match_vulkan(sysfs, vulkan_devs)
 
     # Track per-vendor enumeration index for ROCm fallback (when rocminfo absent)
     amd_count = 0
@@ -269,9 +271,11 @@ def detect_gpus() -> list[GpuInfo]:
             nvidia_count += 1
 
         vk_idx = vk_map.get(pci)
-
-        # Try to get a friendly name from rocminfo if we have it
-        if vendor == "amd" and not name.startswith("Radeon") and not name.startswith("AMD"):
+        # Use vulkaninfo name when available (works even without rocminfo)
+        vk_name = vk_names.get(pci, "")
+        if vk_name:
+            name = vk_name
+        elif vendor == "amd" and name == "Unknown GPU":
             name = f"AMD GPU (PCI {pci})"
         elif vendor == "nvidia" and name == "Unknown GPU":
             name = f"NVIDIA GPU (PCI {pci})"

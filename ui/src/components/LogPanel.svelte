@@ -1,20 +1,30 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { scrollToBottom } from '../lib/scroll';
+  import { fetchClusters } from '../lib/api';
+  import type { ClusterInfo } from '../lib/types';
 
   let lines: string[] = $state([]);
   let connected: boolean = $state(false);
   let autoScroll: boolean = $state(true);
   let source: 'runner' | 'mgmt' = $state('runner');
+  let clusters: ClusterInfo[] = $state([]);
+  let selectedClusterId: string = $state('');
   let eventSource: EventSource | null = null;
   let logContainer: HTMLDivElement | undefined = $state();
+
+  function streamUrl() {
+    const params = new URLSearchParams({ source });
+    if (source === 'runner' && selectedClusterId) params.set('cluster_id', selectedClusterId);
+    return `/api/local-llm/logs/stream?${params}`;
+  }
 
   function connect() {
     eventSource?.close();
     lines = [];
     connected = false;
 
-    eventSource = new EventSource(`/api/local-llm/logs/stream?source=${source}`);
+    eventSource = new EventSource(streamUrl());
     eventSource.onopen = () => { connected = true; };
 
     eventSource.addEventListener('log', (e: MessageEvent) => {
@@ -34,7 +44,14 @@
     };
   }
 
-  onMount(connect);
+  onMount(async () => {
+    try {
+      const data = await fetchClusters();
+      clusters = data.clusters.filter((c) => c.active?.running);
+      if (clusters.length === 1) selectedClusterId = clusters[0].id;
+    } catch { /* non-fatal */ }
+    connect();
+  });
   onDestroy(() => eventSource?.close());
 </script>
 
@@ -48,6 +65,13 @@
       <option value="runner">Runner logs</option>
       <option value="mgmt">Management/API logs</option>
     </select>
+    {#if source === 'runner' && clusters.length > 1}
+      <select bind:value={selectedClusterId} onchange={connect}>
+        {#each clusters as c}
+          <option value={c.id}>{c.name}</option>
+        {/each}
+      </select>
+    {/if}
     <button onclick={connect} disabled={connected}>Reconnect</button>
     <label>
       <input type="checkbox" bind:checked={autoScroll} />
