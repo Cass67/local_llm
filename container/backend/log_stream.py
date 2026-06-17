@@ -81,11 +81,11 @@ def read_log_tail(lines: int = 100, source: str = "runner") -> list[str]:
 async def stream_log_tail(
     disconnect: asyncio.Event,
     source: str = "runner",
-    _poll_interval: float = 1.0,  # ponytail: unused now; follow API replaces polling
+    container: str | None = None,
     skip_existing: bool = False,
 ):
     """SSE generator: stream Docker logs via follow API."""
-    container = _container_name(source)
+    container = container or _container_name(source)
     if not config.DOCKER_SOCKET.exists():
         return
 

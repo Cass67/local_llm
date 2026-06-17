@@ -69,31 +69,3 @@ def paginate_candidates(
     start = (page - 1) * per_page
     end = start + per_page
     return page, total_pages, candidates[start:end]
-
-
-def get_model_metadata(data: dict[str, Any]) -> dict[str, Any]:
-    """Extract model metadata for display in detail view."""
-    return {
-        "repo": data.get("repo", ""),
-        "profiles": data.get("profiles", {}),
-        "launcher": data.get("launcher", ""),
-        "benchmark": data.get("benchmark", {}),
-    }
-
-
-def build_effective_command(
-    repo: str,
-    profile: str,
-    ctx: int,
-    extra_flags: str,
-) -> str:
-    """Build an effective command preview for a model."""
-    parts = [
-        "llama-server",
-        f"--model {repo}",
-        f"--ctx-size {ctx}",
-        f"--profile {profile}",
-    ]
-    if extra_flags.strip():
-        parts.append(extra_flags.strip())
-    return " ".join(parts)

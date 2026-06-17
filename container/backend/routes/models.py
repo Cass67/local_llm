@@ -9,14 +9,30 @@ from ..models import ModelInfo, ModelConfig, ModelListResponse
 router = APIRouter(prefix="/api", tags=["models"])
 
 
-def _is_downloaded(data: dict) -> bool:
+def _snapshot_files() -> set[tuple[str, str]]:
+    """Return {(repo_dir_name, filename)} for all files under MODELS_CACHE_DIR snapshots."""
+    result: set[tuple[str, str]] = set()
+    cache = config.MODELS_CACHE_DIR
+    if not cache.exists():
+        return result
+    for repo_dir in cache.iterdir():
+        snaps = repo_dir / "snapshots"
+        if not snaps.is_dir():
+            continue
+        for f in snaps.rglob("*"):
+            if f.is_file() or f.is_symlink():
+                result.add((repo_dir.name, f.name))
+    return result
+
+
+def _is_downloaded(data: dict, cached: set[tuple[str, str]]) -> bool:
     if data.get("model_path") or data.get("path"):
         return Path(str(data.get("model_path") or data.get("path"))).exists()
     repo = data.get("hf_repo") or data.get("repo")
     filename = data.get("hf_file")
     if repo and filename:
         repo_dir = f"models--{str(repo).replace('/', '--')}"
-        return bool(list((config.MODELS_CACHE_DIR / repo_dir / "snapshots").glob(f"*/{filename}")))
+        return (repo_dir, filename) in cached
     return False
 
 
@@ -25,6 +41,7 @@ def _read_accepted_models() -> list[ModelInfo]:
     if not config.ACCEPTED_DIR.exists():
         return models
 
+    cached = _snapshot_files()
     for path in sorted(config.ACCEPTED_DIR.glob("*.json")):
         if path.name == "default.json":
             continue
@@ -48,7 +65,7 @@ def _read_accepted_models() -> list[ModelInfo]:
             tensor_split=config_data.get("tensor_split"),
         )
 
-        downloaded = _is_downloaded(data)
+        downloaded = _is_downloaded(data, cached)
 
         models.append(
             ModelInfo(
