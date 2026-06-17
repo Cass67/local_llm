@@ -15,6 +15,7 @@
 <header>
 	<h1>local_llm</h1>
 	<nav>
+		<a href="#/architecture" class:active={currentRoute === "/architecture"}>Architecture</a>
 		<a href="#/models" class:active={currentRoute === "/models"}>Models</a>
 		<a href="#/search" class:active={currentRoute === "/search"}>Search</a>
 		<a href="#/status" class:active={currentRoute === "/status"}>Status</a>

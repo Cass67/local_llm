@@ -136,10 +136,12 @@ def test_match_vulkan_maps_by_vendor_device_id():
         {"vendor_id": "0x1002", "device_id": "0x744c", "name": "RX 7900 XT"},
         {"vendor_id": "0x10de", "device_id": "0x1b38", "name": "Tesla P40"},
     ]
-    result = _match_vulkan(sysfs, vulkan)
-    assert result["0000:03:00.0"] == 0
-    assert result["0000:04:00.0"] == 1
-    assert result["0000:05:00.0"] == 2
+    vk_index, vk_names = _match_vulkan(sysfs, vulkan)
+    assert vk_index["0000:03:00.0"] == 0
+    assert vk_index["0000:04:00.0"] == 1
+    assert vk_index["0000:05:00.0"] == 2
+    assert vk_names["0000:03:00.0"] == "RX 7900 XT"
+    assert vk_names["0000:05:00.0"] == "Tesla P40"
 
 
 def test_detect_gpus_combines_sources():

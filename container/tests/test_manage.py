@@ -247,8 +247,8 @@ async def test_delete_models_does_not_call_remote_only_model_manager(temp_state)
 async def test_status_returns_full_state(temp_state):
     with (
         patch(
-            "backend.routes.manage.detect_running_model",
-            return_value={"status": "active", "family": "qwen3.6-27b-q6", "ctx": None},
+            "backend.routes.manage.list_active",
+            return_value=[{"family": "qwen3.6-27b-q6", "model": "qwen3.6-27b-q6", "port": 8080}],
         ),
         patch("backend.routes.manage.subprocess.run") as mock_run,
     ):

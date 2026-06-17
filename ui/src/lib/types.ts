@@ -35,6 +35,16 @@ export interface ModelListResponse {
 	models: ModelInfo[];
 }
 
+export interface ActiveInstance {
+	cluster_id: string;
+	cluster_name: string;
+	model: string;
+	family: string;
+	profile: string;
+	backend: string;
+	port: number;
+}
+
 export interface CurrentModelResponse {
 	family: string;
 	profile: string;
@@ -43,6 +53,7 @@ export interface CurrentModelResponse {
 	running: boolean;
 	native_process_warning: boolean;
 	llama_server: { status: string };
+	instances?: ActiveInstance[];
 }
 
 export interface SwitchRequest {
@@ -120,6 +131,7 @@ export interface StatsResponse {
 	prompt_per_second?: number;
 	draft_n?: number;
 	draft_n_accepted?: number;
+	ts?: number;
 }
 
 export interface DeleteResponse {
@@ -212,6 +224,33 @@ export interface RunnerHealth {
 	status?: string;
 	slots_idle?: number;
 	slots_processing?: number;
+}
+
+export interface GpuInfo {
+	pci_id: string;
+	vendor: string;
+	model_name: string;
+	vram_mb: number | null;
+	rocm_index: number | null;
+	cuda_index: number | null;
+	vulkan_index: number | null;
+}
+
+export interface ClusterActive {
+	model: string | null;
+	family: string | null;
+	profile: string | null;
+	running: boolean;
+}
+
+export interface ClusterInfo {
+	id: string;
+	name: string;
+	gpu_pci_ids: string[];
+	backend: Backend;
+	port: number;
+	container_name: string;
+	active: ClusterActive | null;
 }
 
 export interface BenchmarkRunFilters {

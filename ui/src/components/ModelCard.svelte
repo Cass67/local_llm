@@ -1,19 +1,21 @@
 <script lang="ts">
-	import type { Backend, ModelInfo } from "../lib/types";
+	import type { Backend, ModelInfo, ClusterInfo } from "../lib/types";
 
 	let {
 		model,
-		isRunning = false,
-		switching = null as string | null,
-		onSwitch,
+		runningClusterIds = [] as string[],
+		clusters = [] as ClusterInfo[],
+		starting = false,
+		onStartOnCluster,
 		onCopyBackend,
 		onDetail,
 		onEdit,
 	}: {
 		model: ModelInfo;
-		isRunning: boolean;
-		switching: string | null;
-		onSwitch: (profile: string) => void;
+		runningClusterIds: string[];
+		clusters: ClusterInfo[];
+		starting: boolean;
+		onStartOnCluster: (clusterId: string, profile: string) => void;
 		onCopyBackend?: (backend: Backend) => void;
 		onDetail?: () => void;
 		onEdit?: () => void;
@@ -21,14 +23,23 @@
 
 	const BACKEND_LABELS: Record<Backend, string> = { rocm: "ROCm", vulkan: "Vulkan", cuda: "CUDA" };
 	const ALL_BACKENDS: Backend[] = ["rocm", "vulkan", "cuda"];
+	const STANDARD_PROFILES = ["speed", "fastlong", "balanced", "reliable", "tiny"];
 
 	let selectedProfile = $state("");
-	let isSwitching = $derived(switching === model.family);
+	let selectedCluster = $state("");
 	let otherBackends = $derived(ALL_BACKENDS.filter((b) => b !== model.backend));
+	let isRunning = $derived(runningClusterIds.length > 0);
+	let idleClusters = $derived(clusters.filter((c) => !runningClusterIds.includes(c.id)));
 
 	$effect(() => {
 		if (!selectedProfile) selectedProfile = model.profile || "reliable";
+		if (!selectedCluster && idleClusters.length === 1) selectedCluster = idleClusters[0].id;
 	});
+
+	function doStart() {
+		const cid = idleClusters.length === 1 ? idleClusters[0].id : selectedCluster;
+		if (cid) onStartOnCluster(cid, selectedProfile);
+	}
 </script>
 
 <div class="model-card" class:running={isRunning}>
@@ -47,22 +58,51 @@
 		<div class="info-row"><span>Alias:</span> <code>{model.alias}</code></div>
 		{#if model.context}<div class="info-row"><span>Context:</span> {model.context.toLocaleString()}</div>{/if}
 		{#if model.config?.quant}<div class="info-row"><span>Quant:</span> {model.config.quant}</div>{/if}
-		{#if model.config?.visible_devices}<div class="info-row"><span>GPUs:</span> {model.config.visible_devices}</div>{/if}
 
-		<div class="profile-select">
-			<label for={`profile-${model.family}`}>Profile:</label>
-			<select id={`profile-${model.family}`} bind:value={selectedProfile}>
-				<option value="speed">Speed</option>
-				<option value="fastlong">FastLong</option>
-				<option value="balanced">Balanced</option>
-				<option value="reliable">Reliable</option>
-				<option value="tiny">Tiny</option>
-			</select>
-		</div>
+		{#if isRunning}
+			<div class="running-chips">
+				{#each runningClusterIds as cid}
+					{@const c = clusters.find((x) => x.id === cid)}
+					<span class="running-chip">● Running on {c?.name ?? cid}</span>
+				{/each}
+			</div>
+		{/if}
 
-		<button class="switch-btn" disabled={isSwitching || isRunning} onclick={() => onSwitch(selectedProfile)}>
-			{#if isSwitching}Launching...{:else if isRunning}Running{:else}Launch{/if}
-		</button>
+		{#if idleClusters.length > 0}
+			<div class="start-row">
+				<input
+					class="profile-input"
+					list={`profiles-${model.family}`}
+					bind:value={selectedProfile}
+					placeholder="profile"
+				/>
+				<datalist id={`profiles-${model.family}`}>
+					{#each STANDARD_PROFILES as p}
+						<option value={p}></option>
+					{/each}
+					{#if model.profile && !STANDARD_PROFILES.includes(model.profile)}
+						<option value={model.profile}></option>
+					{/if}
+				</datalist>
+				{#if idleClusters.length > 1}
+					<select class="cluster-select" bind:value={selectedCluster}>
+						<option value="">— cluster —</option>
+						{#each idleClusters as c}
+							<option value={c.id}>{c.name}</option>
+						{/each}
+					</select>
+				{/if}
+				<button
+					class="switch-btn"
+					disabled={starting || (idleClusters.length > 1 && !selectedCluster)}
+					onclick={doStart}
+				>
+					{starting ? "Starting…" : idleClusters.length === 1 ? `▶ ${idleClusters[0].name}` : "▶ Start"}
+				</button>
+			</div>
+		{:else if clusters.length === 0}
+			<p class="no-cluster">No {BACKEND_LABELS[model.backend]} cluster — <a href="#/architecture">Architecture tab</a></p>
+		{/if}
 
 		<div class="card-actions">
 			<button onclick={onDetail}>Detail</button>
@@ -75,29 +115,29 @@
 </div>
 
 <style>
-	.model-card { 
-		background: var(--bg-card); 
-		border: 1px solid var(--border); 
-		border-radius: 8px; 
-		padding: 1rem; 
-		display: flex; 
-		flex-direction: column; 
-		gap: 0.5rem; 
+	.model-card {
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
 		transition: transform 0.1s ease, border-color 0.1s ease;
 		cursor: default;
 	}
-	.model-card:hover { 
-		transform: translateY(-2px); 
-		border-color: var(--accent); 
+	.model-card:hover {
+		transform: translateY(-2px);
+		border-color: var(--accent);
 	}
 	.model-card.running { border-color: var(--green); }
 	.card-header { display: flex; justify-content: space-between; align-items: flex-start; }
 	.card-header h3 { margin: 0; font-size: 1rem; }
-	.backend-badge { 
-		font-size: 0.7rem; 
-		padding: 0.1rem 0.4rem; 
-		border-radius: 3px; 
-		text-transform: uppercase; 
+	.backend-badge {
+		font-size: 0.7rem;
+		padding: 0.1rem 0.4rem;
+		border-radius: 3px;
+		text-transform: uppercase;
 		font-weight: bold;
 	}
 	.backend-badge.rocm { background: #ef444422; color: #ef4444; box-shadow: 0 0 8px #ef444433; }
@@ -106,57 +146,76 @@
 	.card-body { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
 	.info-row { display: flex; justify-content: space-between; gap: 0.5rem; }
 	.info-row span { color: var(--text-muted); }
-	code { 
-		font-family: 'JetBrains Mono', 'Fira Code', monospace; 
-		font-size: 0.8rem; 
-		background: var(--bg); 
-		padding: 0.1rem 0.3rem; 
-		border-radius: 3px; 
-		word-break: break-all; 
+	code {
+		font-family: 'JetBrains Mono', 'Fira Code', monospace;
+		font-size: 0.8rem;
+		background: var(--bg);
+		padding: 0.1rem 0.3rem;
+		border-radius: 3px;
+		word-break: break-all;
 	}
-	.profile-select { 
-		display: flex; 
-		align-items: center; 
-		gap: 0.5rem; 
-		margin-top: 0.8rem; 
-		padding: 0.5rem; 
-		background: var(--bg); 
-		border-radius: 6px; 
+	.running-chips { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.5rem; }
+	.running-chip {
+		font-size: 0.8rem;
+		color: var(--green);
+		background: color-mix(in srgb, var(--green) 12%, transparent);
+		padding: 0.25rem 0.5rem;
+		border-radius: 4px;
+	}
+	.start-row {
+		display: flex;
+		gap: 0.4rem;
+		margin-top: 0.6rem;
+		align-items: center;
+	}
+	.profile-input {
+		width: 7rem;
+		padding: 0.3rem 0.5rem;
 		border: 1px solid var(--border);
+		border-radius: 4px;
+		background: var(--bg);
+		color: var(--text);
+		font-size: 0.82rem;
 	}
-	.profile-select label { color: var(--text-muted); font-size: 0.8rem; }
-	.profile-select select { 
-		flex: 1; 
-		padding: 0.2rem; 
-		border: none; 
-		background: transparent; 
-		color: var(--text); 
-		font-family: inherit;
+	.cluster-select {
+		flex: 1;
+		padding: 0.3rem 0.4rem;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		color: var(--text);
+		border-radius: 4px;
+		font-size: 0.82rem;
+	}
+	.switch-btn {
+		padding: 0.35rem 0.65rem;
+		border: none;
+		border-radius: 6px;
+		background: var(--accent);
+		color: var(--text);
 		cursor: pointer;
-	}
-	.switch-btn { 
-		margin-top: 0.8rem; 
-		padding: 0.6rem; 
-		border: none; 
-		border-radius: 6px; 
-		background: var(--accent); 
-		color: var(--text); 
-		cursor: pointer; 
-		font-weight: bold; 
+		font-weight: bold;
+		font-size: 0.82rem;
+		white-space: nowrap;
 		transition: filter 0.1s;
 	}
 	.switch-btn:hover:not(:disabled) { filter: brightness(1.2); }
 	.switch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-	.card-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
-	.card-actions button { 
-		flex: 1; 
-		padding: 0.35rem; 
-		border: 1px solid var(--border); 
-		border-radius: 4px; 
-		background: var(--bg); 
-		color: var(--text-muted); 
-		cursor: pointer; 
-		font-size: 0.75rem; 
+	.no-cluster {
+		margin: 0.5rem 0 0;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+	}
+	.no-cluster a { color: var(--accent); }
+	.card-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; flex-wrap: wrap; }
+	.card-actions button {
+		flex: 1;
+		padding: 0.35rem;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		background: var(--bg);
+		color: var(--text-muted);
+		cursor: pointer;
+		font-size: 0.75rem;
 		transition: all 0.1s;
 	}
 	.card-actions button:hover { border-color: var(--text-muted); color: var(--text); }

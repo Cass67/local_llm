@@ -95,6 +95,7 @@ def _record_metrics(body: bytes, response_body: bytes) -> None:
         "prompt_per_second": timings.get("prompt_per_second"),
         "draft_n": timings.get("draft_n"),
         "draft_n_accepted": timings.get("draft_n_accepted"),
+        "ts": time.time(),
     }
     config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
     (config.RUNS_DIR / "latest-metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
@@ -126,6 +127,19 @@ async def proxy_chat_completions(request: Request):
             await client.aclose()
             tracing.close_generation(generation, "", error="runner unavailable")
             return JSONResponse({"detail": "runner unavailable"}, status_code=503)
+
+        if upstream.status_code != 200:
+            body_bytes = await upstream.aread()
+            await stream_context.__aexit__(None, None, None)
+            await client.aclose()
+            try:
+                detail = json.loads(body_bytes).get(
+                    "error", body_bytes.decode("utf-8", errors="replace")
+                )
+            except (json.JSONDecodeError, AttributeError):
+                detail = body_bytes.decode("utf-8", errors="replace")
+            tracing.close_generation(generation, "", error=f"HTTP {upstream.status_code}: {detail}")
+            return JSONResponse({"detail": detail}, status_code=upstream.status_code)
 
         async def stream_runner():
             first_token = True

@@ -1,14 +1,27 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { editModel, fetchModelDetail, switchModel } from "../lib/api";
+	import { editModel, fetchModelDetail } from "../lib/api";
 	import { normalizeMtpConfig } from "../lib/mtpFlags";
-	import type { Backend } from "../lib/types";
+	import type { Backend, ClusterInfo } from "../lib/types";
 
-	let { family, onClose, onSaved }: { family: string; onClose: () => void; onSaved: () => void } = $props();
+	let {
+		family,
+		clusters = [] as ClusterInfo[],
+		onClose,
+		onSaved,
+		onStartOnCluster,
+	}: {
+		family: string;
+		clusters?: ClusterInfo[];
+		onClose: () => void;
+		onSaved: () => void;
+		onStartOnCluster?: (clusterId: string, profile: string) => void;
+	} = $props();
 	let loading = $state(true);
 	let saving = $state(false);
 	let error = $state("");
 	let form: Record<string, string> = $state({});
+	let selectedCluster = $state("");
 
 	onMount(async () => {
 		try {
@@ -91,12 +104,14 @@
 		}
 	}
 
-	async function saveAndRestart() {
+	async function saveAndStart() {
+		const cid = clusters.length === 1 ? clusters[0].id : selectedCluster;
+		if (!cid) return;
 		saving = true;
 		error = "";
 		try {
 			await doSave();
-			await switchModel({ family, profile: form.profile, backend: form.backend as Backend });
+			onStartOnCluster?.(cid, form.profile || "reliable");
 			onSaved();
 			onClose();
 		} catch (e: unknown) {
@@ -156,7 +171,25 @@
 				</div>
 				<div class="actions">
 					<button onclick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</button>
-					<button class="restart" onclick={saveAndRestart} disabled={saving}>{saving ? "Saving..." : "Save & Restart"}</button>
+					{#if clusters.length > 0}
+						<div class="start-group">
+							{#if clusters.length > 1}
+								<select bind:value={selectedCluster} class="cluster-sel">
+									<option value="">— cluster —</option>
+									{#each clusters as c}
+										<option value={c.id}>{c.name}</option>
+									{/each}
+								</select>
+							{/if}
+							<button
+								class="start-btn"
+								onclick={saveAndStart}
+								disabled={saving || (clusters.length > 1 && !selectedCluster)}
+							>
+								{saving ? "Saving..." : clusters.length === 1 ? `Save & Start on ${clusters[0].name}` : "Save & Start"}
+							</button>
+						</div>
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -177,9 +210,14 @@
 	.checkbox-row { flex-direction: row; align-items: center; color: var(--text); gap: 0.5rem; }
 	input, select { padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text); transition: border-color 0.1s; }
 	input:focus, select:focus { outline: none; border-color: var(--accent); }
-	.actions { margin-top: 1.2rem; display: flex; justify-content: flex-end; gap: 0.5rem; }
+	.actions { margin-top: 1.2rem; display: flex; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 	.actions button { padding: 0.6rem 1.2rem; background: var(--accent); color: var(--text); border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: filter 0.1s; }
 	.actions button:hover:not(:disabled) { filter: brightness(1.2); }
-	.actions button.restart { background: var(--green); }
+	.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+	.start-group { display: flex; gap: 0.4rem; align-items: center; }
+	.cluster-sel { padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text); font-size: 0.85rem; }
+	.start-btn { padding: 0.6rem 1.2rem; background: var(--green); color: var(--text); border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: filter 0.1s; }
+	.start-btn:hover:not(:disabled) { filter: brightness(1.2); }
+	.start-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 	.error { background: var(--red); color: white; padding: 0.5rem; border-radius: 4px; margin-bottom: 0.7rem; }
 </style>

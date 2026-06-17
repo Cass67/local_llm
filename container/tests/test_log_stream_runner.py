@@ -11,7 +11,6 @@ from backend.log_stream import _decode_docker_log_bytes, read_log_tail, stream_l
 
 def test_decode_docker_log_bytes_strips_multiplex_headers():
     raw = b"\x02\x00\x00\x00\x00\x00\x00\x0crunner line\n"
-
     assert _decode_docker_log_bytes(raw) == "runner line\n"
 
 
@@ -34,6 +33,10 @@ def _make_frame(text: str) -> bytes:
     return bytes([1, 0, 0, 0]) + struct.pack(">I", len(data)) + data
 
 
+async def _noop(*_args, **_kwargs):
+    return None
+
+
 async def _collect_via_socketpair(frames: bytes) -> list[str]:
     server, client = _socket.socketpair(_socket.AF_UNIX, _socket.SOCK_STREAM)
     server.sendall(b"HTTP/1.0 200 OK\r\n\r\n" + frames)
@@ -47,9 +50,8 @@ async def _collect_via_socketpair(frames: bytes) -> list[str]:
         with patch("socket.socket", return_value=client):
             loop = asyncio.get_running_loop()
             saved = (loop.sock_connect, loop.sock_sendall)
-
-            loop.sock_connect = lambda _sock, _address: None  # type: ignore[assignment]
-            loop.sock_sendall = lambda _sock, _data: None  # type: ignore[assignment]
+            loop.sock_connect = _noop
+            loop.sock_sendall = _noop
             try:
                 async for chunk in stream_log_tail(disconnect):
                     chunks.append(chunk)
