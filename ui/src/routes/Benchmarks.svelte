@@ -105,6 +105,11 @@
 		return prompts.find((prompt) => String(prompt.id) === selectedPromptId);
 	}
 
+	function modelLabel(alias: string): string {
+		const m = installedModels.find((m) => m.alias === alias || m.family === alias);
+		return m?.label ?? m?.model_name ?? alias;
+	}
+
 	function sameRunBaseline(run: BenchmarkRun | null): BenchmarkRun[] {
 		if (!run) return [];
 		return runs.filter(
@@ -403,7 +408,7 @@
 					<tr onclick={() => (selectedRun = run)} class:active={selectedRun?.id === run.id}>
 						<td>{new Date(run.created_at).toLocaleString()}</td>
 						<td>{run.endpoint_name}</td>
-						<td>{run.model}</td>
+						<td>{modelLabel(run.model)}</td>
 						<td>{run.prompt_name || run.prompt_text.slice(0, 32)}</td>
 						<td>{formatMs(run.latency_ms)}</td>
 						<td>{formatThroughput(run.throughput_tps, run.throughput_cps)}</td>
@@ -420,7 +425,7 @@
 			<h3>Run detail #{selectedRun.id}</h3>
 			<div class="cards compact">
 				<div class="metric"><span>Endpoint</span><strong>{selectedRun.endpoint_name}</strong></div>
-				<div class="metric"><span>Model</span><strong>{selectedRun.model}</strong></div>
+				<div class="metric"><span>Model</span><strong>{modelLabel(selectedRun.model)}</strong></div>
 				<div class="metric"><span>Best run</span><strong>{summary?.best_run?.id ?? "-"}</strong></div>
 				<div class="metric"><span>Worst latency</span><strong>{summary?.worst_run?.id ?? "-"}</strong></div>
 			</div>
