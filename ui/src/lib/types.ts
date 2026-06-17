@@ -22,6 +22,7 @@ export interface ModelInfo {
 	family: string;
 	alias: string;
 	model_name: string;
+	label?: string;
 	profile: string;
 	context?: number;
 	backend: Backend;
