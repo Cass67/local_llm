@@ -17,6 +17,8 @@
   let abortController: AbortController | null = null;
 
   function modelLabel(alias: string): string {
+    const cluster = runningClusters.find((c) => c.active?.model === alias);
+    if (cluster?.active?.label) return cluster.active.label;
     const m = installedModels.find((m) => m.alias === alias || m.family === alias);
     return m?.label ?? m?.model_name ?? alias;
   }
