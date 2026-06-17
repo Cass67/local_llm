@@ -69,13 +69,13 @@
 				<button class="danger" onclick={del} disabled={deleting || selected.size === 0}>{deleting ? "Deleting..." : `Delete ${selected.size}`}</button>
 			</div>
 			<table>
-				<thead><tr><th></th><th>Family</th><th>Alias</th><th>Backend</th><th>Disk GB</th></tr></thead>
+				<thead><tr><th></th><th>Name</th><th>Alias</th><th>Backend</th><th>Disk GB</th></tr></thead>
 				<tbody>
 					{#each models as model}
 						{@const repo = repoFor(model)}
 						<tr>
 							<td><input type="checkbox" checked={selected.has(repo)} onchange={() => toggle(repo)} /></td>
-							<td>{model.family}</td><td>{model.alias}</td><td>{model.backend}</td><td>{diskGb(repo)}</td>
+							<td>{model.label ?? model.model_name ?? model.family}</td><td>{model.alias}</td><td>{model.backend}</td><td>{diskGb(repo)}</td>
 						</tr>
 					{/each}
 				</tbody>

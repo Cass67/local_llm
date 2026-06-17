@@ -1,7 +1,7 @@
 <script lang="ts">
   import { streamChat, type ChatMessage } from '../../lib/chatApi';
-  import { fetchClusters } from '../../lib/api';
-  import type { ClusterInfo } from '../../lib/types';
+  import { fetchClusters, fetchModels } from '../../lib/api';
+  import type { ClusterInfo, ModelInfo } from '../../lib/types';
   import ChatMessageComponent from './ChatMessage.svelte';
   import { onMount } from 'svelte';
 
@@ -11,13 +11,21 @@
   let input: string = $state('');
   let streaming: boolean = $state(false);
   let runningClusters: ClusterInfo[] = $state([]);
+  let installedModels: ModelInfo[] = $state([]);
   let selectedModel: string = $state('');
   let error: string = $state('');
   let abortController: AbortController | null = null;
 
+  function modelLabel(alias: string): string {
+    const m = installedModels.find((m) => m.alias === alias || m.family === alias);
+    return m?.label ?? m?.model_name ?? alias;
+  }
+
   onMount(async () => {
     try {
-      const data = await fetchClusters();
+      const [clusterData, modelData] = await Promise.all([fetchClusters(), fetchModels()]);
+      installedModels = modelData.models;
+      const data = clusterData;
       runningClusters = data.clusters.filter((c) => c.active?.running);
       if (runningClusters.length === 1 && runningClusters[0].active?.model) {
         selectedModel = runningClusters[0].active.model;
@@ -77,7 +85,7 @@
     {#if runningClusters.length === 0}
       <span class="muted">No models running — start one on the <a href="#/architecture">Architecture tab</a></span>
     {:else if runningClusters.length === 1}
-      Model: <strong>{selectedModel || 'none'}</strong>
+      Model: <strong>{modelLabel(selectedModel) || 'none'}</strong>
       <span class="backend-tag">{runningClusters[0].backend}</span>
     {:else}
       <label for="model-select">Model:</label>
@@ -85,7 +93,7 @@
         <option value="">— pick model —</option>
         {#each runningClusters as c}
           {#if c.active?.model}
-            <option value={c.active.model}>{c.active.model} ({c.name})</option>
+            <option value={c.active.model}>{modelLabel(c.active.model)} ({c.name})</option>
           {/if}
         {/each}
       </select>
