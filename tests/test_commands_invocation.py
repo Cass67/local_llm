@@ -43,7 +43,7 @@ def test_run_benchmark_uses_repo_model_manager_and_remote_target(monkeypatch):
     assert kwargs["timeout"] >= 900
 
 
-def test_accept_and_deploy_use_repo_model_manager(monkeypatch):
+def test_deploy_uses_repo_model_manager(monkeypatch):
     calls = []
 
     def fake_run(cmd, **kwargs):
@@ -52,10 +52,8 @@ def test_accept_and_deploy_use_repo_model_manager(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    assert commands._accept_benchmark("/tmp/bench.json") is True
     assert commands._deploy_accepted_to_remote("ubt26") is True
 
     expected_manager = str(SCRIPT_DIR / "model-manager.sh")
-    assert calls[0][0][:2] == [expected_manager, "accept"]
-    assert calls[1][0][:2] == [expected_manager, "deploy"]
-    assert ["--target", "remote:ubt26"] == calls[1][0][2:4]
+    assert calls[0][0][:2] == [expected_manager, "deploy"]
+    assert ["--target", "remote:ubt26"] == calls[0][0][2:4]

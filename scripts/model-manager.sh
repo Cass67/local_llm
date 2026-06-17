@@ -2868,6 +2868,13 @@ main() {
         cmd_list "${@:2}"
       fi
       ;;
+    accept)
+      if [[ ! -d "$MODEL_MANAGER_PY" ]]; then
+        printf 'Python backend not found at %s\n' "$MODEL_MANAGER_PY" >&2
+        return 1
+      fi
+      python3 -m scripts.model_manager accept "${@:2}"
+      ;;
     update)
       cmd_update "${@:2}"
       ;;

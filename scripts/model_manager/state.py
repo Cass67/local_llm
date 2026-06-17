@@ -17,12 +17,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-RUNS_DIR = Path(os.environ.get("LOCAL_LLM_RUNS_DIR", "~/.local/share/local_llm/runs")).expanduser()
-ACCEPTED_DIR = RUNS_DIR / "accepted"
-LAUNCHERS_DIR = RUNS_DIR / "launchers"
-CANDIDATES_DIR = RUNS_DIR / "candidates"
-CONFIG_FILE = RUNS_DIR / "config.json"
-CANDIDATES_FILE = CANDIDATES_DIR / "latest.json"
+from .config import (
+    ACCEPTED_DIR,
+    CANDIDATES_DIR,
+    CANDIDATES_FILE,
+    CONFIG_FILE,
+    LAUNCHERS_DIR,
+    RUNS_DIR,
+)
 
 SAFE_FAMILY = re.compile(r"^[A-Za-z0-9_.-]+$")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")

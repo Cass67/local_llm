@@ -129,7 +129,8 @@ async def test_v1_chat_injects_thinking_off_when_client_omits_setting(tmp_path, 
                 )
 
     assert response.status_code == 200
-    assert captured["body"]["chat_template_kwargs"] == {"enable_thinking": False}
+    # Thinking is ON by default; no override injected when client omits the setting
+    assert "chat_template_kwargs" not in captured["body"]
 
 
 @pytest.mark.asyncio

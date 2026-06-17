@@ -4,16 +4,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import stat
 import subprocess  # noqa: S404 # nosec: B404
+import sys
+from pathlib import Path
 
 from .config import (
     MODEL_DISCOVERY,
     MODEL_MANAGER,
+    SSH_BIN,
+    SSH_OPTS,
 )
 from .service import check_updates
 from .state import (
+    LAUNCHERS_DIR,
     RUNS_DIR,
     delete_accepted,
+    ensure_dirs,
     get_target,
     has_default,
     list_accepted,
@@ -22,6 +29,19 @@ from .state import (
     save_candidates,
     write_accepted,
     write_config,
+)
+
+# Acceptance thresholds — below these the model is too slow to be useful
+_PROMPT_TOK_S_MIN = 20.0
+_DECODE_TOK_S_MIN = 5.0
+
+# awk filter applied to llama-server log output in launchers
+_AWK_LOG_FILTER = (
+    "!/stopping wait for next result due to should_stop condition/"
+    " && !/ref: https:\\/\\/github.com\\/ggml-org\\/llama.cpp\\/pull\\/22907/"
+    " && !/stop: cancel task/"
+    " && !/create_check/"
+    " && !/slot print_timing:.*prompt processing/"
 )
 
 
@@ -291,19 +311,15 @@ def cmd_install(args: argparse.Namespace) -> int:
 
 def _ensure_hf_cli(host: str) -> bool:
     """Ensure hf CLI (huggingface_hub) is installed on remote host."""
-    install_cmd = [
-        "ssh",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=5",
-        host,
-        'export PATH="$HOME/.local/bin:$PATH" && (which hf || pip3 install --quiet --break-system-packages huggingface_hub) && which hf',
-    ]
     print("  ensuring hf CLI on remote...")
     try:
-        result = subprocess.run(
-            install_cmd,
+        result = subprocess.run(  # noqa: S603 # nosec: B603
+            [
+                SSH_BIN,
+                *SSH_OPTS,
+                host,
+                'export PATH="$HOME/.local/bin:$PATH" && (which hf || pip3 install --quiet --break-system-packages huggingface_hub) && which hf',
+            ],
             capture_output=True,
             text=True,
             timeout=120,
@@ -323,65 +339,52 @@ def _ensure_hf_cli(host: str) -> bool:
 
 def _download_on_host(host: str, repo: str, hf_file: str) -> bool:
     """Download model to remote host using hf CLI."""
-    # hf CLI caches to ~/.cache/huggingface/hub
     repo_dir = repo.replace("/", "--")
-    # Check if requested GGUF already exists on remote. Repo dir alone is not enough:
-    # HF cache may contain only refs/metadata.
     if hf_file:
-        check_cmd = [
-            "ssh",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=5",
-            host,
-            "find ~/.cache/huggingface/hub/models--"
-            + repo_dir
-            + " -name "
-            + repr(hf_file)
-            + r" \( -type f -o -type l \) -print -quit | grep -q .",
-        ]
-        result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=15)
+        result = subprocess.run(  # noqa: S603 # nosec: B603
+            [
+                SSH_BIN,
+                *SSH_OPTS,
+                host,
+                "find ~/.cache/huggingface/hub/models--"
+                + repo_dir
+                + " -name "
+                + repr(hf_file)
+                + r" \( -type f -o -type l \) -print -quit | grep -q .",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
         if result.returncode == 0:
             print(f"  model file already cached on {host}: {hf_file}")
             return True
 
-    # Ensure hf exists
     if not _ensure_hf_cli(host):
         print("  cannot download — hf not available")
         return False
 
-    # Clear stale locks; fix .locks dir perms if root-owned
-    lock_clear = [
-        "ssh",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=5",
-        host,
-        "sudo /usr/bin/bash -c 'chmod 1777 /home/cass/.cache/huggingface/hub/.locks' 2>/dev/null; "
-        "find ~/.cache/huggingface/hub/.locks -type f -delete 2>/dev/null; "
-        "find ~/.cache/huggingface/hub/.locks -type d -empty -delete 2>/dev/null; "
-        "true",
-    ]
-    subprocess.run(lock_clear, capture_output=True, text=True, timeout=15)
+    subprocess.run(  # noqa: S603 # nosec: B603
+        [
+            SSH_BIN,
+            *SSH_OPTS,
+            host,
+            "sudo /usr/bin/bash -c 'chmod 1777 /home/cass/.cache/huggingface/hub/.locks' 2>/dev/null; "
+            "find ~/.cache/huggingface/hub/.locks -type f -delete 2>/dev/null; "
+            "find ~/.cache/huggingface/hub/.locks -type d -empty -delete 2>/dev/null; "
+            "true",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
 
-    # Download via hf
     include_arg = f" --include {hf_file}" if hf_file else ""
     download_cmd = 'export PATH="$HOME/.local/bin:$PATH" && hf download ' + repo + include_arg
-    ssh_cmd = [
-        "ssh",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=5",
-        host,
-        download_cmd,
-    ]
     print(f"  downloading {repo}...")
     try:
-        result = subprocess.run(
-            ssh_cmd,
+        result = subprocess.run(  # noqa: S603 # nosec: B603
+            [SSH_BIN, *SSH_OPTS, host, download_cmd],
             capture_output=True,
             text=True,
             timeout=600,
@@ -465,24 +468,8 @@ def _read_benchmark_summary(benchmark_file: str) -> dict:
 
 
 def _accept_benchmark(benchmark_file: str) -> bool:
-    """Accept benchmark via bash pipeline."""
-    accept_cmd = [str(MODEL_MANAGER), "accept", benchmark_file]
-    try:
-        result = subprocess.run(
-            accept_cmd,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if result.stdout:
-            print(result.stdout.strip())
-        if result.returncode != 0:
-            print(f"  accept error: {result.stderr.strip()[:500]}")
-            return False
-        return True
-    except (subprocess.TimeoutExpired, OSError) as e:
-        print(f"  accept error: {e}")
-        return False
+    """Accept benchmark result: validate, generate launcher, write accepted metadata."""
+    return _do_accept(Path(benchmark_file))
 
 
 def _deploy_accepted_to_remote(host: str) -> bool:
@@ -560,7 +547,227 @@ def cmd_delete(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_accept(args: argparse.Namespace) -> int:
+    """Accept a benchmark result: validate, generate launcher, write accepted metadata."""
+    ok = _do_accept(Path(args.bench_file))
+    return 0 if ok else 1
+
+
 # ---- Helpers ----
+
+
+def _do_accept(bench_path: Path) -> bool:
+    """Core accept logic: validate benchmark JSON, generate launcher, write metadata."""
+    if not bench_path.exists() or not bench_path.is_file():
+        print(f"benchmark file not found: {bench_path}", file=sys.stderr)
+        return False
+
+    try:
+        data = json.loads(bench_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"cannot read benchmark file: {e}", file=sys.stderr)
+        return False
+
+    if not isinstance(data, dict):
+        print("benchmark JSON must be an object", file=sys.stderr)
+        return False
+
+    for key in ("repo", "family", "alias", "target", "profile", "load_status"):
+        if key not in data:
+            print(f"benchmark JSON missing required field: {key}", file=sys.stderr)
+            return False
+
+    if data["load_status"] != "success":
+        print(f"benchmark load_status is not success: {data['load_status']}", file=sys.stderr)
+        return False
+
+    prompt_tok_s = data.get("prompt_tok_s")
+    decode_tok_s = data.get("decode_tok_s")
+    failures = []
+    if not isinstance(prompt_tok_s, (int, float)) or prompt_tok_s < _PROMPT_TOK_S_MIN:
+        failures.append(
+            f"prompt_tok_s={prompt_tok_s} below acceptance threshold ({_PROMPT_TOK_S_MIN})"
+        )
+    if not isinstance(decode_tok_s, (int, float)) or decode_tok_s < _DECODE_TOK_S_MIN:
+        failures.append(
+            f"decode_tok_s={decode_tok_s} below acceptance threshold ({_DECODE_TOK_S_MIN})"
+        )
+    if failures:
+        for msg in failures:
+            print(msg, file=sys.stderr)
+        return False
+
+    repo = str(data["repo"])
+    family = str(data["family"])
+    alias = str(data["alias"])
+    target = str(data["target"])
+    profile_name = str(data["profile"])
+    hf_file = str(data.get("hf_file") or "")
+    quant = str(data.get("quant") or "")
+    ctx = int(data.get("ctx") or 131072)
+    batch = int(data.get("batch") or 4096)
+    ubatch = int(data.get("ubatch") or 256)
+    ngl = int(data.get("ngl") or 999)
+    backend = str(data.get("backend") or "rocm")
+    visible_devices = str(data.get("visible_devices") or "0,1")
+    split_mode = str(data.get("split_mode") or "layer")
+    tensor_split = str(data.get("tensor_split") or "1,1")
+
+    # All modern accepted models support reasoning/thinking mode; oc-local defaults to True
+    reasoning = True
+
+    ensure_dirs()
+
+    launcher_name = f"launcher-{family}.sh"
+    launcher_path = LAUNCHERS_DIR / launcher_name
+    launcher_path.write_text(
+        _generate_launcher(
+            family,
+            alias,
+            repo,
+            hf_file,
+            ctx,
+            batch,
+            ubatch,
+            ngl,
+            backend,
+            visible_devices,
+            split_mode,
+            tensor_split,
+            reasoning,
+        )
+    )
+    launcher_path.chmod(launcher_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    profile_config: dict = {
+        "backend": backend,
+        "batch": batch,
+        "ctx": ctx,
+        "ngl": ngl,
+        "reasoning": reasoning,
+        "split_mode": split_mode,
+        "tensor_split": tensor_split,
+        "ubatch": ubatch,
+        "visible_devices": visible_devices,
+    }
+    profiles = {
+        p: dict(profile_config) for p in ("speed", "fastlong", "balanced", "reliable", "tiny")
+    }
+
+    write_accepted(
+        family,
+        {
+            "alias": alias,
+            "config": dict(profile_config),
+            "decode_tok_s": decode_tok_s,
+            "family": family,
+            "hf_file": hf_file,
+            "hf_repo": repo,
+            "launcher_file": str(launcher_path),
+            "model_name": alias,
+            "profile": profile_name,
+            "profiles": profiles,
+            "prompt_tok_s": prompt_tok_s,
+            "quant": quant,
+            "reasoning": reasoning,
+            "remote_start": f"./{launcher_name}",
+            "repo": repo,
+            "target": target,
+        },
+    )
+
+    print(f"accepted: {family}")
+    print(f"launcher_file={launcher_path}")
+    return True
+
+
+def _generate_launcher(
+    family: str,
+    alias: str,
+    repo: str,
+    hf_file: str,
+    ctx: int,
+    batch: int,
+    ubatch: int,
+    ngl: int,
+    backend: str,
+    visible_devices: str,
+    split_mode: str,
+    tensor_split: str,
+    reasoning: bool,
+) -> str:
+    """Generate a llama-server launcher shell script."""
+    lines = [
+        "#!/usr/bin/env bash",
+        f"# local_llm_repo={repo}",
+        f"# local_llm_family={family}",
+        f"# local_llm_alias={alias}",
+        f"# local_llm_hf_file={hf_file}",
+        "set -euo pipefail",
+        'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"',
+        'mkdir -p "$(dirname "$log_file")"',
+        f"exec > >(stdbuf -oL -eL awk '{_AWK_LOG_FILTER}' | tee \"$log_file\") 2>&1",
+        'profile="${1:-reliable}"',
+        'case "$profile" in speed|fastlong|balanced|reliable|tiny) ;; *)'
+        ' echo "Usage: $0 {speed|fastlong|balanced|reliable|tiny}" >&2; exit 2 ;; esac',
+        f"ctx={ctx}",
+        f"batch={batch}",
+        f"ubatch={ubatch}",
+        f"ngl={ngl}",
+    ]
+
+    if backend == "rocm":
+        lines += [
+            f"export HIP_VISIBLE_DEVICES={visible_devices}",
+            f"export ROCR_VISIBLE_DEVICES={visible_devices}",
+        ]
+    elif backend == "vulkan":
+        lines.append(f"export GGML_VK_VISIBLE_DEVICES={visible_devices}")
+
+    server_bin = (
+        "./build-vulkan/bin/llama-server" if backend == "vulkan" else "./build/bin/llama-server"
+    )
+
+    # Gemma uses different sampler defaults
+    if "gemma" in repo.lower() or "gemma" in family.lower():
+        temp, top_p, top_k = "1.0", "0.95", "64"
+    else:
+        temp, top_p, top_k = "0.6", "0.95", "20"
+
+    reasoning_flag = "on" if reasoning else "off"
+
+    cmd = [f"exec {server_bin} \\", f"  -hf {repo} \\"]
+    if hf_file:
+        cmd.append(f"  --hf-file {hf_file} \\")
+    cmd += [
+        "  --host 0.0.0.0 \\",
+        "  --port 8080 \\",
+        '  -ngl "$ngl" \\',
+        f"  --split-mode {split_mode} \\",
+        f"  --tensor-split {tensor_split} \\",
+        "  --context-shift \\",
+        "  --cache-ram 16384 \\",
+        "  -ctk q8_0 \\",
+        "  -ctv q8_0 \\",
+        '  -c "$ctx" \\',
+        "  --flash-attn on \\",
+        '  -ub "$ubatch" \\',
+        '  -b "$batch" \\',
+        '  --threads "$(nproc)" \\',
+        "  --prio 2 \\",
+        "  --no-warmup \\",
+        f"  --temp {temp} \\",
+        f"  --top-p {top_p} \\",
+        f"  --top-k {top_k} \\",
+        "  --min-p 0.0 \\",
+        "  --presence-penalty 0.0 \\",
+        f"  --alias {alias} \\",
+        f"  --reasoning {reasoning_flag}",
+    ]
+    lines += cmd
+
+    return "\n".join(lines) + "\n"
 
 
 def _infer_family(repo: str) -> str:
