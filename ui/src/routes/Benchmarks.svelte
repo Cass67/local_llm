@@ -322,7 +322,7 @@
 			<select bind:value={selectedModel}>
 				<option value="">Select model</option>
 				{#each installedModels.filter(m => m.downloaded) as m}
-					<option value={m.alias}>{m.alias}{m.family === activeFamily ? " ★" : ""}</option>
+					<option value={m.alias}>{m.label ?? m.model_name ?? m.alias}{m.family === activeFamily ? " ★" : ""}</option>
 				{/each}
 			</select>
 			<button onclick={executeRun} disabled={running || !selectedEndpointId || !selectedModel}>{running ? "Running…" : "Run"}</button>
