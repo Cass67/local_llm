@@ -93,7 +93,7 @@
 	{#if status}
 		<div class="cards">
 			<div class="status-card"><span>Target</span><strong>{status.target}</strong></div>
-			<div class="status-card"><span>Running</span><strong>{status.running.family || status.running.status}</strong></div>
+			<div class="status-card"><span>Running</span><strong>{models.find(m => m.family === status.running.family)?.label ?? status.running.family ?? status.running.status}</strong></div>
 			<div class="status-card"><span>Context</span><strong>{status.running.ctx ? status.running.ctx.toLocaleString() : "-"}</strong></div>
 			<div class="status-card"><span>Accepted</span><strong>{status.accepted_count}</strong></div>
 			<div class="status-card"><span>Default</span><strong>{status.default_set ? "yes" : "no"}</strong></div>
@@ -109,7 +109,7 @@
 				{#each models as model}
 					<tr class:active={status.running.family === model.family}>
 						<td>{status.running.family === model.family ? "▶" : ""}</td>
-						<td>{model.family}</td>
+						<td>{model.label ?? model.model_name ?? model.family}</td>
 						<td>{model.alias}</td>
 						<td>{model.profile}</td>
 						<td>{model.backend}</td>
