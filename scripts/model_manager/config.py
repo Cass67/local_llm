@@ -35,8 +35,10 @@ MODEL_MANAGER = SCRIPT_DIR / "model-manager.sh"
 OC_LOCAL = SCRIPT_DIR / "oc-local"
 MODEL_DISCOVERY = SCRIPT_DIR / "model-discovery.sh"
 MODEL_FIT = SCRIPT_DIR / "model-fit.py"
+MODEL_INVENTORY = SCRIPT_DIR / "model_inventory.py"
 
 SSH_BIN = "/usr/bin/ssh"
+SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
 
 # Runtime defaults
 

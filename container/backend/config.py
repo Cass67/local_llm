@@ -20,7 +20,7 @@ def runner_image_for_backend(backend: str) -> str:
 
 
 DISABLE_THINKING_BY_DEFAULT = os.environ.get(
-    "LOCAL_LLM_DISABLE_THINKING_BY_DEFAULT", "true"
+    "LOCAL_LLM_DISABLE_THINKING_BY_DEFAULT", "false"
 ).lower() in {"1", "true", "yes", "on"}
 VERSION = "0.1.0"
 

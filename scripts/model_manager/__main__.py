@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from .commands import (
+    cmd_accept,
     cmd_check_updates,
     cmd_delete,
     cmd_init,
@@ -68,6 +69,11 @@ def main() -> int:
     p_delete = sub.add_parser("delete", help="Delete an accepted model family")
     p_delete.add_argument("--family", required=True, help="family to delete")
     p_delete.set_defaults(func=cmd_delete)
+
+    # accept
+    p_accept = sub.add_parser("accept", help="Accept a benchmark result and create launcher")
+    p_accept.add_argument("bench_file", help="path to benchmark JSON file")
+    p_accept.set_defaults(func=cmd_accept)
 
     # check-updates
     p_check = sub.add_parser("check-updates", help="Check for recommended model updates (dry-run)")

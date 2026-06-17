@@ -16,11 +16,15 @@ from typing import Any
 from .config import (
     MODEL_DISCOVERY,
     MODEL_FIT,
+    MODEL_INVENTORY,
     MODEL_MANAGER,
     OC_LOCAL,
     SSH_BIN,
+    SSH_OPTS,
 )
 from .state import get_target
+
+_SSH = [SSH_BIN, *SSH_OPTS]
 
 REMOTE_INVENTORY_TTL_SECONDS = 20.0
 _REMOTE_INVENTORY_CACHE: dict[str, tuple[float, list[dict[str, str]]]] = {}
@@ -113,33 +117,9 @@ def remote_inventory(host: str, *, force: bool = False) -> list[dict[str, str]]:
     if cached and not force and now - cached[0] < REMOTE_INVENTORY_TTL_SECONDS:
         return [dict(row) for row in cached[1]]
 
-    script = r"""
-import json, pathlib, subprocess
-roots=[pathlib.Path.home()/'.cache'/'huggingface'/'hub', pathlib.Path.home()/'.cache'/'local_llm'/'models', pathlib.Path.home()/'.cache'/'llama.cpp']
-for root in roots:
-    if not root.is_dir():
-        continue
-    for repo_dir in sorted(root.glob('models--*')):
-        if not repo_dir.is_dir():
-            continue
-        repo=repo_dir.name.removeprefix('models--').replace('--','/',1)
-        ggufs=sorted(p for p in repo_dir.rglob('*.gguf') if not p.name.lower().startswith('mmproj'))
-        path=str(ggufs[0] if ggufs else repo_dir)
-        try:
-            size=int(subprocess.check_output(['du','-sb',str(repo_dir)], text=True).split()[0])
-        except (subprocess.SubprocessError, ValueError, OSError):
-            size=0
-        print(json.dumps({
-            'repo': repo,
-            'path': path,
-            'file': pathlib.Path(path).name,
-            'disk_gb': f'{size/1_000_000_000:.1f}' if size else '-',
-            'gguf': 'yes' if ggufs else 'no',
-        }))
-"""
     result = subprocess.run(  # noqa: S603 # nosec: B603
-        [SSH_BIN, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, "python3", "-"],
-        input=script,
+        [*_SSH, host, "python3", "-"],
+        input=MODEL_INVENTORY.read_text(),
         capture_output=True,
         text=True,
         timeout=30,
@@ -179,11 +159,7 @@ def get_server_status(target: str | None) -> str:
     try:
         result = subprocess.run(  # noqa: S603 # nosec: B603
             [
-                SSH_BIN,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=5",
+                *_SSH,
                 host,
                 "systemctl --user is-active llama-server.service 2>/dev/null || true",
             ],
@@ -207,11 +183,7 @@ def detect_running_model(target: str | None) -> tuple[str, int | None]:
     try:
         result = subprocess.run(  # noqa: S603 # nosec: B603
             [
-                SSH_BIN,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=5",
+                *_SSH,
                 host,
                 "systemctl --user is-active llama-server.service 2>/dev/null || true",
             ],
@@ -230,11 +202,7 @@ def detect_running_model(target: str | None) -> tuple[str, int | None]:
     try:
         result = subprocess.run(  # noqa: S603 # nosec: B603
             [
-                SSH_BIN,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=5",
+                *_SSH,
                 host,
                 "pid=$(pgrep -f llama-server | head -1); "
                 '[ -n "$pid" ] && tr "\\0" "\\n" < /proc/$pid/cmdline || true',
@@ -318,11 +286,7 @@ def stop_server(target: str | None) -> str:
     try:
         result = subprocess.run(  # noqa: S603 # nosec: B603
             [
-                SSH_BIN,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=5",
+                *_SSH,
                 host,
                 "systemctl --user stop llama-server.service",
             ],
@@ -453,11 +417,7 @@ def get_remote_downloads(target: str | None) -> list[tuple[str, str, str]]:
     try:
         result = subprocess.run(  # noqa: S603 # nosec: B603
             [
-                SSH_BIN,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=5",
+                *_SSH,
                 host,
                 "pgrep",
                 "-af",
@@ -497,11 +457,7 @@ def cancel_remote_processes(target: str | None) -> None:
     try:
         subprocess.run(  # noqa: S603 # nosec: B603
             [
-                SSH_BIN,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=5",
+                *_SSH,
                 host,
                 "bash",
                 "-lc",
@@ -548,11 +504,7 @@ def check_remote_vram(host: str) -> float:
     try:
         result = subprocess.run(  # noqa: S603 # nosec: B603
             [
-                SSH_BIN,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=5",
+                *_SSH,
                 host,
                 script,
             ],
@@ -618,11 +570,7 @@ def get_repo_size(
     try:
         result = subprocess.run(  # noqa: S603 # nosec: B603
             [
-                SSH_BIN,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=5",
+                *_SSH,
                 host,
                 "du",
                 "-sb",
@@ -673,11 +621,7 @@ for repo_dir in sorted(root.glob('models--*')):
     try:
         result = subprocess.run(  # noqa: S603 # nosec: B603
             [
-                SSH_BIN,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=5",
+                *_SSH,
                 host,
                 "python3",
                 "-",
@@ -725,11 +669,7 @@ for root in roots:
     try:
         result = subprocess.run(  # noqa: S603 # nosec: B603
             [
-                SSH_BIN,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=5",
+                *_SSH,
                 host,
                 "python3",
                 "-",
