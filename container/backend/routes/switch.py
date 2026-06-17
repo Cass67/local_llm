@@ -100,14 +100,6 @@ async def switch_model(_req: SwitchRequest):
     )
 
 
-def switch_model_by_id(model_id: str) -> None:
-    """No-op stub kept for import compatibility during transition."""
-    raise RuntimeError(
-        f"switch_model_by_id('{model_id}') called but global switching is removed. "
-        "Use active_runners.start() with a cluster instead."
-    )
-
-
 def _native_process_on_runner_port() -> bool:
     """Return True if something occupies the base runner port outside Docker."""
     import socket as _socket

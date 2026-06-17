@@ -6,9 +6,9 @@ import subprocess
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from .. import config
+from .. import cli, config
 from ..model_variants import Backend, copy_backend_variant, migrate_backend_variant
-from ..service import detect_running_model
+from ..clusters import list_active
 
 router = APIRouter(prefix="/api", tags=["manage"])
 
@@ -147,7 +147,9 @@ async def migrate_backend_names():
                 state[field] = renamed[value]
                 changed = True
         if changed:
-            state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+            tmp = state_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+            tmp.replace(state_path)
     return {"status": "ok", "migrated": migrated, "skipped": skipped}
 
 
@@ -238,6 +240,7 @@ async def edit_model(family: str, req: EditRequest):
             cfg[field] = val
     if req.reasoning is not None:
         cfg["reasoning"] = req.reasoning
+        data["reasoning"] = req.reasoning
     if req.backend is not None:
         cfg["backend"] = req.backend
     if req.mtp is not None:
@@ -330,7 +333,16 @@ async def full_status():
         except (json.JSONDecodeError, OSError):
             pass
 
-    running_info = detect_running_model()
+    active = list_active()
+    if active:
+        first = active[0]
+        running_info = {
+            "status": "active",
+            "family": first.get("family") or first.get("model") or "unknown",
+            "ctx": None,
+        }
+    else:
+        running_info = {"status": "inactive", "family": None, "ctx": None}
 
     accepted_count = 0
     if config.ACCEPTED_DIR.exists():
@@ -340,8 +352,10 @@ async def full_status():
             if p.name != "default.json" and not p.is_symlink()
         )
 
-    # Active downloads
-    downloads = []
+    # Active downloads: in-process (backend installs) + CLI-spawned (bash huggingface-cli)
+    downloads = [
+        {"pid": "-", "repo": repo, "file": file} for repo, file in cli.active_downloads.items()
+    ]
     try:
         result = subprocess.run(
             ["pgrep", "-af", "[h]f download|[h]uggingface.*download"],
@@ -357,7 +371,8 @@ async def full_status():
                 idx = parts.index("download")
                 if idx + 1 < len(parts):
                     repo = parts[idx + 1]
-            downloads.append({"pid": pid, "repo": repo})
+            if not any(d["repo"] == repo for d in downloads):
+                downloads.append({"pid": pid, "repo": repo, "file": "?"})
     except (OSError, subprocess.TimeoutExpired):
         pass
 

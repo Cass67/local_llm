@@ -1,3 +1,6 @@
+# rocminfo lives in the already-built runner image — no need to pull the 20GB dev image
+FROM local-llm-runner-rocm:latest AS rocm-tools
+
 FROM python:3.12-slim-bookworm AS base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -5,17 +8,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     git \
     build-essential \
+    pciutils \
+    libvulkan1 \
+    vulkan-tools \
+    mesa-vulkan-drivers \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=rocm-tools /usr/bin/rocminfo /usr/local/bin/rocminfo
 
 WORKDIR /app
 
-COPY pyproject.toml .
+COPY container/pyproject.toml .
 RUN pip install --no-cache-dir -e ".[dev]"
 
-COPY backend/ ./backend/
-COPY ui-dist/ ./ui-dist/
+COPY container/backend/ ./backend/
+COPY container/ui-dist/ ./ui-dist/
 COPY scripts/ /scripts/
-COPY entrypoint.sh .
+COPY container/entrypoint.sh .
 
 EXPOSE 3100
 

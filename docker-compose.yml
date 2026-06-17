@@ -5,7 +5,8 @@ services:
   # and creates/stops the local-llm-runner container on demand via Docker socket.
   local-llm-mgmt:
     build:
-      context: ./container
+      context: .
+      dockerfile: container/Dockerfile
       network: host
     image: local-llm-mgmt:latest
     container_name: local-llm-mgmt
@@ -15,6 +16,9 @@ services:
     group_add:
       - "${RENDER_GROUP:-991}"
       - "${DOCKER_GROUP:-107}"
+    devices:
+      - /dev/kfd
+      - /dev/dri
     volumes:
       - ${LOCAL_LLM_STATE_DIR:-${HOME}/.local/share/local_llm}:/state
       - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface/hub}:/models

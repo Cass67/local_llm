@@ -13,6 +13,9 @@ from .config import SCRIPTS_DIR
 MODEL_DISCOVERY = SCRIPTS_DIR / "model-discovery.sh"
 MODEL_FIT = SCRIPTS_DIR / "model-fit.py"
 
+# repo -> file for in-progress backend installs (GIL makes dict ops atomic enough)
+active_downloads: dict[str, str] = {}
+
 
 def run_discovery(query: str, host: str | None = None, limit: int = 30) -> list[dict]:
     """Run model-discovery.sh, return ranked candidates."""
@@ -129,16 +132,20 @@ def run_install(repo: str, file: str, profile: str) -> dict:
 
     ctx = 65536
     model_id = _model_id(repo, file)
+    active_downloads[repo] = file
     try:
         downloaded = hf_hub_download(repo_id=repo, filename=file, cache_dir=config.MODELS_CACHE_DIR)
         model_path = Path(downloaded)
     except Exception as exc:
+        active_downloads.pop(repo, None)
         return _install_error("download", repo, file, profile, str(exc), logs)
 
     try:
         _write_installed_metadata(model_id, repo, file, profile, ctx, model_path)
     except Exception as exc:
         return _install_error("metadata", repo, file, profile, str(exc), logs)
+    finally:
+        active_downloads.pop(repo, None)
 
     return {
         "status": "installed",
