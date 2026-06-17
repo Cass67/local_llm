@@ -185,6 +185,7 @@ class MTPConfig(BaseModel):
 
 
 class EditRequest(BaseModel):
+    label: str | None = None
     profile: str | None = None
     ctx: int | None = None
     batch: int | None = None
@@ -219,6 +220,10 @@ async def edit_model(family: str, req: EditRequest):
         raise HTTPException(500, "corrupt metadata")
 
     # Apply edits
+    if req.label is not None:
+        data["label"] = req.label.strip() or None
+        if data["label"] is None:
+            data.pop("label", None)
     if req.profile is not None:
         data["profile"] = req.profile
     cfg = data.setdefault("config", {})

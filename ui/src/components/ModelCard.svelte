@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Backend, ModelInfo, ClusterInfo } from "../lib/types";
+	import { editModel } from "../lib/api";
 
 	let {
 		model,
@@ -20,6 +21,28 @@
 		onDetail?: () => void;
 		onEdit?: () => void;
 	} = $props();
+
+	let editingLabel = $state(false);
+	let labelDraft = $state("");
+
+	function startLabelEdit() {
+		labelDraft = model.label || model.model_name;
+		editingLabel = true;
+	}
+
+	async function commitLabel() {
+		editingLabel = false;
+		const next = labelDraft.trim();
+		const current = model.label || "";
+		if (next === current || (next === model.model_name && !model.label)) return;
+		await editModel(model.family, { label: next === model.model_name ? "" : next });
+		model.label = next === model.model_name ? undefined : next;
+	}
+
+	function labelKeydown(e: KeyboardEvent) {
+		if (e.key === "Enter") (e.target as HTMLElement).blur();
+		if (e.key === "Escape") { editingLabel = false; }
+	}
 
 	const BACKEND_LABELS: Record<Backend, string> = { rocm: "ROCm", vulkan: "Vulkan", cuda: "CUDA" };
 	const ALL_BACKENDS: Backend[] = ["rocm", "vulkan", "cuda"];
@@ -44,7 +67,21 @@
 
 <div class="model-card" class:running={isRunning}>
 	<div class="card-header">
-		<h3>{model.model_name}</h3>
+		{#if editingLabel}
+			<!-- svelte-ignore a11y_autofocus -->
+			<input
+				class="label-input"
+				bind:value={labelDraft}
+				onblur={commitLabel}
+				onkeydown={labelKeydown}
+				autofocus
+			/>
+		{:else}
+			<button class="label-title" onclick={startLabelEdit} title="Click to rename">
+				{model.label || model.model_name}
+				{#if model.label}<span class="label-hint" title={model.model_name}>✎</span>{:else}<span class="label-hint muted">✎</span>{/if}
+			</button>
+		{/if}
 		<span
 			class="backend-badge"
 			class:rocm={model.backend === "rocm"}
@@ -132,7 +169,21 @@
 	}
 	.model-card.running { border-color: var(--green); }
 	.card-header { display: flex; justify-content: space-between; align-items: flex-start; }
-	.card-header h3 { margin: 0; font-size: 1rem; }
+	.label-title { margin: 0; font-size: 1rem; font-weight: bold; cursor: text; display: flex; align-items: center; gap: 0.3rem; background: none; border: none; color: var(--text); padding: 0; text-align: left; }
+	.label-hint { font-size: 0.7rem; opacity: 0.4; }
+	.label-hint.muted { opacity: 0.2; }
+	.label-title:hover .label-hint { opacity: 0.7; }
+	.label-input {
+		font-size: 1rem;
+		font-weight: bold;
+		background: var(--bg);
+		border: 1px solid var(--accent);
+		border-radius: 4px;
+		color: var(--text);
+		padding: 0.1rem 0.3rem;
+		width: 100%;
+		min-width: 0;
+	}
 	.backend-badge {
 		font-size: 0.7rem;
 		padding: 0.1rem 0.4rem;

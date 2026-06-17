@@ -15,6 +15,7 @@ class ModelInfo(BaseModel):
     family: str
     alias: str
     model_name: str
+    label: str | None = None
     profile: str
     context: int | None = None
     backend: str = "rocm"

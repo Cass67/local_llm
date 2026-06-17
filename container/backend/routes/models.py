@@ -72,6 +72,7 @@ def _read_accepted_models() -> list[ModelInfo]:
                 family=str(family),
                 alias=str(alias),
                 model_name=str(data.get("model_name", family)),
+                label=data.get("label") or None,
                 profile=str(data.get("profile", "reliable")),
                 context=data.get("context"),
                 backend=str(data.get("backend") or config_data.get("backend", "rocm")),
