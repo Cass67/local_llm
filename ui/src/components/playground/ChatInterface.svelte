@@ -23,10 +23,12 @@
 
   onMount(async () => {
     try {
-      const [clusterData, modelData] = await Promise.all([fetchClusters(), fetchModels()]);
+      const modelData = await fetchModels();
       installedModels = modelData.models;
-      const data = clusterData;
-      runningClusters = data.clusters.filter((c) => c.active?.running);
+    } catch { /* label lookup degrades gracefully */ }
+    try {
+      const clusterData = await fetchClusters();
+      runningClusters = clusterData.clusters.filter((c) => c.active?.running);
       if (runningClusters.length === 1 && runningClusters[0].active?.model) {
         selectedModel = runningClusters[0].active.model;
       }
