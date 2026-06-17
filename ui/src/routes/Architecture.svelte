@@ -274,7 +274,7 @@
 							<select bind:value={startFamily[c.id]}>
 								<option value="">— pick model —</option>
 								{#each models.filter((m) => m.backend === c.backend) as m}
-									<option value={m.family}>{m.alias ?? m.family}</option>
+									<option value={m.family}>{m.label ?? m.model_name ?? m.family}</option>
 								{/each}
 							</select>
 							<select bind:value={startProfile[c.id]}>
