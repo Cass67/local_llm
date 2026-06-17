@@ -240,6 +240,7 @@ export interface GpuInfo {
 export interface ClusterActive {
 	model: string | null;
 	family: string | null;
+	label: string | null;
 	profile: string | null;
 	running: boolean;
 }

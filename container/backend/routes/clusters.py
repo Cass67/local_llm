@@ -62,6 +62,7 @@ def _cluster_with_status(cluster: ClusterDef) -> dict:
         "active": {
             "model": active.get("model"),
             "family": active.get("family"),
+            "label": active.get("label"),
             "profile": active.get("profile"),
             "running": running,
         }

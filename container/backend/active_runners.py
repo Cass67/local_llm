@@ -101,6 +101,7 @@ def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
             "cluster_name": cluster.name,
             "model": alias,
             "family": str(accepted.get("family", alias)),
+            "label": accepted.get("label") or None,
             "profile": str(accepted.get("profile", "reliable")),
             "backend": cluster.backend,
             "port": cluster.port,
