@@ -27,13 +27,17 @@ def _runner_container(cluster_id: str | None) -> str:
 
 
 def _container_for(source: str, cluster_id: str | None) -> str:
-    return _MGMT_CONTAINER if source == "mgmt" else _runner_container(cluster_id)
+    if source == "mgmt":
+        return _MGMT_CONTAINER
+    if source == "router":
+        return "local-llm-router"
+    return _runner_container(cluster_id)
 
 
 @router.get("")
 async def get_logs(
     lines: int = Query(default=100, ge=1, le=10000),
-    source: str = Query(default="runner", pattern="^(runner|mgmt)$"),
+    source: str = Query(default="runner", pattern="^(runner|mgmt|router)$"),
     cluster_id: str | None = Query(default=None),
 ):
     container = _container_for(source, cluster_id)
@@ -45,7 +49,7 @@ async def get_logs(
 async def stream_logs(
     request: Request,
     no_history: bool = Query(default=False),
-    source: str = Query(default="runner", pattern="^(runner|mgmt)$"),
+    source: str = Query(default="runner", pattern="^(runner|mgmt|router)$"),
     cluster_id: str | None = Query(default=None),
 ):
     """SSE stream of selected project container logs."""
