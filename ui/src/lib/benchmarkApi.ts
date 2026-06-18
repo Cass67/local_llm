@@ -84,6 +84,16 @@ export async function listBenchmarkEndpoints(): Promise<{
 	return res.json();
 }
 
+export async function syncClusterBenchmarkEndpoints(): Promise<{
+	endpoints: BenchmarkEndpoint[];
+}> {
+	const res = await fetch(`${BASE}/endpoints/sync-clusters`, {
+		method: "POST",
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
 export async function createBenchmarkEndpoint(req: {
 	name: string;
 	base_url: string;

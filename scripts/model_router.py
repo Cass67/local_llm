@@ -1,6 +1,7 @@
 """Model router — picks model from keywords, forwards to backend."""
 
 import json
+import re
 import time
 import os
 from pathlib import Path
@@ -27,10 +28,19 @@ DEFAULT_MODEL: str | None = None
 HEALTH_INTERVAL: int = 10
 RULES: list[dict] = []
 ENABLED: bool = True
+CLUSTER_REMAP: dict[str, str] = {}
 
 
 def _reload_config() -> None:
-    global BACKEND_URL, DEFAULT_MODEL, HEALTH_INTERVAL, RULES, ENABLED, _config_mtime, _CONFIG_PATH
+    global \
+        BACKEND_URL, \
+        DEFAULT_MODEL, \
+        HEALTH_INTERVAL, \
+        RULES, \
+        ENABLED, \
+        CLUSTER_REMAP, \
+        _config_mtime, \
+        _CONFIG_PATH
     path = _STATE_CONFIG if _STATE_CONFIG.exists() else _REPO_CONFIG
     try:
         mtime = path.stat().st_mtime
@@ -45,6 +55,8 @@ def _reload_config() -> None:
         HEALTH_INTERVAL = cfg.get("health_check_interval_s", 10)
         RULES = cfg.get("rules", [])
         ENABLED = cfg.get("enabled", True)
+        remap = cfg.get("cluster_remap", {})
+        CLUSTER_REMAP = remap if isinstance(remap, dict) else {}
         _CONFIG_PATH = path
         _config_mtime = mtime
     except (OSError, json.JSONDecodeError):
@@ -87,10 +99,14 @@ async def _maybe_refresh() -> None:
         await _refresh_health()
 
 
+def _remap_cluster(name: str) -> str:
+    return str(CLUSTER_REMAP.get(name, name))
+
+
 def _resolve_model(rule_model: str | None, rule_cluster: str | None) -> str | None:
     """Resolve a rule's target to a healthy model alias, or None."""
     if rule_cluster:
-        alias = _cluster_to_model.get(rule_cluster)
+        alias = _cluster_to_model.get(_remap_cluster(rule_cluster))
         if alias and alias in _healthy_aliases:
             return alias
         return None
@@ -128,21 +144,55 @@ def _extract_prompt(messages: list[dict]) -> str:
     return ""
 
 
-def _route(prompt: str) -> str:
-    """First-match-wins keyword routing."""
+def _keyword_in(keyword: str, prompt: str) -> bool:
+    if not keyword.strip():
+        return False
+    if keyword[-1:].isalnum() and keyword[:1].isalnum():
+        return re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", prompt) is not None
+    return keyword in prompt
+
+
+def _route_detail(prompt: str) -> dict:
+    """First-match-wins keyword routing with explanation."""
     for rule in RULES:
-        if not any(kw in prompt for kw in rule["keywords"]):
+        matched = next(
+            (kw for kw in rule.get("keywords", []) if _keyword_in(str(kw), prompt)), None
+        )
+        if not matched:
             continue
-        chosen = _resolve_model(rule.get("model"), rule.get("cluster"))
+        raw_cluster = rule.get("cluster")
+        remapped_cluster = _remap_cluster(raw_cluster) if raw_cluster else None
+        chosen = _resolve_model(rule.get("model"), raw_cluster)
         if chosen:
-            return chosen
+            return {
+                "model": chosen,
+                "reason": "rule",
+                "rule": rule.get("name"),
+                "matched_keyword": matched,
+                "cluster": raw_cluster,
+                "remapped_cluster": remapped_cluster,
+            }
         for fb in rule.get("fallback", []):
             # fallback entries can be model aliases or cluster names
-            fb_alias = _cluster_to_model.get(fb, fb)
+            fb_cluster = _remap_cluster(fb)
+            fb_alias = _cluster_to_model.get(fb_cluster, fb)
             if fb_alias in _healthy_aliases:
-                return fb_alias
+                return {
+                    "model": fb_alias,
+                    "reason": "fallback",
+                    "rule": rule.get("name"),
+                    "matched_keyword": matched,
+                    "cluster": raw_cluster,
+                    "remapped_cluster": remapped_cluster,
+                    "fallback": fb,
+                    "remapped_fallback": fb_cluster,
+                }
         # primary + fallbacks all down — skip rule, try next
-    return _default_model()
+    return {"model": _default_model(), "reason": "default"}
+
+
+def _route(prompt: str) -> str:
+    return str(_route_detail(prompt).get("model") or "")
 
 
 # --- proxy ---
@@ -152,7 +202,7 @@ def _is_stream(payload: dict) -> bool:
     return bool(payload.get("stream"))
 
 
-async def _proxy_stream(payload: dict, request: Request) -> StreamingResponse:
+async def _proxy_stream(payload: dict, request: Request) -> Response:
     client = httpx.AsyncClient(timeout=300.0)
     stream_ctx = client.stream(
         "POST",
@@ -254,6 +304,18 @@ async def v1_chat_completions(request: Request):
     if _is_stream(payload):
         return await _proxy_stream(payload, request)
     return await _proxy_nonstream(payload)
+
+
+@router.post("/route/preview")
+async def route_preview(request: Request):
+    body = await request.body()
+    try:
+        payload = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        payload = {}
+    prompt = str(payload.get("prompt") or "").lower()
+    await _maybe_refresh()
+    return _route_detail(prompt)
 
 
 @router.get("/health")

@@ -10,18 +10,19 @@
 		listBenchmarkPrompts,
 		listBenchmarkRuns,
 		runBenchmark,
+		loadBenchmarkModels,
+		syncClusterBenchmarkEndpoints,
 	} from "../lib/benchmarkApi";
-	import { fetchModels, fetchCurrentModel, switchModel } from "../lib/api";
+	import { fetchClusters } from "../lib/api";
 	import { formatMs, formatThroughput, runDelta } from "../lib/benchmarkMetrics";
 	import type { BenchmarkEndpoint, BenchmarkPrompt, BenchmarkRun, BenchmarkSummary } from "../lib/benchmarkApi";
-	import type { ModelInfo } from "../lib/types";
+	import type { ClusterInfo } from "../lib/types";
 
 	let endpoints: BenchmarkEndpoint[] = $state([]);
 	let prompts: BenchmarkPrompt[] = $state([]);
 	let runs: BenchmarkRun[] = $state([]);
 	let summary: BenchmarkSummary | null = $state(null);
-	let installedModels: ModelInfo[] = $state([]);
-	let activeFamily = $state("");
+	let clusters: ClusterInfo[] = $state([]);
 	let latest: BenchmarkRun | null = $state(null);
 	let selectedRun: BenchmarkRun | null = $state(null);
 	let loading = $state(false);
@@ -34,6 +35,7 @@
 	let promptName = $state("");
 	let promptText = $state("Write a concise Python function that reverses a string and explain it.");
 	let selectedEndpointId = $state("");
+	let endpointModels: string[] = $state([]);
 	let selectedPromptId = $state("");
 	let selectedModel = $state("");
 	let maxTokens = $state(512);
@@ -105,9 +107,26 @@
 		return prompts.find((prompt) => String(prompt.id) === selectedPromptId);
 	}
 
+	async function loadEndpointModels() {
+		if (!selectedEndpointId || selectedEndpointId === "") {
+			endpointModels = [];
+			return;
+		}
+		try {
+			const result = await loadBenchmarkModels(Number(selectedEndpointId));
+			endpointModels = result.models;
+		} catch {
+			endpointModels = [];
+		}
+	}
+
+	$effect(() => {
+		loadEndpointModels();
+		return () => { /* cleanup if needed */ };
+	});
+
 	function modelLabel(alias: string): string {
-		const m = installedModels.find((m) => m.alias === alias || m.family === alias);
-		return m?.label ?? m?.model_name ?? alias;
+		return alias;
 	}
 
 	function sameRunBaseline(run: BenchmarkRun | null): BenchmarkRun[] {
@@ -153,27 +172,34 @@
 			.join(" ");
 	}
 
+	async function syncEndpointsFromClusters() {
+		try {
+			const [clustersResult, endpointsResult] = await Promise.all([
+				fetchClusters(),
+				syncClusterBenchmarkEndpoints(),
+			]);
+			clusters = clustersResult.clusters;
+			endpoints = endpointsResult.endpoints;
+		} catch { /* non-blocking */ }
+	}
+
 	async function loadAll() {
 		loading = true;
 		error = "";
 		try {
-			const [endpointResult, promptResult, runResult, summaryResult, modelResult, currentResult] =
+			const [endpointResult, promptResult, runResult, summaryResult] =
 				await Promise.all([
 					listBenchmarkEndpoints(),
 					listBenchmarkPrompts(),
 					listBenchmarkRuns({ limit: 100 }),
 					fetchBenchmarkSummary(),
-					fetchModels(),
-					fetchCurrentModel(),
 				]);
 			endpoints = endpointResult.endpoints;
 			prompts = promptResult.prompts;
 			runs = runResult.runs;
 			summary = summaryResult;
-			installedModels = modelResult.models;
-			activeFamily = currentResult.family;
+			await syncEndpointsFromClusters();
 			if (!selectedEndpointId && endpoints[0]) selectedEndpointId = String(endpoints[0].id);
-			if (!selectedModel && currentResult.running) selectedModel = currentResult.alias;
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -222,13 +248,6 @@
 		running = true;
 		error = "";
 		try {
-			const model = installedModels.find((m) => m.alias === selectedModel || m.family === selectedModel);
-			if (model && model.family !== activeFamily) {
-				error = `Switching to ${model.alias}…`;
-				await switchModel({ family: model.family, profile: model.profile, backend: model.backend });
-				activeFamily = model.family;
-				error = "";
-			}
 			const prompt = selectedPrompt();
 			const req = {
 				endpoint_id: Number(selectedEndpointId),
@@ -326,8 +345,8 @@
 			</select>
 			<select bind:value={selectedModel}>
 				<option value="">Select model</option>
-				{#each installedModels.filter(m => m.downloaded) as m}
-					<option value={m.alias}>{m.label ?? m.model_name ?? m.alias}{m.family === activeFamily ? " ★" : ""}</option>
+				{#each endpointModels as m}
+					<option value={m}>{m}</option>
 				{/each}
 			</select>
 			<button onclick={executeRun} disabled={running || !selectedEndpointId || !selectedModel}>{running ? "Running…" : "Run"}</button>

@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, HttpUrl
 
 from .. import config
+from ..clusters import list_clusters
 
 BenchmarkStore = import_module("backend.benchmark_store").BenchmarkStore
 
@@ -131,6 +132,15 @@ def _prompt_name(req: BenchmarkRunRequest) -> str | None:
 @router.get("/endpoints")
 async def list_endpoints():
     return {"endpoints": _store().list_endpoints()}
+
+
+@router.post("/endpoints/sync-clusters")
+async def sync_cluster_endpoints():
+    synced = [
+        _store().upsert_endpoint(f"Cluster: {cluster.name}", f"http://127.0.0.1:{cluster.port}/v1")
+        for cluster in list_clusters()
+    ]
+    return {"endpoints": synced}
 
 
 @router.post("/endpoints")

@@ -7,6 +7,7 @@ from backend.gpu_inventory import (
     GpuInfo,
     _rocminfo_indices,
     _nvidia_smi_indices,
+    _lspci_name,
     _vulkaninfo_devices,
     _match_vulkan,
     detect_gpus,
@@ -102,6 +103,12 @@ def test_nvidia_smi_indices_parses_csv():
     assert idx == 0
     assert "P40" in name
     assert vram == 24576
+
+
+def test_lspci_name_parses_model():
+    out = "01:00.0 3D controller [0302]: NVIDIA Corporation GP102GL [Tesla P40] [10de:1b38]"
+    with patch("backend.gpu_inventory._run", return_value=out):
+        assert _lspci_name("0000:01:00.0") == "NVIDIA Corporation GP102GL [Tesla P40]"
 
 
 def test_vulkaninfo_devices_parses_summary():

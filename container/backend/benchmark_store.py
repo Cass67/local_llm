@@ -90,6 +90,29 @@ class BenchmarkStore:
             row = conn.execute("select * from endpoints where id = ?", (cur.lastrowid,)).fetchone()
         return self._endpoint_row(row)
 
+    def upsert_endpoint(self, name: str, base_url: str) -> dict[str, Any]:
+        clean_url = base_url.rstrip("/").replace("localhost", "127.0.0.1")
+        with self._connect() as conn:
+            row = conn.execute(
+                "select * from endpoints where replace(base_url, 'localhost', '127.0.0.1') = ?",
+                (clean_url,),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "update endpoints set name = ?, base_url = ?, updated_at = current_timestamp where id = ?",
+                    (name, clean_url, row["id"]),
+                )
+                row = conn.execute("select * from endpoints where id = ?", (row["id"],)).fetchone()
+            else:
+                cur = conn.execute(
+                    "insert into endpoints (name, base_url) values (?, ?)",
+                    (name, clean_url),
+                )
+                row = conn.execute(
+                    "select * from endpoints where id = ?", (cur.lastrowid,)
+                ).fetchone()
+        return self._endpoint_row(row)
+
     def list_endpoints(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute("select * from endpoints order by name").fetchall()

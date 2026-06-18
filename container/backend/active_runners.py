@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import http.client
+import logging
 import time
 from copy import deepcopy
 from typing import Any
@@ -11,10 +12,14 @@ from . import config
 from .clusters import (
     ClusterDef,
     list_active,
+    list_clusters,
+    list_desired,
     remove_active,
+    remove_desired,
     tensor_split_for,
     visible_devices_for,
     write_active,
+    write_desired,
 )
 from .gpu_inventory import GpuInfo, detect_gpus
 from .runtime import DockerRunner, DockerRunnerConfig
@@ -94,21 +99,20 @@ def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
         logs = "\n".join(runner.logs(40)) or "runner did not become ready"
         raise RuntimeError(logs[-1000:])
     alias = str(accepted.get("alias") or accepted.get("family") or "unknown")
-    write_active(
-        cluster.id,
-        {
-            "cluster_id": cluster.id,
-            "cluster_name": cluster.name,
-            "model": alias,
-            "family": str(accepted.get("family", alias)),
-            "label": accepted.get("label") or None,
-            "profile": str(accepted.get("profile", "reliable")),
-            "backend": cluster.backend,
-            "port": cluster.port,
-            "container": cluster.container_name,
-            "gpu_pci_ids": cluster.gpu_pci_ids,
-        },
-    )
+    state = {
+        "cluster_id": cluster.id,
+        "cluster_name": cluster.name,
+        "model": alias,
+        "family": str(accepted.get("family", alias)),
+        "label": accepted.get("label") or None,
+        "profile": str(accepted.get("profile", "reliable")),
+        "backend": cluster.backend,
+        "port": cluster.port,
+        "container": cluster.container_name,
+        "gpu_pci_ids": cluster.gpu_pci_ids,
+    }
+    write_active(cluster.id, state)
+    write_desired(cluster.id, state)
 
 
 def stop(cluster: ClusterDef) -> None:
@@ -119,6 +123,28 @@ def stop(cluster: ClusterDef) -> None:
     except Exception:  # nosec B110
         pass
     remove_active(cluster.id)
+    remove_desired(cluster.id)
+
+
+def restore_desired(resolve_accepted) -> list[str]:
+    """Restart desired cluster models after Docker/host reboot."""
+    restored: list[str] = []
+    clusters = {c.id: c for c in list_clusters()}
+    for entry in list_desired():
+        cluster_id = str(entry.get("cluster_id") or "")
+        cluster = clusters.get(cluster_id)
+        family = str(entry.get("family") or entry.get("model") or "")
+        if not cluster or not family or is_running(cluster):
+            continue
+        try:
+            accepted = resolve_accepted(family)
+            accepted["profile"] = str(entry.get("profile") or accepted.get("profile") or "reliable")
+            start(cluster, accepted)
+            restored.append(cluster_id)
+        except Exception as exc:
+            logging.warning("restore %s failed: %s", cluster_id, exc)
+            continue
+    return restored
 
 
 def is_running(cluster: ClusterDef) -> bool:

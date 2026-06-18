@@ -40,11 +40,13 @@
 	let editingRule = $state<RouterRule & { _idx: number } | null>(null);
 	let newRule = $state<RouterRule>({ name: "", keywords: [], cluster: "", model: "", fallback: [] });
 	let showAddRule = $state(false);
+	let draftRemap = $state<Record<string, string>>({});
 
 	async function loadRouter() {
 		try {
 			const [cfg, health] = await Promise.all([fetchRouterConfig(), fetchRouterHealth()]);
 			routerCfg = cfg;
+			draftRemap = { ...(cfg.cluster_remap ?? {}) };
 			routerHealth = health;
 		} catch (e: any) {
 			routerError = e.message;
@@ -69,6 +71,26 @@
 		if (!routerCfg) return;
 		routerCfg = { ...routerCfg, enabled: !routerCfg.enabled };
 		saveRouter();
+	}
+
+	function setDraftRemap(from: string, to: string) {
+		draftRemap = { ...draftRemap, [from]: to };
+	}
+
+	function applyRemap() {
+		if (!routerCfg) return;
+		const cluster_remap = Object.fromEntries(Object.entries(draftRemap).filter(([, to]) => to));
+		routerCfg = { ...routerCfg, cluster_remap };
+		saveRouter();
+	}
+
+	function effectiveCluster(name?: string) {
+		if (!name) return "—";
+		return routerCfg?.cluster_remap?.[name] ? `${name} → ${routerCfg.cluster_remap[name]}` : name;
+	}
+
+	function effectiveFallback(fallback?: string[]) {
+		return (fallback ?? []).map((name) => effectiveCluster(name)).join(", ") || "—";
 	}
 
 	function deleteRule(idx: number) {
@@ -337,6 +359,27 @@
 				{/if}
 			</div>
 
+			{#if clusters.length > 0}
+				<div class="remap-row">
+					<span class="muted">Remap rule targets:</span>
+					{#each clusters as source}
+						<label>
+							{source.name} →
+							<select
+								value={draftRemap[source.name] ?? ""}
+								onchange={(e) => setDraftRemap(source.name, e.currentTarget.value)}
+							>
+								<option value="">itself</option>
+								{#each clusters as target}
+									<option value={target.name}>{target.name}</option>
+								{/each}
+							</select>
+						</label>
+					{/each}
+					<button onclick={applyRemap} disabled={routerSaving}>Apply remap</button>
+				</div>
+			{/if}
+
 			<!-- Rules table -->
 			<table class="rules-table">
 				<thead>
@@ -371,8 +414,8 @@
 							<tr>
 								<td>{rule.name}</td>
 								<td class="keywords">{rule.keywords.join(", ")}</td>
-								<td class="mono">{rule.cluster ?? rule.model ?? "—"}</td>
-								<td class="mono">{(rule.fallback ?? []).join(", ") || "—"}</td>
+								<td class="mono">{rule.cluster ? effectiveCluster(rule.cluster) : (rule.model ?? "—")}</td>
+								<td class="mono">{effectiveFallback(rule.fallback)}</td>
 								<td class="rule-actions">
 									<button onclick={() => startEditRule(i)}>Edit</button>
 									<button class="btn-del" onclick={() => deleteRule(i)}>Delete</button>
@@ -684,6 +727,26 @@
 		align-items: center;
 		gap: 0.4rem;
 		cursor: pointer;
+	}
+	.remap-row {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+		margin-bottom: 0.75rem;
+		font-size: 0.85rem;
+	}
+	.remap-row label {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+	.remap-row select {
+		padding: 0.2rem 0.4rem;
+		background: var(--bg-card);
+		color: var(--text);
+		border: 1px solid var(--border);
+		border-radius: 4px;
 	}
 	.rules-table {
 		width: 100%;
