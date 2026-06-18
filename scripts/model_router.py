@@ -11,8 +11,15 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 # --- config ---
 
-CONFIG_PATH = Path(__file__).parent.parent / "configs" / "router_rules.json"
 PORT = int(os.environ.get("ROUTER_PORT", "3200"))
+
+# State-dir config (written by mgmt UI) takes precedence over repo default.
+_STATE_CONFIG = (
+    Path(os.environ.get("ROUTER_CONFIG", ""))
+    or Path(os.environ.get("LOCAL_LLM_STATE_DIR", "/state")) / "router_rules.json"
+)
+_REPO_CONFIG = Path(__file__).parent.parent / "configs" / "router_rules.json"
+CONFIG_PATH = _STATE_CONFIG if _STATE_CONFIG.exists() else _REPO_CONFIG
 
 with CONFIG_PATH.open() as f:
     CFG = json.load(f)
