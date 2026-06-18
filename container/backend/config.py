@@ -28,3 +28,5 @@ RUNS_DIR = STATE_DIR / "runs"
 ACCEPTED_DIR = RUNS_DIR / "accepted"
 SCRIPTS_DIR = Path(os.environ.get("SCRIPTS_DIR", "/scripts"))
 LLAMA_SWAP_CONFIG = Path(os.environ.get("LLAMA_SWAP_CONFIG", "/home/cass/llama-swap/config.yaml"))
+ROUTER_CONFIG = Path(os.environ.get("ROUTER_CONFIG", str(STATE_DIR / "router_rules.json")))
+ROUTER_PORT = int(os.environ.get("ROUTER_PORT", "3200"))
