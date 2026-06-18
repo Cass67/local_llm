@@ -2,16 +2,28 @@
 
 A self-hosted LLM management system for AMD and Nvidia GPU workstations. Models run in an isolated Docker container with full GPU access; a Svelte web UI handles search, install, configuration, model switching, benchmarking, chat, and observability.
 
-![local_llm architecture](docs/assets/local-llm-architecture.svg)
+## Screenshots
 
-## What it does
+| Tab | Description |
+|---|---|
+| [![Models](screenshot-models.png)](screenshot-models.png) | **Models** — browse installed models, view details, edit config, load/switch the active model |
+| [![Search](screenshot-search.png)](screenshot-search.png) | **Search** — discover and install GGUF models from HuggingFace |
+| [![Architecture](screenshot-architecture.png)](screenshot-architecture.png) | **Architecture** — system diagram, routing rules, and router config editor |
+| [![Status](screenshot-status.png)](screenshot-status.png) | **Status** — live TPS sparkline, runner health, active model, system stats |
+| [![Benchmarks](screenshot-benchmarks.png)](screenshot-benchmarks.png) | **Benchmarks** — run configurable benchmarks, view latency/throughput trends across runs |
+| [![Logs](screenshot-logs.png)](screenshot-logs.png) | **Logs** — real-time Docker container log streaming (runner, mgmt, router) |
+| [![Chat](screenshot-chat.png)](screenshot-chat.png) | **Chat** — Open WebUI full chat interface with model selection and conversation history |
+| [![Traces](screenshot-traces.png)](screenshot-traces.png) | **Traces** — Langfuse LLM request tracing: TTFT, token throughput, per-request timelines |
+
+### Feature summary
 
 - **Search and install** GGUF models from HuggingFace, downloading directly into the local HF cache.
 - **Switch models** on demand — the management container creates and replaces the runner container via the Docker socket.
-- **Benchmark** models with configurable llama.cpp parameters (temperature, seed, top-p, top-k, repeat penalty, system prompt) and track latency/throughput trends across runs.
-- **Chat** directly in the browser through an OpenAI-compatible proxy, or via Open WebUI.
-- **Stream logs** from the runner or management container in real time.
 - **Edit model configs** — context size, batch, ngl, tensor split, MTP speculative decoding — without touching JSON by hand.
+- **Benchmark** models with configurable llama.cpp parameters (temperature, seed, top-p, top-k, repeat penalty, system prompt) and track latency/throughput trends across runs.
+- **Chat** via Open WebUI at `/chat/` — full conversation UI with model selection, history, and streaming.
+- **Router** — keyword-based request router with live config reload, routing rules editor in the Architecture tab, and per-request routing audit.
+- **Stream logs** from the runner, management, or router containers in real time.
 - **Monitor** TPS sparkline and runner slot health in the Status panel.
 - **Trace** LLM requests with Langfuse: TTFT, token throughput, prompt/completion tokens, per-request timeline.
 
@@ -176,6 +188,12 @@ Changes take effect on the next model switch.
 ### Traces
 
 **Traces** link in the nav opens Langfuse in a new tab. Every chat completion (streaming and non-streaming) is traced with TTFT, duration, token counts, and TPS. Traces appear within seconds of a request completing.
+
+### Router
+
+The **Architecture** tab includes a router config editor for managing keyword-based request routing. Requests sent with `model=auto` are matched against routing rules — the first matching rule's target cluster handles the request. Rules are evaluated in order and support exact-prefix matching on the prompt text.
+
+The router is a standalone container (`local-llm-router`) that reloads its config live when updated via the UI. Each routing decision is logged and visible in the **Logs** tab (router source) and in the Langfuse trace metadata.
 
 ### Status
 
