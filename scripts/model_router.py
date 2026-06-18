@@ -230,8 +230,12 @@ async def v1_chat_completions(request: Request):
     except json.JSONDecodeError:
         return JSONResponse({"detail": "invalid JSON"}, status_code=400)
 
-    # Bypass routing when disabled or model already set explicitly
-    if ENABLED and not (isinstance(payload.get("model"), str) and payload["model"]):
+    # "auto" (and empty) are sentinels meaning "let the router decide"
+    _ROUTE_SENTINELS = {"auto", "router", "local-auto", ""}
+    model_val = payload.get("model") or ""
+    explicit_model = bool(model_val) and model_val not in _ROUTE_SENTINELS
+
+    if ENABLED and not explicit_model:
         await _maybe_refresh()
         prompt = _extract_prompt(payload.get("messages", []))
         chosen = _route(prompt)
@@ -240,8 +244,8 @@ async def v1_chat_completions(request: Request):
         payload["model"] = chosen
         cluster = next((k for k, v in _cluster_to_model.items() if v == chosen), "?")
         print(f"router: [{cluster}] {chosen} ← {prompt[:80]!r}", flush=True)
-    elif isinstance(payload.get("model"), str) and payload["model"]:
-        model = payload["model"]
+    else:
+        model = payload.get("model", "")
         cluster = next((k for k, v in _cluster_to_model.items() if v == model), "client-specified")
         print(f"router: [{cluster}] {model} (passthrough)", flush=True)
 
