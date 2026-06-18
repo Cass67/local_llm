@@ -7,7 +7,7 @@
   let lines: string[] = $state([]);
   let connected: boolean = $state(false);
   let autoScroll: boolean = $state(true);
-  let source: 'runner' | 'mgmt' = $state('runner');
+  let source: 'runner' | 'mgmt' | 'router' = $state('runner');
   let clusters: ClusterInfo[] = $state([]);
   let selectedClusterId: string = $state('');
   let eventSource: EventSource | null = null;
@@ -64,6 +64,7 @@
     <select bind:value={source} onchange={connect}>
       <option value="runner">Runner logs</option>
       <option value="mgmt">Management/API logs</option>
+      <option value="router">Router logs</option>
     </select>
     {#if source === 'runner' && clusters.length > 1}
       <select bind:value={selectedClusterId} onchange={connect}>
