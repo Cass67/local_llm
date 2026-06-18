@@ -255,6 +255,30 @@ export interface ClusterInfo {
 	active: ClusterActive | null;
 }
 
+export interface RouterRule {
+	name: string;
+	keywords: string[];
+	cluster?: string;
+	model?: string;
+	fallback?: string[];
+}
+
+export interface RouterConfig {
+	backend_url: string;
+	default_model: string | null;
+	health_check_interval_s: number;
+	enabled: boolean;
+	rules: RouterRule[];
+}
+
+export interface RouterHealth {
+	running: boolean;
+	detail?: string;
+	healthy_models?: string[];
+	cluster_map?: Record<string, string>;
+	default_model?: string;
+}
+
 export interface BenchmarkRunFilters {
 	endpoint_id?: number | "";
 	model?: string;
