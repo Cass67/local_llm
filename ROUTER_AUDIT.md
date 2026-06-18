@@ -1,4 +1,4 @@
-# Model Router Audit — model-router Branch
+# Model Router Audit — model-router Branch (v2)
 
 ## Plan (from commit messages)
 
@@ -73,7 +73,7 @@ handle /v1/* {
 
 ---
 
-### 2. Router health check depends on `/api/clusters` — silent degradation
+### 2. Router health check silent degradation
 
 **Severity: MEDIUM**
 
@@ -90,7 +90,7 @@ except Exception as exc:
     # Don't clear cluster_map on failure — keep last-known state
 ```
 
-Currently the code only sets `_last_health_check` but does clear `_cluster_to_model` on failure (the global assignment on line 64 runs before the try). The fix: move `_cluster_to_model = {}` into the try block so it only clears on success.
+Currently the code only sets `_last_health_check` but does clear `_cluster_to_model` on failure (the global assignment on line 59 runs before the try block on line 64). The fix: move `_cluster_to_model = {}` into the try block so it only clears on success.
 
 ---
 

@@ -38,7 +38,7 @@
 	let routerError = $state("");
 	let routerSaving = $state(false);
 	let editingRule = $state<RouterRule & { _idx: number } | null>(null);
-	let newRule = $state<RouterRule>({ name: "", keywords: [], cluster: "", fallback: [] });
+	let newRule = $state<RouterRule>({ name: "", keywords: [], cluster: "", model: "", fallback: [] });
 	let showAddRule = $state(false);
 
 	async function loadRouter() {
@@ -95,9 +95,9 @@
 	}
 
 	function addRule() {
-		if (!routerCfg || !newRule.name || !newRule.keywords.length) return;
+		if (!routerCfg || !newRule.name || !newRule.keywords.length || (!newRule.cluster && !newRule.model)) return;
 		routerCfg = { ...routerCfg, rules: [...routerCfg.rules, { ...newRule }] };
-		newRule = { name: "", keywords: [], cluster: "", fallback: [] };
+		newRule = { name: "", keywords: [], cluster: "", model: "", fallback: [] };
 		showAddRule = false;
 		saveRouter();
 	}
@@ -401,12 +401,18 @@
 							<option value={c.name}>{c.name}</option>
 						{/each}
 					</select>
+					<select bind:value={newRule.model}>
+						<option value="">— model alias —</option>
+						{#each models as m}
+							<option value={m.alias}>{m.label ?? m.alias}</option>
+						{/each}
+					</select>
 					<input
 						value={(newRule.fallback ?? []).join(", ")}
 						oninput={(e) => newRule.fallback = parseKeywords((e.target as HTMLInputElement).value)}
 						placeholder="fallback clusters (optional)"
 					/>
-					<button onclick={addRule} disabled={!newRule.name || !newRule.keywords.length || !newRule.cluster}>Add</button>
+					<button onclick={addRule} disabled={!newRule.name || !newRule.keywords.length || (!newRule.cluster && !newRule.model)}>Add</button>
 					<button onclick={() => showAddRule = false}>Cancel</button>
 				</div>
 			{:else}
