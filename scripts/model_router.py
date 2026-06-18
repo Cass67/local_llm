@@ -238,9 +238,12 @@ async def v1_chat_completions(request: Request):
         if not chosen:
             return JSONResponse({"detail": "no healthy model available"}, status_code=503)
         payload["model"] = chosen
-        print(f"router: {chosen!r} ← {prompt[:80]!r}", flush=True)
+        cluster = next((k for k, v in _cluster_to_model.items() if v == chosen), "?")
+        print(f"router: [{cluster}] {chosen} ← {prompt[:80]!r}", flush=True)
     elif isinstance(payload.get("model"), str) and payload["model"]:
-        print(f"router: passthrough → {payload['model']!r}", flush=True)
+        model = payload["model"]
+        cluster = next((k for k, v in _cluster_to_model.items() if v == model), "client-specified")
+        print(f"router: [{cluster}] {model} (passthrough)", flush=True)
 
     if _is_stream(payload):
         return await _proxy_stream(payload, request)
