@@ -19,7 +19,7 @@
 	}
 
 	handle /v1/* {
-		reverse_proxy 127.0.0.1:3100
+		reverse_proxy 127.0.0.1:3200
 	}
 
 	# Chat shell with guaranteed back link; iframe hosts Open WebUI.
