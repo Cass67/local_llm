@@ -26,6 +26,9 @@ _VENDOR_IDS = {
 }
 
 _PCI_CLASS_DISPLAY = {"0300", "0302"}
+_NVIDIA_VRAM_FALLBACK_MB = {
+    "1b38": 23040,  # Tesla P40 with ECC enabled, as reported by nvidia-smi
+}
 
 
 def _sysfs_gpus() -> list[dict]:
@@ -115,6 +118,14 @@ def _rocminfo_indices() -> dict[str, int]:
             current_pci = m.group(1).lower()
             indices[current_pci] = current_idx  # pyright: ignore[reportArgumentType]
     return indices
+
+
+def _lspci_name(pci_id: str) -> str | None:
+    out = _run(["lspci", "-s", pci_id])
+    match = re.search(
+        r"(?:\]|controller):\s*(.+?)(?:\s*\[[0-9a-fA-F]{4}:[0-9a-fA-F]{4}\])?(?:\s*\(rev|$)", out
+    )
+    return match.group(1).strip() if match else None
 
 
 def _nvidia_smi_indices() -> dict[str, tuple[int, str, int | None]]:
@@ -268,6 +279,9 @@ def detect_gpus() -> list[GpuInfo]:
                     vram_mb = nvram
             else:
                 cuda_idx = nvidia_count
+                name = _lspci_name(pci) or name
+                if vram_mb is None:
+                    vram_mb = _NVIDIA_VRAM_FALLBACK_MB.get(dev["device_id"])
             nvidia_count += 1
 
         vk_idx = vk_map.get(pci)

@@ -90,14 +90,34 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
             alias,
             "--reasoning",
             _bool_flag(cfg.get("reasoning", metadata.get("reasoning", False))),
-            "--context-shift",
-            "--cache-prompt",
-            "--cache-ram",
-            str(cfg.get("cache_ram", 16384)),
-            "--ctx-checkpoints",
-            str(cfg.get("ctx_checkpoints", 64)),
-            "--checkpoint-min-step",
-            str(cfg.get("checkpoint_min_step", 4096)),
+        ]
+    )
+    if cfg.get("context_shift", True):
+        args.append("--context-shift")
+    if cfg.get("cache_prompt", True):
+        args.extend(["--cache-prompt", "--cache-ram", str(cfg.get("cache_ram", 16384))])
+    else:
+        args.extend(["--cache-ram", "0"])
+    if int(cfg.get("ctx_checkpoints", 64) or 0) > 0:
+        args.extend(
+            [
+                "--ctx-checkpoints",
+                str(cfg.get("ctx_checkpoints", 64)),
+                "--checkpoint-min-step",
+                str(cfg.get("checkpoint_min_step", 4096)),
+            ]
+        )
+    else:
+        args.extend(["--ctx-checkpoints", "0"])
+    if cfg.get("repeat_penalty") is not None:
+        args.extend(["--repeat-penalty", str(cfg["repeat_penalty"])])
+    if cfg.get("presence_penalty") is not None:
+        args.extend(["--presence-penalty", str(cfg["presence_penalty"])])
+    if cfg.get("frequency_penalty") is not None:
+        args.extend(["--frequency-penalty", str(cfg["frequency_penalty"])])
+
+    args.extend(
+        [
             "--timeout",
             str(cfg.get("timeout", 600)),
             "--threads-http",

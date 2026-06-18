@@ -32,6 +32,12 @@ def active_dir() -> Path:
     return d
 
 
+def desired_dir() -> Path:
+    d = config.RUNS_DIR / "desired"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 @dataclass
 class ClusterDef:
     id: str
@@ -179,6 +185,40 @@ def remove_active(cluster_id: str) -> None:
     path = active_dir() / f"{cluster_id}.json"
     if path.exists():
         path.unlink()
+
+
+def read_desired(cluster_id: str) -> dict[str, Any] | None:
+    path = desired_dir() / f"{cluster_id}.json"
+    if not path.exists() or path.is_symlink():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def write_desired(cluster_id: str, data: dict[str, Any]) -> None:
+    path = desired_dir() / f"{cluster_id}.json"
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def remove_desired(cluster_id: str) -> None:
+    path = desired_dir() / f"{cluster_id}.json"
+    if path.exists():
+        path.unlink()
+
+
+def list_desired() -> list[dict[str, Any]]:
+    result = []
+    for f in sorted(desired_dir().glob("*.json")):
+        try:
+            data = json.loads(f.read_text())
+            if isinstance(data, dict):
+                result.append(data)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return result
 
 
 def list_active() -> list[dict[str, Any]]:

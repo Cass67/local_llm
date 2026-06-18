@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from importlib import import_module
+from . import active_runners
 from .config import VERSION
 from .routes.models import router as models_router
 from .routes.switch import router as switch_router
@@ -21,6 +22,19 @@ from .routes.router_config import router as router_config_router
 benchmark_router = import_module("backend.routes.benchmark").router
 
 app = FastAPI(title="local-llm-server", version=VERSION)
+
+
+@app.on_event("startup")
+async def restore_desired_runners():
+    import asyncio
+
+    await asyncio.to_thread(active_runners.restore_desired, _resolve_accepted_for_restore)
+
+
+def _resolve_accepted_for_restore(family: str) -> dict:
+    from .routes.clusters import _resolve_accepted
+
+    return _resolve_accepted(family)
 
 
 @app.middleware("http")

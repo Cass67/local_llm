@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { tick } from "svelte";
 	import { marked } from "marked";
 	import DOMPurify from "dompurify";
-	import { fetchHFCard } from "../lib/api";
+	import { fetchClusters, fetchGpus, fetchHFCard } from "../lib/api";
 	import { installStatusView } from "../lib/installStatus";
 	import { searchStore } from "../lib/searchStore";
-	import type { SearchCandidate } from "../lib/types";
+	import type { ClusterInfo, GpuInfo, SearchCandidate } from "../lib/types";
 
 	type InstallErrorDetail = {
 		status: "error";
@@ -24,6 +25,9 @@
 	let hfCardLoading = $state(false);
 	let installErrorDetail: InstallErrorDetail | null = $state(null);
 	let hideTooTight = $state(false);
+	let clusters: ClusterInfo[] = $state([]);
+	let gpus: GpuInfo[] = $state([]);
+	let selectedClusters: Record<string, boolean> = $state({});
 
 	let filtered = $derived(
 		(
@@ -50,9 +54,24 @@
 	let paged = $derived(sorted.slice(($searchState.page - 1) * perPage, $searchState.page * perPage));
 	let baseIdx = $derived(($searchState.page - 1) * perPage);
 	let latestInstallError = $derived(getLatestInstallError());
+	let selectedVramGb = $derived(clusterVramGb());
+
+	$effect(() => {
+		Promise.all([fetchClusters(), fetchGpus()])
+			.then(([clusterData, gpuData]) => {
+				clusters = clusterData.clusters;
+				gpus = gpuData.gpus;
+			})
+			.catch(() => {
+				clusters = [];
+				gpus = [];
+			});
+	});
 
 	async function doSearch() {
-		await searchStore.search();
+		hideTooTight = !!selectedVramGb;
+		await tick();
+		await (searchStore.search as (targetVramGb?: number) => Promise<void>)(selectedVramGb || undefined);
 	}
 
 	async function doInstall(candidate: SearchCandidate) {
@@ -99,6 +118,18 @@
 		return typeof status === "object" && status?.status === "error";
 	}
 
+	function clusterVramGb(): number {
+		const selected = clusters.filter((c) => selectedClusters[c.id]);
+		const mb = selected
+			.flatMap((c) => c.gpu_pci_ids)
+			.reduce((sum, id) => sum + (gpus.find((g) => g.pci_id === id)?.vram_mb ?? 0), 0);
+		return mb ? Math.round((mb / 1024) * 10) / 10 : 0;
+	}
+
+	function toggleCluster(id: string) {
+		selectedClusters = { ...selectedClusters, [id]: !selectedClusters[id] };
+	}
+
 	function getLatestInstallError(): InstallErrorDetail | null {
 		let latest: InstallErrorDetail | null = null;
 		for (const status of Object.values($searchState.installStatus) as InstallStatus[]) {
@@ -114,7 +145,7 @@
 			type="text"
 			value={$searchState.query}
 			oninput={(e) => searchStore.setQuery(e.currentTarget.value)}
-			placeholder="Search models (e.g. qwen coding gguf)"
+			placeholder="Search models (e.g. gemma gguf)"
 			onkeydown={(e) => e.key === "Enter" && doSearch()}
 			disabled={$searchState.searching}
 		/>
@@ -122,6 +153,23 @@
 			{$searchState.searching ? "Searching..." : "Search"}
 		</button>
 	</div>
+
+	{#if clusters.length > 0}
+		<div class="cluster-filter">
+			<span>Target cluster:</span>
+			{#each clusters as cluster}
+				<label>
+					<input
+						type="checkbox"
+						checked={!!selectedClusters[cluster.id]}
+						onchange={() => toggleCluster(cluster.id)}
+					/>
+					{cluster.name}
+				</label>
+			{/each}
+			<span class="vram">{selectedVramGb ? `${selectedVramGb} GB VRAM` : "all hardware"}</span>
+		</div>
+	{/if}
 
 	{#if $searchState.error}
 		<div class="error">{$searchState.error}</div>
@@ -276,6 +324,9 @@
 		box-shadow: 0 0 0 2px var(--accent33);
 	}
 	.search-bar button { padding: 0.6rem 1rem; background: var(--accent); color: var(--text); border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+	.cluster-filter { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 0.6rem 0; color: var(--text-muted); font-size: 0.85rem; }
+	.cluster-filter label { display: flex; gap: 0.25rem; align-items: center; color: var(--text); }
+	.cluster-filter .vram { margin-left: auto; font-family: 'JetBrains Mono', monospace; color: var(--green); }
 	.toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
 	.toolbar input { flex: 1; min-width: 150px; padding: 0.3rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
 	.toolbar button { padding: 0.3rem 0.6rem; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.1s; }

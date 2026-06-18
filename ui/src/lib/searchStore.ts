@@ -19,15 +19,30 @@ export interface SearchState {
 	page: number;
 	installingRepos: Record<string, true>;
 	installStatus: Record<string, "installed" | string | InstallErrorDetail>;
+	vramGb: number | null;
 }
 
 interface SearchApi {
-	searchModels: (query: string, limit?: number) => Promise<SearchResponse>;
+	searchModels: (
+		query: string,
+		limit?: number,
+		vramGb?: number,
+	) => Promise<SearchResponse>;
 	installModel: (
 		repo: string,
 		file: string,
 		profile: string,
 	) => Promise<InstallResult>;
+}
+
+interface SearchStore {
+	state: ReturnType<typeof writable<SearchState>>;
+	setQuery: (query: string) => void;
+	setFilter: (filter: string) => void;
+	setSortMode: (sortMode: SortMode) => void;
+	setPage: (page: number) => void;
+	search: (targetVramGb?: number) => Promise<void>;
+	install: (candidate: SearchCandidate, profile: string) => Promise<void>;
 }
 
 const initialState: SearchState = {
@@ -40,9 +55,10 @@ const initialState: SearchState = {
 	page: 1,
 	installingRepos: {},
 	installStatus: {},
+	vramGb: null,
 };
 
-export function createSearchStore(api: SearchApi) {
+export function createSearchStore(api: SearchApi): SearchStore {
 	const state = writable<SearchState>({ ...initialState });
 	const installs = new Map<string, Promise<void>>();
 
@@ -56,10 +72,12 @@ export function createSearchStore(api: SearchApi) {
 		setFilter: (filter: string) => patch({ filter, page: 1 }),
 		setSortMode: (sortMode: SortMode) => patch({ sortMode, page: 1 }),
 		setPage: (page: number) => patch({ page }),
-		async search() {
+		async search(targetVramGb?: number) {
 			let query = "";
+			let vramGb: number | null = null;
 			state.update((current) => {
 				query = current.query.trim();
+				vramGb = targetVramGb ?? current.vramGb;
 				if (!query) return current;
 				return {
 					...current,
@@ -71,7 +89,7 @@ export function createSearchStore(api: SearchApi) {
 			});
 			if (!query) return;
 			try {
-				const result = await api.searchModels(query);
+				const result = await api.searchModels(query, 30, vramGb ?? undefined);
 				state.update((current) => ({
 					...current,
 					candidates: result.candidates,

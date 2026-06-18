@@ -268,6 +268,7 @@ export interface RouterConfig {
 	default_model: string | null;
 	health_check_interval_s: number;
 	enabled: boolean;
+	cluster_remap?: Record<string, string>;
 	rules: RouterRule[];
 }
 

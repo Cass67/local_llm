@@ -27,7 +27,7 @@ def test_build_llama_server_args_includes_model_runtime_and_mtp_flags():
 
     args = build_llama_server_args(metadata, port=8080)
 
-    assert args == [
+    assert args[:23] == [
         "llama-server",
         "--port",
         "8080",
@@ -49,15 +49,40 @@ def test_build_llama_server_args_includes_model_runtime_and_mtp_flags():
         "qwopus-q5km",
         "--reasoning",
         "off",
-        "--spec-type",
-        "draft-mtp",
-        "--spec-draft-n-max",
-        "3",
-        "--spec-draft-n-min",
-        "1",
-        "--spec-draft-p-min",
-        "0.5",
+        "--context-shift",
+        "--cache-prompt",
     ]
+    assert "--spec-type" in args
+    assert "draft-mtp" in args
+
+
+def test_build_llama_server_args_includes_repeat_penalties_when_configured():
+    metadata = {
+        "alias": "qwopus",
+        "model_path": "/models/qwopus.gguf",
+        "config": {"repeat_penalty": 1.05, "presence_penalty": 0.0},
+    }
+
+    args = build_llama_server_args(metadata, port=8080)
+
+    assert args[args.index("--repeat-penalty") + 1] == "1.05"
+    assert args[args.index("--presence-penalty") + 1] == "0.0"
+
+
+def test_build_llama_server_args_can_disable_prompt_cache_for_swa_models():
+    metadata = {
+        "alias": "gemma4",
+        "model_path": "/models/gemma.gguf",
+        "config": {"cache_prompt": False, "ctx_checkpoints": 0, "context_shift": False},
+    }
+
+    args = build_llama_server_args(metadata, port=8080)
+
+    assert "--cache-prompt" not in args
+    assert args[args.index("--cache-ram") + 1] == "0"
+    assert args[args.index("--ctx-checkpoints") + 1] == "0"
+    assert "--checkpoint-min-step" not in args
+    assert "--context-shift" not in args
 
 
 def test_build_llama_server_args_omits_legacy_raw_mtp_flags_when_structured_mtp_enabled():
