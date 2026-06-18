@@ -114,8 +114,10 @@ def _is_healthy(alias: str) -> bool:
 
 
 def _extract_prompt(messages: list[dict]) -> str:
-    """Return last message content as prompt text."""
+    """Return last user message content for routing — ignore tool/assistant messages."""
     for msg in reversed(messages):
+        if msg.get("role") != "user":
+            continue
         content = msg.get("content", "")
         if isinstance(content, str) and content.strip():
             return content.strip().lower()
