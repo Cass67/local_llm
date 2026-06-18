@@ -1,0 +1,19 @@
+{
+  "backend_url": "http://ubt26:3100",
+  "default_model": null,
+  "health_check_interval_s": 10,
+  "rules": [
+    {
+      "name": "code tasks",
+      "keywords": ["code", "python", "bug", "debug", "function", "api", "deploy", "docker", "git", "test"],
+      "cluster": "7900-1",
+      "fallback": ["7900-2"]
+    },
+    {
+      "name": "creative writing",
+      "keywords": ["write", "story", "poem", "creative", "essay", "blog"],
+      "cluster": "7900-2",
+      "fallback": ["7900-1"]
+    }
+  ]
+}
