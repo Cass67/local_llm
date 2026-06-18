@@ -280,4 +280,4 @@ class DockerRunner:
         # Imported lazily to avoid a module cycle with log_stream.
         from .log_stream import _docker_logs_tail
 
-        return _docker_logs_tail(lines)
+        return _docker_logs_tail(lines, self.config.name)
