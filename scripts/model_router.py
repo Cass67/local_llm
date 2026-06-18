@@ -13,21 +13,45 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 PORT = int(os.environ.get("ROUTER_PORT", "3200"))
 
-# State-dir config (written by mgmt UI) takes precedence over repo default.
 _STATE_CONFIG = (
     Path(os.environ.get("ROUTER_CONFIG", ""))
     or Path(os.environ.get("LOCAL_LLM_STATE_DIR", "/state")) / "router_rules.json"
 )
 _REPO_CONFIG = Path(__file__).parent.parent / "configs" / "router_rules.json"
-CONFIG_PATH = _STATE_CONFIG if _STATE_CONFIG.exists() else _REPO_CONFIG
+_CONFIG_PATH = _STATE_CONFIG if _STATE_CONFIG.exists() else _REPO_CONFIG
+_config_mtime: float = 0.0
 
-with CONFIG_PATH.open() as f:
-    CFG = json.load(f)
+# Runtime config — reloaded when the file changes
+BACKEND_URL = "http://127.0.0.1:3100"
+DEFAULT_MODEL: str | None = None
+HEALTH_INTERVAL: int = 10
+RULES: list[dict] = []
+ENABLED: bool = True
 
-BACKEND_URL = CFG["backend_url"].rstrip("/")
-DEFAULT_MODEL = CFG.get("default_model")  # None → first available
-HEALTH_INTERVAL = CFG.get("health_check_interval_s", 10)
-RULES = CFG.get("rules", [])
+
+def _reload_config() -> None:
+    global BACKEND_URL, DEFAULT_MODEL, HEALTH_INTERVAL, RULES, ENABLED, _config_mtime, _CONFIG_PATH
+    path = _STATE_CONFIG if _STATE_CONFIG.exists() else _REPO_CONFIG
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return
+    if path == _CONFIG_PATH and mtime == _config_mtime:
+        return
+    try:
+        cfg = json.loads(path.read_text())
+        BACKEND_URL = cfg.get("backend_url", BACKEND_URL).rstrip("/")
+        DEFAULT_MODEL = cfg.get("default_model")
+        HEALTH_INTERVAL = cfg.get("health_check_interval_s", 10)
+        RULES = cfg.get("rules", [])
+        ENABLED = cfg.get("enabled", True)
+        _CONFIG_PATH = path
+        _config_mtime = mtime
+    except (OSError, json.JSONDecodeError):
+        pass
+
+
+_reload_config()
 
 # --- health cache ---
 
@@ -38,6 +62,7 @@ _last_health_check: float = 0.0
 
 async def _refresh_health() -> None:
     global _healthy_aliases, _cluster_to_model, _last_health_check
+    _reload_config()
     try:
         async with httpx.AsyncClient(timeout=5.0) as c:
             models_resp = await c.get(f"{BACKEND_URL}/v1/models")
@@ -205,8 +230,8 @@ async def v1_chat_completions(request: Request):
     except json.JSONDecodeError:
         return JSONResponse({"detail": "invalid JSON"}, status_code=400)
 
-    # Bypass when model already set explicitly
-    if not (isinstance(payload.get("model"), str) and payload["model"]):
+    # Bypass routing when disabled or model already set explicitly
+    if ENABLED and not (isinstance(payload.get("model"), str) and payload["model"]):
         await _maybe_refresh()
         prompt = _extract_prompt(payload.get("messages", []))
         chosen = _route(prompt)
@@ -224,6 +249,7 @@ async def health():
     await _maybe_refresh()
     return {
         "status": "ok",
+        "enabled": ENABLED,
         "backend": BACKEND_URL,
         "healthy_models": sorted(_healthy_aliases),
         "cluster_map": _cluster_to_model,

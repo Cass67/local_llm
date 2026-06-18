@@ -36,6 +36,27 @@ services:
       LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-}"
       LANGFUSE_HOST: "${LANGFUSE_HOST:-http://localhost:3004}"
 
+  # ── Model Router ─────────────────────────────────────────────────────────────
+  # Keyword-based request router on :3200.
+  # Reads routing rules from state dir; proxies to local-llm-mgmt :3100.
+  local-llm-router:
+    build:
+      context: .
+      dockerfile: container/Dockerfile.router
+      network: host
+    image: local-llm-router:latest
+    container_name: local-llm-router
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - local-llm-mgmt
+    volumes:
+      - ${LOCAL_LLM_STATE_DIR:-${HOME}/.local/share/local_llm}:/state
+    environment:
+      ROUTER_PORT: "3200"
+      ROUTER_CONFIG: /state/router_rules.json
+      LOCAL_LLM_STATE_DIR: /state
+
   # ── Caddy reverse proxy ──────────────────────────────────────────────────────
   # Single public entrypoint on :3001.
   # Routes /ui/, /api/local-llm/, /v1/ → local-llm-mgmt :3100
