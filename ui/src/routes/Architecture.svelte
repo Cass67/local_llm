@@ -9,7 +9,11 @@
 		startOnCluster,
 		stopCluster,
 		fetchModels,
+		fetchRouterConfig,
+		saveRouterConfig,
+		fetchRouterHealth,
 	} from "../lib/api";
+	import type { RouterConfig, RouterRule } from "../lib/types";
 
 	let gpus = $state<GpuInfo[]>([]);
 	let clusters = $state<ClusterInfo[]>([]);
@@ -27,6 +31,80 @@
 	// start form per cluster
 	let startFamily = $state<Record<string, string>>({});
 	let startProfile = $state<Record<string, string>>({});
+
+	// router
+	let routerCfg = $state<RouterConfig | null>(null);
+	let routerHealth = $state<{ running: boolean; cluster_map?: Record<string, string> } | null>(null);
+	let routerError = $state("");
+	let routerSaving = $state(false);
+	let editingRule = $state<RouterRule & { _idx: number } | null>(null);
+	let newRule = $state<RouterRule>({ name: "", keywords: [], cluster: "", fallback: [] });
+	let showAddRule = $state(false);
+
+	async function loadRouter() {
+		try {
+			const [cfg, health] = await Promise.all([fetchRouterConfig(), fetchRouterHealth()]);
+			routerCfg = cfg;
+			routerHealth = health;
+		} catch (e: any) {
+			routerError = e.message;
+		}
+	}
+
+	async function saveRouter() {
+		if (!routerCfg) return;
+		routerSaving = true;
+		routerError = "";
+		try {
+			await saveRouterConfig(routerCfg);
+			await loadRouter();
+		} catch (e: any) {
+			routerError = e.message;
+		} finally {
+			routerSaving = false;
+		}
+	}
+
+	function toggleRouter() {
+		if (!routerCfg) return;
+		routerCfg = { ...routerCfg, enabled: !routerCfg.enabled };
+		saveRouter();
+	}
+
+	function deleteRule(idx: number) {
+		if (!routerCfg) return;
+		const rules = [...routerCfg.rules];
+		rules.splice(idx, 1);
+		routerCfg = { ...routerCfg, rules };
+		saveRouter();
+	}
+
+	function startEditRule(idx: number) {
+		if (!routerCfg) return;
+		editingRule = { ...routerCfg.rules[idx], _idx: idx };
+	}
+
+	function saveEditRule() {
+		if (!routerCfg || !editingRule) return;
+		const rules = [...routerCfg.rules];
+		const { _idx, ...rule } = editingRule;
+		rules[_idx] = rule;
+		routerCfg = { ...routerCfg, rules };
+		editingRule = null;
+		saveRouter();
+	}
+
+	function addRule() {
+		if (!routerCfg || !newRule.name || !newRule.keywords.length) return;
+		routerCfg = { ...routerCfg, rules: [...routerCfg.rules, { ...newRule }] };
+		newRule = { name: "", keywords: [], cluster: "", fallback: [] };
+		showAddRule = false;
+		saveRouter();
+	}
+
+	function parseKeywords(s: string): string[] {
+		return s.split(",").map((k) => k.trim()).filter(Boolean);
+	}
 
 	async function loadGpus() {
 		loadingGpus = true;
@@ -67,6 +145,7 @@
 		loadGpus();
 		loadClusters();
 		loadModels();
+		loadRouter();
 	});
 
 	function togglePci(pci: string) {
@@ -229,6 +308,112 @@
 			</div>
 		{:else}
 			<p class="muted">Detect GPUs first.</p>
+		{/if}
+	</section>
+
+	<!-- Model Router -->
+	<section>
+		<div class="section-head">
+			<h3>Model Router</h3>
+			<span class="router-status" class:online={routerHealth?.running}>
+				{routerHealth?.running ? "● online :3200" : "○ offline"}
+			</span>
+			<button onclick={loadRouter}>Refresh</button>
+		</div>
+
+		{#if routerError}<p class="error">{routerError}</p>{/if}
+
+		{#if routerCfg}
+			<div class="router-toolbar">
+				<label class="toggle-label">
+					<input type="checkbox" checked={routerCfg.enabled} onchange={toggleRouter} />
+					Routing enabled
+				</label>
+				<span class="muted">backend: {routerCfg.backend_url}</span>
+				{#if routerHealth?.cluster_map && Object.keys(routerHealth.cluster_map).length > 0}
+					<span class="muted">
+						{Object.entries(routerHealth.cluster_map).map(([k, v]) => `${k} → ${v}`).join(" · ")}
+					</span>
+				{/if}
+			</div>
+
+			<!-- Rules table -->
+			<table class="rules-table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Keywords</th>
+						<th>Cluster / Model</th>
+						<th>Fallback</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each routerCfg.rules as rule, i}
+						{#if editingRule && editingRule._idx === i}
+							<tr class="editing-row">
+								<td><input bind:value={editingRule.name} /></td>
+								<td><input
+									value={editingRule.keywords.join(", ")}
+									oninput={(e) => editingRule!.keywords = parseKeywords((e.target as HTMLInputElement).value)}
+								/></td>
+								<td><input bind:value={editingRule.cluster} placeholder="cluster name" /></td>
+								<td><input
+									value={(editingRule.fallback ?? []).join(", ")}
+									oninput={(e) => editingRule!.fallback = parseKeywords((e.target as HTMLInputElement).value)}
+								/></td>
+								<td class="rule-actions">
+									<button onclick={saveEditRule}>Save</button>
+									<button onclick={() => editingRule = null}>Cancel</button>
+								</td>
+							</tr>
+						{:else}
+							<tr>
+								<td>{rule.name}</td>
+								<td class="keywords">{rule.keywords.join(", ")}</td>
+								<td class="mono">{rule.cluster ?? rule.model ?? "—"}</td>
+								<td class="mono">{(rule.fallback ?? []).join(", ") || "—"}</td>
+								<td class="rule-actions">
+									<button onclick={() => startEditRule(i)}>Edit</button>
+									<button class="btn-del" onclick={() => deleteRule(i)}>Delete</button>
+								</td>
+							</tr>
+						{/if}
+					{/each}
+					{#if routerCfg.rules.length === 0}
+						<tr><td colspan={5} class="muted" style="text-align:center;padding:1rem">No rules — all requests go to default model</td></tr>
+					{/if}
+				</tbody>
+			</table>
+
+			<!-- Add rule -->
+			{#if showAddRule}
+				<div class="add-rule-form">
+					<input bind:value={newRule.name} placeholder="Rule name" />
+					<input
+						value={newRule.keywords.join(", ")}
+						oninput={(e) => newRule.keywords = parseKeywords((e.target as HTMLInputElement).value)}
+						placeholder="keywords, comma separated"
+					/>
+					<select bind:value={newRule.cluster}>
+						<option value="">— cluster —</option>
+						{#each clusters as c}
+							<option value={c.name}>{c.name}</option>
+						{/each}
+					</select>
+					<input
+						value={(newRule.fallback ?? []).join(", ")}
+						oninput={(e) => newRule.fallback = parseKeywords((e.target as HTMLInputElement).value)}
+						placeholder="fallback clusters (optional)"
+					/>
+					<button onclick={addRule} disabled={!newRule.name || !newRule.keywords.length || !newRule.cluster}>Add</button>
+					<button onclick={() => showAddRule = false}>Cancel</button>
+				</div>
+			{:else}
+				<button class="btn-add-rule" onclick={() => showAddRule = true}>+ Add rule</button>
+			{/if}
+		{:else}
+			<p class="muted">Loading router config…</p>
 		{/if}
 	</section>
 
@@ -473,6 +658,97 @@
 		padding: 0.25rem 0.6rem;
 		cursor: pointer;
 		font-size: 0.85rem;
+	}
+	.router-status {
+		font-size: 0.85rem;
+		color: var(--red, #e57373);
+	}
+	.router-status.online {
+		color: var(--green, #4caf50);
+	}
+	.router-toolbar {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		margin-bottom: 0.75rem;
+		flex-wrap: wrap;
+	}
+	.toggle-label {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		cursor: pointer;
+	}
+	.rules-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.85rem;
+		margin-bottom: 0.75rem;
+	}
+	.rules-table th,
+	.rules-table td {
+		padding: 0.35rem 0.6rem;
+		text-align: left;
+		border-bottom: 1px solid var(--border);
+	}
+	.rules-table th {
+		color: var(--text-muted);
+		font-weight: normal;
+	}
+	.keywords {
+		color: var(--text-muted);
+		font-size: 0.8rem;
+		max-width: 260px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.rule-actions {
+		display: flex;
+		gap: 0.4rem;
+		white-space: nowrap;
+	}
+	.editing-row input {
+		width: 100%;
+		padding: 0.2rem 0.4rem;
+		background: var(--bg);
+		border: 1px solid var(--accent, #6c8ebf);
+		color: var(--text);
+		border-radius: 3px;
+		font-size: 0.8rem;
+	}
+	.add-rule-form {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		align-items: center;
+		padding: 0.75rem;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		margin-bottom: 0.5rem;
+	}
+	.add-rule-form input,
+	.add-rule-form select {
+		padding: 0.3rem 0.5rem;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		color: var(--text);
+		border-radius: 4px;
+		font-size: 0.85rem;
+	}
+	.btn-add-rule {
+		background: transparent;
+		border: 1px dashed var(--border);
+		color: var(--text-muted);
+		border-radius: 4px;
+		padding: 0.3rem 0.75rem;
+		cursor: pointer;
+		font-size: 0.85rem;
+	}
+	.btn-add-rule:hover {
+		border-color: var(--accent, #6c8ebf);
+		color: var(--text);
 	}
 	button:disabled {
 		opacity: 0.5;

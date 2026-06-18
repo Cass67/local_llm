@@ -21,6 +21,8 @@ import type {
 	RunnerHealth,
 	GpuInfo,
 	ClusterInfo,
+	RouterConfig,
+	RouterHealth,
 } from "./types";
 
 const BASE = "/api/local-llm";
@@ -359,6 +361,32 @@ export async function stopCluster(clusterId: string): Promise<{ status: string }
 		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
 		throw new Error(err.detail || `HTTP ${res.status}`);
 	}
+	return res.json();
+}
+
+// --- Router ---
+
+export async function fetchRouterConfig(): Promise<RouterConfig> {
+	const res = await fetch(`${BASE}/router/config`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function saveRouterConfig(cfg: RouterConfig): Promise<void> {
+	const res = await fetch(`${BASE}/router/config`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(cfg),
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+}
+
+export async function fetchRouterHealth(): Promise<RouterHealth> {
+	const res = await fetch(`${BASE}/router/health`);
+	if (!res.ok) return { running: false, detail: `HTTP ${res.status}` };
 	return res.json();
 }
 

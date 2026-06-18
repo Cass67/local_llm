@@ -1,0 +1,10 @@
+FROM python:3.12-slim-bookworm
+
+RUN pip install --no-cache-dir fastapi uvicorn httpx
+
+WORKDIR /app
+COPY scripts/model_router.py .
+
+EXPOSE 3200
+
+CMD ["python", "model_router.py"]

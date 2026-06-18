@@ -4,6 +4,12 @@
 
 :3001 {
 	# Container API and UI routes
+	handle /api/local-llm/logs/stream* {
+		reverse_proxy 127.0.0.1:3100 {
+			flush_interval -1
+		}
+	}
+
 	handle /api/local-llm/* {
 		reverse_proxy 127.0.0.1:3100
 	}

@@ -45,6 +45,7 @@ def _decode_docker_log_bytes(content: bytes) -> str:
 LOG_SOURCES = {
     "runner": "local-llm-runner",
     "mgmt": "local-llm-mgmt",
+    "router": "local-llm-router",
 }
 
 
