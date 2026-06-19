@@ -136,6 +136,18 @@ async def proxy_chat_completions(request: Request):
         async def stream_runner():
             # Notify the client and reload if the cluster was idle-unloaded
             if reload_cluster:
+                # role delta first, then content — matches OpenAI streaming format
+                role_chunk = json.dumps(
+                    {
+                        "id": "chatcmpl-loading",
+                        "object": "chat.completion.chunk",
+                        "model": model or "router",
+                        "choices": [
+                            {"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}
+                        ],
+                    }
+                )
+                yield f"data: {role_chunk}\n\n".encode()
                 notice = json.dumps(
                     {
                         "id": "chatcmpl-loading",
@@ -144,21 +156,29 @@ async def proxy_chat_completions(request: Request):
                         "choices": [
                             {
                                 "index": 0,
-                                "delta": {
-                                    "role": "assistant",
-                                    "content": "⏳ *Loading model, please wait...*\n\n",
-                                },
+                                "delta": {"content": "⏳ *Loading model, please wait...*\n\n"},
                                 "finish_reason": None,
                             }
                         ],
                     }
                 )
                 yield f"data: {notice}\n\n".encode()
+
                 from .clusters import _resolve_accepted
 
-                await asyncio.to_thread(
-                    active_runners.ensure_running, reload_cluster, _resolve_accepted
+                # Run load in background; send keep-alives every 10s so the connection stays open
+                load_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        active_runners.ensure_running, reload_cluster, _resolve_accepted
+                    )
                 )
+                while not load_task.done():
+                    try:
+                        await asyncio.wait_for(asyncio.shield(load_task), timeout=10.0)
+                    except asyncio.TimeoutError:
+                        yield b": keep-alive\n\n"
+                await load_task  # propagate any exception
+
                 for entry in active_runners.list_active():
                     if entry.get("model") == model or entry.get("family") == model:
                         if cluster_id := entry.get("cluster_id"):
