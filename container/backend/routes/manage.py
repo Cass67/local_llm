@@ -232,17 +232,20 @@ async def model_detail(family: str):
     except (json.JSONDecodeError, OSError) as e:
         raise HTTPException(500, f"corrupt metadata: {e}")
 
+    # Normalise nested mtp → flat for old accepted JSONs
+    cfg = data.get("config") or {}
+    if "mtp" in cfg and isinstance(cfg["mtp"], dict):
+        mtp = cfg.pop("mtp")
+        cfg["mtp_enabled"] = bool(mtp.get("enabled"))
+        for k in ("draft_n_max", "draft_n_min", "draft_p_min"):
+            if mtp.get(k) is not None:
+                cfg[f"mtp_{k}"] = mtp[k]
+        data["config"] = cfg
+
     return data
 
 
 # --- Edit ---
-
-
-class MTPConfig(BaseModel):
-    enabled: bool = False
-    draft_n_max: int = 3
-    draft_n_min: int = 1
-    draft_p_min: float = 0.5
 
 
 class EditRequest(BaseModel):
@@ -263,7 +266,10 @@ class EditRequest(BaseModel):
     flags: str | None = None
     flash_attention: bool | None = None
     jinja: bool | None = None
-    mtp: MTPConfig | None = None
+    mtp_enabled: bool | None = None
+    mtp_draft_n_max: int | None = None
+    mtp_draft_n_min: int | None = None
+    mtp_draft_p_min: float | None = None
 
 
 @router.put("/models/{family}")
@@ -315,8 +321,11 @@ async def edit_model(family: str, req: EditRequest):
         cfg["jinja"] = req.jinja
     if req.backend is not None:
         cfg["backend"] = req.backend
-    if req.mtp is not None:
-        cfg["mtp"] = req.mtp.model_dump()
+    cfg.pop("mtp", None)  # remove any old nested mtp block
+    for field in ("mtp_enabled", "mtp_draft_n_max", "mtp_draft_n_min", "mtp_draft_p_min"):
+        val = getattr(req, field, None)
+        if val is not None:
+            cfg[field] = val
 
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
     return {"status": "ok"}

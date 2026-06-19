@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { editModel, fetchModelDetail } from "../lib/api";
-	import { normalizeMtpConfig, splitKnownFlags } from "../lib/mtpFlags";
+	import { splitKnownFlags } from "../lib/mtpFlags";
 	import type { Backend, ClusterInfo } from "../lib/types";
 
 	let {
@@ -27,19 +27,15 @@
 		try {
 			const data = await fetchModelDetail(family);
 			const cfg = data.config || {};
-			const normalizedMtp = normalizeMtpConfig(cfg.mtp, cfg.flags);
-			const normalizedKnown = splitKnownFlags(normalizedMtp.flags);
-			// flash_attention: proper field takes precedence over parsed flags
-			const flashOn = cfg.flash_attention !== undefined
-				? cfg.flash_attention
-				: normalizedKnown.flash_attention;
-			const jinjaOn = cfg.jinja !== undefined ? cfg.jinja : normalizedKnown.jinja;
+			const parsed = splitKnownFlags(cfg.flags);
+			const flashOn = cfg.flash_attention !== undefined ? cfg.flash_attention : parsed.flash_attention;
+			const jinjaOn = cfg.jinja !== undefined ? cfg.jinja : parsed.jinja;
 			form = {
 				profile: data.profile || "balanced",
 				ctx: String(cfg.ctx || data.context || ""),
-				batch: String(cfg.batch || "4096"),
-				ubatch: String(cfg.ubatch || "256"),
-				ngl: String(cfg.ngl || "999"),
+				batch: String(cfg.batch || ""),
+				ubatch: String(cfg.ubatch || ""),
+				ngl: String(cfg.ngl || ""),
 				cache_type_k: cfg.cache_type_k || "",
 				cache_type_v: cfg.cache_type_v || "",
 				ctx_shift: cfg.ctx_shift || "",
@@ -48,13 +44,13 @@
 				visible_devices: cfg.visible_devices || "",
 				split_mode: cfg.split_mode || "",
 				tensor_split: cfg.tensor_split || "",
-				mtp_enabled: normalizedMtp.mtp.enabled ? "on" : "off",
-				mtp_draft_n_max: String(normalizedMtp.mtp.draft_n_max),
-				mtp_draft_n_min: String(normalizedMtp.mtp.draft_n_min),
-				mtp_draft_p_min: String(normalizedMtp.mtp.draft_p_min),
+				mtp_enabled: cfg.mtp_enabled ? "on" : "off",
+				mtp_draft_n_max: String(cfg.mtp_draft_n_max ?? ""),
+				mtp_draft_n_min: String(cfg.mtp_draft_n_min ?? ""),
+				mtp_draft_p_min: String(cfg.mtp_draft_p_min ?? ""),
 				flash_attention: flashOn ? "on" : "off",
 				jinja: jinjaOn ? "on" : "off",
-				flags: normalizedKnown.flags,
+				flags: parsed.flags,
 			};
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);
@@ -88,12 +84,10 @@
 			visible_devices: form.visible_devices || undefined,
 			split_mode: form.split_mode || undefined,
 			tensor_split: form.tensor_split || undefined,
-			mtp: {
-				enabled: form.mtp_enabled === "on",
-				draft_n_max: num("mtp_draft_n_max") ?? 3,
-				draft_n_min: num("mtp_draft_n_min") ?? 1,
-				draft_p_min: mtpFloat(),
-			},
+			mtp_enabled: form.mtp_enabled === "on",
+			mtp_draft_n_max: num("mtp_draft_n_max"),
+			mtp_draft_n_min: num("mtp_draft_n_min"),
+			mtp_draft_p_min: mtpFloat() || undefined,
 			flash_attention: form.flash_attention === "on",
 			jinja: form.jinja === "on",
 			flags: form.flags,

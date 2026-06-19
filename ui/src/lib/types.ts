@@ -18,13 +18,6 @@ export interface ProfilesData {
 	families: Record<string, FamilyProfiles>;
 }
 
-export interface MtpConfig {
-	enabled: boolean;
-	draft_n_max: number;
-	draft_n_min: number;
-	draft_p_min: number;
-}
-
 export interface ModelConfig {
 	quant?: string;
 	batch: number;
@@ -33,7 +26,10 @@ export interface ModelConfig {
 	visible_devices?: string;
 	split_mode?: string;
 	tensor_split?: string;
-	mtp?: MtpConfig;
+	mtp_enabled?: boolean;
+	mtp_draft_n_max?: number;
+	mtp_draft_n_min?: number;
+	mtp_draft_p_min?: number;
 }
 
 export interface ModelInfo {
