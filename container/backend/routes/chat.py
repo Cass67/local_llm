@@ -6,7 +6,7 @@ import time
 
 import httpx
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from .. import active_runners, config, tracing
 from .stats import append_chat_metric
@@ -107,66 +107,88 @@ async def proxy_chat_completions(request: Request):
     """Proxy chat completion requests to the appropriate cluster runner."""
     body = _prepare_runner_payload(await request.body())
 
-    # Auto-reload if the model is desired but not currently running
     model = _request_model(body)
+
+    # Detect whether we need to reload before serving
+    reload_cluster = None
     if model and not active_runners.runner_url_for_model(model):
         from ..clusters import list_clusters, read_desired
-        from .clusters import _resolve_accepted
 
         for cluster in list_clusters():
             desired = read_desired(cluster.id)
             if desired and desired.get("model") == model:
-                await asyncio.to_thread(active_runners.ensure_running, cluster, _resolve_accepted)
+                reload_cluster = cluster
                 break
 
-    runner_url = _resolve_runner_url(body)
+    if not reload_cluster:
+        for entry in active_runners.list_active():
+            if entry.get("model") == model or entry.get("family") == model or model is None:
+                if cluster_id := entry.get("cluster_id"):
+                    active_runners.touch(str(cluster_id))
+                break
 
-    for entry in active_runners.list_active():
-        if entry.get("model") == model or entry.get("family") == model or model is None:
-            if cluster_id := entry.get("cluster_id"):
-                active_runners.touch(str(cluster_id))
-            break
-    headers = {
-        "Content-Type": request.headers.get("content-type", "application/json"),
-    }
+    headers = {"Content-Type": request.headers.get("content-type", "application/json")}
 
     if _is_stream_request(body):
         generation = tracing.open_generation(body, stream=True)
         req_start = time.perf_counter()
 
-        client = httpx.AsyncClient(timeout=300.0)
-        stream_context = client.stream(
-            "POST",
-            f"{runner_url}/chat/completions",
-            content=body,
-            headers=headers,
-        )
-        try:
-            upstream = await stream_context.__aenter__()
-        except httpx.HTTPError:
-            await client.aclose()
-            tracing.close_generation(generation, "", error="runner unavailable")
-            return JSONResponse({"detail": "runner unavailable"}, status_code=503)
-
-        if upstream.status_code != 200:
-            body_bytes = await upstream.aread()
-            await stream_context.__aexit__(None, None, None)
-            await client.aclose()
-            try:
-                detail = json.loads(body_bytes).get(
-                    "error", body_bytes.decode("utf-8", errors="replace")
-                )
-            except (json.JSONDecodeError, AttributeError):
-                detail = body_bytes.decode("utf-8", errors="replace")
-            tracing.close_generation(generation, "", error=f"HTTP {upstream.status_code}: {detail}")
-            return JSONResponse({"detail": detail}, status_code=upstream.status_code)
-
         async def stream_runner():
+            # Notify the client and reload if the cluster was idle-unloaded
+            if reload_cluster:
+                notice = json.dumps(
+                    {
+                        "id": "chatcmpl-loading",
+                        "object": "chat.completion.chunk",
+                        "model": model or "router",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant",
+                                    "content": "⏳ *Loading model, please wait...*\n\n",
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                )
+                yield f"data: {notice}\n\n".encode()
+                from .clusters import _resolve_accepted
+
+                await asyncio.to_thread(
+                    active_runners.ensure_running, reload_cluster, _resolve_accepted
+                )
+                for entry in active_runners.list_active():
+                    if entry.get("model") == model or entry.get("family") == model:
+                        if cluster_id := entry.get("cluster_id"):
+                            active_runners.touch(str(cluster_id))
+                        break
+
+            runner_url = _resolve_runner_url(body)
             first_token = True
             ttft_ms: float | None = None
             parts: list[str] = []
             prompt_tokens: int | None = None
             completion_tokens: int | None = None
+
+            client = httpx.AsyncClient(timeout=300.0)
+            stream_context = client.stream(
+                "POST", f"{runner_url}/chat/completions", content=body, headers=headers
+            )
+            try:
+                upstream = await stream_context.__aenter__()
+            except httpx.HTTPError:
+                await client.aclose()
+                tracing.close_generation(generation, "", error="runner unavailable")
+                return
+
+            if upstream.status_code != 200:
+                await upstream.aread()
+                await stream_context.__aexit__(None, None, None)
+                await client.aclose()
+                tracing.close_generation(generation, "", error=f"HTTP {upstream.status_code}")
+                return
 
             try:
                 async for raw in upstream.aiter_raw():
@@ -202,6 +224,17 @@ async def proxy_chat_completions(request: Request):
 
         return StreamingResponse(stream_runner(), media_type="text/event-stream")
 
+    if reload_cluster:
+        from .clusters import _resolve_accepted
+
+        await asyncio.to_thread(active_runners.ensure_running, reload_cluster, _resolve_accepted)
+        for entry in active_runners.list_active():
+            if entry.get("model") == model or entry.get("family") == model:
+                if cluster_id := entry.get("cluster_id"):
+                    active_runners.touch(str(cluster_id))
+                break
+
+    runner_url = _resolve_runner_url(body)
     generation = tracing.open_generation(body, stream=False)
     req_start = time.perf_counter()
     try:
