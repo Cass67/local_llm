@@ -15,6 +15,7 @@ from .clusters import (
     list_clusters,
     list_desired,
     read_active,
+    read_desired,
     remove_active,
     remove_desired,
     tensor_split_for,
@@ -195,4 +196,26 @@ def idle_check(timeout_s: float) -> None:
             continue
         if now - last >= timeout_s:
             logging.info("idle_check: cluster=%s idle=%.0fs — stopping", cluster.name, now - last)
-            stop(cluster)
+            # ponytail: keep desired so the model reloads on next request
+            runner = _runner_for(cluster)
+            try:
+                runner.stop()
+            except Exception:  # nosec B110
+                pass
+            remove_active(cluster.id)
+
+
+def ensure_running(cluster: ClusterDef, resolve_accepted) -> None:
+    """Start cluster if it is desired but not currently running."""
+    if is_running(cluster):
+        return
+    desired = read_desired(cluster.id)
+    if not desired:
+        return
+    family = str(desired.get("family") or desired.get("model") or "")
+    if not family:
+        return
+    logging.info("ensure_running: auto-reloading cluster=%s model=%s", cluster.name, family)
+    accepted = resolve_accepted(family)
+    accepted["profile"] = str(desired.get("profile") or accepted.get("profile") or "reliable")
+    start(cluster, accepted)
