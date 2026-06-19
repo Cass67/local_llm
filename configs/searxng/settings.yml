@@ -1,0 +1,12 @@
+# https://docs.searxng.org/admin/settings/
+use_default_settings: true
+
+server:
+  secret_key: "7I4YOXzMp6RhaqF4qxE6EcRwOS7z21R"  # gitleaks:allow
+  image_proxy: true
+  limiter: false
+
+search:
+  formats:
+    - html
+    - json

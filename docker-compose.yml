@@ -141,7 +141,7 @@ services:
     network_mode: host
     restart: unless-stopped
     volumes:
-      - searxng:/etc/searxng
+      - ./configs/searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
       SEARXNG_BASE_URL: "http://127.0.0.1:3005/"
       GRANIAN_HOST: "127.0.0.1"
@@ -152,4 +152,3 @@ volumes:
   caddy-data:
   caddy-config:
   langfuse-postgres:
-  searxng:
