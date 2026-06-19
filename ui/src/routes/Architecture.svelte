@@ -49,13 +49,10 @@
 	let editingRule = $state<RouterRule & { _idx: number } | null>(null);
 	let newRule = $state<RouterRule>({ name: "", keywords: [], cluster: "", model: "", fallback: [] });
 	let showAddRule = $state(false);
-	let draftRemap = $state<Record<string, string>>({});
-
 	async function loadRouter() {
 		try {
 			const [cfg, health] = await Promise.all([fetchRouterConfig(), fetchRouterHealth()]);
 			routerCfg = cfg;
-			draftRemap = { ...(cfg.cluster_remap ?? {}) };
 			routerHealth = health;
 		} catch (e: any) {
 			routerError = e.message;
@@ -82,24 +79,34 @@
 		saveRouter();
 	}
 
-	function setDraftRemap(from: string, to: string) {
-		draftRemap = { ...draftRemap, [from]: to };
-	}
+	let remapFrom = $state("");
+	let remapTo = $state("");
 
 	function applyRemap() {
-		if (!routerCfg) return;
-		const cluster_remap = Object.fromEntries(Object.entries(draftRemap).filter(([, to]) => to));
-		routerCfg = { ...routerCfg, cluster_remap };
+		if (!routerCfg || !remapFrom || !remapTo || remapFrom === remapTo) return;
+		// Find-replace cluster names in rules
+		routerCfg = {
+			...routerCfg,
+			rules: routerCfg.rules.map(rule => ({
+				...rule,
+				cluster: rule.cluster === remapFrom ? remapTo : rule.cluster,
+				fallback: (rule.fallback ?? []).map(f => f === remapFrom ? remapTo : f),
+			})),
+		};
+		// Clear the separate remap dict too
+		routerCfg = { ...routerCfg, cluster_remap: {} };
+		remapFrom = "";
+		remapTo = "";
 		saveRouter();
 	}
 
 	function effectiveCluster(name?: string) {
 		if (!name) return "—";
-		return routerCfg?.cluster_remap?.[name] ? `${name} → ${routerCfg.cluster_remap[name]}` : name;
+		return name;
 	}
 
 	function effectiveFallback(fallback?: string[]) {
-		return (fallback ?? []).map((name) => effectiveCluster(name)).join(", ") || "—";
+		return (fallback ?? []).join(", ") || "—";
 	}
 
 	function deleteRule(idx: number) {
@@ -425,37 +432,21 @@
 
 			{#if clusters.length > 0}
 				<div class="remap-row">
-					<span class="muted">Remap targets:</span>
-					{#each Object.entries(draftRemap).filter(([, to]) => to) as [from, to]}
-						<div class="remap-entry">
-							<select
-								value={from}
-								onchange={(e) => {
-									const newFrom = e.currentTarget.value;
-									const updated = { ...draftRemap };
-									delete updated[from];
-									updated[newFrom] = to;
-									draftRemap = updated;
-								}}
-							>
-								{#each clusters as c}
-									<option value={c.name}>{c.name}</option>
-								{/each}
-							</select>
-							→
-							<select
-								value={to}
-								onchange={(e) => setDraftRemap(from, e.currentTarget.value)}
-							>
-								{#each clusters as c}
-									<option value={c.name}>{c.name}</option>
-								{/each}
-							</select>
-							<button class="btn-del" onclick={() => { const updated = { ...draftRemap }; delete updated[from]; draftRemap = updated; }}>✕</button>
-						</div>
-					{/each}
-					<button onclick={() => draftRemap = { ...draftRemap, '': '' }}>+ Add</button>
-					<button onclick={applyRemap} disabled={routerSaving}>Apply remap</button>
+					<span class="muted">Replace cluster in rules:</span>
+					<select bind:value={remapFrom}>
+						<option value="">— from —</option>
+						{#each clusters as c}
+							<option value={c.name}>{c.name}</option>
+						{/each}
+					</select>
+					→
+					<select bind:value={remapTo}>
+						<option value="">— to —</option>
+						{#each clusters as c}
+							<option value={c.name}>{c.name}</option>
+						{/each}
+					</select>
+					<button onclick={applyRemap} disabled={routerSaving || !remapFrom || !remapTo || remapFrom === remapTo}>Apply</button>
 				</div>
 			{/if}
 
@@ -853,11 +844,6 @@
 		flex-wrap: wrap;
 		margin-bottom: 0.75rem;
 		font-size: 0.85rem;
-	}
-	.remap-entry {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.3rem;
 	}
 	.remap-row select {
 		padding: 0.2rem 0.4rem;
