@@ -2,7 +2,7 @@
 	import { tick } from "svelte";
 	import { marked } from "marked";
 	import DOMPurify from "dompurify";
-	import { fetchClusters, fetchGpus, fetchHFCard } from "../lib/api";
+	import { fetchClusters, fetchGpus, fetchHFCard, cancelDownload } from "../lib/api";
 	import { installStatusView } from "../lib/installStatus";
 	import { searchStore } from "../lib/searchStore";
 	import type { ClusterInfo, GpuInfo, SearchCandidate } from "../lib/types";
@@ -240,6 +240,7 @@
 								{/if}
 							{:else if $searchState.installingRepos[candidate.repo]}
 								<span class="installing">Installing...</span>
+								<button class="cancel-btn" onclick={() => cancelDownload(candidate.repo)}>Cancel</button>
 							{:else}
 								<button class="install-btn" onclick={() => doInstall(candidate)}>Install</button>
 							{/if}

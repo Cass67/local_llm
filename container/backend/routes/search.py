@@ -57,3 +57,13 @@ class InstallRequest(BaseModel):
 async def install_model(req: InstallRequest):
     """Install a model candidate. Runs model-manager.sh install."""
     return await asyncio.to_thread(cli.run_install, req.repo, req.file, req.profile)
+
+
+class CancelRequest(BaseModel):
+    repo: str
+
+
+@router.post("/cancel")
+async def cancel_download(req: CancelRequest):
+    ok = cli.cancel_download(req.repo)
+    return {"cancelled": ok}

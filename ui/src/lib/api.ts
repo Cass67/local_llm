@@ -108,6 +108,14 @@ export async function installModel(
 	return res.json();
 }
 
+export async function cancelDownload(repo: string): Promise<void> {
+	await fetch(`${BASE}/search/cancel`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ repo }),
+	});
+}
+
 // --- Inventory & Status ---
 
 export async function fetchInventory(): Promise<{
