@@ -202,6 +202,59 @@ Changes take effect on the next model switch.
 
 When you start a model on a cluster in the **Architecture** tab, select a profile from the dropdown. The profile config is merged into the launch metadata before any cluster-specific GPU settings (visible devices, tensor split) are applied.
 
+**Profile is the complete source of truth.** Only fields present in the profile are passed to llama-server — there are no hidden runtime defaults. What you see in the editor is exactly what runs.
+
+#### Single-GPU profile
+
+```json
+{
+  "ngl": 999,
+  "batch": 4096,
+  "ubatch": 256,
+  "context": 32768,
+  "cache_prompt": true,
+  "cache_ram": 16384,
+  "context_shift": true,
+  "ctx_checkpoints": 64,
+  "checkpoint_min_step": 4096,
+  "flash_attention": true,
+  "reasoning": false,
+  "repeat_penalty": 1.05,
+  "presence_penalty": 0,
+  "timeout": 600,
+  "threads_http": 2,
+  "parallel": 1
+}
+```
+
+#### Multi-GPU profile (two cards, layer split)
+
+```json
+{
+  "ngl": 999,
+  "split_mode": "layer",
+  "tensor_split": "1,1",
+  "visible_devices": "0,1",
+  "batch": 4096,
+  "ubatch": 256,
+  "context": 65536,
+  "cache_prompt": true,
+  "cache_ram": 16384,
+  "context_shift": true,
+  "ctx_checkpoints": 64,
+  "checkpoint_min_step": 4096,
+  "flash_attention": true,
+  "reasoning": false,
+  "repeat_penalty": 1.05,
+  "presence_penalty": 0,
+  "timeout": 600,
+  "threads_http": 2,
+  "parallel": 1
+}
+```
+
+`tensor_split` is a comma-separated weight list — `"1,1"` distributes evenly across two GPUs. For unequal VRAM use ratios like `"2,1"`. `visible_devices` maps to `HIP_VISIBLE_DEVICES` / `CUDA_VISIBLE_DEVICES`. Use **Import from models** to seed profiles automatically from each model's current config.
+
 ### Audit
 
 **Models** or **Status** → **Audit** button. Scans all registered model entries and checks whether their GGUF files still exist in the HF cache. Orphaned entries (file deleted from disk) are listed. Click **Remove N** to clean them up.
