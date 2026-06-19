@@ -88,8 +88,9 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
     args.extend(["--alias", alias])
     reasoning = cfg.get("reasoning")
     if reasoning is None:
-        reasoning = metadata.get("reasoning", False)
-    args.extend(["--reasoning", _bool_flag(reasoning)])
+        reasoning = metadata.get("reasoning")
+    if reasoning is not None:
+        args.extend(["--reasoning", _bool_flag(reasoning)])
 
     if cfg.get("context_shift"):
         args.append("--context-shift")
