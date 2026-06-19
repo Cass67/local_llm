@@ -178,9 +178,8 @@
 		}
 	}
 
-	async function toggleIdle() {
+	async function saveIdle() {
 		if (!idleCfg) return;
-		idleCfg = { ...idleCfg, enabled: !idleCfg.enabled };
 		idleSaving = true;
 		try {
 			await saveIdleUnload(idleCfg);
@@ -189,6 +188,18 @@
 		} finally {
 			idleSaving = false;
 		}
+	}
+
+	function toggleIdle() {
+		if (!idleCfg) return;
+		idleCfg = { ...idleCfg, enabled: !idleCfg.enabled };
+		saveIdle();
+	}
+
+	function setIdleTimeout(minutes: number) {
+		if (!idleCfg) return;
+		idleCfg = { ...idleCfg, timeout_minutes: minutes };
+		saveIdle();
 	}
 
 	onMount(() => {
@@ -508,9 +519,18 @@
 						disabled={idleSaving}
 						onchange={toggleIdle}
 					/>
-					Auto-unload idle models
+					Auto-unload idle models after
 				</label>
-				<span class="muted">after {idleCfg.timeout_minutes} min of no requests</span>
+				<select
+					value={idleCfg.timeout_minutes}
+					disabled={idleSaving}
+					onchange={(e) => setIdleTimeout(Number(e.currentTarget.value))}
+				>
+					{#each [[5,"5 min"],[10,"10 min"],[15,"15 min"],[30,"30 min"],[60,"1 hr"],[120,"2 hr"]] as [val, label]}
+						<option value={val}>{label}</option>
+					{/each}
+				</select>
+				<span class="muted">of no requests</span>
 			</div>
 		{:else}
 			<p class="muted">Loading…</p>
