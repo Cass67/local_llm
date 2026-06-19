@@ -17,6 +17,7 @@
 	<nav>
 		<a href="#/architecture" class:active={currentRoute === "/architecture"}>Architecture</a>
 		<a href="#/models" class:active={currentRoute === "/models"}>Models</a>
+		<a href="#/profiles" class:active={currentRoute === "/profiles"}>Profiles</a>
 		<a href="#/search" class:active={currentRoute === "/search"}>Search</a>
 		<a href="#/status" class:active={currentRoute === "/status"}>Status</a>
 		<a href="#/benchmarks" class:active={currentRoute === "/benchmarks"}>Benchmarks</a>

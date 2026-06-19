@@ -24,6 +24,9 @@ import type {
 	RouterConfig,
 	RouterHealth,
 	IdleUnloadConfig,
+	ModelProfile,
+	FamilyProfiles,
+	ProfilesData,
 } from "./types";
 
 const BASE = "/api/local-llm";
@@ -424,6 +427,91 @@ export async function saveIdleUnload(cfg: IdleUnloadConfig): Promise<void> {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(cfg),
 	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+// --- Audit ---
+
+export async function auditModels(): Promise<{
+	orphaned: Array<{ family: string; alias: string; label: string | null; model_name: string; profile: string }>;
+	total: number;
+}> {
+	const res = await fetch(`${BASE}/models/audit`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function cleanupOrphanedModels(): Promise<{ deleted: string[]; count: number }> {
+	const res = await fetch(`${BASE}/models/audit`, { method: "POST" });
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+// --- Profiles ---
+
+export async function importProfilesFromModels(): Promise<{ imported: number }> {
+	const res = await fetch(`${BASE}/profiles/import`, { method: "POST" });
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchAllProfiles(): Promise<ProfilesData> {
+	const res = await fetch(`${BASE}/profiles`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchFamilyProfiles(family: string): Promise<FamilyProfiles> {
+	const res = await fetch(`${BASE}/profiles/${encodeURIComponent(family)}`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function upsertProfile(
+	family: string,
+	name: string,
+	profile: ModelProfile,
+): Promise<void> {
+	const res = await fetch(
+		`${BASE}/profiles/${encodeURIComponent(family)}/${encodeURIComponent(name)}`,
+		{
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(profile),
+		},
+	);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+export async function deleteProfile(family: string, name: string): Promise<void> {
+	const res = await fetch(
+		`${BASE}/profiles/${encodeURIComponent(family)}/${encodeURIComponent(name)}`,
+		{ method: "DELETE" },
+	);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+export async function cloneProfile(
+	family: string,
+	name: string,
+	newName: string,
+): Promise<void> {
+	const res = await fetch(
+		`${BASE}/profiles/${encodeURIComponent(family)}/${encodeURIComponent(name)}/clone`,
+		{
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ new_name: newName }),
+		},
+	);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+export async function setDefaultProfile(family: string, name: string): Promise<void> {
+	const res = await fetch(
+		`${BASE}/profiles/${encodeURIComponent(family)}/default/${encodeURIComponent(name)}`,
+		{ method: "PUT" },
+	);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 

@@ -6,6 +6,7 @@
   import Status from './routes/Status.svelte';
   import Benchmarks from './routes/Benchmarks.svelte';
   import Architecture from './routes/Architecture.svelte';
+  import Profiles from './routes/Profiles.svelte';
   import Header from './components/Header.svelte';
 
   const routes = {
@@ -16,6 +17,7 @@
     '/status': Status,
     '/benchmarks': Benchmarks,
     '/architecture': Architecture,
+    '/profiles': Profiles,
   };
 </script>
 

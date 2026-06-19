@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { fetchStatus, fetchModels, switchModel, fetchStats, fetchStatsHistory, fetchRunnerHealth, cancelDownload } from "../lib/api";
+	import { fetchStatus, fetchModels, switchModel, fetchStats, fetchStatsHistory, fetchRunnerHealth, cancelDownload, auditModels, cleanupOrphanedModels } from "../lib/api";
 	import type { StatusResponse, ModelInfo, StatsResponse, ChatMetric, RunnerHealth } from "../lib/types";
 
 	const HISTORY_LIMIT = 30;
@@ -13,6 +13,9 @@
 	let loading = $state(true);
 	let error = $state("");
 	let restarting: string | null = $state(null);
+	let auditResult = $state<{ orphaned: Array<{ family: string; label: string | null; model_name: string }>; total: number } | null>(null);
+	let auditing = $state(false);
+	let cleaning = $state(false);
 
 	async function load() {
 		loading = true;
@@ -74,6 +77,31 @@
 		}
 	}
 
+	async function handleAudit() {
+		auditing = true;
+		auditResult = null;
+		try {
+			auditResult = await auditModels();
+		} catch (e: unknown) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			auditing = false;
+		}
+	}
+
+	async function handleCleanup() {
+		cleaning = true;
+		try {
+			await cleanupOrphanedModels();
+			auditResult = null;
+			await load();
+		} catch (e: unknown) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			cleaning = false;
+		}
+	}
+
 	onMount(() => {
 		load();
 		const id = setInterval(load, 10000);
@@ -83,8 +111,31 @@
 
 <div class="status-panel">
 	<div class="toolbar">
+		<button onclick={handleAudit} class="audit" disabled={auditing}>{auditing ? "Scanning…" : "Audit"}</button>
 		<button onclick={load} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>
 	</div>
+
+	{#if auditResult}
+		<div class="audit-panel">
+			{#if auditResult.orphaned.length === 0}
+				<span class="audit-clean">✓ All {auditResult.total} registered models have files on disk.</span>
+				<button onclick={() => auditResult = null}>✕</button>
+			{:else}
+				<div class="audit-header">
+					<span class="audit-warn">{auditResult.orphaned.length} of {auditResult.total} registrations missing from cache:</span>
+					<button class="btn-cleanup" onclick={handleCleanup} disabled={cleaning}>
+						{cleaning ? "Removing…" : `Remove ${auditResult.orphaned.length}`}
+					</button>
+					<button onclick={() => auditResult = null}>✕</button>
+				</div>
+				<div class="audit-list">
+					{#each auditResult.orphaned as m}
+						<span class="audit-chip">{m.label ?? m.model_name ?? m.family}</span>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	{#if error}
 		<div class="error">{error}</div>
@@ -160,8 +211,18 @@
 
 <style>
 	.status-panel { display: flex; flex-direction: column; gap: 1rem; }
-	.toolbar { display: flex; justify-content: flex-end; }
+	.toolbar { display: flex; justify-content: flex-end; gap: 0.5rem; }
 	button { padding: 0.3rem 0.6rem; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); border-radius: 4px; cursor: pointer; }
+	.audit { border-color: #f59e0b33; background: #f59e0b1a; color: #f59e0b; }
+	.audit:hover { background: #f59e0b33; }
+	.audit-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.85rem; }
+	.audit-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+	.audit-warn { color: #f59e0b; font-weight: 500; }
+	.audit-clean { color: #4caf50; }
+	.audit-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+	.audit-chip { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.15rem 0.5rem; color: var(--text-muted); font-size: 0.8rem; }
+	.btn-cleanup { border-color: #ef444433; background: #ef44441a; color: var(--red); }
+	.btn-cleanup:hover { background: #ef444433; }
 	.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.7rem; }
 	.status-card { 
 		background: var(--bg-card); 

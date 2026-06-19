@@ -13,6 +13,87 @@ from ..clusters import list_active
 router = APIRouter(prefix="/api", tags=["manage"])
 
 
+# --- Audit ---
+
+
+def _scan_orphaned() -> list[dict]:
+    """Return accepted models whose files are not on disk."""
+    if not config.ACCEPTED_DIR.exists():
+        return []
+    cached: set[tuple[str, str]] = set()
+    cache = config.MODELS_CACHE_DIR
+    if cache.exists():
+        for repo_dir in cache.iterdir():
+            snaps = repo_dir / "snapshots"
+            if snaps.is_dir():
+                for f in snaps.rglob("*"):
+                    if f.is_file() or f.is_symlink():
+                        cached.add((repo_dir.name, f.name))
+
+    orphaned = []
+    for path in sorted(config.ACCEPTED_DIR.glob("*.json")):
+        if path.name == "default.json" or path.is_symlink():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("model_path") or data.get("path"):
+            downloaded = Path(str(data.get("model_path") or data.get("path"))).exists()
+        else:
+            repo = data.get("hf_repo") or data.get("repo")
+            filename = data.get("hf_file")
+            if repo and filename:
+                repo_dir_name = f"models--{str(repo).replace('/', '--')}"
+                downloaded = (repo_dir_name, filename) in cached
+            else:
+                downloaded = False
+        if not downloaded:
+            family = str(data.get("family", path.stem))
+            orphaned.append(
+                {
+                    "family": family,
+                    "alias": str(data.get("alias", family)),
+                    "label": data.get("label") or None,
+                    "model_name": str(data.get("model_name", family)),
+                    "profile": str(data.get("profile", "")),
+                }
+            )
+    return orphaned
+
+
+@router.get("/models/audit")
+async def audit_models():
+    """List accepted-model registrations whose files are no longer on disk."""
+    orphaned = _scan_orphaned()
+    total = (
+        sum(
+            1
+            for p in config.ACCEPTED_DIR.glob("*.json")
+            if p.name != "default.json" and not p.is_symlink()
+        )
+        if config.ACCEPTED_DIR.exists()
+        else 0
+    )
+    return {"orphaned": orphaned, "total": total}
+
+
+@router.post("/models/audit")
+async def cleanup_orphaned():
+    """Delete accepted-model registrations for models no longer on disk."""
+    orphaned = _scan_orphaned()
+    deleted = []
+    for m in orphaned:
+        path = config.ACCEPTED_DIR / f"{m['family']}.json"
+        if path.exists():
+            path.unlink()
+            _remove_model_state_references(m["family"], m["alias"])
+            deleted.append(m["family"])
+    return {"deleted": deleted, "count": len(deleted)}
+
+
 # --- Inventory ---
 
 
@@ -180,6 +261,8 @@ class EditRequest(BaseModel):
     split_mode: str | None = None
     tensor_split: str | None = None
     flags: str | None = None
+    flash_attention: bool | None = None
+    jinja: bool | None = None
     mtp: MTPConfig | None = None
 
 
@@ -226,6 +309,10 @@ async def edit_model(family: str, req: EditRequest):
     if req.reasoning is not None:
         cfg["reasoning"] = req.reasoning
         data["reasoning"] = req.reasoning
+    if req.flash_attention is not None:
+        cfg["flash_attention"] = req.flash_attention
+    if req.jinja is not None:
+        cfg["jinja"] = req.jinja
     if req.backend is not None:
         cfg["backend"] = req.backend
     if req.mtp is not None:
