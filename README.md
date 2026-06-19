@@ -21,8 +21,10 @@ A self-hosted LLM management system for AMD and Nvidia GPU workstations. Models 
 - **Switch models** on demand — the management container creates and replaces the runner container via the Docker socket.
 - **Edit model configs** — context size, batch, ngl, tensor split, MTP speculative decoding — without touching JSON by hand.
 - **Benchmark** models with configurable llama.cpp parameters (temperature, seed, top-p, top-k, repeat penalty, system prompt) and track latency/throughput trends across runs.
-- **Chat** via Open WebUI at `/chat/` — full conversation UI with model selection, history, and streaming.
-- **Router** — keyword-based request router with live config reload, routing rules editor in the Architecture tab, and per-request routing audit.
+- **Chat** via Open WebUI at `/chat/` — full conversation UI with web search (SearXNG), model selection, history, and streaming.
+- **Router** — keyword-based request router with live config reload, routing rules editor in the Architecture tab, and per-request routing audit. Open WebUI defaults to the `router` model so all chats are automatically dispatched to the best cluster.
+- **Idle unload** — clusters auto-stop after a configurable idle timeout (5 min–2 hr) to save GPU power. Models reload automatically on the next request. Toggle and timeout in the Architecture tab.
+- **Web search** — SearXNG container on `:3005` wired to Open WebUI. Enable per-chat with the 🌐 icon.
 - **Stream logs** from the runner, management, or router containers in real time.
 - **Monitor** TPS sparkline and runner slot health in the Status panel.
 - **Trace** LLM requests with Langfuse: TTFT, token throughput, prompt/completion tokens, per-request timeline.
@@ -38,17 +40,21 @@ Browser
   │
   │  :3001  (Caddy)
   ▼
-local-llm-caddy  ──/ui/*, /api/local-llm/*, /v1/*──▶  local-llm-mgmt  :3100
-                 ──/*, /chat/*──────────────────────▶  open-webui       :3101
+local-llm-caddy  ──/ui/*, /api/local-llm/*, /v1/*──▶  local-llm-mgmt    :3100
+                 ──/*, /chat/*──────────────────────▶  open-webui         :3101
                  ──/traces*─────────────────────────▶  local-llm-langfuse :3004
   │
-  │  local-llm-mgmt creates/stops runner via Docker socket
+  │  local-llm-mgmt creates/stops cluster runners via Docker socket
   ▼
-local-llm-runner  :8080  (llama-server, GPU access)
+local-llm-router  :3200  (keyword router — dispatches to per-cluster runners)
   │
-  ├── /dev/kfd, /dev/dri  (ROCm or Vulkan) — or Nvidia device requests (CUDA)
-  └── ~/.cache/huggingface/hub  (GGUF model files)
+  ├── local-llm-runner-cluster-7900s  :8081  (ROCm, AMD 7900s)
+  └── local-llm-runner-cluster-p40    :8082  (CUDA, Nvidia P40)
+        │
+        ├── GPU devices (ROCm /dev/kfd,/dev/dri or Nvidia device requests)
+        └── ~/.cache/huggingface/hub  (GGUF model files)
 
+open-webui  :3101  ──web search──▶  searxng  :3005
 local-llm-langfuse  :3004  (LLM request tracing)
 local-llm-postgres  :5433  (Langfuse database)
 ```
@@ -57,8 +63,10 @@ local-llm-postgres  :5433  (Langfuse database)
 |---|---|---|
 | `local-llm-mgmt` | `3100` | FastAPI backend + Svelte UI. Manages models, launches runner. |
 | `local-llm-runner` | `8080` | llama.cpp `llama-server`. Created on demand for the active model. |
+| `local-llm-router` | `3200` | Keyword-based request router. OpenWebUI points here by default. |
 | `local-llm-caddy` | `3001` | Reverse proxy. Single public entrypoint. |
-| `open-webui` | `3101` | Optional full chat interface backed by the mgmt `/v1` proxy. |
+| `open-webui` | `3101` | Full chat interface. Defaults to `router` model for automatic routing. |
+| `searxng` | `3005` | Self-hosted web search for OpenWebUI. |
 | `local-llm-langfuse` | `3004` | Langfuse v2 — LLM request tracing UI. |
 | `local-llm-postgres` | `5433` | PostgreSQL for Langfuse (isolated from any other Postgres on the host). |
 
@@ -191,9 +199,21 @@ Changes take effect on the next model switch.
 
 ### Router
 
-The **Architecture** tab includes a router config editor for managing keyword-based request routing. Requests sent with `model=auto` are matched against routing rules — the first matching rule's target cluster handles the request. Rules are evaluated in order and support exact-prefix matching on the prompt text.
+The **Architecture** tab includes a router config editor for managing keyword-based request routing. Requests sent with `model=auto` or `model=router` are matched against routing rules — the first matching rule's target cluster handles the request. Rules are evaluated in order and support exact-prefix matching on the prompt text.
 
 The router is a standalone container (`local-llm-router`) that reloads its config live when updated via the UI. Each routing decision is logged and visible in the **Logs** tab (router source) and in the Langfuse trace metadata.
+
+Open WebUI defaults to the `router` model so all conversations are automatically dispatched to the appropriate cluster without manual model selection.
+
+### Idle unload
+
+In the **Architecture** tab, toggle **Auto-unload idle models** to automatically stop cluster runners after a period of inactivity. A dropdown lets you choose the timeout (5 min, 10 min, 15 min, 30 min, 1 hr, 2 hr). When a request arrives for an unloaded cluster, the model reloads automatically before the request is served. Desired state is preserved across unloads so the model comes back with the same configuration.
+
+This is useful for reducing GPU idle power — a P40 with a model loaded draws ~50 W idle; unloaded it drops to ~10 W.
+
+### Web search
+
+Open WebUI has web search built in, powered by a local SearXNG container on `:3005`. Enable per-message with the 🌐 globe icon. SearXNG is configured to return JSON results with the bot limiter disabled so programmatic queries work. Web page fetching is bypassed in favour of search snippets to keep context small and response fast.
 
 ### Status
 
@@ -220,6 +240,7 @@ The router is a standalone container (`local-llm-router`) that reloads its confi
 | `LLAMA_SERVER_PORT` | `8080` | Port the runner listens on. |
 | `RENDER_GROUP` | `991` | GID of the render group — needed for GPU access. |
 | `DOCKER_GROUP` | `107` | GID of the docker group — needed for Docker socket access. |
+| `LOCAL_LLM_DISABLE_THINKING_BY_DEFAULT` | `false` | Inject `enable_thinking: false` into requests that don't explicitly set it. Prevents reasoning-only models from returning empty `content`. |
 | `LANGFUSE_PUBLIC_KEY` | — | Langfuse project public key. Tracing disabled if absent. |
 | `LANGFUSE_SECRET_KEY` | — | Langfuse project secret key. |
 | `LANGFUSE_HOST` | `http://localhost:3004` | Langfuse server URL reachable from the mgmt container. |
