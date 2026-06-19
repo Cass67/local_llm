@@ -410,26 +410,14 @@ ssh ubt26 "cd ~/git/local_llm && docker compose build local-llm-mgmt && docker c
 
 Each backend is its own multi-stage Docker build under `runner/<backend>/Dockerfile`:
 
-- **vulkan**: compiles llama.cpp with `-DGGML_VULKAN=ON`. Runtime stage is plain Ubuntu + Mesa Vulkan drivers.
+- **vulkan**: compiles llama.cpp with `-DGGML_VULKAN=ON`. Runtime stage is plain Ubuntu + Mesa Vulkan drivers. Also handles NVIDIA GPUs on the Vulkan backend (headless, via EGL ICD).
 - **rocm**: compiles llama.cpp with `-DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1100` (override `AMDGPU_TARGETS`
   for other RDNA/CDNA chips) using the ROCm devel image. Runtime stage installs only the HIP runtime libs.
 - **cuda**: compiles llama.cpp with `-DGGML_CUDA=ON` using Nvidia's `cuda:12.6.3-devel` image. Runtime
   stage uses the matching `cuda:12.6.3-runtime` image.
 
-GPU passthrough differs by backend in the runner container spec:
-
-```
-# rocm / vulkan
-devices: ["/dev/kfd", "/dev/dri"]
-group_add: ["991"]   # render group
-environment: HIP_VISIBLE_DEVICES, ROCR_VISIBLE_DEVICES, GGML_VK_VISIBLE_DEVICES
-
-# cuda
-device_requests: [{"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu"]]}]
-environment: CUDA_VISIBLE_DEVICES
-```
-
-`network_mode: host` applies to all three.
+For full details on host requirements, driver setup, CUDA version pinning, NVIDIA Vulkan ICD wiring,
+and troubleshooting GPU visibility issues, see **[gpu-backends.md](gpu-backends.md)**.
 
 ---
 

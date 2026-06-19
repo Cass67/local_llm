@@ -115,9 +115,20 @@ def _build_launch_metadata(
     cfg = meta["config"]
 
     cfg["backend"] = cluster.backend
+
+    # Detect NVIDIA GPU on a Vulkan cluster — needs different container wiring
+    if cluster.backend == "vulkan":
+        cluster_pci_ids = set(cluster.gpu_pci_ids)
+        nvidia_in_cluster = any(
+            g.vendor == "nvidia" for g in inventory if g.pci_id in cluster_pci_ids
+        )
+        if nvidia_in_cluster:
+            cfg["nvidia_vulkan"] = True
+
     vd = visible_devices_for(cluster, inventory)
     if vd:
-        cfg["visible_devices"] = vd
+        # NVIDIA Vulkan: only the target GPU is injected into the container → always index 0
+        cfg["visible_devices"] = "0" if cfg.get("nvidia_vulkan") else vd
     n = len(cluster.gpu_pci_ids)
     if n > 1:
         cfg.setdefault("tensor_split", tensor_split_for(n))
