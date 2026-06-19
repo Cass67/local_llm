@@ -149,7 +149,7 @@ async def sync_cluster_endpoints():
             ",".join(c.gpu_pci_ids),
         )
     synced = [
-        _store().upsert_endpoint(f"Cluster: {cluster.name}", f"http://127.0.0.1:{cluster.port}/v1")
+        _store().upsert_endpoint(f"Cluster: {cluster.name}", "http://127.0.0.1:3200/v1")
         for cluster in clusters
     ]
     return {"endpoints": synced}

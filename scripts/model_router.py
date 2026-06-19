@@ -84,11 +84,15 @@ async def _refresh_health() -> None:
             clusters_resp = await c.get(f"{BACKEND_URL}/api/clusters")
             if clusters_resp.status_code == 200:
                 clusters = clusters_resp.json().get("clusters", [])
+                old_map = _cluster_to_model.copy()
                 _cluster_to_model = {
                     c["name"]: c["active"]["model"]
                     for c in clusters
                     if c.get("active") and c["active"].get("running") and c["active"].get("model")
                 }
+                for name, model in sorted(_cluster_to_model.items()):
+                    if old_map.get(name) != model:
+                        print(f"router: active [{name}] {model}", flush=True)
     except Exception as exc:
         print(f"router: health refresh failed: {exc}")
     _last_health_check = time.monotonic()
@@ -299,7 +303,8 @@ async def v1_chat_completions(request: Request):
     else:
         model = payload.get("model", "")
         cluster = next((k for k, v in _cluster_to_model.items() if v == model), "client-specified")
-        print(f"router: [{cluster}] {model} (passthrough)", flush=True)
+        prompt = _extract_prompt(payload.get("messages", []))
+        print(f"router: [{cluster}] {model} ← {prompt[:80]!r}", flush=True)
 
     if _is_stream(payload):
         return await _proxy_stream(payload, request)
