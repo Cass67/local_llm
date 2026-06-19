@@ -139,6 +139,7 @@ export interface InventoryModel {
 export interface StatusResponse {
 	target: string;
 	running: { status: string; family: string | null; ctx: number | null };
+	running_clusters: Array<{ cluster_name: string; family: string; profile: string; backend: string }>;
 	accepted_count: number;
 	default_set: boolean;
 	downloads: Array<{ pid: string; repo: string }>;

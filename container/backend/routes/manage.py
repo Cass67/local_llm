@@ -406,15 +406,21 @@ async def full_status():
             pass
 
     active = list_active()
-    if active:
-        first = active[0]
-        running_info = {
-            "status": "active",
-            "family": first.get("family") or first.get("model") or "unknown",
-            "ctx": None,
+    running_list = [
+        {
+            "cluster_name": entry.get("cluster_name", ""),
+            "family": entry.get("family") or entry.get("model") or "unknown",
+            "profile": entry.get("profile", ""),
+            "backend": entry.get("backend", ""),
         }
-    else:
-        running_info = {"status": "inactive", "family": None, "ctx": None}
+        for entry in active
+    ]
+    # Legacy single-runner field for backwards compat
+    running_info = (
+        {"status": "active", "family": running_list[0]["family"], "ctx": None}
+        if running_list
+        else {"status": "inactive", "family": None, "ctx": None}
+    )
 
     accepted_count = 0
     if config.ACCEPTED_DIR.exists():
@@ -451,6 +457,7 @@ async def full_status():
     return {
         "target": target,
         "running": running_info,
+        "running_clusters": running_list,
         "accepted_count": accepted_count,
         "default_set": (config.ACCEPTED_DIR / "default.json").exists(),
         "downloads": downloads,

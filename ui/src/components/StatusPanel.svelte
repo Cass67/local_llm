@@ -144,8 +144,17 @@
 	{#if status}
 		<div class="cards">
 			<div class="status-card"><span>Target</span><strong>{status.target}</strong></div>
-			<div class="status-card"><span>Running</span><strong>{models.find(m => m.family === status.running.family)?.label ?? status.running.family ?? status.running.status}</strong></div>
-			<div class="status-card"><span>Context</span><strong>{status.running.ctx ? status.running.ctx.toLocaleString() : "-"}</strong></div>
+			{#if (status.running_clusters ?? []).length === 0}
+				<div class="status-card"><span>Running</span><strong class="muted">none</strong></div>
+			{:else}
+				{#each (status.running_clusters ?? []) as rc}
+					<div class="status-card">
+						<span>Running · {rc.cluster_name}</span>
+						<strong>{models.find(m => m.family === rc.family)?.label ?? rc.family}</strong>
+						{#if rc.profile}<small class="muted"> {rc.profile}</small>{/if}
+					</div>
+				{/each}
+			{/if}
 			<div class="status-card"><span>Accepted</span><strong>{status.accepted_count}</strong></div>
 			<div class="status-card"><span>Default</span><strong>{status.default_set ? "yes" : "no"}</strong></div>
 			<div class="status-card"><span>Tok/s</span><strong>{stats.predicted_per_second ? stats.predicted_per_second.toFixed(1) : "-"}</strong>{#if stats.ts}<small class="stat-age">{statsAge(stats.ts)}</small>{/if}</div>
@@ -158,8 +167,8 @@
 			<thead><tr><th>Run</th><th>Family</th><th>Alias</th><th>Profile</th><th>Backend</th><th>Ctx</th><th>Action</th></tr></thead>
 			<tbody>
 				{#each models as model}
-					<tr class:active={status.running.family === model.family}>
-						<td>{status.running.family === model.family ? "▶" : ""}</td>
+					<tr class:active={(status.running_clusters ?? []).some(rc => rc.family === model.family)}>
+						<td>{(status.running_clusters ?? []).some(rc => rc.family === model.family) ? "▶" : ""}</td>
 						<td>{model.label ?? model.model_name ?? model.family}</td>
 						<td>{model.alias}</td>
 						<td>{model.profile}</td>
