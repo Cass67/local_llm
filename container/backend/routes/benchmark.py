@@ -139,7 +139,6 @@ async def list_endpoints():
 @router.post("/endpoints/sync-clusters")
 async def sync_cluster_endpoints():
     clusters = list_clusters()
-    logger.info("sync clusters: %d clusters", len(clusters))
     for c in clusters:
         logger.info(
             "  cluster %s: %s -> http://127.0.0.1:%d/v1 (backend=%s, gpus=%s)",
@@ -203,9 +202,9 @@ async def run_benchmark(req: BenchmarkRunRequest):
     endpoint = _store().get_endpoint_secret(req.endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail="endpoint not found")
-    logger.info(
-        "benchmark: endpoint=%s(%s) model=%s", endpoint["name"], endpoint["base_url"], req.model
-    )
+    cluster_name = str(endpoint["name"]).removeprefix("Cluster: ").strip()
+    prompt_snippet = req.prompt_text.strip()[:60].replace("\n", " ")
+    print(f"bench: [{cluster_name}] {req.model} ← {prompt_snippet!r}", flush=True)
 
     started = time.perf_counter()
     payload: dict[str, Any] | None = None
@@ -273,14 +272,8 @@ async def run_benchmark(req: BenchmarkRunRequest):
         status=status,
         error=error,
     )
-    logger.info(
-        "benchmark done: endpoint=%s model=%s latency=%.0fms tps=%s status=%s",
-        endpoint["name"],
-        req.model,
-        duration_ms,
-        throughput_tps or "N/A",
-        status,
-    )
+    status_str = f"{duration_ms:.0f}ms tps={throughput_tps:.0f}" if status == "ok" else status
+    print(f"bench: [{cluster_name}] {req.model} → {status_str}", flush=True)
     return result
 
 
