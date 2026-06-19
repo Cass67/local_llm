@@ -157,6 +157,17 @@ docker compose up -d local-llm-mgmt
 
 ---
 
+## lltop
+
+A terminal monitor for the local_llm stack. Shows GPU utilisation, VRAM, power, runner TPS, CPU temp, fan speeds, and system memory — all in one curses view, refreshing every 2 seconds.
+
+```bash
+cd lltop && ./install.sh          # installs to ~/.local/bin/lltop
+lltop                             # run on the GPU host
+```
+
+---
+
 ## Usage
 
 ### Installing a model
