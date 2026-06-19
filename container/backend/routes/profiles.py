@@ -173,6 +173,9 @@ async def import_from_models():
         profile.setdefault("timeout", 600)
         profile.setdefault("threads_http", 2)
         profile.setdefault("parallel", 1)
+        profile.setdefault("no_cont_batching", True)
+        profile.setdefault("prio", 2)
+        profile.setdefault("no_warmup", True)
 
         fam = data["families"].setdefault(family, {"default": profile_name, "profiles": {}})
         fam["profiles"][profile_name] = profile  # always overwrite

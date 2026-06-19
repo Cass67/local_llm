@@ -223,7 +223,10 @@ When you start a model on a cluster in the **Architecture** tab, select a profil
   "presence_penalty": 0,
   "timeout": 600,
   "threads_http": 2,
-  "parallel": 1
+  "parallel": 1,
+  "no_cont_batching": true,
+  "prio": 2,
+  "no_warmup": true
 }
 ```
 
@@ -249,7 +252,10 @@ When you start a model on a cluster in the **Architecture** tab, select a profil
   "presence_penalty": 0,
   "timeout": 600,
   "threads_http": 2,
-  "parallel": 1
+  "parallel": 1,
+  "no_cont_batching": true,
+  "prio": 2,
+  "no_warmup": true
 }
 ```
 

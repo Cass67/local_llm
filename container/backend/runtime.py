@@ -69,9 +69,9 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
         str(port),
         "-m",
         _model_path(metadata),
-        "-ngl",
-        str(cfg.get("ngl", 999)),
     ]
+    if cfg.get("ngl") is not None:
+        args.extend(["-ngl", str(cfg["ngl"])])
 
     if cfg.get("split_mode"):
         args.extend(["--split-mode", str(cfg["split_mode"])])
@@ -118,7 +118,12 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
         args.extend(["--threads-http", str(cfg["threads_http"])])
     if cfg.get("parallel") is not None:
         args.extend(["--parallel", str(cfg["parallel"])])
-    args.extend(["--no-cont-batching", "--prio", "2", "--no-warmup"])
+    if cfg.get("no_cont_batching"):
+        args.append("--no-cont-batching")
+    if cfg.get("prio") is not None:
+        args.extend(["--prio", str(cfg["prio"])])
+    if cfg.get("no_warmup"):
+        args.append("--no-warmup")
 
     if cfg.get("mtp_enabled"):
         args.extend(["--spec-type", "draft-mtp"])
