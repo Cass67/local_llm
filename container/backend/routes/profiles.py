@@ -151,6 +151,16 @@ async def import_from_models():
         # Promote known raw flags to proper fields
         _extract_flags(profile)
 
+        # Fill in runtime defaults so the profile is fully self-contained
+        profile.setdefault("cache_prompt", True)
+        profile.setdefault("cache_ram", 16384)
+        profile.setdefault("context_shift", True)
+        profile.setdefault("ctx_checkpoints", 64)
+        profile.setdefault("checkpoint_min_step", 4096)
+        profile.setdefault("timeout", 600)
+        profile.setdefault("threads_http", 2)
+        profile.setdefault("parallel", 1)
+
         fam = data["families"].setdefault(family, {"default": profile_name, "profiles": {}})
         fam["profiles"][profile_name] = profile  # always overwrite
         imported += 1
