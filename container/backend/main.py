@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +22,8 @@ from .routes.clusters import router as clusters_router
 from .routes.router_config import router as router_config_router
 
 benchmark_router = import_module("backend.routes.benchmark").router
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 app = FastAPI(title="local-llm-server", version=VERSION)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from functools import lru_cache
 from importlib import import_module
@@ -16,6 +17,7 @@ from ..clusters import list_clusters
 
 BenchmarkStore = import_module("backend.benchmark_store").BenchmarkStore
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/benchmark", tags=["benchmark"])
 
 
@@ -136,9 +138,20 @@ async def list_endpoints():
 
 @router.post("/endpoints/sync-clusters")
 async def sync_cluster_endpoints():
+    clusters = list_clusters()
+    logger.info("sync clusters: %d clusters", len(clusters))
+    for c in clusters:
+        logger.info(
+            "  cluster %s: %s -> http://127.0.0.1:%d/v1 (backend=%s, gpus=%s)",
+            c.id,
+            c.name,
+            c.port,
+            c.backend,
+            ",".join(c.gpu_pci_ids),
+        )
     synced = [
         _store().upsert_endpoint(f"Cluster: {cluster.name}", f"http://127.0.0.1:{cluster.port}/v1")
-        for cluster in list_clusters()
+        for cluster in clusters
     ]
     return {"endpoints": synced}
 
@@ -190,6 +203,9 @@ async def run_benchmark(req: BenchmarkRunRequest):
     endpoint = _store().get_endpoint_secret(req.endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail="endpoint not found")
+    logger.info(
+        "benchmark: endpoint=%s(%s) model=%s", endpoint["name"], endpoint["base_url"], req.model
+    )
 
     started = time.perf_counter()
     payload: dict[str, Any] | None = None
@@ -236,7 +252,7 @@ async def run_benchmark(req: BenchmarkRunRequest):
     )
     throughput_cps = len(text) / duration_seconds if text else None
 
-    return _store().create_run(
+    result = _store().create_run(
         endpoint_id=endpoint["id"],
         endpoint_name=endpoint["name"],
         endpoint_base_url=endpoint["base_url"],
@@ -257,6 +273,15 @@ async def run_benchmark(req: BenchmarkRunRequest):
         status=status,
         error=error,
     )
+    logger.info(
+        "benchmark done: endpoint=%s model=%s latency=%.0fms tps=%s status=%s",
+        endpoint["name"],
+        req.model,
+        duration_ms,
+        throughput_tps or "N/A",
+        status,
+    )
+    return result
 
 
 @router.get("/runs")
