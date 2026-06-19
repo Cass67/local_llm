@@ -130,8 +130,22 @@ services:
       HOSTNAME: "0.0.0.0"
       # Login: admin@localhost.local / local-llm-admin
 
+  # ── SearXNG ─────────────────────────────────────────────────────────────────
+  # Self-hosted search for OpenWebUI web search. UI at http://ubt26:3005
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - searxng:/etc/searxng
+    environment:
+      SEARXNG_BASE_URL: "http://127.0.0.1:3005/"
+      SEARXNG_BIND_ADDRESS: "127.0.0.1:3005"
+
 volumes:
   open-webui:
   caddy-data:
   caddy-config:
   langfuse-postgres:
+  searxng:
