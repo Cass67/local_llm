@@ -272,6 +272,7 @@ export interface ClusterInfo {
 	port: number;
 	container_name: string;
 	active: ClusterActive | null;
+	desired: { family: string; profile: string } | null;
 }
 
 export interface RouterRule {

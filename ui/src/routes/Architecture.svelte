@@ -155,8 +155,8 @@
 			const data = await fetchClusters();
 			clusters = data.clusters;
 			for (const c of clusters) {
-				if (!startFamily[c.id]) startFamily[c.id] = "";
-				if (!startProfile[c.id]) startProfile[c.id] = "reliable";
+				if (!startFamily[c.id]) startFamily[c.id] = c.desired?.family ?? "";
+				if (!startProfile[c.id]) startProfile[c.id] = c.desired?.profile ?? "reliable";
 			}
 		} catch (e: any) {
 			clusterError = e.message;

@@ -15,6 +15,7 @@ from ..clusters import (
     get_cluster,
     list_clusters,
     read_active,
+    read_desired,
     remove_active,
 )
 from ..gpu_inventory import GpuInfo, detect_gpus
@@ -56,6 +57,7 @@ class CreateClusterRequest(BaseModel):
 
 def _cluster_with_status(cluster: ClusterDef) -> dict:
     active = read_active(cluster.id)
+    desired = read_desired(cluster.id)
     running = active_runners.is_running(cluster) if active else False
     return {
         **asdict(cluster),
@@ -67,6 +69,12 @@ def _cluster_with_status(cluster: ClusterDef) -> dict:
             "running": running,
         }
         if active
+        else None,
+        "desired": {
+            "family": desired.get("family"),
+            "profile": desired.get("profile", "reliable"),
+        }
+        if desired
         else None,
     }
 
