@@ -1,0 +1,1003 @@
+#!/usr/bin/env python3
+"""Live monitor for local_llm containers — mixed AMD/NVIDIA, multi-cluster."""
+
+from __future__ import annotations
+
+import argparse
+import curses
+import glob
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import time
+from pathlib import Path
+from typing import Any
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+
+DEFAULT_DRM_ROOT = Path("/sys/class/drm")
+DEFAULT_STATE_DIR = Path.home() / ".local/share/local_llm"
+DEFAULT_DOCKER_SOCKET = Path("/var/run/docker.sock")
+PROC_STAT = Path("/proc/stat")
+
+
+# ── sysfs helpers ────────────────────────────────────────────────────────────
+
+def read_text(path: Path) -> str | None:
+    try:
+        return path.read_text(errors="replace").strip()
+    except OSError:
+        return None
+
+
+def read_int(path: Path) -> int | None:
+    value = read_text(path)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def format_bytes(value: int | float | None) -> str:
+    if value is None:
+        return "n/a"
+    size = float(value)
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    unit = units[0]
+    for unit in units:
+        if abs(size) < 1024.0 or unit == units[-1]:
+            break
+        size /= 1024.0
+    return f"{size:.1f} {unit}"
+
+
+def bar(percent: int | float | None, width: int = 24) -> str:
+    if percent is None:
+        return "[" + "?" * max(0, width) + "]"
+    pct = clamp(float(percent), 0.0, 100.0)
+    filled = int(round((pct / 100.0) * width))
+    return "[" + ("#" * filled) + ("-" * (width - filled)) + "]"
+
+
+def meter_style(percent: int | float | None) -> str:
+    if percent is None:
+        return "muted"
+    pct = clamp(float(percent), 0.0, 100.0)
+    if pct >= 90.0:
+        return "bad"
+    if pct >= 75.0:
+        return "warn"
+    return "good"
+
+
+def section(title: str, body: list[str], width: int) -> list[str]:
+    header = f"+-- {title} "
+    header += "-" * max(0, width - len(header))
+    return [header, *body, ""]
+
+
+def join_columns(left: list[str], right: list[str], left_width: int, gap: str = "   ") -> list[str]:
+    rows: list[str] = []
+    height = max(len(left), len(right))
+    for index in range(height):
+        left_text = left[index] if index < len(left) else ""
+        right_text = right[index] if index < len(right) else ""
+        rows.append(f"{left_text:<{left_width}}{gap}{right_text}")
+    return rows
+
+
+def active_clock(path: Path) -> str | None:
+    value = read_text(path)
+    if not value:
+        return None
+    for line in value.splitlines():
+        if "*" in line:
+            return line.strip()
+    return value.splitlines()[0].strip() if value.splitlines() else None
+
+
+def first_glob(root: Path, pattern: str) -> Path | None:
+    matches = glob.glob(str(root / pattern))
+    return Path(matches[0]) if matches else None
+
+
+# ── GPU collection ────────────────────────────────────────────────────────────
+
+def _lspci_name(pci_id: str) -> str:
+    out = run_command(["lspci", "-s", pci_id], timeout=2.0)
+    m = re.search(r"(?:VGA|Display|3D)[^:]*:\s*(.+?)(?:\s*\(rev|\s*$)", out)
+    if not m:
+        return ""
+    name = m.group(1).strip()
+    # Prefer the last bracketed term (marketing name e.g. "[Radeon RX 7900 XT/7900 XTX/...]")
+    bracket = re.findall(r"\[([^\]]+)\]", name)
+    if bracket:
+        # Take first slash-variant only
+        name = bracket[-1].split("/")[0].strip()
+    else:
+        # No brackets: strip vendor prefix and take what remains
+        name = re.sub(r"^Advanced Micro Devices[^A-Z]*", "", name).strip()
+    return name
+
+
+def collect_amd_gpus(drm_root: Path = DEFAULT_DRM_ROOT) -> list[dict[str, Any]]:
+    gpus: list[dict[str, Any]] = []
+    for device in sorted(drm_root.glob("card*/device")):
+        if read_text(device / "vendor") != "0x1002":
+            continue
+
+        hwmon = first_glob(device, "hwmon/hwmon*")
+        temp_raw = read_int(hwmon / "temp1_input") if hwmon else None       # edge
+        junction_raw = read_int(hwmon / "temp2_input") if hwmon else None   # junction
+        power_raw = read_int(hwmon / "power1_average") if hwmon else None
+        fan_rpm = read_int(hwmon / "fan1_input") if hwmon else None
+        pwm = read_int(hwmon / "pwm1") if hwmon else None
+        fan_pct = round(pwm / 255.0 * 100) if pwm is not None else None
+
+        # PCI id for cluster correlation
+        try:
+            resolved = device.resolve()
+            pci_id = resolved.name
+            # Also record the upstream bridge PCI id (one level up in PCI hierarchy)
+            upstream_pci_id = resolved.parent.name
+        except OSError:
+            pci_id = device.parts[-2]  # cardN
+            upstream_pci_id = ""
+
+        name = _lspci_name(pci_id) or "Radeon"
+
+        gpus.append({
+            "vendor": "AMD",
+            "name": name,
+            "path": str(device),
+            "pci_id": pci_id,
+            "upstream_pci_id": upstream_pci_id,
+            "gpu_busy_percent": read_int(device / "gpu_busy_percent"),
+            "mem_busy_percent": read_int(device / "mem_busy_percent"),
+            "vram_used": read_int(device / "mem_info_vram_used"),
+            "vram_total": read_int(device / "mem_info_vram_total"),
+            "temp_c": temp_raw / 1000.0 if temp_raw is not None else None,
+            "junction_temp_c": junction_raw / 1000.0 if junction_raw is not None else None,
+            "power_w": power_raw / 1000000.0 if power_raw is not None else None,
+            "fan_rpm": fan_rpm,
+            "fan_pct": fan_pct,
+            "sclk": active_clock(device / "pp_dpm_sclk"),
+            "mclk": active_clock(device / "pp_dpm_mclk"),
+        })
+    return gpus
+
+
+def csv_int(value: str) -> int | None:
+    value = value.strip()
+    if not value or value == "[Not Supported]":
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def csv_float(value: str) -> float | None:
+    value = value.strip()
+    if not value or value == "[Not Supported]":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def mib_to_bytes(value: int | None) -> int | None:
+    return value * 1024 * 1024 if value is not None else None
+
+
+def collect_nvidia_gpus() -> list[dict[str, Any]]:
+    output = run_command(
+        [
+            "nvidia-smi",
+            "--query-gpu=name,pci.bus_id,utilization.gpu,utilization.memory,"
+            "memory.used,memory.total,temperature.gpu,power.draw,"
+            "clocks.sm,clocks.mem,fan.speed",
+            "--format=csv,noheader,nounits",
+        ]
+    )
+    gpus: list[dict[str, Any]] = []
+    for index, line in enumerate(output.splitlines()):
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) != 11:
+            continue
+        memory_used = csv_int(parts[4])
+        memory_total = csv_int(parts[5])
+        sclk = csv_int(parts[8])
+        mclk = csv_int(parts[9])
+        fan = csv_int(parts[10])
+        # Normalize PCI id: strip leading domain (00000000:) → 0000:03:00.0
+        pci_raw = parts[1].strip().lower()
+        pci_id = re.sub(r"^[0-9a-f]{8}:", "", pci_raw)
+        gpus.append({
+            "vendor": "NVIDIA",
+            "name": parts[0],
+            "index": index,
+            "pci_id": pci_id,
+            "gpu_busy_percent": csv_int(parts[2]),
+            "mem_busy_percent": csv_int(parts[3]),
+            "vram_used": mib_to_bytes(memory_used),
+            "vram_total": mib_to_bytes(memory_total),
+            "temp_c": csv_float(parts[6]),
+            "power_w": csv_float(parts[7]),
+            "fan_pct": fan,
+            "sclk": f"{sclk} MHz" if sclk is not None else None,
+            "mclk": f"{mclk} MHz" if mclk is not None else None,
+        })
+    return gpus
+
+
+def collect_gpu(drm_root: Path = DEFAULT_DRM_ROOT) -> dict[str, Any]:
+    gpus = [*collect_amd_gpus(drm_root), *collect_nvidia_gpus()]
+    if gpus:
+        return {"gpus": gpus}
+    return {"error": f"no GPUs found (checked AMD sysfs under {drm_root} and nvidia-smi)"}
+
+
+# ── subprocess helper ─────────────────────────────────────────────────────────
+
+def run_command(args: list[str], timeout: float = 1.0) -> str:
+    try:
+        result = subprocess.run(
+            args,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout.strip()
+
+
+# ── Docker helpers ────────────────────────────────────────────────────────────
+
+class _UnixHTTPConn(socket.socket):
+    pass
+
+
+def _docker_request(socket_path: Path, method: str, path: str) -> bytes:
+    """Make a raw HTTP/1.0 request to the Docker socket, return response body."""
+    if not socket_path.exists():
+        return b""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(2.0)
+        sock.connect(str(socket_path))
+        request = f"{method} {path} HTTP/1.0\r\nHost: localhost\r\n\r\n"
+        sock.sendall(request.encode())
+        chunks: list[bytes] = []
+        while True:
+            try:
+                chunk = sock.recv(65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        sock.close()
+    raw = b"".join(chunks)
+    # Strip HTTP headers
+    if b"\r\n\r\n" in raw:
+        return raw.split(b"\r\n\r\n", 1)[1]
+    return raw
+
+
+def _decode_docker_log_bytes(content: bytes) -> str:
+    """Decode Docker multiplexed log stream (stdcopy format)."""
+    chunks: list[bytes] = []
+    index = 0
+    while index + 8 <= len(content) and content[index] in (0, 1, 2):
+        size = int.from_bytes(content[index + 4: index + 8], "big")
+        start = index + 8
+        end = start + size
+        if size < 0 or end > len(content):
+            break
+        chunks.append(content[start:end])
+        index = end
+    if chunks and index == len(content):
+        return b"".join(chunks).decode("utf-8", errors="replace")
+    return content.decode("utf-8", errors="replace")
+
+
+def docker_log_tail(socket_path: Path, container: str, lines: int = 10) -> list[str]:
+    if not socket_path.exists():
+        return [f"docker socket not found: {socket_path}"]
+    path = f"/containers/{container}/logs?stdout=1&stderr=1&tail={lines}&timestamps=0"
+    raw = _docker_request(socket_path, "GET", path)
+    if not raw:
+        return []
+    text = _decode_docker_log_bytes(raw)
+    return [line for line in text.splitlines() if '"GET /logs HTTP/1.1"' not in line]
+
+
+def docker_container_running(socket_path: Path, container: str) -> bool:
+    if not socket_path.exists():
+        return False
+    raw = _docker_request(socket_path, "GET", f"/containers/{container}/json")
+    if not raw:
+        return False
+    try:
+        data = json.loads(raw)
+        state = data.get("State") if isinstance(data, dict) else None
+        return bool(isinstance(state, dict) and state.get("Running"))
+    except (json.JSONDecodeError, AttributeError):
+        return False
+
+
+# ── local_llm state readers ───────────────────────────────────────────────────
+
+def _read_json_dir(directory: Path) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    if not directory.exists():
+        return result
+    for f in sorted(directory.glob("*.json")):
+        try:
+            data = json.loads(f.read_text())
+            if isinstance(data, dict):
+                result.append(data)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return result
+
+
+def collect_runners(state_dir: Path, socket_path: Path) -> list[dict[str, Any]]:
+    """Read active runner state from local_llm state dir + check Docker status."""
+    active = _read_json_dir(state_dir / "runs" / "active")
+    runners: list[dict[str, Any]] = []
+    for entry in active:
+        container = str(entry.get("container") or "")
+        running = docker_container_running(socket_path, container) if container else False
+        runners.append({
+            "cluster_id": str(entry.get("cluster_id") or ""),
+            "cluster_name": str(entry.get("cluster_name") or ""),
+            "model": str(entry.get("model") or entry.get("family") or "unknown"),
+            "family": str(entry.get("family") or ""),
+            "label": entry.get("label"),
+            "backend": str(entry.get("backend") or ""),
+            "port": int(entry.get("port") or 8080),
+            "container": container,
+            "gpu_pci_ids": list(entry.get("gpu_pci_ids") or []),
+            "running": running,
+        })
+    return runners
+
+
+# ── HTTP / API ────────────────────────────────────────────────────────────────
+
+def http_json_or_text(url: str, timeout: float = 0.8, max_bytes: int = 4096) -> str:
+    request = Request(url, headers={"Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            body = response.read(max_bytes).decode("utf-8", errors="replace").strip()
+    except (OSError, URLError) as exc:
+        return f"unreachable: {exc.__class__.__name__}"
+    return body or "ok"
+
+
+def parse_slots(body: str) -> list[dict[str, Any]]:
+    try:
+        raw_slots = json.loads(body)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw_slots, list):
+        return []
+    slots: list[dict[str, Any]] = []
+    for slot in raw_slots:
+        if not isinstance(slot, dict):
+            continue
+        next_token = slot.get("next_token")
+        decoded = 0
+        if isinstance(next_token, list) and next_token and isinstance(next_token[0], dict):
+            decoded = int(next_token[0].get("n_decoded") or 0)
+        slots.append(
+            {
+                "id": int(slot.get("id") or 0),
+                "task": int(slot.get("id_task") or 0),
+                "is_processing": bool(slot.get("is_processing")),
+                "decoded": decoded,
+            }
+        )
+    return slots
+
+
+class TpsTracker:
+    def __init__(self) -> None:
+        self.previous: dict[tuple[int, int], tuple[int, float]] = {}
+
+    def update(self, slots: list[dict[str, Any]], now: float | None = None) -> dict[str, Any]:
+        sample_time = time.monotonic() if now is None else now
+        current: dict[tuple[int, int], tuple[int, float]] = {}
+        live_tps = 0.0
+        has_sample = False
+        for slot in slots:
+            key = (int(slot["id"]), int(slot["task"]))
+            decoded = int(slot["decoded"])
+            current[key] = (decoded, sample_time)
+            if key in self.previous:
+                previous_decoded, previous_time = self.previous[key]
+                elapsed = sample_time - previous_time
+                delta = decoded - previous_decoded
+                if elapsed > 0 and delta >= 0:
+                    live_tps += delta / elapsed
+                    has_sample = True
+        self.previous = current
+        return {
+            "live_tps": round(live_tps, 1) if has_sample else None,
+            "active_slots": sum(1 for slot in slots if slot["is_processing"]),
+            "total_slots": len(slots),
+        }
+
+
+def summarize_models(models_body: str) -> str:
+    if models_body.startswith("unreachable:"):
+        return models_body
+    if '"id"' not in models_body:
+        return models_body[:120]
+    ids: list[str] = []
+    marker = '"id"'
+    rest = models_body
+    while marker in rest and len(ids) < 3:
+        rest = rest.split(marker, 1)[1]
+        if ":" not in rest:
+            break
+        rest = rest.split(":", 1)[1].lstrip()
+        if not rest.startswith('"'):
+            continue
+        rest = rest[1:]
+        model_id, _, rest = rest.partition('"')
+        if model_id:
+            ids.append(model_id)
+    return ", ".join(ids) if ids else models_body[:120]
+
+
+def collect_runner_api(port: int, tracker: TpsTracker) -> dict[str, Any]:
+    base = f"http://127.0.0.1:{port}"
+    health = http_json_or_text(f"{base}/health")
+    models = summarize_models(http_json_or_text(f"{base}/v1/models"))
+    slots_body = http_json_or_text(f"{base}/slots", max_bytes=1024 * 1024)
+    if slots_body.startswith("unreachable:"):
+        tps: dict[str, Any] = {"live_tps": None, "active_slots": "n/a", "total_slots": "n/a"}
+    else:
+        tps = tracker.update(parse_slots(slots_body))
+    return {"health": health, "models": models, "tps": tps}
+
+
+# ── system metrics ────────────────────────────────────────────────────────────
+
+def summarize_iostat(row: str) -> str:
+    parts = row.split()
+    if len(parts) < 9:
+        return row
+    device = parts[0]
+    reads = parts[1]
+    read_kib = parts[2]
+    writes = parts[7]
+    write_kib = parts[8]
+    util = parts[-1]
+    return f"{device} r/s {reads} w/s {writes} read {read_kib} KiB/s write {write_kib} KiB/s util {util}%"
+
+
+def summarize_vmstat(row: str) -> str:
+    parts = row.split()
+    if len(parts) < 17:
+        return row
+    return f"r {parts[0]} b {parts[1]} free {parts[3]} KiB in {parts[10]} cs {parts[11]} cpu {parts[12]}u/{parts[13]}s/{parts[14]}i"
+
+
+def compact_free_row(row: str) -> str:
+    return " ".join(row.split())
+
+
+def parse_proc_stat(text: str) -> dict[str, list[int]]:
+    samples: dict[str, list[int]] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts or not re.fullmatch(r"cpu\d+", parts[0]):
+            continue
+        try:
+            samples[parts[0]] = [int(value) for value in parts[1:]]
+        except ValueError:
+            continue
+    return samples
+
+
+def read_proc_stat(path: Path = PROC_STAT) -> dict[str, list[int]]:
+    text = read_text(path)
+    return parse_proc_stat(text or "")
+
+
+def cpu_percentages(before: dict[str, list[int]], after: dict[str, list[int]]) -> list[tuple[str, int]]:
+    percentages: list[tuple[str, int]] = []
+    for name in sorted(after, key=lambda value: int(value[3:])):
+        if name not in before:
+            continue
+        old = before[name]
+        new = after[name]
+        if len(old) < 4 or len(new) < 4:
+            continue
+        total_delta = sum(new) - sum(old)
+        idle_delta = (new[3] + (new[4] if len(new) > 4 else 0)) - (old[3] + (old[4] if len(old) > 4 else 0))
+        if total_delta <= 0:
+            percent = 0
+        else:
+            percent = int(round(((total_delta - idle_delta) / total_delta) * 100))
+        percentages.append((name[3:], int(clamp(percent, 0, 100))))
+    return percentages
+
+
+def collect_cpu_cores() -> list[tuple[str, int]]:
+    before = read_proc_stat()
+    time.sleep(0.1)
+    after = read_proc_stat()
+    return cpu_percentages(before, after)
+
+
+def collect_thermal() -> dict[str, Any]:
+    """Read CPU package temp and case fan RPMs from hwmon sysfs."""
+    result: dict[str, Any] = {}
+    hwmon_root = Path("/sys/class/hwmon")
+    if not hwmon_root.exists():
+        return result
+    for hwmon in sorted(hwmon_root.iterdir()):
+        name = read_text(hwmon / "name") or ""
+        if name == "coretemp":
+            raw = read_int(hwmon / "temp1_input")
+            if raw is not None:
+                result["cpu_temp_c"] = raw / 1000.0
+        elif name == "it8622":
+            fans: list[tuple[int, int]] = []
+            for i in range(1, 6):
+                rpm = read_int(hwmon / f"fan{i}_input")
+                if rpm is not None and rpm > 0:
+                    fans.append((i, rpm))
+            if fans:
+                result.setdefault("fans", []).extend(fans)
+    return result
+
+
+def collect_system() -> dict[str, str]:
+    load = " ".join(f"{value:.2f}" for value in os.getloadavg())
+    mem = run_command(["free", "-h"], timeout=1.0).splitlines()
+    vmstat = run_command(["vmstat", "1", "2"], timeout=2.5).splitlines()
+    iostat = run_command(["iostat", "-dx", "1", "1"], timeout=2.0).splitlines()
+    return {
+        "load": load,
+        "mem": mem[1] if len(mem) > 1 else "n/a",
+        "swap": mem[2] if len(mem) > 2 else "n/a",
+        "vmstat": summarize_vmstat(vmstat[-1]) if vmstat else "n/a",
+        "iostat": summarize_iostat(iostat[-1]) if iostat else "n/a",
+        "cpu_cores": collect_cpu_cores(),
+        **collect_thermal(),
+    }
+
+
+# ── snapshot ──────────────────────────────────────────────────────────────────
+
+def collect_snapshot(
+    drm_root: Path,
+    state_dir: Path,
+    socket_path: Path,
+    tps_trackers: dict[int, TpsTracker],
+) -> dict[str, Any]:
+    runners = collect_runners(state_dir, socket_path)
+
+    # Per-runner API + TPS (only for running containers)
+    for runner in runners:
+        if runner["running"]:
+            port = runner["port"]
+            if port not in tps_trackers:
+                tps_trackers[port] = TpsTracker()
+            runner["api"] = collect_runner_api(port, tps_trackers[port])
+        else:
+            runner["api"] = {"health": "stopped", "models": "n/a", "tps": {}}
+
+    # Collect logs from running containers (last 10 lines each, up to 2 containers)
+    logs: list[str] = []
+    for runner in runners:
+        if runner["running"] and runner["container"]:
+            label = runner.get("cluster_name") or runner["container"][-20:]
+            lines = docker_log_tail(socket_path, runner["container"], lines=10)
+            if lines:
+                logs.append(f"[{label}]")
+                logs.extend(lines)
+    if not logs:
+        logs = ["no running containers"]
+
+    return {
+        "hostname": _hostname(),
+        "time": time.strftime("%H:%M:%S"),
+        "gpu": collect_gpu(drm_root),
+        "runners": runners,
+        "system": collect_system(),
+        "logs": logs,
+    }
+
+
+def _hostname() -> str:
+    import socket as _socket
+    try:
+        return _socket.gethostname()
+    except OSError:
+        return "unknown"
+
+
+# ── rendering ─────────────────────────────────────────────────────────────────
+
+def pct_text(value: int | float | None) -> str:
+    return "n/a" if value is None else f"{value}%"
+
+
+def tps_text(value: int | float | None) -> str:
+    return "n/a" if value is None else f"{float(value):.1f}"
+
+
+def single_line(text: str, width: int) -> str:
+    clean = text.replace("\n", " ")
+    if len(clean) <= width:
+        return clean
+    return clean[: max(0, width - 1)] + "…"
+
+
+def line_style(line: str) -> str:
+    stripped = line.strip()
+    lower = stripped.lower()
+    if line.startswith("lltop "):
+        return "header"
+    if line.startswith("+-- "):
+        return "panel"
+    if any(word in lower for word in ("unreachable", "error", "failed", "stopped")):
+        return "bad"
+    if lower.startswith("health:") or lower.startswith("models:") or lower.startswith("  health:"):
+        return "good"
+    if stripped.startswith("[") and stripped.endswith("]"):
+        return "muted"
+    percent_values = [int(match) for match in re.findall(r"(\d+)%", line)]
+    if percent_values:
+        return meter_style(max(percent_values))
+    if stripped.startswith("running") or "running" in lower[:20]:
+        return "good"
+    return "normal"
+
+
+def style_palette() -> dict[str, dict[str, Any]]:
+    return {
+        "header": {"foreground": "black", "background": "cyan", "bold": True, "dim": False},
+        "panel": {"foreground": "magenta", "background": "default", "bold": True, "dim": False},
+        "good": {"foreground": "green", "background": "default", "bold": True, "dim": False},
+        "warn": {"foreground": "yellow", "background": "default", "bold": True, "dim": False},
+        "bad": {"foreground": "red", "background": "default", "bold": True, "dim": False},
+        "muted": {"foreground": "cyan", "background": "default", "bold": False, "dim": False},
+        "normal": {"foreground": "white", "background": "default", "bold": False, "dim": False},
+    }
+
+
+def init_colors() -> None:
+    if not curses.has_colors():
+        return
+    curses.start_color()
+    try:
+        curses.use_default_colors()
+        background = -1
+    except curses.error:
+        background = curses.COLOR_BLACK
+    color_numbers = {
+        "black": curses.COLOR_BLACK,
+        "blue": curses.COLOR_BLUE,
+        "cyan": curses.COLOR_CYAN,
+        "green": curses.COLOR_GREEN,
+        "magenta": curses.COLOR_MAGENTA,
+        "red": curses.COLOR_RED,
+        "white": curses.COLOR_WHITE,
+        "yellow": curses.COLOR_YELLOW,
+    }
+    for pair_number, style in enumerate(style_palette().values(), start=1):
+        foreground = color_numbers[style["foreground"]]
+        pair_background = (
+            background if style["background"] == "default" else color_numbers[style["background"]]
+        )
+        try:
+            curses.init_pair(pair_number, foreground, pair_background)
+        except curses.error:
+            pass
+
+
+def style_attr(style: str) -> int:
+    if not curses.has_colors():
+        return 0
+    pair_numbers = {
+        "header": 1,
+        "panel": 2,
+        "good": 3,
+        "warn": 4,
+        "bad": 5,
+        "muted": 6,
+        "normal": 7,
+    }
+    attr = curses.color_pair(pair_numbers.get(style, 7))
+    palette = style_palette().get(style, style_palette()["normal"])
+    if palette["bold"]:
+        attr |= curses.A_BOLD
+    if palette["dim"]:
+        attr |= curses.A_DIM
+    return attr
+
+
+def render_cpu_cores(cores: list[tuple[str, int]], per_row: int = 4, bar_width: int = 10) -> list[str]:
+    if not cores:
+        return []
+    lines = ["  CPU cores:"]
+    row: list[str] = []
+    for core, percent in cores:
+        row.append(f"{int(core):02d} {bar(percent, bar_width)} {percent}%")
+        if len(row) == per_row:
+            lines.append("  " + "  ".join(row))
+            row = []
+    if row:
+        lines.append("  " + "  ".join(row))
+    return lines
+
+
+def system_memory_io_lines(system: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for key in ("mem", "swap", "vmstat", "iostat"):
+        value = system.get(key)
+        if not value or value == "n/a":
+            continue
+        if key == "mem":
+            lines.append("  Memory columns: total used free shared buff/cache available")
+        if key == "swap":
+            lines.append("  Swap columns: total used free")
+        prefix = "  " if key in ("mem", "swap") else f"  {key}: "
+        if key in ("mem", "swap"):
+            value = compact_free_row(value)
+        lines.append(f"{prefix}{value}")
+    return lines
+
+
+def render_thermal(system: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    temp = system.get("cpu_temp_c")
+    fans = system.get("fans") or []
+    if temp is not None:
+        marker = " !" if temp >= 85 else " ~" if temp >= 70 else ""
+        lines.append(f"  cpu temp: {temp:.0f}°C{marker}")
+    if fans:
+        lines.append("  fans: " + "  ".join(f"fan{n} {rpm}RPM" for n, rpm in fans))
+    return lines
+
+
+def system_stacked_lines(system: dict[str, Any]) -> list[str]:
+    lines = [f"  load: {system.get('load', 'n/a')}"]
+    lines.extend(render_thermal(system))
+    lines.extend(render_cpu_cores(system.get("cpu_cores") or []))
+    lines.extend(system_memory_io_lines(system))
+    return lines
+
+
+def system_side_by_side_lines(system: dict[str, Any], width: int) -> list[str]:
+    gap = "   "
+    left_width = min(64, max(50, (width - len(gap)) // 2))
+    cpu_block = section(
+        "CPU",
+        [f"  load: {system.get('load', 'n/a')}", *render_thermal(system), *render_cpu_cores(system.get("cpu_cores") or [], per_row=4, bar_width=5)],
+        left_width,
+    )[:-1]
+    memory_block = section("Memory / IO", system_memory_io_lines(system), left_width)[:-1]
+    return join_columns(cpu_block, memory_block, left_width, gap)
+
+
+def _gpu_cluster_label(pci_id: str, runners: list[dict[str, Any]], upstream_pci_id: str = "") -> str:
+    """Find which cluster owns this GPU by PCI id, falling back to upstream bridge id."""
+    matches = [
+        r.get("cluster_name") or r.get("cluster_id") or "?"
+        for r in runners
+        if pci_id in (r.get("gpu_pci_ids") or [])
+        or (upstream_pci_id and upstream_pci_id in (r.get("gpu_pci_ids") or []))
+    ]
+    return f" [{', '.join(matches)}]" if matches else ""
+
+
+def render_gpu_device(device: dict[str, Any], runners: list[dict[str, Any]]) -> list[str]:
+    gpu_busy = device.get("gpu_busy_percent")
+    mem_busy = device.get("mem_busy_percent")
+    vram_used = device.get("vram_used")
+    vram_total = device.get("vram_total")
+    temp = device.get("temp_c")
+    junction = device.get("junction_temp_c")
+    power = device.get("power_w")
+    fan = device.get("fan_pct")
+    fan_rpm = device.get("fan_rpm")
+    label = f"{device.get('vendor', 'GPU')} {device.get('name', '')}"
+    pci_id = device.get("pci_id") or device.get("path") or f"index {device.get('index', '?')}"
+    upstream = device.get("upstream_pci_id") or ""
+    cluster_tag = _gpu_cluster_label(pci_id, runners, upstream)
+
+    temp_str = f"Temp {temp:.0f}°C" if temp is not None else "Temp n/a"
+    if junction is not None:
+        temp_str += f" (junction {junction:.0f}°C)"
+    power_str = f"Power {power:.1f} W" if power is not None else "Power n/a"
+    fan_str = ""
+    if fan is not None:
+        fan_str = f"   Fan {fan}%"
+        if fan_rpm is not None:
+            fan_str += f" ({fan_rpm} RPM)"
+
+    return [
+        f"  {label} ({pci_id}){cluster_tag}",
+        f"  Core {pct_text(gpu_busy):>5} {bar(gpu_busy)}   Mem busy {pct_text(mem_busy):>5} {bar(mem_busy)}",
+        f"  VRAM {format_bytes(vram_used)} / {format_bytes(vram_total)}   {temp_str}{fan_str}",
+        f"  {power_str}   SCLK {device.get('sclk') or 'n/a'}   MCLK {device.get('mclk') or 'n/a'}",
+    ]
+
+
+def render_runner(runner: dict[str, Any]) -> list[str]:
+    name = runner.get("cluster_name") or runner.get("cluster_id") or "?"
+    model = runner.get("model") or "unknown"
+    label = runner.get("label")
+    backend = runner.get("backend") or "?"
+    port = runner.get("port") or "?"
+    container = runner.get("container") or "?"
+    running = runner.get("running", False)
+    api = runner.get("api") or {}
+    tps = api.get("tps") or {}
+    gpu_pci = runner.get("gpu_pci_ids") or []
+
+    status = "running" if running else "stopped"
+    gpu_str = " ".join(gpu_pci) if gpu_pci else "no GPUs"
+
+    # Status on line 1 so it's never truncated off-screen
+    lines = [
+        f"  [{name}]  {status}   {backend}   :{port}",
+        f"  model: {model}" + (f"  ({label})" if label else ""),
+        f"  container: {container}",
+        f"  GPUs: {gpu_str}",
+    ]
+    if running:
+        health = api.get("health", "n/a")
+        models = api.get("models", "n/a")
+        live_tps = tps.get("live_tps")
+        active_slots = tps.get("active_slots", "n/a")
+        total_slots = tps.get("total_slots", "n/a")
+        lines.append(f"  health: {health}   models: {models}")
+        lines.append(f"  tokens/sec: live {tps_text(live_tps)}   slots {active_slots}/{total_slots}")
+    return lines
+
+
+def render_snapshot(snapshot: dict[str, Any], width: int | None = None, height: int | None = None) -> str:
+    width = width or shutil.get_terminal_size((100, 30)).columns
+    height = height or shutil.get_terminal_size((100, 30)).lines
+    gpu = snapshot.get("gpu") or {}
+    runners: list[dict[str, Any]] = snapshot.get("runners") or []
+    system = snapshot.get("system") or {}
+    logs = snapshot.get("logs") or []
+
+    lines = [f"lltop {snapshot.get('hostname', 'unknown')} {snapshot.get('time', '')}  q quit  r refresh"]
+
+    # GPU section
+    if "error" in gpu:
+        lines.extend(section("GPU", [f"  {gpu['error']}"], width))
+    else:
+        gpu_lines: list[str] = []
+        for device in gpu.get("gpus") or []:
+            if gpu_lines:
+                gpu_lines.append("")
+            gpu_lines.extend(render_gpu_device(device, runners))
+        lines.extend(section("GPU", gpu_lines or ["  no GPU metrics found"], width))
+
+    # Runners section
+    runner_lines: list[str] = []
+    if runners:
+        for i, runner in enumerate(runners):
+            if i > 0:
+                runner_lines.append("")
+            runner_lines.extend(render_runner(runner))
+    else:
+        runner_lines = [
+            "  no active runners",
+            f"  (state dir: {snapshot.get('state_dir', '~/.local/share/local_llm')})",
+        ]
+    lines.extend(section("Runners", runner_lines, width))
+
+    # System section
+    system_lines = system_side_by_side_lines(system, width) if width >= 120 else system_stacked_lines(system)
+    lines.extend(section("System", system_lines, width))
+
+    # Logs section
+    log_section = section("Logs", [f"  {line}" for line in logs], width)
+    min_log_lines = min(len(log_section), 4)
+    if len(lines) + min_log_lines > height:
+        lines = lines[: max(0, height - min_log_lines)]
+    available_log_lines = max(0, height - len(lines))
+    if available_log_lines and len(log_section) > available_log_lines:
+        log_section = [log_section[0], *log_section[-(available_log_lines - 1):]]
+    lines.extend(log_section)
+
+    return "\n".join(single_line(line, width) for line in lines[:height])
+
+
+# ── curses loop ───────────────────────────────────────────────────────────────
+
+def draw(stdscr: Any, args: argparse.Namespace) -> None:
+    curses.curs_set(0)
+    init_colors()
+    stdscr.nodelay(True)
+    stdscr.timeout(250)
+    tps_trackers: dict[int, TpsTracker] = {}
+    last_refresh = 0.0
+    output = ""
+    while True:
+        now = time.monotonic()
+        if now - last_refresh >= args.interval or not output:
+            snapshot = collect_snapshot(args.drm_root, args.state_dir, args.docker_socket, tps_trackers)
+            snapshot["state_dir"] = str(args.state_dir)
+            height, width = stdscr.getmaxyx()
+            output = render_snapshot(snapshot, width=width, height=height)
+            stdscr.erase()
+            for row, line in enumerate(output.splitlines()[:height]):
+                try:
+                    stdscr.addstr(row, 0, line[: max(0, width - 1)], style_attr(line_style(line)))
+                except curses.error:
+                    pass
+            stdscr.refresh()
+            last_refresh = now
+        key = stdscr.getch()
+        if key in (ord("q"), ord("Q")):
+            break
+        if key in (ord("r"), ord("R")):
+            last_refresh = 0.0
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Monitor local_llm containers — mixed AMD/NVIDIA, multi-cluster"
+    )
+    parser.add_argument("--once", action="store_true", help="print one snapshot and exit")
+    parser.add_argument("--interval", type=float, default=1.0, help="refresh interval in seconds")
+    parser.add_argument("--drm-root", type=Path, default=DEFAULT_DRM_ROOT, help="DRM sysfs root")
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=DEFAULT_STATE_DIR,
+        help="local_llm state directory (contains runs/active/, runs/clusters/)",
+    )
+    parser.add_argument(
+        "--docker-socket",
+        type=Path,
+        default=DEFAULT_DOCKER_SOCKET,
+        help="Docker socket path",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    if args.once:
+        tps_trackers: dict[int, TpsTracker] = {}
+        snapshot = collect_snapshot(args.drm_root, args.state_dir, args.docker_socket, tps_trackers)
+        snapshot["state_dir"] = str(args.state_dir)
+        print(render_snapshot(snapshot))
+        return 0
+    curses.wrapper(draw, args)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
