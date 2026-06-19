@@ -16,12 +16,13 @@ def test_build_llama_server_args_includes_model_runtime_and_mtp_flags():
             "split_mode": "layer",
             "tensor_split": "1,1",
             "reasoning": False,
-            "mtp": {
-                "enabled": True,
-                "draft_n_max": 3,
-                "draft_n_min": 1,
-                "draft_p_min": 0.5,
-            },
+            "context_shift": True,
+            "cache_prompt": True,
+            "cache_ram": 16384,
+            "mtp_enabled": True,
+            "mtp_draft_n_max": 3,
+            "mtp_draft_n_min": 1,
+            "mtp_draft_p_min": 0.5,
         },
     }
 
@@ -53,6 +54,27 @@ def test_build_llama_server_args_includes_model_runtime_and_mtp_flags():
         "--cache-prompt",
     ]
     assert "--spec-type" in args
+    assert "draft-mtp" in args
+
+
+def test_build_llama_server_args_emits_md_when_draft_model_configured():
+    metadata = {
+        "alias": "gemma4-mtp",
+        "model_path": "/models/gemma4.gguf",
+        "config": {
+            "mtp_enabled": True,
+            "mtp_draft_model": "/models/gemma4-assistant.gguf",
+            "mtp_draft_n_max": 3,
+            "mtp_draft_n_min": 1,
+            "mtp_draft_p_min": 0.5,
+        },
+    }
+
+    args = build_llama_server_args(metadata, port=8080)
+
+    md_idx = args.index("-md")
+    assert args[md_idx + 1] == "/models/gemma4-assistant.gguf"
+    assert args.count("--spec-type") == 1
     assert "draft-mtp" in args
 
 
@@ -90,7 +112,10 @@ def test_build_llama_server_args_omits_legacy_raw_mtp_flags_when_structured_mtp_
         "alias": "qwopus",
         "model_path": "/models/qwopus.gguf",
         "config": {
-            "mtp": {"enabled": True, "draft_n_max": 3, "draft_n_min": 1, "draft_p_min": 0.5},
+            "mtp_enabled": True,
+            "mtp_draft_n_max": 3,
+            "mtp_draft_n_min": 1,
+            "mtp_draft_p_min": 0.5,
             "flags": "--spec-type draft-mtp --spec-draft-n-max 3 --temp 0.6",
         },
     }
