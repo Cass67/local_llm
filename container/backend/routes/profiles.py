@@ -95,13 +95,18 @@ def _extract_flags(profile: dict) -> dict:
         elif tok == "--cache-ram" and nxt is not None:
             profile.setdefault("cache_ram", int(nxt))
             i += 2
-        elif tok in (
-            "--spec-type",
-            "--spec-draft-n-max",
-            "--spec-draft-n-min",
-            "--spec-draft-p-min",
-        ):
-            i += 2 if nxt and not nxt.startswith("-") else 1
+        elif tok == "--spec-type" and nxt == "draft-mtp":
+            profile["mtp_enabled"] = True
+            i += 2
+        elif tok == "--spec-draft-n-max" and nxt is not None:
+            profile.setdefault("mtp_draft_n_max", int(nxt))
+            i += 2
+        elif tok == "--spec-draft-n-min" and nxt is not None:
+            profile.setdefault("mtp_draft_n_min", int(nxt))
+            i += 2
+        elif tok == "--spec-draft-p-min" and nxt is not None:
+            profile.setdefault("mtp_draft_p_min", float(nxt))
+            i += 2
         else:
             remaining.append(tok)
             i += 1
@@ -147,6 +152,14 @@ async def import_from_models():
         # Top-level reasoning flag (may not be in config block)
         if "reasoning" not in profile and model.get("reasoning") is not None:
             profile["reasoning"] = model["reasoning"]
+
+        # Flatten nested mtp block if present
+        if "mtp" in profile and isinstance(profile["mtp"], dict):
+            mtp = profile.pop("mtp")
+            profile.setdefault("mtp_enabled", bool(mtp.get("enabled")))
+            for k in ("draft_n_max", "draft_n_min", "draft_p_min"):
+                if mtp.get(k) is not None:
+                    profile.setdefault(f"mtp_{k}", mtp[k])
 
         # Promote known raw flags to proper fields
         _extract_flags(profile)

@@ -120,20 +120,14 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
         args.extend(["--parallel", str(cfg["parallel"])])
     args.extend(["--no-cont-batching", "--prio", "2", "--no-warmup"])
 
-    mtp = cfg.get("mtp")
-    if isinstance(mtp, dict) and mtp.get("enabled"):
-        args.extend(
-            [
-                "--spec-type",
-                "draft-mtp",
-                "--spec-draft-n-max",
-                str(mtp.get("draft_n_max", 3)),
-                "--spec-draft-n-min",
-                str(mtp.get("draft_n_min", 1)),
-                "--spec-draft-p-min",
-                str(mtp.get("draft_p_min", 0.5)),
-            ]
-        )
+    if cfg.get("mtp_enabled"):
+        args.extend(["--spec-type", "draft-mtp"])
+        if cfg.get("mtp_draft_n_max") is not None:
+            args.extend(["--spec-draft-n-max", str(cfg["mtp_draft_n_max"])])
+        if cfg.get("mtp_draft_n_min") is not None:
+            args.extend(["--spec-draft-n-min", str(cfg["mtp_draft_n_min"])])
+        if cfg.get("mtp_draft_p_min") is not None:
+            args.extend(["--spec-draft-p-min", str(cfg["mtp_draft_p_min"])])
 
     if cfg.get("flash_attention"):
         args.extend(["-fa", "on"])

@@ -102,6 +102,14 @@ def _build_launch_metadata(
         cfg = {}
         meta["config"] = cfg
 
+    # Normalise legacy nested mtp → flat before profile overlay
+    if "mtp" in cfg and isinstance(cfg["mtp"], dict):
+        mtp = cfg.pop("mtp")
+        cfg.setdefault("mtp_enabled", bool(mtp.get("enabled")))
+        for _k in ("draft_n_max", "draft_n_min", "draft_p_min"):
+            if mtp.get(_k) is not None:
+                cfg.setdefault(f"mtp_{_k}", mtp[_k])
+
     # Apply named profile config (batch, ubatch, ngl, tensor_split, etc.)
     _apply_profile_config(meta)
     cfg = meta["config"]
