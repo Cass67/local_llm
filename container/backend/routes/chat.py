@@ -1,5 +1,6 @@
 """Chat completion proxy to project-owned runner."""
 
+import asyncio
 import json
 import time
 
@@ -105,9 +106,21 @@ def _record_metrics(body: bytes, response_body: bytes) -> None:
 async def proxy_chat_completions(request: Request):
     """Proxy chat completion requests to the appropriate cluster runner."""
     body = _prepare_runner_payload(await request.body())
+
+    # Auto-reload if the model is desired but not currently running
+    model = _request_model(body)
+    if model and not active_runners.runner_url_for_model(model):
+        from ..clusters import list_clusters, read_desired
+        from .clusters import _resolve_accepted
+
+        for cluster in list_clusters():
+            desired = read_desired(cluster.id)
+            if desired and desired.get("model") == model:
+                await asyncio.to_thread(active_runners.ensure_running, cluster, _resolve_accepted)
+                break
+
     runner_url = _resolve_runner_url(body)
 
-    model = _request_model(body)
     for entry in active_runners.list_active():
         if entry.get("model") == model or entry.get("family") == model or model is None:
             if cluster_id := entry.get("cluster_id"):
