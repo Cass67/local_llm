@@ -1,6 +1,7 @@
 """Idle unload settings — auto-stop cluster runners after N minutes of inactivity."""
 
 import json
+import logging
 
 from fastapi import APIRouter
 
@@ -39,4 +40,9 @@ async def put_config(body: dict):
         "timeout_minutes": int(body.get("timeout_minutes", _DEFAULTS["timeout_minutes"])),
     }
     _save(cfg)
+    logging.info(
+        "idle_unload: %s (timeout=%dm)",
+        "enabled" if cfg["enabled"] else "disabled",
+        cfg["timeout_minutes"],
+    )
     return cfg
