@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { fetchStatus, fetchModels, switchModel, fetchStats, fetchStatsHistory, fetchRunnerHealth } from "../lib/api";
+	import { fetchStatus, fetchModels, switchModel, fetchStats, fetchStatsHistory, fetchRunnerHealth, cancelDownload } from "../lib/api";
 	import type { StatusResponse, ModelInfo, StatsResponse, ChatMetric, RunnerHealth } from "../lib/types";
 
 	const HISTORY_LIMIT = 30;
@@ -144,13 +144,13 @@
 
 		<h3>Active Downloads</h3>
 		<table>
-			<thead><tr><th>PID</th><th>Repo</th></tr></thead>
+			<thead><tr><th>PID</th><th>Repo</th><th></th></tr></thead>
 			<tbody>
 				{#if status.downloads.length === 0}
 					<tr><td colspan="2">none</td></tr>
 				{:else}
 					{#each status.downloads as dl}
-						<tr><td>{dl.pid}</td><td>{dl.repo}</td></tr>
+						<tr><td>{dl.pid}</td><td>{dl.repo}</td><td><button onclick={() => cancelDownload(dl.repo)}>Cancel</button></td></tr>
 					{/each}
 				{/if}
 			</tbody>

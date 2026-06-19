@@ -1,10 +1,12 @@
 """CLI wrapper: subprocess calls to model-manager scripts."""
 
+import ctypes
 import importlib
 import json
 import os
 import re
 import subprocess
+import threading
 from pathlib import Path
 
 from . import config
@@ -15,6 +17,19 @@ MODEL_FIT = SCRIPTS_DIR / "model-fit.py"
 
 # repo -> file for in-progress backend installs (GIL makes dict ops atomic enough)
 active_downloads: dict[str, str] = {}
+# repo -> thread ident for cancellation
+_download_threads: dict[str, int] = {}
+
+
+def cancel_download(repo: str) -> bool:
+    """Interrupt an active download by raising KeyboardInterrupt in its thread."""
+    tid = _download_threads.get(repo)
+    if not tid:
+        return False
+    ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        ctypes.c_ulong(tid), ctypes.py_object(KeyboardInterrupt)
+    )
+    return True
 
 
 def run_discovery(query: str, host: str | None = None, limit: int = 30) -> list[dict]:
@@ -133,11 +148,15 @@ def run_install(repo: str, file: str, profile: str) -> dict:
     ctx = 65536
     model_id = _model_id(repo, file)
     active_downloads[repo] = file
+    _download_threads[repo] = threading.current_thread().ident or 0
     try:
         downloaded = hf_hub_download(repo_id=repo, filename=file, cache_dir=config.MODELS_CACHE_DIR)
         model_path = Path(downloaded)
-    except Exception as exc:
+    except (Exception, KeyboardInterrupt) as exc:
         active_downloads.pop(repo, None)
+        _download_threads.pop(repo, None)
+        if isinstance(exc, KeyboardInterrupt):
+            return _install_error("download", repo, file, profile, "cancelled", logs)
         return _install_error("download", repo, file, profile, str(exc), logs)
 
     try:
@@ -146,6 +165,7 @@ def run_install(repo: str, file: str, profile: str) -> dict:
         return _install_error("metadata", repo, file, profile, str(exc), logs)
     finally:
         active_downloads.pop(repo, None)
+        _download_threads.pop(repo, None)
 
     return {
         "status": "installed",
