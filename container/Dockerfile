@@ -22,7 +22,9 @@ COPY container/pyproject.toml .
 RUN pip install --no-cache-dir -e ".[dev]"
 
 COPY container/backend/ ./backend/
-COPY container/ui-dist/ ./ui-dist/
+ARG CACHEBUST=1
+RUN rm -rf ./ui-dist/assets/index-*.js ./ui-dist/assets/index-*.css ./ui-dist/index.html
+COPY --link container/ui-dist/ ./ui-dist/
 COPY scripts/ /scripts/
 COPY container/entrypoint.sh .
 

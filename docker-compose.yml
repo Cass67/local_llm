@@ -1,5 +1,4 @@
 services:
-
   # ── Management UI + API ──────────────────────────────────────────────────────
   # Builds the FastAPI backend + Svelte UI. Manages model metadata, downloads,
   # and creates/stops the local-llm-runner container on demand via Docker socket.
@@ -8,6 +7,7 @@ services:
       context: .
       dockerfile: container/Dockerfile
       network: host
+      no_cache: true
     image: local-llm-mgmt:latest
     container_name: local-llm-mgmt
     network_mode: host
