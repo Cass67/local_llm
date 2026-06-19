@@ -106,6 +106,13 @@ async def proxy_chat_completions(request: Request):
     """Proxy chat completion requests to the appropriate cluster runner."""
     body = _prepare_runner_payload(await request.body())
     runner_url = _resolve_runner_url(body)
+
+    model = _request_model(body)
+    for entry in active_runners.list_active():
+        if entry.get("model") == model or entry.get("family") == model or model is None:
+            if cluster_id := entry.get("cluster_id"):
+                active_runners.touch(str(cluster_id))
+            break
     headers = {
         "Content-Type": request.headers.get("content-type", "application/json"),
     }

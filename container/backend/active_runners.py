@@ -14,6 +14,7 @@ from .clusters import (
     list_active,
     list_clusters,
     list_desired,
+    read_active,
     remove_active,
     remove_desired,
     tensor_split_for,
@@ -23,6 +24,9 @@ from .clusters import (
 )
 from .gpu_inventory import GpuInfo, detect_gpus
 from .runtime import DockerRunner, DockerRunnerConfig
+
+# cluster_id → monotonic timestamp of last chat request
+_last_request: dict[str, float] = {}
 
 
 def _runner_for(cluster: ClusterDef) -> DockerRunner:
@@ -169,3 +173,26 @@ def runner_url_for_model(model_id: str) -> str | None:
             if isinstance(port, int):
                 return f"http://127.0.0.1:{port}/v1"
     return None
+
+
+def touch(cluster_id: str) -> None:
+    """Record that cluster_id just handled a request."""
+    _last_request[cluster_id] = time.monotonic()
+
+
+def idle_check(timeout_s: float) -> None:
+    """Stop any running cluster that has been idle longer than timeout_s."""
+    now = time.monotonic()
+    for cluster in list_clusters():
+        active = read_active(cluster.id)
+        if not active:
+            continue
+        last = _last_request.get(cluster.id)
+        if last is None:
+            # No request recorded since startup — seed from now so we don't
+            # immediately evict a model the user just manually started.
+            _last_request[cluster.id] = now
+            continue
+        if now - last >= timeout_s:
+            logging.info("idle_check: cluster=%s idle=%.0fs — stopping", cluster.name, now - last)
+            stop(cluster)

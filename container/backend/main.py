@@ -20,6 +20,7 @@ from .routes.stats import router as stats_router
 from .routes.runner import router as runner_router
 from .routes.clusters import router as clusters_router
 from .routes.router_config import router as router_config_router
+from .routes.idle_unload import router as idle_unload_router
 
 benchmark_router = import_module("backend.routes.benchmark").router
 
@@ -33,6 +34,19 @@ async def restore_desired_runners():
     import asyncio
 
     await asyncio.to_thread(active_runners.restore_desired, _resolve_accepted_for_restore)
+    asyncio.create_task(_idle_unload_loop())
+
+
+async def _idle_unload_loop():
+    import asyncio
+    from .routes.idle_unload import load as _load_idle_cfg
+
+    while True:
+        await asyncio.sleep(60)
+        cfg = _load_idle_cfg()
+        if cfg.get("enabled"):
+            timeout_s = float(cfg.get("timeout_minutes", 10)) * 60
+            await asyncio.to_thread(active_runners.idle_check, timeout_s)
 
 
 def _resolve_accepted_for_restore(family: str) -> dict:
@@ -61,6 +75,7 @@ app.include_router(stats_router)
 app.include_router(runner_router)
 app.include_router(clusters_router)
 app.include_router(router_config_router)
+app.include_router(idle_unload_router)
 app.include_router(benchmark_router)
 
 

@@ -23,6 +23,7 @@ import type {
 	ClusterInfo,
 	RouterConfig,
 	RouterHealth,
+	IdleUnloadConfig,
 } from "./types";
 
 const BASE = "/api/local-llm";
@@ -401,6 +402,21 @@ export async function fetchRouterHealth(): Promise<RouterHealth> {
 	const res = await fetch(`${BASE}/router/health`);
 	if (!res.ok) return { running: false, detail: `HTTP ${res.status}` };
 	return res.json();
+}
+
+export async function fetchIdleUnload(): Promise<IdleUnloadConfig> {
+	const res = await fetch(`${BASE}/idle-unload`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function saveIdleUnload(cfg: IdleUnloadConfig): Promise<void> {
+	const res = await fetch(`${BASE}/idle-unload`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(cfg),
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
 // --- Init ---

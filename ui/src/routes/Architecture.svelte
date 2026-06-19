@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import type { GpuInfo, ClusterInfo, Backend, ModelInfo } from "../lib/types";
+	import type { GpuInfo, ClusterInfo, Backend, ModelInfo, IdleUnloadConfig } from "../lib/types";
 	import {
 		fetchGpus,
 		fetchClusters,
@@ -12,6 +12,8 @@
 		fetchRouterConfig,
 		saveRouterConfig,
 		fetchRouterHealth,
+		fetchIdleUnload,
+		saveIdleUnload,
 	} from "../lib/api";
 	import type { RouterConfig, RouterRule } from "../lib/types";
 
@@ -31,6 +33,11 @@
 	// start form per cluster
 	let startFamily = $state<Record<string, string>>({});
 	let startProfile = $state<Record<string, string>>({});
+
+	// idle unload
+	let idleCfg = $state<IdleUnloadConfig | null>(null);
+	let idleError = $state("");
+	let idleSaving = $state(false);
 
 	// router
 	let routerCfg = $state<RouterConfig | null>(null);
@@ -163,11 +170,33 @@
 		}
 	}
 
+	async function loadIdle() {
+		try {
+			idleCfg = await fetchIdleUnload();
+		} catch (e: any) {
+			idleError = e.message;
+		}
+	}
+
+	async function toggleIdle() {
+		if (!idleCfg) return;
+		idleCfg = { ...idleCfg, enabled: !idleCfg.enabled };
+		idleSaving = true;
+		try {
+			await saveIdleUnload(idleCfg);
+		} catch (e: any) {
+			idleError = e.message;
+		} finally {
+			idleSaving = false;
+		}
+	}
+
 	onMount(() => {
 		loadGpus();
 		loadClusters();
 		loadModels();
 		loadRouter();
+		loadIdle();
 	});
 
 	function togglePci(pci: string) {
@@ -463,6 +492,28 @@
 			{/if}
 		{:else}
 			<p class="muted">Loading router config…</p>
+		{/if}
+	</section>
+
+	<!-- Idle Unload -->
+	<section>
+		<h3>Idle Unload</h3>
+		{#if idleError}<p class="error">{idleError}</p>{/if}
+		{#if idleCfg}
+			<div class="router-toolbar">
+				<label class="toggle-label">
+					<input
+						type="checkbox"
+						checked={idleCfg.enabled}
+						disabled={idleSaving}
+						onchange={toggleIdle}
+					/>
+					Auto-unload idle models
+				</label>
+				<span class="muted">after {idleCfg.timeout_minutes} min of no requests</span>
+			</div>
+		{:else}
+			<p class="muted">Loading…</p>
 		{/if}
 	</section>
 
