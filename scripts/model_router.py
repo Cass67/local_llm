@@ -291,9 +291,9 @@ async def v1_chat_completions(request: Request):
     model_val = payload.get("model") or ""
     explicit_model = bool(model_val) and model_val not in _ROUTE_SENTINELS
 
+    await _maybe_refresh()
+    prompt = _extract_prompt(payload.get("messages", []))
     if ENABLED and not explicit_model:
-        await _maybe_refresh()
-        prompt = _extract_prompt(payload.get("messages", []))
         chosen = _route(prompt)
         if not chosen:
             return JSONResponse({"detail": "no healthy model available"}, status_code=503)
@@ -303,7 +303,6 @@ async def v1_chat_completions(request: Request):
     else:
         model = payload.get("model", "")
         cluster = next((k for k, v in _cluster_to_model.items() if v == model), "client-specified")
-        prompt = _extract_prompt(payload.get("messages", []))
         print(f"router: [{cluster}] {model} ← {prompt[:80]!r}", flush=True)
 
     if _is_stream(payload):
