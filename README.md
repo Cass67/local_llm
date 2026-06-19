@@ -6,10 +6,11 @@ A self-hosted LLM management system for AMD and Nvidia GPU workstations. Models 
 
 | Tab | Description |
 |---|---|
-| [![Models](screenshot-models.png)](screenshot-models.png) | **Models** — browse installed models, view details, edit config, load/switch the active model |
+| [![Models](screenshot-models.png)](screenshot-models.png) | **Models** — browse installed models, view details, edit config, audit orphaned registrations |
 | [![Search](screenshot-search.png)](screenshot-search.png) | **Search** — discover and install GGUF models from HuggingFace |
-| [![Architecture](screenshot-architecture.png)](screenshot-architecture.png) | **Architecture** — system diagram, routing rules, and router config editor |
-| [![Status](screenshot-status.png)](screenshot-status.png) | **Status** — live TPS sparkline, runner health, active model, system stats |
+| [![Architecture](screenshot-architecture.png)](screenshot-architecture.png) | **Architecture** — system diagram, cluster management, profile selection when loading a model |
+| [![Profiles](screenshot-profiles.png)](screenshot-profiles.png) | **Profiles** — named load configs per model family: edit raw JSON, clone, set default, import from models |
+| [![Status](screenshot-status.png)](screenshot-status.png) | **Status** — live TPS sparkline, runner health, active model, system stats, audit orphaned registrations |
 | [![Benchmarks](screenshot-benchmarks.png)](screenshot-benchmarks.png) | **Benchmarks** — run configurable benchmarks, view latency/throughput trends across runs |
 | [![Logs](screenshot-logs.png)](screenshot-logs.png) | **Logs** — real-time Docker container log streaming (runner, mgmt, router) |
 | [![Chat](screenshot-chat.png)](screenshot-chat.png) | **Chat** — Open WebUI full chat interface with model selection and conversation history |
@@ -19,7 +20,9 @@ A self-hosted LLM management system for AMD and Nvidia GPU workstations. Models 
 
 - **Search and install** GGUF models from HuggingFace, downloading directly into the local HF cache.
 - **Switch models** on demand — the management container creates and replaces the runner container via the Docker socket.
-- **Edit model configs** — context size, batch, ngl, tensor split, MTP speculative decoding — without touching JSON by hand.
+- **Edit model configs** — context size, batch, ngl, tensor split, flash attention, Jinja templates, MTP speculative decoding — without touching JSON by hand.
+- **Profiles** — named load configurations per model family, stored in `profiles.json`. Select a profile when starting a model on a cluster. Edit as raw JSON, clone, set a default, or auto-seed from existing model configs. Profile fields (tensor split, context, flash attention, etc.) are merged into the launch metadata at start time.
+- **Audit** — scan registered models against the HF cache; remove stale registrations whose GGUF files have been deleted from disk. Available on the Models and Status tabs.
 - **Benchmark** models with configurable llama.cpp parameters (temperature, seed, top-p, top-k, repeat penalty, system prompt) and track latency/throughput trends across runs.
 - **Chat** via Open WebUI at `/chat/` — full conversation UI with web search (SearXNG), model selection, history, and streaming.
 - **Router** — keyword-based request router with live config reload, routing rules editor in the Architecture tab, and per-request routing audit. Open WebUI defaults to the `router` model so all chats are automatically dispatched to the best cluster.
@@ -74,7 +77,9 @@ local-llm-postgres  :5433  (Langfuse database)
 
 | Path | Purpose |
 |---|---|
-| `~/.local/share/local_llm/` | Accepted model metadata, current runner state, benchmark and chat metrics databases. |
+| `~/.local/share/local_llm/runs/accepted/` | Per-model JSON metadata (config, hf_repo, hf_file, etc.). |
+| `~/.local/share/local_llm/profiles.json` | Named load profiles per model family. |
+| `~/.local/share/local_llm/` | Runner state, benchmark and chat metrics databases. |
 | `~/.cache/huggingface/hub/` | Downloaded GGUF files (shared between mgmt download and runner mount). |
 
 ---
@@ -180,10 +185,26 @@ The UI shows a green dot when the runner is live.
 | ngl | `-ngl` |
 | batch / ubatch | `-b` / `-ub` |
 | tensor split | `--tensor-split` |
-| flags | appended verbatim |
+| flash attention | `-fa on` |
+| jinja templates | `--jinja` |
 | MTP | `--spec-type draft-mtp` + `--spec-draft-n-*` |
+| flags | extra raw args appended verbatim |
 
 Changes take effect on the next model switch.
+
+### Profiles
+
+**Profiles** tab. Select a model family, then select or create a named profile. Each profile is a raw JSON object of llama-server config fields — the same fields as the Edit form but unstructured, suitable for complex configs like dual-GPU tensor splits. Profiles are stored in `~/.local/share/local_llm/profiles.json`.
+
+- **Import from models** — seeds all families from their current accepted model configs. Always overwrites.
+- **Clone** — duplicate an existing profile under a new name.
+- **Set default** — mark a profile as the one pre-selected when loading a model on a cluster.
+
+When you start a model on a cluster in the **Architecture** tab, select a profile from the dropdown. The profile config is merged into the launch metadata before any cluster-specific GPU settings (visible devices, tensor split) are applied.
+
+### Audit
+
+**Models** or **Status** → **Audit** button. Scans all registered model entries and checks whether their GGUF files still exist in the HF cache. Orphaned entries (file deleted from disk) are listed. Click **Remove N** to clean them up.
 
 ### Benchmarking
 

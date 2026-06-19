@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import type { GpuInfo, ClusterInfo, Backend, ModelInfo, IdleUnloadConfig } from "../lib/types";
+	import type { GpuInfo, ClusterInfo, Backend, ModelInfo, IdleUnloadConfig, FamilyProfiles } from "../lib/types";
 	import {
 		fetchGpus,
 		fetchClusters,
@@ -14,6 +14,7 @@
 		fetchRouterHealth,
 		fetchIdleUnload,
 		saveIdleUnload,
+		fetchAllProfiles,
 	} from "../lib/api";
 	import type { RouterConfig, RouterRule } from "../lib/types";
 
@@ -33,6 +34,7 @@
 	// start form per cluster
 	let startFamily = $state<Record<string, string>>({});
 	let startProfile = $state<Record<string, string>>({});
+	let allProfiles = $state<Record<string, FamilyProfiles>>({});
 
 	// idle unload
 	let idleCfg = $state<IdleUnloadConfig | null>(null);
@@ -170,6 +172,27 @@
 		}
 	}
 
+	async function loadProfiles() {
+		try {
+			const data = await fetchAllProfiles();
+			allProfiles = data.families;
+		} catch {
+			// non-fatal
+		}
+	}
+
+	function familyProfileOptions(family: string): string[] {
+		const fam = allProfiles[family];
+		if (fam && Object.keys(fam.profiles).length > 0) return Object.keys(fam.profiles).sort();
+		return ["reliable", "balanced", "speed"];
+	}
+
+	function onFamilyChange(cid: string, family: string) {
+		startFamily[cid] = family;
+		const fam = allProfiles[family];
+		startProfile[cid] = fam?.default || familyProfileOptions(family)[0];
+	}
+
 	async function loadIdle() {
 		try {
 			idleCfg = await fetchIdleUnload();
@@ -208,6 +231,7 @@
 		loadModels();
 		loadRouter();
 		loadIdle();
+		loadProfiles();
 	});
 
 	function togglePci(pci: string) {
@@ -576,16 +600,19 @@
 						</div>
 					{:else}
 						<div class="cluster-start">
-							<select bind:value={startFamily[c.id]}>
+							<select
+								value={startFamily[c.id]}
+								onchange={(e) => onFamilyChange(c.id, e.currentTarget.value)}
+							>
 								<option value="">— pick model —</option>
 								{#each models.filter((m) => m.backend === c.backend) as m}
 									<option value={m.family}>{m.label ?? m.model_name ?? m.family}</option>
 								{/each}
 							</select>
 							<select bind:value={startProfile[c.id]}>
-								<option value="reliable">reliable</option>
-								<option value="fast">fast</option>
-								<option value="quality">quality</option>
+								{#each familyProfileOptions(startFamily[c.id]) as p}
+									<option value={p}>{p}</option>
+								{/each}
 							</select>
 							<button
 								onclick={() => handleStart(c.id)}

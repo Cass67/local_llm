@@ -146,26 +146,38 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
             ]
         )
 
-    raw_flags = str(cfg.get("flags") or "").split()
-    if isinstance(mtp, dict) and mtp.get("enabled"):
-        mtp_flags = {
-            "--spec-type",
-            "--spec-draft-n-max",
-            "--spec-draft-n-min",
-            "--spec-draft-p-min",
-        }
-        filtered_flags: list[str] = []
-        skip_next = False
-        for flag in raw_flags:
-            if skip_next:
-                skip_next = False
-                continue
-            if flag in mtp_flags:
-                skip_next = True
-                continue
-            filtered_flags.append(flag)
-        raw_flags = filtered_flags
-    args.extend(raw_flags)
+    if cfg.get("flash_attention"):
+        args.extend(["-fa", "on"])
+    if cfg.get("jinja"):
+        args.append("--jinja")
+
+    # Strip known-promoted flags from raw flags so they're not doubled
+    _PROMOTED_FLAGS = {
+        "-fa",
+        "--flash-attn",
+        "--jinja",
+        "--spec-type",
+        "--spec-draft-n-max",
+        "--spec-draft-n-min",
+        "--spec-draft-p-min",
+        "--parallel",
+        "--cache-ram",
+    }
+    raw_tokens = str(cfg.get("flags") or "").split()
+    filtered: list[str] = []
+    skip_next = False
+    for tok in raw_tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        if tok in _PROMOTED_FLAGS:
+            skip_next = True
+            continue
+        if tok in ("on", "off") and filtered and filtered[-1] in ("-fa", "--flash-attn"):
+            filtered.pop()
+            continue
+        filtered.append(tok)
+    args.extend(filtered)
     return args
 
 

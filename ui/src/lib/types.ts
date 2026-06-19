@@ -1,5 +1,23 @@
 export type Backend = "rocm" | "vulkan" | "cuda";
 
+export interface ModelProfile {
+	batch: number;
+	ubatch: number;
+	ngl: number;
+	context: number | null;
+	split_mode?: string | null;
+	tensor_split?: string | null;
+}
+
+export interface FamilyProfiles {
+	default: string;
+	profiles: Record<string, ModelProfile>;
+}
+
+export interface ProfilesData {
+	families: Record<string, FamilyProfiles>;
+}
+
 export interface MtpConfig {
 	enabled: boolean;
 	draft_n_max: number;

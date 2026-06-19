@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { editModel, fetchModelDetail } from "../lib/api";
-	import { normalizeMtpConfig } from "../lib/mtpFlags";
+	import { normalizeMtpConfig, splitKnownFlags } from "../lib/mtpFlags";
 	import type { Backend, ClusterInfo } from "../lib/types";
 
 	let {
@@ -28,6 +28,12 @@
 			const data = await fetchModelDetail(family);
 			const cfg = data.config || {};
 			const normalizedMtp = normalizeMtpConfig(cfg.mtp, cfg.flags);
+			const normalizedKnown = splitKnownFlags(normalizedMtp.flags);
+			// flash_attention: proper field takes precedence over parsed flags
+			const flashOn = cfg.flash_attention !== undefined
+				? cfg.flash_attention
+				: normalizedKnown.flash_attention;
+			const jinjaOn = cfg.jinja !== undefined ? cfg.jinja : normalizedKnown.jinja;
 			form = {
 				profile: data.profile || "balanced",
 				ctx: String(cfg.ctx || data.context || ""),
@@ -46,7 +52,9 @@
 				mtp_draft_n_max: String(normalizedMtp.mtp.draft_n_max),
 				mtp_draft_n_min: String(normalizedMtp.mtp.draft_n_min),
 				mtp_draft_p_min: String(normalizedMtp.mtp.draft_p_min),
-				flags: normalizedMtp.flags,
+				flash_attention: flashOn ? "on" : "off",
+				jinja: jinjaOn ? "on" : "off",
+				flags: normalizedKnown.flags,
 			};
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);
@@ -86,6 +94,8 @@
 				draft_n_min: num("mtp_draft_n_min") ?? 1,
 				draft_p_min: mtpFloat(),
 			},
+			flash_attention: form.flash_attention === "on",
+			jinja: form.jinja === "on",
 			flags: form.flags,
 		});
 	}
@@ -167,7 +177,17 @@
 							</div>
 						{/if}
 					</div>
-					<label>Flags<input bind:value={form.flags} /></label>
+					<label class="checkbox-row">
+							<input type="checkbox" checked={form.flash_attention === "on"}
+								onchange={(e) => (form.flash_attention = e.currentTarget.checked ? "on" : "off")} />
+							Flash attention
+						</label>
+						<label class="checkbox-row">
+							<input type="checkbox" checked={form.jinja === "on"}
+								onchange={(e) => (form.jinja = e.currentTarget.checked ? "on" : "off")} />
+							Jinja templates
+						</label>
+						<label>Flags<input bind:value={form.flags} /></label>
 				</div>
 				<div class="actions">
 					<button onclick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</button>

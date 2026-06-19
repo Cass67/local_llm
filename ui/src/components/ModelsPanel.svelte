@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { fetchModels, fetchCurrentModel, fetchClusters, startOnCluster, copyModelBackend } from "../lib/api";
+	import { fetchModels, fetchCurrentModel, fetchClusters, startOnCluster, copyModelBackend, auditModels, cleanupOrphanedModels } from "../lib/api";
 	import type { Backend, ModelInfo, CurrentModelResponse, ClusterInfo } from "../lib/types";
 	import ModelCard from "./ModelCard.svelte";
 	import ModelDetail from "./ModelDetail.svelte";
@@ -17,6 +17,9 @@
 	let detailFamily: string | null = $state(null);
 	let editFamily: string | null = $state(null);
 	let deleteOpen = $state(false);
+	let auditResult = $state<{ orphaned: Array<{ family: string; label: string | null; model_name: string; profile: string }>; total: number } | null>(null);
+	let auditing = $state(false);
+	let cleaning = $state(false);
 
 	async function load() {
 		loading = true;
@@ -61,6 +64,33 @@
 		}
 	}
 
+	async function handleAudit() {
+		auditing = true;
+		auditResult = null;
+		error = "";
+		try {
+			auditResult = await auditModels();
+		} catch (e: unknown) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			auditing = false;
+		}
+	}
+
+	async function handleCleanup() {
+		cleaning = true;
+		error = "";
+		try {
+			await cleanupOrphanedModels();
+			auditResult = null;
+			await load();
+		} catch (e: unknown) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			cleaning = false;
+		}
+	}
+
 	onMount(load);
 
 	let filteredModels = $derived(models.filter((m) => m.backend === selectedBackend));
@@ -86,10 +116,33 @@
 			<button class:active={selectedBackend === "cuda"} onclick={() => (selectedBackend = "cuda")}>CUDA</button>
 		</div>
 		<div class="toolbar-actions">
+			<button class="audit" onclick={handleAudit} disabled={auditing}>{auditing ? "Scanning…" : "Audit"}</button>
 			<button class="delete" onclick={() => (deleteOpen = true)}>Delete</button>
 			<button class="refresh" onclick={load} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>
 		</div>
 	</div>
+
+	{#if auditResult}
+		<div class="audit-panel">
+			{#if auditResult.orphaned.length === 0}
+				<span class="audit-clean">✓ All {auditResult.total} registered models have files on disk.</span>
+				<button class="btn-close" onclick={() => auditResult = null}>✕</button>
+			{:else}
+				<div class="audit-header">
+					<span class="audit-warn">{auditResult.orphaned.length} of {auditResult.total} registrations have no files on disk:</span>
+					<button class="btn-cleanup" onclick={handleCleanup} disabled={cleaning}>
+						{cleaning ? "Removing…" : `Remove ${auditResult.orphaned.length}`}
+					</button>
+					<button class="btn-close" onclick={() => auditResult = null}>✕</button>
+				</div>
+				<div class="audit-list">
+					{#each auditResult.orphaned as m}
+						<span class="audit-chip">{m.label ?? m.model_name ?? m.family}</span>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	{#if current?.native_process_warning}
 		<div class="native-warning">
@@ -154,6 +207,54 @@
 		color: var(--text);
 		border-color: var(--accent);
 		font-weight: bold;
+	}
+	.audit {
+		padding: 0.3rem 0.8rem;
+		border: 1px solid #f59e0b33;
+		background: #f59e0b1a;
+		color: #f59e0b;
+		cursor: pointer;
+		border-radius: 6px;
+		font-size: 0.85rem;
+	}
+	.audit:hover { background: #f59e0b33; }
+	.audit-panel {
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 0.75rem 1rem;
+		font-size: 0.85rem;
+	}
+	.audit-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+	.audit-warn { color: #f59e0b; font-weight: 500; }
+	.audit-clean { color: #4caf50; }
+	.audit-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+	.audit-chip {
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		padding: 0.15rem 0.5rem;
+		color: var(--text-muted);
+		font-size: 0.8rem;
+	}
+	.btn-cleanup {
+		padding: 0.25rem 0.7rem;
+		border: 1px solid #ef444433;
+		background: #ef44441a;
+		color: var(--red);
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 0.82rem;
+	}
+	.btn-cleanup:hover { background: #ef444433; }
+	.btn-close {
+		margin-left: auto;
+		background: transparent;
+		border: none;
+		color: var(--text-muted);
+		cursor: pointer;
+		font-size: 0.85rem;
+		padding: 0.1rem 0.3rem;
 	}
 	.refresh, .delete {
 		padding: 0.3rem 0.8rem;

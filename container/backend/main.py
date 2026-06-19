@@ -21,6 +21,7 @@ from .routes.runner import router as runner_router
 from .routes.clusters import router as clusters_router
 from .routes.router_config import router as router_config_router
 from .routes.idle_unload import router as idle_unload_router
+from .routes.profiles import router as profiles_router
 
 benchmark_router = import_module("backend.routes.benchmark").router
 
@@ -77,6 +78,7 @@ app.include_router(clusters_router)
 app.include_router(router_config_router)
 app.include_router(idle_unload_router)
 app.include_router(benchmark_router)
+app.include_router(profiles_router)
 
 
 @app.get("/api/health")

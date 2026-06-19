@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import http.client
+import json
 import logging
 import time
 from copy import deepcopy
@@ -67,6 +68,30 @@ def _wait_ready(runner: DockerRunner, port: int, timeout: float = 120.0) -> bool
     return False
 
 
+def _apply_profile_config(meta: dict[str, Any]) -> None:
+    """Overlay named profile config from profiles.json onto meta."""
+    family = str(meta.get("family", ""))
+    profile_name = str(meta.get("profile", ""))
+    if not family or not profile_name:
+        return
+    try:
+        data = json.loads(config.PROFILES_CONFIG.read_text())
+    except (OSError, json.JSONDecodeError):
+        return
+    profile_cfg = data.get("families", {}).get(family, {}).get("profiles", {}).get(profile_name)
+    if not isinstance(profile_cfg, dict):
+        return
+    cfg = meta.setdefault("config", {})
+    for key, value in profile_cfg.items():
+        if value is None:
+            continue
+        if key == "context":
+            meta["context"] = value
+            cfg["ctx"] = value  # runtime reads cfg["ctx"] first
+        else:
+            cfg[key] = value
+
+
 def _build_launch_metadata(
     accepted: dict[str, Any], cluster: ClusterDef, inventory: list[GpuInfo]
 ) -> dict[str, Any]:
@@ -76,6 +101,10 @@ def _build_launch_metadata(
     if not isinstance(cfg, dict):
         cfg = {}
         meta["config"] = cfg
+
+    # Apply named profile config (batch, ubatch, ngl, tensor_split, etc.)
+    _apply_profile_config(meta)
+    cfg = meta["config"]
 
     cfg["backend"] = cluster.backend
     vd = visible_devices_for(cluster, inventory)
