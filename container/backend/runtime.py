@@ -78,37 +78,33 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
     if cfg.get("tensor_split"):
         args.extend(["--tensor-split", str(cfg["tensor_split"])])
 
-    args.extend(
-        [
-            "-c",
-            str(cfg.get("ctx") or metadata.get("context") or 65536),
-            "-b",
-            str(cfg.get("batch", 4096)),
-            "-ub",
-            str(cfg.get("ubatch", 256)),
-            "--alias",
-            alias,
-            "--reasoning",
-            _bool_flag(cfg.get("reasoning", metadata.get("reasoning", False))),
-        ]
-    )
-    if cfg.get("context_shift", True):
+    ctx = cfg.get("ctx") or metadata.get("context")
+    if ctx:
+        args.extend(["-c", str(ctx)])
+    if cfg.get("batch") is not None:
+        args.extend(["-b", str(cfg["batch"])])
+    if cfg.get("ubatch") is not None:
+        args.extend(["-ub", str(cfg["ubatch"])])
+    args.extend(["--alias", alias])
+    reasoning = cfg.get("reasoning")
+    if reasoning is None:
+        reasoning = metadata.get("reasoning", False)
+    args.extend(["--reasoning", _bool_flag(reasoning)])
+
+    if cfg.get("context_shift"):
         args.append("--context-shift")
-    if cfg.get("cache_prompt", True):
-        args.extend(["--cache-prompt", "--cache-ram", str(cfg.get("cache_ram", 16384))])
-    else:
-        args.extend(["--cache-ram", "0"])
-    if int(cfg.get("ctx_checkpoints", 64) or 0) > 0:
-        args.extend(
-            [
-                "--ctx-checkpoints",
-                str(cfg.get("ctx_checkpoints", 64)),
-                "--checkpoint-min-step",
-                str(cfg.get("checkpoint_min_step", 4096)),
-            ]
-        )
-    else:
-        args.extend(["--ctx-checkpoints", "0"])
+    if cfg.get("cache_prompt"):
+        args.extend(["--cache-prompt", "--cache-ram", str(cfg["cache_ram"])])
+    elif "cache_ram" in cfg:
+        args.extend(["--cache-ram", str(cfg["cache_ram"])])
+    ctx_chk = cfg.get("ctx_checkpoints")
+    if ctx_chk is not None:
+        if int(ctx_chk or 0) > 0:
+            args.extend(["--ctx-checkpoints", str(ctx_chk)])
+            if cfg.get("checkpoint_min_step") is not None:
+                args.extend(["--checkpoint-min-step", str(cfg["checkpoint_min_step"])])
+        else:
+            args.extend(["--ctx-checkpoints", "0"])
     if cfg.get("repeat_penalty") is not None:
         args.extend(["--repeat-penalty", str(cfg["repeat_penalty"])])
     if cfg.get("presence_penalty") is not None:
@@ -116,20 +112,13 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
     if cfg.get("frequency_penalty") is not None:
         args.extend(["--frequency-penalty", str(cfg["frequency_penalty"])])
 
-    args.extend(
-        [
-            "--timeout",
-            str(cfg.get("timeout", 600)),
-            "--threads-http",
-            str(cfg.get("threads_http", 2)),
-            "--parallel",
-            str(cfg.get("parallel", 1)),
-            "--no-cont-batching",
-            "--prio",
-            "2",
-            "--no-warmup",
-        ]
-    )
+    if cfg.get("timeout") is not None:
+        args.extend(["--timeout", str(cfg["timeout"])])
+    if cfg.get("threads_http") is not None:
+        args.extend(["--threads-http", str(cfg["threads_http"])])
+    if cfg.get("parallel") is not None:
+        args.extend(["--parallel", str(cfg["parallel"])])
+    args.extend(["--no-cont-batching", "--prio", "2", "--no-warmup"])
 
     mtp = cfg.get("mtp")
     if isinstance(mtp, dict) and mtp.get("enabled"):
