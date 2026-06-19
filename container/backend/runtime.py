@@ -55,6 +55,21 @@ def _model_path(metadata: dict[str, Any], models_dir: Path | None = None) -> str
     raise ValueError("accepted metadata missing model_path")
 
 
+def _draft_path(metadata: dict[str, Any], models_dir: Path | None = None) -> str:
+    cfg = _config(metadata)
+    path = cfg.get("mtp_draft_model")
+    if path:
+        return str(path)
+    repo = cfg.get("mtp_draft_hf_repo")
+    filename = cfg.get("mtp_draft_hf_file")
+    if repo and filename and models_dir:
+        repo_dir = f"models--{str(repo).replace('/', '--')}"
+        matches = sorted((models_dir / repo_dir / "snapshots").glob(f"*/{filename}"))
+        if matches:
+            return str(matches[-1])
+    return ""
+
+
 def _bool_flag(value: Any) -> str:
     return "on" if bool(value) else "off"
 
@@ -127,6 +142,9 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
         args.append("--no-warmup")
 
     if cfg.get("mtp_enabled"):
+        draft_path = cfg.get("mtp_draft_model")
+        if draft_path:
+            args.extend(["-md", str(draft_path)])
         args.extend(["--spec-type", "draft-mtp"])
         if cfg.get("mtp_draft_n_max") is not None:
             args.extend(["--spec-draft-n-max", str(cfg["mtp_draft_n_max"])])
@@ -145,6 +163,8 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
         "-fa",
         "--flash-attn",
         "--jinja",
+        "-md",
+        "--model-draft",
         "--spec-type",
         "--spec-draft-n-max",
         "--spec-draft-n-min",
@@ -174,8 +194,15 @@ def build_runner_container_spec(
     metadata: dict[str, Any], config: DockerRunnerConfig, models_dir: Path | None = None
 ) -> DockerContainerSpec:
     """Build a Docker container spec for the project-owned runner."""
-    if models_dir and not (metadata.get("model_path") or metadata.get("path")):
-        metadata = {**metadata, "model_path": _model_path(metadata, models_dir)}
+    if models_dir:
+        if not (metadata.get("model_path") or metadata.get("path")):
+            metadata = {**metadata, "model_path": _model_path(metadata, models_dir)}
+        cfg = _config(metadata)
+        if cfg.get("mtp_enabled") and not cfg.get("mtp_draft_model"):
+            draft_path = _draft_path(metadata, models_dir)
+            if draft_path:
+                merged_cfg = {**cfg, "mtp_draft_model": draft_path}
+                metadata = {**metadata, "config": merged_cfg}
     cfg = _config(metadata)
     backend = str(cfg.get("backend") or "rocm")
     visible_devices = str(cfg.get("visible_devices") or "")
