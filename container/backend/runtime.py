@@ -32,6 +32,7 @@ class DockerContainerSpec:
     device_requests: list[dict[str, Any]] = field(default_factory=list)
     group_add: list[str] = field(default_factory=list)
     environment: dict[str, str] = field(default_factory=dict)
+    binds: list[str] = field(default_factory=list)
 
 
 def _config(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -210,11 +211,51 @@ def build_runner_container_spec(
     devices: list[str] = []
     device_requests: list[dict[str, Any]] = []
     group_add: list[str] = []
+    binds: list[str] = []
 
     if backend == "cuda":
         device_requests = [{"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu"]]}]
         if visible_devices:
             environment["CUDA_VISIBLE_DEVICES"] = visible_devices
+    elif backend == "mixed_vulkan":
+        # AMD + NVIDIA in one container: AMD devices + NVIDIA runtime.
+        # Bind-mount host NVIDIA graphics libs so libEGL_nvidia.so.0 (headless Vulkan ICD)
+        # can initialize — the container runtime doesn't inject them with gpu+graphics caps.
+        devices = ["/dev/kfd", "/dev/dri", "/dev/nvidia-modeset"]
+        group_add = [config.render_group]
+        device_requests = [
+            {"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu", "graphics", "utility"]]}
+        ]
+        _nlib = "/host/nvidia-libs"  # host lib dir mounted read-only into mgmt container
+        _glx_patterns = [
+            "libGLX_nvidia.so.*",
+            "libnvidia-glcore.so.*",
+            "libnvidia-glsi.so.*",
+            "libnvidia-gpucomp.so.*",
+            "libnvidia-tls.so.*",
+            "libnvidia-glvkspirv.so.*",
+            "libnvidia-present.so.*",
+        ]
+        import glob as _glob
+
+        _nvidia_libs = [
+            f
+            for pat in _glx_patterns
+            for f in _glob.glob(f"{_nlib}/{pat}")
+            if ".so." in f.split("/")[-1]
+        ]
+        binds = [
+            *[
+                f"/usr/lib/x86_64-linux-gnu/{name}:/usr/lib/x86_64-linux-gnu/{name}:ro"
+                for lib in _nvidia_libs
+                for name in (lib.split("/")[-1],)
+            ],
+        ]
+        environment["VK_ICD_FILENAMES"] = (
+            "/usr/share/vulkan/icd.d/nvidia_egl_icd.json:/usr/share/vulkan/icd.d/radeon_icd.json"
+        )
+        if visible_devices:
+            environment["GGML_VK_VISIBLE_DEVICES"] = visible_devices
     elif cfg.get("nvidia_vulkan"):
         # NVIDIA GPU on Vulkan backend: inject via nvidia container runtime with graphics capability.
         # Use the headless EGL ICD baked into the image (libEGL_nvidia.so.0) rather than
@@ -243,6 +284,7 @@ def build_runner_container_spec(
         device_requests=device_requests,
         group_add=group_add,
         environment=environment,
+        binds=binds,
     )
 
 
@@ -307,9 +349,10 @@ class DockerRunner:
             time.sleep(0.25)
         spec = build_runner_container_spec(metadata, self.config, self.models_dir)
         env = [f"{key}={value}" for key, value in spec.environment.items()]
+        binds = [f"{self.host_models_dir}:/models:rw"] + spec.binds
         host_config: dict[str, Any] = {
             "NetworkMode": "host",
-            "Binds": [f"{self.host_models_dir}:/models:rw"],
+            "Binds": binds,
             "Devices": [
                 {"PathOnHost": device, "PathInContainer": device, "CgroupPermissions": "rwm"}
                 for device in spec.devices

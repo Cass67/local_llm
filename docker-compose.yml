@@ -1,4 +1,5 @@
 services:
+
   # ── Management UI + API ──────────────────────────────────────────────────────
   # Builds the FastAPI backend + Svelte UI. Manages model metadata, downloads,
   # and creates/stops the local-llm-runner container on demand via Docker socket.
@@ -7,7 +8,6 @@ services:
       context: .
       dockerfile: container/Dockerfile
       network: host
-      no_cache: true
     image: local-llm-mgmt:latest
     container_name: local-llm-mgmt
     network_mode: host
@@ -23,6 +23,7 @@ services:
       - ${LOCAL_LLM_STATE_DIR:-${HOME}/.local/share/local_llm}:/state
       - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface/hub}:/models
       - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/lib/x86_64-linux-gnu:/host/nvidia-libs:ro  # needed for mixed_vulkan: mgmt globs NVIDIA graphics libs from here to bind-mount into runner
     environment:
       LOCAL_LLM_STATE_DIR: /state
       MODELS_CACHE_DIR: /models

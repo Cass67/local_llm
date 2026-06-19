@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4 \
     libgomp1 \
     libvulkan1 \
+    libxext6 \
     mesa-vulkan-drivers \
     && rm -rf /var/lib/apt/lists/*
 
