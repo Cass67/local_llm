@@ -185,6 +185,20 @@ async def load_models(req: EndpointRef):
     endpoint = _store().get_endpoint_secret(req.endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail="endpoint not found")
+    cluster_name = str(endpoint.get("name", "")).removeprefix("Cluster: ").strip()
+    if cluster_name:
+        # Cluster endpoint — return only the model running on this cluster
+        from ..active_runners import list_active
+
+        active = list_active()
+        models = []
+        for entry in active:
+            if entry.get("cluster_name") == cluster_name:
+                alias = entry.get("model")
+                if alias:
+                    models = [alias]
+                break
+        return {"models": models}
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(

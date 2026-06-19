@@ -39,9 +39,12 @@ async def get_logs(
     lines: int = Query(default=100, ge=1, le=10000),
     source: str = Query(default="runner", pattern="^(runner|mgmt|router)$"),
     cluster_id: str | None = Query(default=None),
+    cluster: str | None = Query(default=None, description="Filter router logs to cluster name"),
 ):
     container = _container_for(source, cluster_id)
     raw = _docker_logs_tail(lines, container)
+    if cluster and source == "router":
+        raw = [ln for ln in raw if f"[{cluster}]" in ln]
     return {"lines": raw[-lines:] if len(raw) > lines else raw}
 
 
@@ -51,14 +54,21 @@ async def stream_logs(
     no_history: bool = Query(default=False),
     source: str = Query(default="runner", pattern="^(runner|mgmt|router)$"),
     cluster_id: str | None = Query(default=None),
+    cluster: str | None = Query(default=None, description="Filter router logs to cluster name"),
 ):
     """SSE stream of selected project container logs."""
     container = _container_for(source, cluster_id)
 
+    def _passes(line: str) -> bool:
+        if not cluster or source != "router":
+            return True
+        return f"[{cluster}]" in line
+
     async def event_generator():
         if not no_history:
             for line in _docker_logs_tail(50, container):
-                yield {"event": "log", "data": line}
+                if _passes(line):
+                    yield {"event": "log", "data": line}
 
         disconnect = asyncio.Event()
 
@@ -76,7 +86,8 @@ async def stream_logs(
                 disconnect, container=container, skip_existing=True
             ):
                 data = sse_chunk.removeprefix("data: ").removesuffix("\n\n")
-                yield {"event": "log", "data": data}
+                if _passes(data):
+                    yield {"event": "log", "data": data}
         finally:
             disconnect.set()
             task.cancel()

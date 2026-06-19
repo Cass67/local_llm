@@ -94,13 +94,13 @@ class BenchmarkStore:
         clean_url = base_url.rstrip("/").replace("localhost", "127.0.0.1")
         with self._connect() as conn:
             row = conn.execute(
-                "select * from endpoints where replace(base_url, 'localhost', '127.0.0.1') = ?",
-                (clean_url,),
+                "select * from endpoints where name = ?",
+                (name,),
             ).fetchone()
             if row:
                 conn.execute(
-                    "update endpoints set name = ?, base_url = ?, updated_at = current_timestamp where id = ?",
-                    (name, clean_url, row["id"]),
+                    "update endpoints set base_url = ?, updated_at = current_timestamp where id = ?",
+                    (clean_url, row["id"]),
                 )
                 row = conn.execute("select * from endpoints where id = ?", (row["id"],)).fetchone()
             else:
