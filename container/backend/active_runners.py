@@ -93,6 +93,16 @@ def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
     stop(cluster)
     inventory = detect_gpus()
     meta = _build_launch_metadata(accepted, cluster, inventory)
+    visible = meta.get("config", {}).get("visible_devices", "")
+    logging.info(
+        "start: cluster=%s model=%s backend=%s port=%d gpus=%s visible=%s",
+        cluster.name,
+        accepted.get("alias") or accepted.get("family") or "?",
+        cluster.backend,
+        cluster.port,
+        ",".join(cluster.gpu_pci_ids),
+        visible,
+    )
     runner = _runner_for(cluster)
     runner.launch(meta)
     if not _wait_ready(runner, cluster.port):
