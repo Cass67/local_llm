@@ -82,6 +82,9 @@
 	let remapFrom = $state("");
 	let remapTo = $state("");
 
+	// Unique cluster values currently used in rules (for remap "from" dropdown)
+	let ruleClusterValues = $derived([...new Set((routerCfg?.rules ?? []).flatMap(r => [r.cluster, ...(r.fallback ?? [])]).filter(Boolean))].sort());
+
 	function applyRemap() {
 		if (!routerCfg || !remapFrom || !remapTo || remapFrom === remapTo) return;
 		// Find-replace cluster names in rules
@@ -435,8 +438,8 @@
 					<span class="muted">Replace cluster in rules:</span>
 					<select bind:value={remapFrom}>
 						<option value="">— from —</option>
-						{#each clusters as c}
-							<option value={c.name}>{c.name}</option>
+						{#each ruleClusterValues as v}
+							<option value={v}>{v}</option>
 						{/each}
 					</select>
 					→
