@@ -141,7 +141,8 @@ services:
       - searxng:/etc/searxng
     environment:
       SEARXNG_BASE_URL: "http://127.0.0.1:3005/"
-      SEARXNG_BIND_ADDRESS: "127.0.0.1:3005"
+      GRANIAN_HOST: "127.0.0.1"
+      GRANIAN_PORT: "3005"
 
 volumes:
   open-webui:
