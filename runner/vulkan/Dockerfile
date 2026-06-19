@@ -44,6 +44,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=build /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=build /src/llama.cpp/build/bin/*.so /usr/local/lib/
+
+# Headless NVIDIA Vulkan ICD — uses libEGL_nvidia.so.0 (injected by nvidia-container-toolkit)
+# which works without a display, unlike libGLX_nvidia.so.0
+RUN mkdir -p /usr/share/vulkan/icd.d && \
+    printf '{"file_format_version":"1.0.1","ICD":{"library_path":"libEGL_nvidia.so.0","api_version":"1.4.312"}}' \
+    > /usr/share/vulkan/icd.d/nvidia_egl_icd.json
+
 RUN ldconfig
 ENTRYPOINT []
 CMD ["llama-server", "--help"]
