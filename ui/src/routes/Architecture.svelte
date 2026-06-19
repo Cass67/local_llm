@@ -425,21 +425,36 @@
 
 			{#if clusters.length > 0}
 				<div class="remap-row">
-					<span class="muted">Remap rule targets:</span>
-					{#each clusters as source}
-						<label>
-							{source.name} →
+					<span class="muted">Remap targets:</span>
+					{#each Object.entries(draftRemap).filter(([, to]) => to) as [from, to]}
+						<div class="remap-entry">
 							<select
-								value={draftRemap[source.name] ?? ""}
-								onchange={(e) => setDraftRemap(source.name, e.currentTarget.value)}
+								value={from}
+								onchange={(e) => {
+									const newFrom = e.currentTarget.value;
+									const updated = { ...draftRemap };
+									delete updated[from];
+									updated[newFrom] = to;
+									draftRemap = updated;
+								}}
 							>
-								<option value="">itself</option>
-								{#each clusters as target}
-									<option value={target.name}>{target.name}</option>
+								{#each clusters as c}
+									<option value={c.name}>{c.name}</option>
 								{/each}
 							</select>
-						</label>
+							→
+							<select
+								value={to}
+								onchange={(e) => setDraftRemap(from, e.currentTarget.value)}
+							>
+								{#each clusters as c}
+									<option value={c.name}>{c.name}</option>
+								{/each}
+							</select>
+							<button class="btn-del" onclick={() => { const updated = { ...draftRemap }; delete updated[from]; draftRemap = updated; }}>✕</button>
+						</div>
 					{/each}
+					<button onclick={() => draftRemap = { ...draftRemap, '': '' }}>+ Add</button>
 					<button onclick={applyRemap} disabled={routerSaving}>Apply remap</button>
 				</div>
 			{/if}
@@ -458,17 +473,22 @@
 				<tbody>
 					{#each routerCfg.rules as rule, i}
 						{#if editingRule && editingRule._idx === i}
-							<tr class="editing-row">
-								<td><input bind:value={editingRule.name} /></td>
-								<td><input
-									value={editingRule.keywords.join(", ")}
-									oninput={(e) => editingRule!.keywords = parseKeywords((e.target as HTMLInputElement).value)}
-								/></td>
-								<td><input bind:value={editingRule.cluster} placeholder="cluster name" /></td>
-								<td><input
-									value={(editingRule.fallback ?? []).join(", ")}
-									oninput={(e) => editingRule!.fallback = parseKeywords((e.target as HTMLInputElement).value)}
-								/></td>
+						<tr class="editing-row">
+							<td><input bind:value={editingRule.name} /></td>
+							<td><input
+								value={editingRule.keywords.join(", ")}
+								oninput={(e) => editingRule!.keywords = parseKeywords((e.target as HTMLInputElement).value)}
+							/></td>
+							<td><select bind:value={editingRule.cluster}>
+								<option value="">— cluster —</option>
+								{#each clusters as c}
+									<option value={c.name}>{c.name}</option>
+								{/each}
+							</select></td>
+							<td><input
+								value={(editingRule.fallback ?? []).join(", ")}
+								oninput={(e) => editingRule!.fallback = parseKeywords((e.target as HTMLInputElement).value)}
+							/></td>
 								<td class="rule-actions">
 									<button onclick={saveEditRule}>Save</button>
 									<button onclick={() => editingRule = null}>Cancel</button>
@@ -478,7 +498,7 @@
 							<tr>
 								<td>{rule.name}</td>
 								<td class="keywords">{rule.keywords.join(", ")}</td>
-								<td class="mono">{rule.cluster ? effectiveCluster(rule.cluster) : (rule.model ?? "—")}</td>
+								<td class="mono">{rule.cluster ? rule.cluster : (rule.model ?? "—")}</td>
 								<td class="mono">{effectiveFallback(rule.fallback)}</td>
 								<td class="rule-actions">
 									<button onclick={() => startEditRule(i)}>Edit</button>
@@ -834,8 +854,8 @@
 		margin-bottom: 0.75rem;
 		font-size: 0.85rem;
 	}
-	.remap-row label {
-		display: flex;
+	.remap-entry {
+		display: inline-flex;
 		align-items: center;
 		gap: 0.3rem;
 	}
