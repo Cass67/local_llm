@@ -280,6 +280,11 @@ export interface RouterHealth {
 	default_model?: string;
 }
 
+export interface IdleUnloadConfig {
+	enabled: boolean;
+	timeout_minutes: number;
+}
+
 export interface BenchmarkRunFilters {
 	endpoint_id?: number | "";
 	model?: string;
