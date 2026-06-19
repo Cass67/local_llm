@@ -3,6 +3,7 @@
 	import { marked } from "marked";
 	import DOMPurify from "dompurify";
 	import { fetchClusters, fetchGpus, fetchHFCard, cancelDownload } from "../lib/api";
+	import type { DownloadProgress } from "../lib/searchStore";
 	import { installStatusView } from "../lib/installStatus";
 	import { searchStore } from "../lib/searchStore";
 	import type { ClusterInfo, GpuInfo, SearchCandidate } from "../lib/types";
@@ -130,6 +131,20 @@
 		selectedClusters = { ...selectedClusters, [id]: !selectedClusters[id] };
 	}
 
+	function fmtBytes(b: number): string {
+		if (b >= 1e9) return `${(b / 1e9).toFixed(1)} GB`;
+		if (b >= 1e6) return `${(b / 1e6).toFixed(0)} MB`;
+		return `${(b / 1e3).toFixed(0)} KB`;
+	}
+
+	function fmtProgress(p: DownloadProgress): string {
+		const pct = p.total > 0 ? Math.round((p.downloaded / p.total) * 100) : 0;
+		const speed = p.speed > 0 ? ` @ ${fmtBytes(p.speed)}/s` : "";
+		return p.total > 0
+			? `${pct}% · ${fmtBytes(p.downloaded)} / ${fmtBytes(p.total)}${speed}`
+			: `${fmtBytes(p.downloaded)}${speed}`;
+	}
+
 	function getLatestInstallError(): InstallErrorDetail | null {
 		let latest: InstallErrorDetail | null = null;
 		for (const status of Object.values($searchState.installStatus) as InstallStatus[]) {
@@ -239,7 +254,19 @@
 									<button class="details-btn" onclick={() => (installErrorDetail = status)}>Details</button>
 								{/if}
 							{:else if $searchState.installingRepos[candidate.repo]}
-								<span class="installing">Installing...</span>
+								{@const prog = $searchState.downloadProgress[candidate.repo]}
+								<span class="installing">
+									{#if prog && prog.downloaded > 0}
+										{#if prog.total > 0}
+											<span class="progress-bar-wrap">
+												<span class="progress-bar" style="width:{Math.round((prog.downloaded/prog.total)*100)}%"></span>
+											</span>
+										{/if}
+										{fmtProgress(prog)}
+									{:else}
+										Downloading...
+									{/if}
+								</span>
 								<button class="cancel-btn" onclick={() => cancelDownload(candidate.repo)}>Cancel</button>
 							{:else}
 								<button class="install-btn" onclick={() => doInstall(candidate)}>Install</button>
@@ -350,7 +377,9 @@
 	.card-btn, .details-btn { padding: 0.2rem 0.5rem; background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; font-size: 0.75rem; transition: all 0.1s; }
 	.card-btn:hover, .details-btn:hover { border-color: var(--text-muted); color: var(--text); }
 	.installed { color: var(--green); font-size: 0.8rem; font-weight: bold; }
-	.installing { color: var(--yellow); font-size: 0.8rem; }
+	.installing { color: var(--yellow); font-size: 0.8rem; display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+	.progress-bar-wrap { display: inline-block; width: 60px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+	.progress-bar { display: block; height: 100%; background: var(--yellow); border-radius: 3px; transition: width 0.4s; }
 	.err { color: var(--red); font-size: 0.8rem; max-width: 360px; display: inline-block; }
 	.fail-reason { color: var(--text-muted); }
 	.empty { text-align: center; color: var(--text-muted); padding: 2rem; }

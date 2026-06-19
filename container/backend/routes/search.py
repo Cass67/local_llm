@@ -67,3 +67,9 @@ class CancelRequest(BaseModel):
 async def cancel_download(req: CancelRequest):
     ok = cli.cancel_download(req.repo)
     return {"cancelled": ok}
+
+
+@router.get("/progress")
+async def download_progress():
+    """Current download progress for all active installs."""
+    return {"progress": cli.download_progress}

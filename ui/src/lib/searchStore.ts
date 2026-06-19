@@ -7,6 +7,12 @@ import type {
 	SearchResponse,
 } from "./types";
 
+export interface DownloadProgress {
+	downloaded: number;
+	total: number;
+	speed: number;
+}
+
 export type SortMode = "score" | "repo" | "quant";
 
 export interface SearchState {
@@ -20,6 +26,7 @@ export interface SearchState {
 	installingRepos: Record<string, true>;
 	installStatus: Record<string, "installed" | string | InstallErrorDetail>;
 	vramGb: number | null;
+	downloadProgress: Record<string, DownloadProgress>;
 }
 
 interface SearchApi {
@@ -33,6 +40,7 @@ interface SearchApi {
 		file: string,
 		profile: string,
 	) => Promise<InstallResult>;
+	fetchDownloadProgress: () => Promise<Record<string, DownloadProgress>>;
 }
 
 interface SearchStore {
@@ -56,14 +64,36 @@ const initialState: SearchState = {
 	installingRepos: {},
 	installStatus: {},
 	vramGb: null,
+	downloadProgress: {},
 };
 
 export function createSearchStore(api: SearchApi): SearchStore {
 	const state = writable<SearchState>({ ...initialState });
 	const installs = new Map<string, Promise<void>>();
+	let progressInterval: ReturnType<typeof setInterval> | null = null;
 
 	function patch(update: Partial<SearchState>) {
 		state.update((current) => ({ ...current, ...update }));
+	}
+
+	function startProgressPoll() {
+		if (progressInterval) return;
+		progressInterval = setInterval(async () => {
+			try {
+				const progress = await api.fetchDownloadProgress();
+				patch({ downloadProgress: progress });
+			} catch {
+				// ignore poll failures
+			}
+		}, 800);
+	}
+
+	function stopProgressPoll() {
+		if (progressInterval) {
+			clearInterval(progressInterval);
+			progressInterval = null;
+		}
+		patch({ downloadProgress: {} });
 	}
 
 	return {
@@ -108,6 +138,7 @@ export function createSearchStore(api: SearchApi): SearchStore {
 				...current,
 				installingRepos: { ...current.installingRepos, [candidate.repo]: true },
 			}));
+			startProgressPoll();
 			const promise = api
 				.installModel(candidate.repo, candidate.best_file, profile)
 				.then((result) => {
@@ -136,6 +167,7 @@ export function createSearchStore(api: SearchApi): SearchStore {
 							current.installingRepos;
 						return { ...current, installingRepos };
 					});
+					if (installs.size === 0) stopProgressPoll();
 				});
 			installs.set(candidate.repo, promise);
 			return promise;
@@ -143,4 +175,11 @@ export function createSearchStore(api: SearchApi): SearchStore {
 	};
 }
 
-export const searchStore = createSearchStore({ searchModels, installModel });
+async function fetchDownloadProgress(): Promise<Record<string, DownloadProgress>> {
+	const res = await fetch("/api/local-llm/search/progress");
+	if (!res.ok) return {};
+	const data = await res.json();
+	return data.progress ?? {};
+}
+
+export const searchStore = createSearchStore({ searchModels, installModel, fetchDownloadProgress });

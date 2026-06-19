@@ -12,9 +12,10 @@ Read this before touching a Dockerfile, cluster config, or Docker runtime setup.
 3. [ROCm / AMD](#rocm--amd)
 4. [CUDA / NVIDIA](#cuda--nvidia)
 5. [Vulkan / AMD (or NVIDIA headless)](#vulkan)
-6. [How the stack wires GPU access at launch](#how-the-stack-wires-gpu-access-at-launch)
-7. [Cluster definition and device indexing](#cluster-definition-and-device-indexing)
-8. [Troubleshooting](#troubleshooting)
+6. [Mixed AMD + NVIDIA Vulkan](#mixed-amd--nvidia-vulkan)
+7. [How the stack wires GPU access at launch](#how-the-stack-wires-gpu-access-at-launch)
+8. [Cluster definition and device indexing](#cluster-definition-and-device-indexing)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -46,13 +47,17 @@ The runner containers need GPU device access injected at container start time.
 
 | Backend | GPU vendor | Host kernel module | Docker access method | Device env var |
 |---------|-----------|-------------------|---------------------|----------------|
-| `rocm`  | AMD       | `amdgpu`          | `/dev/kfd`, `/dev/dri` bind-mount + `render` group | `HIP_VISIBLE_DEVICES` |
-| `cuda`  | NVIDIA    | `nvidia`          | `nvidia` Docker runtime + `DeviceRequests` | `CUDA_VISIBLE_DEVICES` |
-| `vulkan`| AMD       | `amdgpu`          | `/dev/kfd`, `/dev/dri` bind-mount + `render` group | `GGML_VK_VISIBLE_DEVICES` |
-| `vulkan`| NVIDIA    | `nvidia`          | `nvidia` Docker runtime + graphics capability | `GGML_VK_VISIBLE_DEVICES` |
+| `rocm`         | AMD            | `amdgpu` + `nvidia` | `/dev/kfd`, `/dev/dri` bind-mount + `render` group | `HIP_VISIBLE_DEVICES` |
+| `cuda`         | NVIDIA         | `nvidia`            | `nvidia` Docker runtime + `DeviceRequests` | `CUDA_VISIBLE_DEVICES` |
+| `vulkan`       | AMD            | `amdgpu`            | `/dev/kfd`, `/dev/dri` bind-mount + `render` group | `GGML_VK_VISIBLE_DEVICES` |
+| `vulkan`       | NVIDIA         | `nvidia`            | `nvidia` Docker runtime + graphics capability | `GGML_VK_VISIBLE_DEVICES` |
+| `mixed_vulkan` | AMD + NVIDIA   | `amdgpu` + `nvidia` | Both AMD bind-mount and `nvidia` Docker runtime + host graphics lib bind-mounts | `GGML_VK_VISIBLE_DEVICES` |
 
 NVIDIA Vulkan is a special case: same `vulkan` backend in cluster config, but detected
 at runtime and wired differently (see [NVIDIA Vulkan](#nvidia-on-vulkan-backend) below).
+
+`mixed_vulkan` is for clusters that span both AMD and NVIDIA GPUs in a single container.
+See [Mixed AMD + NVIDIA Vulkan](#mixed-amd--nvidia-vulkan) for the full setup.
 
 ---
 
@@ -313,6 +318,142 @@ and nvidia-container-toolkit must be installed and configured. Additionally:
 
 ---
 
+## Mixed AMD + NVIDIA Vulkan
+
+`mixed_vulkan` allows a single cluster to span AMD and NVIDIA GPUs simultaneously,
+with all cards visible to a single llama-server process via Vulkan. This is useful
+for large models where you want to pool VRAM across different GPU vendors.
+
+**Reference hardware**: AMD RX 7900 XT × 2 (20 GB each) + NVIDIA Tesla P40 (22 GB)
+running a Q6_K 40B model split `1:1:1` across all three.
+
+### How it works
+
+The container must satisfy both AMD and NVIDIA access simultaneously:
+
+- **AMD**: `/dev/kfd` + `/dev/dri` bind-mount + render group (same as regular Vulkan)
+- **NVIDIA**: `DeviceRequests` with `gpu+graphics+utility` capabilities (same as NVIDIA Vulkan)
+- **NVIDIA Vulkan graphics libs**: the NVIDIA container runtime does NOT inject the graphics
+  support libraries (`libnvidia-glcore`, `libnvidia-gpucomp`, `libnvidia-glvkspirv`, etc.)
+  even when `graphics` is in the capabilities list. These are required for
+  `libEGL_nvidia.so.0` to initialize its Vulkan ICD. They must be bind-mounted
+  from the host.
+- **ICD selection**: `VK_ICD_FILENAMES` explicitly lists both the NVIDIA EGL ICD
+  (baked into the image) and the AMD RADV ICD, so the Vulkan loader enumerates
+  all cards in one pass.
+
+### Host requirements
+
+All requirements from both [ROCm / AMD](#rocm--amd) and [CUDA / NVIDIA](#cuda--nvidia)
+must be met:
+
+1. AMDGPU kernel module loaded — `lsmod | grep amdgpu`
+2. NVIDIA kernel module loaded — `lsmod | grep ^nvidia`
+3. NVIDIA container toolkit installed and configured — `docker info | grep nvidia`
+4. `/dev/kfd` exists with render group, user in render group
+5. `/dev/nvidia-modeset` exists — required for NVIDIA Vulkan ICD initialization:
+   `ls /dev/nvidia-modeset`
+6. NVIDIA graphics libs present in `/usr/lib/x86_64-linux-gnu/`:
+   `ls /usr/lib/x86_64-linux-gnu/libnvidia-gpucomp*` — should show the versioned `.so`
+
+### Management container requirements
+
+The mgmt container needs `/usr/lib/x86_64-linux-gnu` from the host mounted read-only
+so it can glob for the NVIDIA graphics libs to bind-mount into each runner.
+This is declared in `docker-compose.yml`:
+
+```yaml
+volumes:
+  - /usr/lib/x86_64-linux-gnu:/host/nvidia-libs:ro
+```
+
+Without this mount, `runtime.py`'s glob finds nothing and the runner launches without
+the NVIDIA graphics libs — `libEGL_nvidia.so.0` will fail `vkCreateInstance` silently
+and the P40 (or other NVIDIA GPU) will not appear in `--list-devices`.
+
+### Cluster definition
+
+```json
+{
+  "id": "dd886af6",
+  "name": "7900P40",
+  "gpu_pci_ids": [
+    "0000:01:00.0",
+    "0000:04:00.0",
+    "0000:07:00.0"
+  ],
+  "backend": "mixed_vulkan",
+  "port": 8087,
+  "container_name": "local-llm-runner-cluster-7900P40-dd886af6"
+}
+```
+
+`gpu_pci_ids` must list all cards (AMD and NVIDIA). The `visible_devices_for()`
+function in `clusters.py` handles `mixed_vulkan` specially: it places NVIDIA cards
+first (to match the order the Vulkan loader enumerates them — NVIDIA ICD is listed
+first in `VK_ICD_FILENAMES`), then AMD cards. The result is a contiguous range
+`"0,1,2"` regardless of how many of each vendor.
+
+### Profile configuration
+
+For a 3-GPU split, use `tensor_split: "1,1,1"` with `visible_devices: "0,1,2"`:
+
+```json
+{
+  "backend": "mixed_vulkan",
+  "ngl": 999,
+  "tensor_split": "1,1,1",
+  "visible_devices": "0,1,2",
+  "split_mode": "row"
+}
+```
+
+Adjust the tensor split weights if your GPUs have very different VRAM capacities.
+Equal weights (`1,1,1`) let llama.cpp distribute proportionally.
+
+### Docker access wiring
+
+```python
+# runtime.py — mixed_vulkan path
+devices = ["/dev/kfd", "/dev/dri", "/dev/nvidia-modeset"]
+group_add = [render_group]
+device_requests = [{"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu", "graphics", "utility"]]}]
+# glob NVIDIA graphics libs from the host mount, bind them into the runner
+_nvidia_libs = glob("/host/nvidia-libs/libGLX_nvidia.so.*", "libnvidia-glcore.so.*", ...)
+binds = [f"/usr/lib/x86_64-linux-gnu/{name}:/usr/lib/x86_64-linux-gnu/{name}:ro" for ...]
+environment["VK_ICD_FILENAMES"] = (
+    "/usr/share/vulkan/icd.d/nvidia_egl_icd.json"
+    ":/usr/share/vulkan/icd.d/radeon_icd.json"
+)
+environment["GGML_VK_VISIBLE_DEVICES"] = "0,1,2"
+```
+
+### Container image
+
+Same image as regular Vulkan — `local-llm-runner-vulkan:latest`. The image
+already bakes in `nvidia_egl_icd.json` (the headless NVIDIA Vulkan ICD) and
+includes `mesa-vulkan-drivers` for AMD RADV.
+
+### Verifying the setup
+
+Confirm all GPUs enumerate inside the running container:
+
+```bash
+docker exec <container_name> sh -c 'unset GGML_VK_VISIBLE_DEVICES; /usr/local/bin/llama-server --list-devices'
+```
+
+Expected output (order may vary by ICD enumeration):
+```
+Available devices:
+  Vulkan0: AMD Radeon RX 7900 XT (RADV NAVI31) (20464 MiB, ...)
+  Vulkan1: Tesla P40 (23040 MiB, ...)
+  Vulkan2: AMD Radeon RX 7900 XT (RADV NAVI31) (20464 MiB, ...)
+```
+
+If the P40 is missing, see [Mixed Vulkan: P40 not visible](#mixed-vulkan-p40-or-nvidia-gpu-not-visible).
+
+---
+
 ## How the stack wires GPU access at launch
 
 This is the sequence from "user clicks Load" to GPU access inside the container.
@@ -435,6 +576,38 @@ CUDA error: no kernel image is available for execution on the device
 or driver version mismatch errors mean the `nvidia/cuda:X.Y.Z` base is too new
 for the installed host driver. Lower the CUDA version in `runner/cuda/Dockerfile`.
 
+### Mixed Vulkan: P40 (or NVIDIA GPU) not visible
+
+If `--list-devices` inside the container shows only AMD cards:
+
+1. **Check the NVIDIA graphics libs are bind-mounted:**
+   ```bash
+   docker inspect <container_name> | python3 -c 'import json,sys; d=json.load(sys.stdin)[0]; [print(b) for b in d["HostConfig"]["Binds"] if "nvidia" in b]'
+   ```
+   If only the models bind is shown (no nvidia libs), the mgmt container can't see
+   `/host/nvidia-libs`. Check `docker-compose.yml` has the mount and restart mgmt:
+   ```bash
+   docker compose up -d local-llm-mgmt
+   ```
+
+2. **Check `libEGL_nvidia.so.0` can initialize:**
+   ```bash
+   docker exec <container_name> sh -c \
+     'VK_LOADER_DEBUG=error VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_egl_icd.json \
+      /usr/local/bin/llama-server --list-devices 2>&1'
+   ```
+   - `Could not get vkCreateInstance via vk_icdGetInstanceProcAddr`: the support libs
+     are still missing. Check the bind mounts above.
+   - `Found no drivers`: the EGL ICD file is missing — rebuild the Vulkan image.
+   - Device appears: ICD works; the issue is elsewhere.
+
+3. **Check `/dev/nvidia-modeset` is in the container:**
+   ```bash
+   docker exec <container_name> ls /dev/nvidia-modeset
+   ```
+   If missing, the cluster JSON has `"backend": "mixed_vulkan"` but the running
+   container predates the code change. Stop and restart the runner.
+
 ### GPU not visible to GPU inventory (cluster setup fails)
 
 The management container runs `rocminfo`, `nvidia-smi`, and `vulkaninfo` on startup.
@@ -470,9 +643,10 @@ docker compose up -d
 
 ## Quick reference: what each image needs injected at runtime
 
-| Image | Access method | Required host setup |
-|-------|-------------|---------------------|
-| `local-llm-runner-rocm` | `/dev/kfd` + `/dev/dri` bind, render GID | AMDGPU kernel module, ROCm userspace |
-| `local-llm-runner-cuda` | `nvidia` Docker runtime, `DeviceRequests` | NVIDIA kernel module, nvidia-container-toolkit |
-| `local-llm-runner-vulkan` (AMD) | `/dev/kfd` + `/dev/dri` bind, render GID | AMDGPU kernel module |
-| `local-llm-runner-vulkan` (NVIDIA) | `nvidia` Docker runtime with `graphics` capability, `VK_ICD_FILENAMES` | NVIDIA kernel module, nvidia-container-toolkit |
+| Image | Backend | Access method | Required host setup |
+|-------|---------|-------------|---------------------|
+| `local-llm-runner-rocm` | `rocm` | `/dev/kfd` + `/dev/dri` bind, render GID | AMDGPU kernel module, ROCm userspace |
+| `local-llm-runner-cuda` | `cuda` | `nvidia` Docker runtime, `DeviceRequests` | NVIDIA kernel module, nvidia-container-toolkit |
+| `local-llm-runner-vulkan` | `vulkan` (AMD) | `/dev/kfd` + `/dev/dri` bind, render GID | AMDGPU kernel module |
+| `local-llm-runner-vulkan` | `vulkan` (NVIDIA) | `nvidia` Docker runtime with `graphics` capability, `VK_ICD_FILENAMES` | NVIDIA kernel module, nvidia-container-toolkit |
+| `local-llm-runner-vulkan` | `mixed_vulkan` | Both AMD bind-mount and `nvidia` Docker runtime; NVIDIA graphics libs bind-mounted from host; `/dev/nvidia-modeset` | AMDGPU kernel module, NVIDIA kernel module, nvidia-container-toolkit; `/usr/lib/x86_64-linux-gnu:/host/nvidia-libs:ro` in mgmt container |

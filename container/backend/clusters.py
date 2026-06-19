@@ -144,6 +144,18 @@ def delete_cluster(cluster_id: str) -> None:
 def visible_devices_for(cluster: ClusterDef, inventory: list[GpuInfo]) -> str:
     """Return comma-separated backend device indices for this cluster."""
     inv_map = {g.pci_id: g for g in inventory}
+    if cluster.backend == "mixed_vulkan":
+        # Container enumerates NVIDIA (via nvidia_egl ICD) before AMD (via radeon ICD).
+        # Assign sequential indices: NVIDIA cards first, then AMD by rocm_index.
+        nvidia = sorted(
+            [g for g in inventory if g.pci_id in set(cluster.gpu_pci_ids) and g.vendor == "nvidia"],
+            key=lambda g: g.cuda_index or 0,
+        )
+        amd = sorted(
+            [g for g in inventory if g.pci_id in set(cluster.gpu_pci_ids) and g.vendor == "amd"],
+            key=lambda g: g.rocm_index or 0,
+        )
+        return ",".join(str(i) for i in range(len(nvidia) + len(amd)))
     indices: list[int] = []
     for pci in cluster.gpu_pci_ids:
         gpu = inv_map.get(pci)

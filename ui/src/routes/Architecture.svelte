@@ -619,7 +619,7 @@
 								onchange={(e) => onFamilyChange(c.id, e.currentTarget.value)}
 							>
 								<option value="">— pick model —</option>
-								{#each models.filter((m) => m.backend === c.backend) as m}
+								{#each models.filter((m) => m.backend === c.backend || (c.backend === "mixed_vulkan" && m.backend === "vulkan")) as m}
 									<option value={m.family}>{m.label ?? m.model_name ?? m.family}</option>
 								{/each}
 							</select>

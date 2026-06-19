@@ -19,6 +19,8 @@ MODEL_FIT = SCRIPTS_DIR / "model-fit.py"
 active_downloads: dict[str, str] = {}
 # repo -> thread ident for cancellation
 _download_threads: dict[str, int] = {}
+# repo -> {downloaded, total, speed} — updated by tqdm hook during hf_hub_download
+download_progress: dict[str, dict] = {}
 
 
 def cancel_download(repo: str) -> bool:
@@ -149,15 +151,35 @@ def run_install(repo: str, file: str, profile: str) -> dict:
     model_id = _model_id(repo, file)
     active_downloads[repo] = file
     _download_threads[repo] = threading.current_thread().ident or 0
+    download_progress[repo] = {"downloaded": 0, "total": 0, "speed": 0.0}
+
+    import tqdm as _tqdm_module
+
+    _orig_tqdm = _tqdm_module.tqdm
+
+    class _TrackTqdm(_orig_tqdm):
+        def update(self, n=1):
+            super().update(n)
+            download_progress[repo] = {
+                "downloaded": self.n,
+                "total": self.total or 0,
+                "speed": self.format_dict.get("rate") or 0.0,
+            }
+
+    _tqdm_module.tqdm = _TrackTqdm
     try:
         downloaded = hf_hub_download(repo_id=repo, filename=file, cache_dir=config.MODELS_CACHE_DIR)
         model_path = Path(downloaded)
     except (Exception, KeyboardInterrupt) as exc:
         active_downloads.pop(repo, None)
         _download_threads.pop(repo, None)
+        download_progress.pop(repo, None)
+        _tqdm_module.tqdm = _orig_tqdm
         if isinstance(exc, KeyboardInterrupt):
             return _install_error("download", repo, file, profile, "cancelled", logs)
         return _install_error("download", repo, file, profile, str(exc), logs)
+    finally:
+        _tqdm_module.tqdm = _orig_tqdm
 
     try:
         _write_installed_metadata(model_id, repo, file, profile, ctx, model_path)
@@ -166,6 +188,7 @@ def run_install(repo: str, file: str, profile: str) -> dict:
     finally:
         active_downloads.pop(repo, None)
         _download_threads.pop(repo, None)
+        download_progress.pop(repo, None)
 
     return {
         "status": "installed",
