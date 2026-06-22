@@ -119,6 +119,22 @@ export async function cancelDownload(repo: string): Promise<void> {
 	});
 }
 
+export async function fetchUnregistered(): Promise<{ models: Array<{ repo: string; file: string; path: string }> }> {
+	const res = await fetch(`${BASE}/search/unregistered`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function acceptModel(repo: string, file: string, path: string): Promise<{ status: string; family: string }> {
+	const res = await fetch(`${BASE}/search/accept`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ repo, file, path }),
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
 // --- Inventory & Status ---
 
 export async function fetchInventory(): Promise<{

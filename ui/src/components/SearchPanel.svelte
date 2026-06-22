@@ -2,7 +2,7 @@
 	import { tick } from "svelte";
 	import { marked } from "marked";
 	import DOMPurify from "dompurify";
-	import { fetchClusters, fetchGpus, fetchHFCard, cancelDownload } from "../lib/api";
+	import { fetchClusters, fetchGpus, fetchHFCard, cancelDownload, fetchUnregistered, acceptModel } from "../lib/api";
 	import type { DownloadProgress } from "../lib/searchStore";
 	import { installStatusView } from "../lib/installStatus";
 	import { searchStore } from "../lib/searchStore";
@@ -19,8 +19,34 @@
 	};
 	type InstallStatus = "installed" | string | InstallErrorDetail;
 
+	type UnregisteredModel = { repo: string; file: string; path: string };
+
 	const searchState = searchStore.state;
 	let perPage = 15;
+	let unregistered: UnregisteredModel[] = $state([]);
+	let acceptingRepo: string | null = $state(null);
+	let acceptedRepos: Set<string> = $state(new Set());
+
+	async function loadUnregistered() {
+		try {
+			const data = await fetchUnregistered();
+			unregistered = data.models;
+		} catch {
+			unregistered = [];
+		}
+	}
+
+	async function doAccept(m: UnregisteredModel) {
+		acceptingRepo = m.repo;
+		try {
+			await acceptModel(m.repo, m.file, m.path);
+			acceptedRepos = new Set([...acceptedRepos, m.repo]);
+		} finally {
+			acceptingRepo = null;
+		}
+	}
+
+	$effect(() => { loadUnregistered(); });
 	let hfCardRepo: string | null = $state(null);
 	let hfCardMarkdown = $state("");
 	let hfCardLoading = $state(false);
@@ -155,6 +181,28 @@
 </script>
 
 <div class="search-panel">
+	{#if unregistered.length > 0}
+		<div class="unregistered-section">
+			<div class="unregistered-header">
+				<span>Models in cache but not registered</span>
+			</div>
+			{#each unregistered as m}
+				{@const accepted = acceptedRepos.has(m.repo)}
+				<div class="unregistered-row">
+					<span class="unreg-repo" title={m.repo}>{m.repo}</span>
+					<code class="unreg-file">{m.file}</code>
+					{#if accepted}
+						<span class="unreg-done">✓ Accepted</span>
+					{:else}
+						<button class="unreg-btn" disabled={acceptingRepo === m.repo} onclick={() => doAccept(m)}>
+							{acceptingRepo === m.repo ? "Accepting..." : "Accept"}
+						</button>
+					{/if}
+				</div>
+			{/each}
+		</div>
+	{/if}
+
 	<div class="search-bar">
 		<input
 			type="text"
@@ -336,6 +384,15 @@
 {/if}
 
 <style>
+	.unregistered-section { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 1rem; overflow: hidden; }
+	.unregistered-header { padding: 0.4rem 0.75rem; background: var(--bg); color: var(--text-muted); font-size: 0.8rem; border-bottom: 1px solid var(--border); }
+	.unregistered-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+	.unregistered-row:last-child { border-bottom: none; }
+	.unreg-repo { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'JetBrains Mono', monospace; }
+	.unreg-file { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
+	.unreg-btn { padding: 0.2rem 0.6rem; background: var(--accent); color: var(--text); border: none; border-radius: 3px; cursor: pointer; font-size: 0.75rem; font-weight: bold; white-space: nowrap; }
+	.unreg-btn:disabled { opacity: 0.5; cursor: default; }
+	.unreg-done { color: var(--green); font-size: 0.8rem; font-weight: bold; white-space: nowrap; }
 	.search-bar { display: flex; gap: 0.5rem; }
 	.search-bar input { 
 		flex: 1; 

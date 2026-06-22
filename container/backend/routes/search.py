@@ -1,10 +1,12 @@
 """Search and install endpoints."""
 
 import asyncio
+import json
+from pathlib import Path
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
-from .. import cli
+from .. import cli, config
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -73,3 +75,58 @@ async def cancel_download(req: CancelRequest):
 async def download_progress():
     """Current download progress for all active installs."""
     return {"progress": cli.download_progress}
+
+
+@router.get("/unregistered")
+def unregistered_models():
+    """Models in HF cache that have no accepted JSON entry."""
+    accepted_repos: set[str] = set()
+    if config.ACCEPTED_DIR.exists():
+        for p in config.ACCEPTED_DIR.glob("*.json"):
+            if p.name == "default.json":
+                continue
+            try:
+                data = json.loads(p.read_text())
+                repo = data.get("hf_repo") or data.get("repo")
+                if repo:
+                    accepted_repos.add(str(repo))
+            except (OSError, json.JSONDecodeError):
+                pass
+
+    result = []
+    cache = config.MODELS_CACHE_DIR
+    if not cache.exists():
+        return {"models": result}
+    for repo_dir in sorted(cache.iterdir()):
+        if not repo_dir.name.startswith("models--"):
+            continue
+        repo = repo_dir.name.removeprefix("models--").replace("--", "/", 1)
+        if repo in accepted_repos:
+            continue
+        snaps = repo_dir / "snapshots"
+        if not snaps.is_dir():
+            continue
+        ggufs = [
+            f
+            for f in snaps.rglob("*.gguf")
+            if not f.name.lower().startswith("mmproj") and (f.is_file() or f.is_symlink())
+        ]
+        if not ggufs:
+            continue
+        ggufs.sort(key=lambda f: f.stat().st_size if f.exists() else 0, reverse=True)
+        result.append({"repo": repo, "file": ggufs[0].name, "path": str(ggufs[0])})
+    return {"models": result}
+
+
+class AcceptRequest(BaseModel):
+    repo: str
+    file: str
+    path: str
+
+
+@router.post("/accept")
+def accept_model(req: AcceptRequest):
+    """Write accepted metadata for a model already present in the cache."""
+    model_id = cli._model_id(req.repo, req.file)
+    cli._write_installed_metadata(model_id, req.repo, req.file, "balanced", 65536, Path(req.path))
+    return {"status": "accepted", "family": model_id}
