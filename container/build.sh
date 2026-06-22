@@ -7,7 +7,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "=== Building Svelte UI ==="
 cd "$PROJECT_ROOT/ui"
-npm ci
+npm install
 npm run build
 
 echo "=== Building runner images ==="
