@@ -133,19 +133,21 @@ def _is_healthy(alias: str) -> bool:
 # --- routing ---
 
 
-def _extract_prompt(messages: list[dict]) -> str:
-    """Return last user message content for routing — ignore tool/assistant messages."""
+def _extract_user_messages(messages: list[dict]) -> list[str]:
+    """Return all user message texts, most-recent first."""
+    result = []
     for msg in reversed(messages):
         if msg.get("role") != "user":
             continue
         content = msg.get("content", "")
         if isinstance(content, str) and content.strip():
-            return content.strip().lower()
-        if isinstance(content, list):
+            result.append(content.strip().lower())
+        elif isinstance(content, list):
             for part in content:
-                if isinstance(part, dict) and part.get("type") == "text":
-                    return part["text"].strip().lower()
-    return ""
+                if isinstance(part, dict) and part.get("type") == "text" and part["text"].strip():
+                    result.append(part["text"].strip().lower())
+                    break
+    return result
 
 
 def _keyword_in(keyword: str, prompt: str) -> bool:
@@ -156,8 +158,8 @@ def _keyword_in(keyword: str, prompt: str) -> bool:
     return keyword in prompt
 
 
-def _route_detail(prompt: str) -> dict:
-    """First-match-wins keyword routing with explanation."""
+def _match_rule(prompt: str) -> dict | None:
+    """Return routing result for a single prompt string, or None if no rule matched."""
     for rule in RULES:
         matched = next(
             (kw for kw in rule.get("keywords", []) if _keyword_in(str(kw), prompt)), None
@@ -177,7 +179,6 @@ def _route_detail(prompt: str) -> dict:
                 "remapped_cluster": remapped_cluster,
             }
         for fb in rule.get("fallback", []):
-            # fallback entries can be model aliases or cluster names
             fb_cluster = _remap_cluster(fb)
             fb_alias = _cluster_to_model.get(fb_cluster, fb)
             if fb_alias in _healthy_aliases:
@@ -192,11 +193,25 @@ def _route_detail(prompt: str) -> dict:
                     "remapped_fallback": fb_cluster,
                 }
         # primary + fallbacks all down — skip rule, try next
+    return None
+
+
+def _route_detail(messages: list[dict]) -> dict:
+    """First-match-wins keyword routing across conversation history.
+
+    Scans user messages most-recent first so a short reply like "yes" inherits
+    the routing context of earlier messages in the same conversation.
+    ponytail: walk history rather than adding session state
+    """
+    for prompt in _extract_user_messages(messages):
+        result = _match_rule(prompt)
+        if result is not None:
+            return result
     return {"model": _default_model(), "reason": "default"}
 
 
-def _route(prompt: str) -> str:
-    return str(_route_detail(prompt).get("model") or "")
+def _route(messages: list[dict]) -> str:
+    return str(_route_detail(messages).get("model") or "")
 
 
 # --- proxy ---
@@ -292,18 +307,19 @@ async def v1_chat_completions(request: Request):
     explicit_model = bool(model_val) and model_val not in _ROUTE_SENTINELS
 
     await _maybe_refresh()
-    prompt = _extract_prompt(payload.get("messages", []))
+    messages = payload.get("messages", [])
+    last_prompt = (_extract_user_messages(messages) or [""])[0]
     if ENABLED and not explicit_model:
-        chosen = _route(prompt)
+        chosen = _route(messages)
         if not chosen:
             return JSONResponse({"detail": "no healthy model available"}, status_code=503)
         payload["model"] = chosen
         cluster = next((k for k, v in _cluster_to_model.items() if v == chosen), "?")
-        print(f"router: [{cluster}] {chosen} ← {prompt[:80]!r}", flush=True)
+        print(f"router: [{cluster}] {chosen} ← {last_prompt[:80]!r}", flush=True)
     else:
         model = payload.get("model", "")
         cluster = next((k for k, v in _cluster_to_model.items() if v == model), "client-specified")
-        print(f"router: [{cluster}] {model} ← {prompt[:80]!r}", flush=True)
+        print(f"router: [{cluster}] {model} ← {last_prompt[:80]!r}", flush=True)
 
     if _is_stream(payload):
         return await _proxy_stream(payload, request)
@@ -317,9 +333,12 @@ async def route_preview(request: Request):
         payload = json.loads(body) if body else {}
     except json.JSONDecodeError:
         payload = {}
-    prompt = str(payload.get("prompt") or "").lower()
+    # Accept either a messages array or a legacy plain-text prompt string
+    messages = payload.get("messages") or [
+        {"role": "user", "content": str(payload.get("prompt") or "")}
+    ]
     await _maybe_refresh()
-    return _route_detail(prompt)
+    return _route_detail(messages)
 
 
 @router.get("/health")
