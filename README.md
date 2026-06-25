@@ -290,9 +290,23 @@ When you start a model on a cluster in the **Architecture** tab, select a profil
 
 ### Router
 
-The **Architecture** tab includes a router config editor for managing keyword-based request routing. Requests sent with `model=auto` or `model=router` are matched against routing rules — the first matching rule's target cluster handles the request. Rules are evaluated in order and support exact-prefix matching on the prompt text.
+The **Architecture** tab includes a router config editor for managing request routing. Requests sent with `model=auto` or `model=router` are matched against routing rules — the first matching rule's target cluster handles the request. Rules are evaluated in order.
 
-The router is a standalone container (`local-llm-router`) that reloads its config live when updated via the UI. Each routing decision is logged and visible in the **Logs** tab (router source) and in the Langfuse trace metadata.
+Each rule can match on **keywords** (word-boundary substring match against the prompt) and/or **structural signals** that fire based on prompt shape rather than content:
+
+| Signal | Fires when |
+|---|---|
+| `has_code_block` | Prompt contains a triple-backtick fence or 4-space-indented block |
+| `has_math` | Prompt contains Unicode math symbols or LaTeX (`$...$`, `\frac`, `\sum`, etc.) |
+| `long_prompt` | Prompt is more than 120 words |
+| `short_prompt` | Prompt is fewer than 15 words |
+| `is_question` | Prompt ends with `?` and is under 30 words |
+
+A rule fires if any keyword **or** any signal matches. Signals complement keywords — a code block in the prompt routes to the code cluster even if no coding keywords appear in the text.
+
+The router is a standalone container (`local-llm-router`) that reloads its config live when updated via the UI. Each routing decision is logged and visible in the **Logs** tab (router source) and in the Langfuse trace metadata. The matched keyword or signal (e.g. `signal:has_code_block`) is included in the log line.
+
+Routing rules are stored in `configs/router_rules.json` in the git repo and bind-mounted into both the router and management containers. UI edits write directly to that file, so rule changes are always version-controlled — `git diff` on the server shows what changed.
 
 Open WebUI defaults to the `router` model so all conversations are automatically dispatched to the appropriate cluster without manual model selection.
 
