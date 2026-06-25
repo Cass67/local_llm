@@ -1,19 +1,337 @@
 {
-  "backend_url": "http://ubt26:3100",
-  "default_model": null,
+  "backend_url": "http://127.0.0.1:3100",
+  "default_model": "qwopus3.6-27b-coder-mtp-q5km",
   "health_check_interval_s": 10,
+  "enabled": false,
   "rules": [
     {
-      "name": "code tasks",
-      "keywords": ["code", "python", "bug", "debug", "function", "api", "deploy", "docker", "git", "test"],
-      "cluster": "7900-1",
-      "fallback": ["7900-2"]
+      "name": "agent/system/tooling prompts",
+      "keywords": [
+        "system-reminder",
+        "tool result",
+        "create a new anchored summary",
+        "conversation history",
+        "edit the file",
+        "read the file",
+        "run command",
+        "apply patch",
+        "diagnostics",
+        "lsp",
+        "ast-grep",
+        "screenshot",
+        "web ui",
+        "ui",
+        "api endpoint",
+        "route",
+        "router",
+        "config",
+        "json",
+        "yaml",
+        "typescript",
+        "python",
+        "svelte",
+        "fastapi"
+      ],
+      "cluster": "7900sv",
+      "fallback": []
     },
     {
-      "name": "creative writing",
-      "keywords": ["write", "story", "poem", "creative", "essay", "blog"],
-      "cluster": "7900-2",
-      "fallback": ["7900-1"]
+      "name": "code implementation & features",
+      "keywords": [
+        "implement",
+        "write code",
+        "add feature",
+        "create function",
+        "build",
+        "refactor",
+        "rewrite",
+        "code",
+        "function",
+        "class",
+        "module",
+        "component",
+        "endpoint",
+        "button",
+        "checkbox",
+        "toggle",
+        "apply",
+        "deploy",
+        "restart",
+        "fix benchmarking",
+        "bench",
+        "benchmark",
+        "golang",
+        "go ",
+        "rust",
+        "javascript",
+        "typescript code",
+        "show me",
+        "write me",
+        "give me",
+        "example",
+        "sample",
+        "demo",
+        "web server",
+        "web service",
+        "http server",
+        "fancy"
+      ],
+      "signals": ["has_code_block"],
+      "cluster": "7900sv",
+      "fallback": []
+    },
+    {
+      "name": "debugging & fixing",
+      "keywords": [
+        "debug",
+        "fix",
+        "bug",
+        "error",
+        "exception",
+        "traceback",
+        "failing",
+        "broken",
+        "crash",
+        "diagnose",
+        "root cause",
+        "not working",
+        "service unavailable",
+        "runner unavailable",
+        "failed",
+        "stale",
+        "wrong model"
+      ],
+      "cluster": "7900sv",
+      "fallback": []
+    },
+    {
+      "name": "git actions (do it)",
+      "keywords": [
+        "merge branch",
+        "merge the",
+        "merge this",
+        "merge into",
+        "commit this",
+        "commit and push",
+        "push to",
+        "push the",
+        "rebase onto",
+        "cherry-pick",
+        "create pr",
+        "open pr",
+        "raise pr",
+        "squash",
+        "amend",
+        "create a branch",
+        "checkout -b",
+        "commit",
+        "move to main",
+        "move to branch",
+        "switch branch",
+        "checkout main",
+        "checkout master",
+        "pull request",
+        "fetch origin",
+        "git pull",
+        "git push",
+        "merge conflict",
+        "resolve conflict"
+      ],
+      "cluster": "7900sv",
+      "fallback": []
+    },
+    {
+      "name": "git info & repo lookup",
+      "keywords": [
+        "git log",
+        "git diff",
+        "git blame",
+        "git status",
+        "git show",
+        "what branch",
+        "which commit",
+        "git stash",
+        "git history",
+        "find file",
+        "search repo",
+        "search codebase",
+        "find function",
+        "find class",
+        "where is this implemented"
+      ],
+      "cluster": "7900sv",
+      "fallback": []
+    },
+    {
+      "name": "code review & audit",
+      "keywords": [
+        "review",
+        "audit",
+        "security",
+        "vulnerability",
+        "check for",
+        "analyse",
+        "analyze",
+        "inspect",
+        "look at this",
+        "what do you think",
+        "over-engineered",
+        "simplify"
+      ],
+      "cluster": "7900sv",
+      "fallback": []
+    },
+    {
+      "name": "architecture & design",
+      "keywords": [
+        "architecture",
+        "design",
+        "plan",
+        "approach",
+        "structure",
+        "pattern",
+        "best way",
+        "should i",
+        "trade-off",
+        "tradeoff",
+        "strategy"
+      ],
+      "cluster": "7900sv",
+      "fallback": []
+    },
+    {
+      "name": "testing",
+      "keywords": [
+        "test",
+        "testing",
+        "unit test",
+        "integration test",
+        "mock",
+        "coverage",
+        "assertion",
+        "pytest",
+        "spec"
+      ],
+      "cluster": "7900sv",
+      "fallback": []
+    },
+    {
+      "name": "devops & infrastructure",
+      "keywords": [
+        "docker",
+        "kubernetes",
+        "deploy",
+        "deployment",
+        "ci",
+        "cd",
+        "pipeline",
+        "infra",
+        "nginx",
+        "caddy",
+        "ssl",
+        "certificate",
+        "systemctl service",
+        "journalctl",
+        "container",
+        "gpu",
+        "cuda",
+        "rocm",
+        "nvidia"
+      ],
+      "cluster": "7900sv",
+      "fallback": []
+    },
+    {
+      "name": "web & internet search",
+      "keywords": [
+        "internet",
+        "search online",
+        "look up online",
+        "lookup online",
+        "browse web",
+        "find online",
+        "latest news",
+        "web search",
+        "current version"
+      ],
+      "cluster": "P40",
+      "fallback": ["7900sv"]
+    },
+    {
+      "name": "quick lookup & definitions",
+      "keywords": [
+        "define ",
+        "explain briefly",
+        "tldr",
+        "meaning of",
+        "quick question",
+        "one word answer",
+        "yes or no"
+      ],
+      "signals": ["is_question", "short_prompt"],
+      "cluster": "P40",
+      "fallback": ["7900sv"]
+    },
+    {
+      "name": "shell command syntax",
+      "keywords": [
+        "what command",
+        "chmod syntax",
+        "chown syntax",
+        "mkdir syntax",
+        "ls syntax",
+        "ps syntax",
+        "grep syntax",
+        "awk syntax",
+        "sed syntax",
+        "curl syntax",
+        "wget syntax"
+      ],
+      "cluster": "P40",
+      "fallback": ["7900sv"]
+    },
+    {
+      "name": "translation & language",
+      "keywords": [
+        "translate",
+        "translation",
+        "in french",
+        "in spanish",
+        "in german",
+        "in japanese",
+        "grammar",
+        "spelling",
+        "proofread"
+      ],
+      "cluster": "P40",
+      "fallback": ["7900sv"]
+    },
+    {
+      "name": "math & calculations",
+      "keywords": [
+        "calculate",
+        "calculation",
+        "formula",
+        "convert units",
+        "percentage",
+        "equation"
+      ],
+      "signals": ["has_math"],
+      "cluster": "P40",
+      "fallback": ["7900sv"]
+    },
+    {
+      "name": "docs & api lookup",
+      "keywords": [
+        "api reference",
+        "man page",
+        "syntax for",
+        "parameters for",
+        "signature of"
+      ],
+      "cluster": "P40",
+      "fallback": ["7900sv"]
     }
-  ]
+  ],
+  "cluster_remap": {}
 }

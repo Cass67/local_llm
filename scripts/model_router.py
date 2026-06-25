@@ -158,12 +158,45 @@ def _keyword_in(keyword: str, prompt: str) -> bool:
     return keyword in prompt
 
 
+# Structural signal detectors — operate on the raw (lowercased) prompt text.
+# Each returns True/False. Keep them fast: no LLM, no network.
+_SIGNAL_CHECKS: dict[str, "re.Pattern[str] | None"] = {}
+
+_CODE_BLOCK_RE = re.compile(r"```|^\s{4}\S", re.MULTILINE)
+_MATH_RE = re.compile(r"[∑∫∂∇∏√≈≠≤≥±×÷∈∉∩∪⊂⊃]|\$[^$]+\$|\\frac|\\sum|\\int")
+_WORD_RE = re.compile(r"\S+")
+
+
+def _eval_signal(signal: str, prompt: str) -> bool:
+    match signal:
+        case "has_code_block":
+            return bool(_CODE_BLOCK_RE.search(prompt))
+        case "has_math":
+            return bool(_MATH_RE.search(prompt))
+        case "long_prompt":
+            return len(_WORD_RE.findall(prompt)) > 120
+        case "short_prompt":
+            return len(_WORD_RE.findall(prompt)) < 15
+        case "is_question":
+            stripped = prompt.strip()
+            return stripped.endswith("?") and len(_WORD_RE.findall(stripped)) < 30
+        case _:
+            return False
+
+
+def _match_signals(signals: list[str], prompt: str) -> str | None:
+    """Return first signal that fires, or None."""
+    return next((s for s in signals if _eval_signal(s, prompt)), None)
+
+
 def _match_rule(prompt: str) -> dict | None:
     """Return routing result for a single prompt string, or None if no rule matched."""
     for rule in RULES:
-        matched = next(
-            (kw for kw in rule.get("keywords", []) if _keyword_in(str(kw), prompt)), None
-        )
+        keywords = rule.get("keywords", [])
+        signals = rule.get("signals", [])
+        matched_kw = next((kw for kw in keywords if _keyword_in(str(kw), prompt)), None)
+        matched_sig = _match_signals(signals, prompt) if not matched_kw else None
+        matched = matched_kw or (f"signal:{matched_sig}" if matched_sig else None)
         if not matched:
             continue
         raw_cluster = rule.get("cluster")

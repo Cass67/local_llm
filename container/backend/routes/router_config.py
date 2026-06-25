@@ -35,10 +35,14 @@ def _validate(cfg: dict) -> None:
     if not isinstance(cfg.get("rules", []), list):
         raise HTTPException(status_code=422, detail="rules must be a list")
     for rule in cfg.get("rules", []):
-        if not isinstance(rule.get("keywords"), list):
+        keywords = rule.get("keywords", [])
+        signals = rule.get("signals", [])
+        if not isinstance(keywords, list):
             raise HTTPException(status_code=422, detail="each rule needs a keywords list")
-        if not rule.get("keywords"):
-            raise HTTPException(status_code=422, detail="each rule needs at least one keyword")
+        if not keywords and not signals:
+            raise HTTPException(
+                status_code=422, detail="each rule needs at least one keyword or signal"
+            )
         if not rule.get("cluster") and not rule.get("model"):
             raise HTTPException(status_code=422, detail="each rule needs cluster or model")
 
