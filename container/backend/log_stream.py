@@ -10,9 +10,22 @@ from urllib.parse import quote
 from . import config
 
 
-def _filter_log_noise(lines: list[str]) -> list[str]:
+_NOISE_MGMT = '"GET /logs HTTP/1.1"'
+# Router gets polled for /health and /v1/models every ~10s — filter those so
+# actual routing decisions (router: [...]) are visible without the spam.
+_NOISE_ROUTER = (
+    '"GET /health HTTP/1.1"',
+    '"GET /v1/models HTTP/1.1"',
+    '"GET /route/preview HTTP/1.1"',
+)
+
+
+def _filter_log_noise(lines: list[str], container: str = "") -> list[str]:
     """Remove log lines caused by log viewers polling runtime endpoints."""
-    return [line for line in lines if '"GET /logs HTTP/1.1"' not in line]
+    result = [line for line in lines if _NOISE_MGMT not in line]
+    if "router" in container:
+        result = [line for line in result if not any(n in line for n in _NOISE_ROUTER)]
+    return result
 
 
 class _UnixHTTPConnection(http.client.HTTPConnection):
@@ -70,7 +83,7 @@ def _docker_logs_tail(lines: int, container: str = "local-llm-runner") -> list[s
     finally:
         conn.close()
     text = _decode_docker_log_bytes(content)
-    return _filter_log_noise(text.splitlines())
+    return _filter_log_noise(text.splitlines(), container)
 
 
 def read_log_tail(lines: int = 100, source: str = "runner") -> list[str]:
@@ -120,9 +133,8 @@ async def stream_log_tail(
                     break
                 frame = buf[8 : 8 + size].decode("utf-8", errors="replace")
                 buf = buf[8 + size :]
-                for line in frame.splitlines():
-                    if '"GET /logs HTTP/1.1"' not in line:
-                        yield f"data: {line}\n\n"
+                for line in _filter_log_noise(frame.splitlines(), container):
+                    yield f"data: {line}\n\n"
 
             try:
                 chunk = await asyncio.wait_for(loop.sock_recv(sock, 4096), timeout=1.0)
