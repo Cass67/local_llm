@@ -236,6 +236,15 @@ def idle_check(timeout_s: float) -> None:
         active = read_active(cluster.id)
         if not active:
             continue
+        runner = _runner_for(cluster)
+        if not runner.is_running():
+            # Container crashed or was stopped externally — evict stale active
+            # entry now so the next chat request triggers ensure_running instead
+            # of forwarding to a dead port for up to timeout_s seconds.
+            logging.info("idle_check: cluster=%s not running — clearing stale active entry", cluster.name)
+            remove_active(cluster.id)
+            _last_request.pop(cluster.id, None)
+            continue
         last = _last_request.get(cluster.id)
         if last is None:
             # No request recorded since startup — seed from now so we don't
@@ -245,7 +254,6 @@ def idle_check(timeout_s: float) -> None:
         if now - last >= timeout_s:
             logging.info("idle_check: cluster=%s idle=%.0fs — stopping", cluster.name, now - last)
             # ponytail: keep desired so the model reloads on next request
-            runner = _runner_for(cluster)
             try:
                 runner.stop()
             except Exception:  # nosec B110
