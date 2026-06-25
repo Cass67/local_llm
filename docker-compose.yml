@@ -146,8 +146,8 @@ services:
     volumes:
       - ./configs/searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
-      SEARXNG_BASE_URL: "http://127.0.0.1:3005/"
-      GRANIAN_HOST: "127.0.0.1"
+      SEARXNG_BASE_URL: "http://192.168.2.1:3005/"
+      GRANIAN_HOST: "192.168.2.1"
       GRANIAN_PORT: "3005"
 
 volumes:
