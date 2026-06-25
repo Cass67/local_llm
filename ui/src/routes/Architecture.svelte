@@ -51,12 +51,15 @@
 	let showAddRule = $state(false);
 	async function loadRouter() {
 		try {
-			const [cfg, health] = await Promise.all([fetchRouterConfig(), fetchRouterHealth()]);
-			routerCfg = cfg;
-			routerHealth = health;
+			routerCfg = await fetchRouterConfig();
 		} catch (e: any) {
 			routerError = e.message;
 		}
+		// Health check is slow (3s timeout if router offline) — fire separately
+		// so config + rules render immediately.
+		fetchRouterHealth().then(h => routerHealth = h).catch(() => {
+			routerHealth = { running: false };
+		});
 	}
 
 	async function saveRouter() {
@@ -236,12 +239,8 @@
 	}
 
 	onMount(() => {
-		loadGpus();
-		loadClusters();
-		loadModels();
-		loadRouter();
-		loadIdle();
-		loadProfiles();
+		Promise.all([loadClusters(), loadModels(), loadRouter(), loadIdle(), loadProfiles()]);
+		loadGpus(); // potentially slow hardware detection — runs in parallel but last
 	});
 
 	function togglePci(pci: string) {
