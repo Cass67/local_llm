@@ -24,8 +24,10 @@ services:
       - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface/hub}:/models
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/lib/x86_64-linux-gnu:/host/nvidia-libs:ro  # needed for mixed_vulkan: mgmt globs NVIDIA graphics libs from here to bind-mount into runner
+      - ./configs:/configs
     environment:
       LOCAL_LLM_STATE_DIR: /state
+      ROUTER_CONFIG: /configs/router_rules.json
       MODELS_CACHE_DIR: /models
       HOST_MODELS_CACHE_DIR: ${HF_CACHE_DIR:-${HOME}/.cache/huggingface/hub}
       DOCKER_SOCKET: /var/run/docker.sock
@@ -53,11 +55,10 @@ services:
     depends_on:
       - local-llm-mgmt
     volumes:
-      - ${LOCAL_LLM_STATE_DIR:-${HOME}/.local/share/local_llm}:/state
+      - ./configs:/configs
     environment:
       ROUTER_PORT: "3200"
-      ROUTER_CONFIG: /state/router_rules.json
-      LOCAL_LLM_STATE_DIR: /state
+      ROUTER_CONFIG: /configs/router_rules.json
 
   # ── Caddy reverse proxy ──────────────────────────────────────────────────────
   # Single public entrypoint on :3001.
