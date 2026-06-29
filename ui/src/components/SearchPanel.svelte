@@ -316,7 +316,10 @@
 								{/if}
 							{:else if $searchState.installingRepos[candidate.repo]}
 								{@const prog = $searchState.downloadProgress[candidate.repo]}
+								{@const activeFile = $searchState.installingFiles[candidate.repo]}
+								{@const activeQuant = candidate.all_files?.find(f => f.name === activeFile)?.quant ?? activeFile?.split('/').pop()?.replace('.gguf','') ?? ''}
 								<span class="installing">
+									{#if activeQuant}<code class="active-quant">{activeQuant}</code>{/if}
 									{#if prog && prog.downloaded > 0}
 										{#if prog.total > 0}
 											<span class="progress-bar-wrap">
@@ -476,6 +479,7 @@
 	.quant-row.best-quant td { background: color-mix(in srgb, var(--accent) 8%, var(--bg-alt, #1a1a1a)); }
 	.quant-file { font-family: 'JetBrains Mono', monospace; color: var(--text-muted); max-width: 20rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.size-label { font-size: 0.75rem; color: var(--text-muted); }
+	.active-quant { margin-right: 0.4rem; color: var(--accent); }
 	.installed { color: var(--green); font-size: 0.8rem; font-weight: bold; }
 	.installing { color: var(--yellow); font-size: 0.8rem; display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
 	.progress-bar-wrap { display: inline-block; width: 60px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }

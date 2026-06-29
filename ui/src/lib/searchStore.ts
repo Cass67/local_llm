@@ -24,6 +24,7 @@ export interface SearchState {
 	sortMode: SortMode;
 	page: number;
 	installingRepos: Record<string, true>;
+	installingFiles: Record<string, string>;
 	installStatus: Record<string, "installed" | string | InstallErrorDetail>;
 	vramGb: number | null;
 	downloadProgress: Record<string, DownloadProgress>;
@@ -62,6 +63,7 @@ const initialState: SearchState = {
 	sortMode: "score",
 	page: 1,
 	installingRepos: {},
+	installingFiles: {},
 	installStatus: {},
 	vramGb: null,
 	downloadProgress: {},
@@ -137,6 +139,7 @@ export function createSearchStore(api: SearchApi): SearchStore {
 			state.update((current) => ({
 				...current,
 				installingRepos: { ...current.installingRepos, [candidate.repo]: true },
+				installingFiles: { ...current.installingFiles, [candidate.repo]: candidate.best_file },
 			}));
 			startProgressPoll();
 			const promise = api
@@ -163,9 +166,9 @@ export function createSearchStore(api: SearchApi): SearchStore {
 				.finally(() => {
 					installs.delete(candidate.repo);
 					state.update((current) => {
-						const { [candidate.repo]: _done, ...installingRepos } =
-							current.installingRepos;
-						return { ...current, installingRepos };
+						const { [candidate.repo]: _done, ...installingRepos } = current.installingRepos;
+						const { [candidate.repo]: _file, ...installingFiles } = current.installingFiles;
+						return { ...current, installingRepos, installingFiles };
 					});
 					if (installs.size === 0) stopProgressPoll();
 				});
