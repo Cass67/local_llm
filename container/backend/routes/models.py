@@ -2,9 +2,11 @@
 
 import json
 from pathlib import Path
+
 from fastapi import APIRouter
+
 from .. import config
-from ..models import ModelInfo, ModelConfig, ModelListResponse
+from ..models import ModelConfig, ModelInfo, ModelListResponse
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -67,6 +69,17 @@ def _read_accepted_models() -> list[ModelInfo]:
 
         downloaded = _is_downloaded(data, cached)
 
+        context = data.get("context")
+        if context is None:
+            try:
+                profiles = json.loads(config.PROFILES_CONFIG.read_text())
+                fam_data = profiles.get("families", {}).get(str(family), {})
+                profile_name = str(data.get("profile", "reliable"))
+                profile_cfg = fam_data.get("profiles", {}).get(profile_name, {})
+                context = profile_cfg.get("context")
+            except (OSError, json.JSONDecodeError, AttributeError):
+                pass
+
         models.append(
             ModelInfo(
                 family=str(family),
@@ -74,7 +87,7 @@ def _read_accepted_models() -> list[ModelInfo]:
                 model_name=str(data.get("model_name", family)),
                 label=data.get("label") or None,
                 profile=str(data.get("profile", "reliable")),
-                context=data.get("context"),
+                context=context,
                 backend=str(data.get("backend") or config_data.get("backend", "rocm")),
                 reasoning=bool(data.get("reasoning", False)),
                 config=model_cfg,
