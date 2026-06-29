@@ -1,0 +1,2 @@
+# GPU runner containers must run as root to access /dev/dri, /dev/kfd, nvidia devices
+DS-0002

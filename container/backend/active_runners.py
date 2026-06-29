@@ -62,14 +62,14 @@ def _wait_ready(runner: DockerRunner, port: int, timeout: float = 120.0) -> bool
             if conn is not None:
                 try:
                     conn.close()
-                except Exception:  # nosec B110
+                except Exception:  # nosec B110  # noqa: BLE001, S110
                     pass
         time.sleep(1)
     return False
 
 
 def _apply_profile_config(meta: dict[str, Any]) -> None:
-    """Overlay named profile config from profiles.json onto meta."""
+    """Replace config with saved profile — profile is the single source of truth."""
     family = str(meta.get("family", ""))
     profile_name = str(meta.get("profile", ""))
     if not family or not profile_name:
@@ -78,16 +78,23 @@ def _apply_profile_config(meta: dict[str, Any]) -> None:
         data = json.loads(config.PROFILES_CONFIG.read_text())
     except (OSError, json.JSONDecodeError):
         return
-    profile_cfg = data.get("families", {}).get(family, {}).get("profiles", {}).get(profile_name)
+    fam_data = data.get("families", {}).get(family, {})
+    # Fall back to family default if the named profile doesn't exist
+    if profile_name not in fam_data.get("profiles", {}):
+        profile_name = fam_data.get("default", profile_name)
+        meta["profile"] = profile_name
+    profile_cfg = fam_data.get("profiles", {}).get(profile_name)
     if not isinstance(profile_cfg, dict):
         return
-    cfg = meta.setdefault("config", {})
+    # Wipe accepted config — profile is authoritative; cluster keys added after
+    meta["config"] = {}
+    cfg = meta["config"]
     for key, value in profile_cfg.items():
         if value is None:
             continue
         if key == "context":
             meta["context"] = value
-            cfg["ctx"] = value  # runtime reads cfg["ctx"] first
+            cfg["ctx"] = value
         else:
             cfg[key] = value
 
@@ -183,7 +190,7 @@ def stop(cluster: ClusterDef) -> None:
     runner = _runner_for(cluster)
     try:
         runner.stop()
-    except Exception:  # nosec B110
+    except Exception:  # nosec B110  # noqa: BLE001, S110
         pass
     remove_active(cluster.id)
     remove_desired(cluster.id)
@@ -204,7 +211,7 @@ def restore_desired(resolve_accepted) -> list[str]:
             accepted["profile"] = str(entry.get("profile") or accepted.get("profile") or "reliable")
             start(cluster, accepted)
             restored.append(cluster_id)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logging.warning("restore %s failed: %s", cluster_id, exc)
             continue
     return restored
@@ -241,7 +248,9 @@ def idle_check(timeout_s: float) -> None:
             # Container crashed or was stopped externally — evict stale active
             # entry now so the next chat request triggers ensure_running instead
             # of forwarding to a dead port for up to timeout_s seconds.
-            logging.info("idle_check: cluster=%s not running — clearing stale active entry", cluster.name)
+            logging.info(
+                "idle_check: cluster=%s not running — clearing stale active entry", cluster.name
+            )
             remove_active(cluster.id)
             _last_request.pop(cluster.id, None)
             continue
@@ -256,7 +265,7 @@ def idle_check(timeout_s: float) -> None:
             # ponytail: keep desired so the model reloads on next request
             try:
                 runner.stop()
-            except Exception:  # nosec B110
+            except Exception:  # nosec B110  # noqa: BLE001, S110
                 pass
             remove_active(cluster.id)
 

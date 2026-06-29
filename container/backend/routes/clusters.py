@@ -112,7 +112,15 @@ async def del_cluster(cluster_id: str):
 
 class StartRequest(BaseModel):
     family: str
-    profile: str = "reliable"
+    profile: str = ""  # empty = use saved default for this family
+
+
+def _default_profile(family: str) -> str:
+    try:
+        data = json.loads(config.PROFILES_CONFIG.read_text())
+        return data.get("families", {}).get(family, {}).get("default", "") or "balanced"
+    except (OSError, json.JSONDecodeError):
+        return "balanced"
 
 
 def _resolve_accepted(family: str) -> dict:
@@ -124,8 +132,8 @@ def _resolve_accepted(family: str) -> dict:
         raise HTTPException(status_code=404, detail=f"model family '{family}' not found")
     try:
         data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        raise HTTPException(status_code=500, detail="corrupt model metadata")
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="corrupt model metadata") from exc
     if not isinstance(data, dict):
         raise HTTPException(status_code=500, detail="invalid model metadata")
     return data
@@ -137,7 +145,9 @@ async def start_cluster(cluster_id: str, req: StartRequest):
     if not cluster:
         raise HTTPException(status_code=404, detail="cluster not found")
     accepted = _resolve_accepted(req.family)
-    accepted["profile"] = req.profile
+    # Use saved default profile if none specified
+    profile = req.profile or _default_profile(req.family)
+    accepted["profile"] = profile
     try:
         await asyncio.to_thread(active_runners.start, cluster, accepted)
     except (RuntimeError, ValueError) as exc:
