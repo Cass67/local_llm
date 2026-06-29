@@ -6,7 +6,7 @@
 	import type { DownloadProgress } from "../lib/searchStore";
 	import { installStatusView } from "../lib/installStatus";
 	import { searchStore } from "../lib/searchStore";
-	import type { ClusterInfo, GpuInfo, SearchCandidate } from "../lib/types";
+	import type { ClusterInfo, GpuInfo, SearchCandidate, CandidateFile } from "../lib/types";
 
 	type InstallErrorDetail = {
 		status: "error";
@@ -102,8 +102,20 @@
 		await (searchStore.search as (targetVramGb?: number) => Promise<void>)(selectedVramGb || undefined);
 	}
 
+	let expandedRepos: Set<string> = $state(new Set());
+
+	function toggleExpand(repo: string) {
+		const next = new Set(expandedRepos);
+		if (next.has(repo)) next.delete(repo); else next.add(repo);
+		expandedRepos = next;
+	}
+
 	async function doInstall(candidate: SearchCandidate) {
 		await searchStore.install(candidate, "balanced");
+	}
+
+	async function doInstallFile(candidate: SearchCandidate, file: CandidateFile) {
+		await searchStore.install({ ...candidate, best_file: file.name, best_quant: file.quant }, "balanced");
 	}
 
 	async function showHFCard(repo: string) {
@@ -321,8 +333,32 @@
 								<button class="install-btn" onclick={() => doInstall(candidate)}>Install</button>
 							{/if}
 							<button class="card-btn" onclick={() => showHFCard(candidate.repo)}>Card</button>
+							{#if candidate.all_files && candidate.all_files.length > 1}
+								<button class="quants-btn" onclick={() => toggleExpand(candidate.repo)}>
+									{expandedRepos.has(candidate.repo) ? "▾ Quants" : "▸ Quants"}
+								</button>
+							{/if}
 						</td>
 					</tr>
+					{#if expandedRepos.has(candidate.repo) && candidate.all_files}
+						{#each candidate.all_files as file}
+							<tr class="quant-row" class:best-quant={file.name === candidate.best_file}>
+								<td></td>
+								<td colspan="2" class="quant-file" title={file.name}>{file.name}</td>
+								<td><code>{file.quant}</code></td>
+								<td><span class="size-label">{file.size_gb} GB</span></td>
+								<td class="actions">
+									{#if getStatus(candidate.repo) === "installed" && candidate.best_file === file.name}
+										<span class="installed">✓ Installed</span>
+									{:else if $searchState.installingRepos[candidate.repo]}
+										<span class="installing">…</span>
+									{:else}
+										<button class="install-btn" onclick={() => doInstallFile(candidate, file)}>Install</button>
+									{/if}
+								</td>
+							</tr>
+						{/each}
+					{/if}
 				{/each}
 			</tbody>
 		</table>
@@ -434,6 +470,12 @@
 	.install-btn { padding: 0.2rem 0.5rem; background: var(--accent); color: var(--text); border: none; border-radius: 3px; cursor: pointer; font-size: 0.75rem; font-weight: bold; }
 	.card-btn, .details-btn { padding: 0.2rem 0.5rem; background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; font-size: 0.75rem; transition: all 0.1s; }
 	.card-btn:hover, .details-btn:hover { border-color: var(--text-muted); color: var(--text); }
+	.quants-btn { padding: 0.2rem 0.5rem; background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; font-size: 0.75rem; transition: all 0.1s; }
+	.quants-btn:hover { border-color: var(--text-muted); color: var(--text); }
+	.quant-row td { background: var(--bg-alt, #1a1a1a); font-size: 0.8rem; padding: 0.2rem 0.5rem; border-bottom: none; }
+	.quant-row.best-quant td { background: color-mix(in srgb, var(--accent) 8%, var(--bg-alt, #1a1a1a)); }
+	.quant-file { font-family: 'JetBrains Mono', monospace; color: var(--text-muted); max-width: 20rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.size-label { font-size: 0.75rem; color: var(--text-muted); }
 	.installed { color: var(--green); font-size: 0.8rem; font-weight: bold; }
 	.installing { color: var(--yellow); font-size: 0.8rem; display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
 	.progress-bar-wrap { display: inline-block; width: 60px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
