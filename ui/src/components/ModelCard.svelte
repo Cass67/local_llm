@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Backend, ModelInfo, ClusterInfo } from "../lib/types";
-	import { editModel } from "../lib/api";
+	import { editModel, fetchFamilyProfiles } from "../lib/api";
 
 	let {
 		model,
@@ -50,12 +50,19 @@
 
 	let selectedProfile = $state("");
 	let selectedCluster = $state("");
+	let savedProfiles: string[] = $state([]);
 	let otherBackends = $derived(ALL_BACKENDS.filter((b) => b !== model.backend));
 	let isRunning = $derived(runningClusterIds.length > 0);
 	let idleClusters = $derived(clusters.filter((c) => !runningClusterIds.includes(c.id)));
 
 	$effect(() => {
-		if (!selectedProfile) selectedProfile = model.profile || "reliable";
+		fetchFamilyProfiles(model.family).then((data) => {
+			const names = Object.keys(data.profiles ?? {});
+			savedProfiles = names;
+			if (!selectedProfile) selectedProfile = data.default || names[0] || model.profile || "balanced";
+		}).catch(() => {
+			if (!selectedProfile) selectedProfile = model.profile || "balanced";
+		});
 		if (!selectedCluster && idleClusters.length === 1) selectedCluster = idleClusters[0].id;
 	});
 
@@ -114,12 +121,12 @@
 					placeholder="profile"
 				/>
 				<datalist id={`profiles-${model.family}`}>
-					{#each STANDARD_PROFILES as p}
+					{#each savedProfiles as p}
 						<option value={p}></option>
 					{/each}
-					{#if model.profile && !STANDARD_PROFILES.includes(model.profile)}
-						<option value={model.profile}></option>
-					{/if}
+					{#each STANDARD_PROFILES.filter(p => !savedProfiles.includes(p)) as p}
+						<option value={p}></option>
+					{/each}
 				</datalist>
 				{#if idleClusters.length > 1}
 					<select class="cluster-select" bind:value={selectedCluster}>

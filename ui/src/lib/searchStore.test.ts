@@ -28,6 +28,7 @@ describe("createSearchStore", () => {
 				error: null,
 			}),
 			installModel: async () => ({ status: "installed" }),
+			fetchDownloadProgress: async () => ({}),
 		});
 
 		store.setQuery("qwen coding");
@@ -57,6 +58,7 @@ describe("createSearchStore", () => {
 		const store = createSearchStore({
 			searchModels: async () => ({ candidates: [], error: null }),
 			installModel: async () => installError,
+			fetchDownloadProgress: async () => ({}),
 		});
 		const candidate = {
 			repo: "Org/Model-GGUF",
@@ -76,6 +78,7 @@ describe("createSearchStore", () => {
 		const store = createSearchStore({
 			searchModels: async () => ({ candidates: [], error: null }),
 			installModel: async () => install.promise,
+			fetchDownloadProgress: async () => ({}),
 		});
 		const candidate = {
 			repo: "Org/Model-GGUF",
