@@ -344,6 +344,15 @@ def score_candidate(item: dict[str, Any], hardware: dict[str, Any]) -> dict[str,
             "Warning: Model size footprint overflows target hardware total VRAM cache capabilities."
         )
 
+    all_files = [
+        {
+            "name": f["name"],
+            "quant": f["quant"] or "unknown",
+            "size_gb": round(f["size"] / 1073741824, 2),
+        }
+        for f in sorted(gguf_files(item), key=lambda f: f["size"], reverse=True)
+    ]
+
     return {
         "repo": repo,
         "params_b": total_params,
@@ -362,6 +371,7 @@ def score_candidate(item: dict[str, Any], hardware: dict[str, Any]) -> dict[str,
         "downloads": int(downloads),
         "likes": int(likes),
         "notes": notes,
+        "all_files": all_files,
     }
 
 

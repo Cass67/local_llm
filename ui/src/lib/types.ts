@@ -93,6 +93,12 @@ export interface CopyBackendResponse {
 
 export type FitLevel = "perfect" | "good" | "marginal" | "too_tight";
 
+export interface CandidateFile {
+	name: string;
+	quant: string;
+	size_gb: number;
+}
+
 export interface SearchCandidate {
 	repo: string;
 	score: number;
@@ -103,6 +109,7 @@ export interface SearchCandidate {
 	memory_available_gb?: number;
 	size_class?: string;
 	params_b?: number | null;
+	all_files?: CandidateFile[];
 }
 
 export interface SearchResponse {
