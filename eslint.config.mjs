@@ -1,6 +1,5 @@
-// repo-guard scaffold.
-// TS flat-config starter. Needs `eslint`, `typescript-eslint`, `typescript`,
-// `eslint-config-prettier`.
+// Disabled: replaced by svelte-check in .pre-commit-config.yaml (see
+// #repo-guard:javascript:start). Keep for reference if re-enabling.
 
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";

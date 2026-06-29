@@ -97,10 +97,11 @@ local-llm-postgres  :5433  (Langfuse database)
 
 ```bash
 cp .env.example .env
-# Verify RENDER_GROUP and DOCKER_GROUP match your system:
-getent group render | cut -d: -f3
-getent group docker | cut -d: -f3
-```
+# Verify RENDER_GROUP matches your system:
+#   getent group render | cut -d: -f3
+#
+# Other variables use sensible defaults. See .env.example for each field's
+# purpose and default value.
 
 ### 2. Build the runner images
 
@@ -336,6 +337,10 @@ Open WebUI has web search built in, powered by a local SearXNG container on `:30
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `LOCAL_LLM_UID` | `1000` | UID the management container runs as. Match your host user. |
+| `LOCAL_LLM_GID` | `1000` | GID the management container runs as. Match your host group. |
+| `HF_CACHE_DIR` | `${HOME}/.cache/huggingface/hub` | Host path to the HF GGUF cache (bind-mounted into runner). |
+| `LOCAL_LLM_STATE_DIR` | `${HOME}/.local/share/local_llm` | Host path for accepted model metadata, state files, and benchmark DB. |
 | `RUNNER_IMAGE_VULKAN` | `local-llm-runner-vulkan:latest` | Image used when launching a model with `backend: vulkan`. |
 | `RUNNER_IMAGE_ROCM` | `local-llm-runner-rocm:latest` | Image used when launching a model with `backend: rocm`. |
 | `RUNNER_IMAGE_CUDA` | `local-llm-runner-cuda:latest` | Image used when launching a model with `backend: cuda`. |
