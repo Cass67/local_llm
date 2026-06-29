@@ -69,16 +69,18 @@ def _read_accepted_models() -> list[ModelInfo]:
 
         downloaded = _is_downloaded(data, cached)
 
-        context = data.get("context")
+        # Profile is authoritative — prefer its context over the accepted model JSON
+        context = None
+        try:
+            profiles = json.loads(config.PROFILES_CONFIG.read_text())
+            fam_data = profiles.get("families", {}).get(str(family), {})
+            profile_name = str(data.get("profile", "reliable"))
+            profile_cfg = fam_data.get("profiles", {}).get(profile_name, {})
+            context = profile_cfg.get("context")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
         if context is None:
-            try:
-                profiles = json.loads(config.PROFILES_CONFIG.read_text())
-                fam_data = profiles.get("families", {}).get(str(family), {})
-                profile_name = str(data.get("profile", "reliable"))
-                profile_cfg = fam_data.get("profiles", {}).get(profile_name, {})
-                context = profile_cfg.get("context")
-            except (OSError, json.JSONDecodeError, AttributeError):
-                pass
+            context = data.get("context")
 
         models.append(
             ModelInfo(
