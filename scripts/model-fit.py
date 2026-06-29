@@ -157,12 +157,13 @@ def gguf_files(item: dict[str, Any]) -> list[dict[str, Any]]:
         name = str(raw.get("rfilename") or raw.get("path") or raw.get("name") or "")
         if not name.lower().endswith(".gguf"):
             continue
-        # Skip auxiliary files (mmproj, text embeddings, etc.)
+        # Skip auxiliary files (mmproj, imatrix, text embeddings, etc.)
         lower = name.lower()
-        if any(lower.startswith(skip) for skip in ("mmproj", "text", "embedding")):
+        if any(tok in lower for tok in ("mmproj", "imatrix", "text", "embedding")):
             continue
         size = raw.get("size")
-        if not isinstance(size, int | float) or size <= 0:
+        # Skip stubs/pointer files — real GGUFs are at least 100 MB
+        if not isinstance(size, int | float) or size < 100 * 1024 * 1024:
             continue
         files.append({"name": name, "size": float(size), "quant": quant_from_filename(name)})
     return files
