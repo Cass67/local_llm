@@ -1,5 +1,0 @@
-family,repo,hf_file,ctx,batch,ubatch,spec_n,status,model_mib,kv_mib,rs_mib,compute_mib,prompt_tps,decode_tps,reason
-qwen-mtp,unsloth/Qwen3.6-35B-A3B-MTP-GGUF,Qwen3.6-35B-A3B-UD-IQ4_XS.gguf,65536,64,64,2,success,,,,,54.57,107.91,
-qwen-27b-mtp,unsloth/Qwen3.6-27B-MTP-GGUF,Qwen3.6-27B-IQ4_XS.gguf,65536,64,64,2,oom,,,,,,,OOM detected
-qwen-heretic-mtp,llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-GGUF,Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q4_K_S.gguf,65536,64,64,2,oom,,,,,,,OOM detected
-qwen-opus-mtp,noctrex/Qwopus3.6-27B-v1-preview-MTP-GGUF,Qwopus3.6-27B-v1-preview-MTP-IQ4_XS.gguf,65536,64,64,2,oom,,,,,,,OOM detected
