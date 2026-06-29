@@ -62,7 +62,8 @@
 				? $searchState.candidates.filter(
 						(c) =>
 							c.repo.toLowerCase().includes($searchState.filter.toLowerCase()) ||
-							c.best_quant.toLowerCase().includes($searchState.filter.toLowerCase()),
+							c.best_quant.toLowerCase().includes($searchState.filter.toLowerCase()) ||
+							c.best_file.toLowerCase().includes($searchState.filter.toLowerCase()),
 					)
 				: $searchState.candidates
 		).filter((c) => !hideTooTight || c.fit_level !== "too_tight"),
