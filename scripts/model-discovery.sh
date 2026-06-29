@@ -329,18 +329,19 @@ def fetch_tree(repo):
     except Exception:
         return []
 
-def has_sized_gguf(item):
+def count_sized_gguf(item):
+    count = 0
     for file_info in item.get("siblings") or item.get("gguf_files") or []:
         if not isinstance(file_info, dict):
             continue
         path = file_info.get("path") or file_info.get("rfilename")
         size = file_info.get("size")
         if isinstance(path, str) and path.lower().endswith(".gguf") and isinstance(size, (int, float)):
-            return True
-    return False
+            count += 1
+    return count
 
 for item in candidates:
-    if not isinstance(item, dict) or has_sized_gguf(item):
+    if not isinstance(item, dict) or count_sized_gguf(item) >= 3:
         continue
     tree = fetch_tree(repo_id(item))
     siblings = []
