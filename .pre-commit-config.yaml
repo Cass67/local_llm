@@ -1,5 +1,8 @@
 repos:
   # repo-guard:base:start
+# repo-guard:bash:end
+
+# repo-guard:base:start
   - repo: local
     hooks:
       - id: risky-filenames
@@ -9,7 +12,6 @@ repos:
             status=0
             for f in "$@"; do
               case "$f" in
-                .env.example) ;;
                 .env|.env.*|*.env|*env*|*.local|*.secret|*.secrets|*.token|*.tokens)
                   printf "refusing risky path=%s\n" "$f"
                   status=1
@@ -84,9 +86,9 @@ repos:
         entry: gitleaks git --pre-commit --staged --redact
         language: system
         pass_filenames: false
-  # repo-guard:base:end
+# repo-guard:base:end
 
-  # repo-guard:python:start
+# repo-guard:python:start
   - repo: local
     hooks:
       - id: ruff-check
@@ -114,13 +116,10 @@ repos:
         name: bandit
         entry: >-
           bash -lc 'if [ -n "${VIRTUAL_ENV:-}" ] && [ -x
-          "$VIRTUAL_ENV/bin/bandit" ]; then "$VIRTUAL_ENV/bin/bandit" -q -x
-          tests,container/tests -s B404,B603,B607 "$@"; elif [ -x
-          ./.venv/bin/bandit ]; then ./.venv/bin/bandit -q -x
-          tests,container/tests -s B404,B603,B607 "$@"; elif [ -x
-          ./venv/bin/bandit ]; then ./venv/bin/bandit -q -x
-          tests,container/tests -s B404,B603,B607 "$@"; else bandit -q -x
-          tests,container/tests -s B404,B603,B607 "$@"; fi' --
+          "$VIRTUAL_ENV/bin/bandit" ]; then "$VIRTUAL_ENV/bin/bandit" -q
+          "$@"; elif [ -x ./.venv/bin/bandit ]; then ./.venv/bin/bandit -q
+          "$@"; elif [ -x ./venv/bin/bandit ]; then ./venv/bin/bandit -q
+          "$@"; else bandit -q "$@"; fi' --
         language: system
         files: \.pyi?$
       - id: radon-cc
@@ -149,18 +148,19 @@ repos:
         name: pip audit
         entry: >-
           bash -lc 'if [ -n "${VIRTUAL_ENV:-}" ] && [ -x
-          "$VIRTUAL_ENV/bin/pip-audit" ]; then audit="$VIRTUAL_ENV/bin/pip-audit";
-          elif [ -x ./.venv/bin/pip-audit ]; then audit=./.venv/bin/pip-audit;
-          elif [ -x ./venv/bin/pip-audit ]; then audit=./venv/bin/pip-audit;
-          else audit=pip-audit; fi; if [ -f requirements.txt ]; then
-          "$audit" -r requirements.txt; elif [ -f container/pyproject.toml ]; then
-          "$audit" container; else echo "no auditable Python dependency manifest found, skipping pip-audit";
+          "$VIRTUAL_ENV/bin/pip-audit" ]; then "$VIRTUAL_ENV/bin/pip-audit"
+          -r requirements.txt; elif [ -x ./.venv/bin/pip-audit ]; then
+          ./.venv/bin/pip-audit -r requirements.txt; elif [ -x
+          ./venv/bin/pip-audit ]; then ./venv/bin/pip-audit -r
+          requirements.txt; elif [ -f requirements.txt ]; then pip-audit -r
+          requirements.txt; elif [ -f pyproject.toml ]; then pip-audit; else
+          echo "no Python dependency manifest found, skipping pip-audit";
           fi'
         language: system
         pass_filenames: false
-  # repo-guard:python:end
+# repo-guard:python:end
 
-  # repo-guard:bash:start
+# repo-guard:bash:start
   - repo: local
     hooks:
       - id: shfmt
@@ -179,3 +179,50 @@ repos:
         language: system
         files: \.(sh|bash)$
 # repo-guard:bash:end
+
+# repo-guard:javascript:start
+  - repo: local
+    hooks:
+      - id: svelte-check
+        name: svelte-check (lint + type)
+        entry: >-
+          bash -lc '
+            if [ -x "$(cd ui && pwd)/node_modules/.bin/svelte-check" ]; then
+              cd ui && ./node_modules/.bin/svelte-check || exit 1
+            else
+              npx svelte-check || exit 1
+            fi'
+        language: system
+        files: \.(svelte|ts|tsx|mts|cts)$
+        pass_filenames: false
+        exclude: \.test\.(ts|tsx|mts|cts)$
+      - id: svelte-check-tests
+        name: svelte-check (tests)
+        entry: >-
+          bash -lc '
+            if [ -x "$(cd ui && pwd)/node_modules/.bin/svelte-check" ]; then
+              cd ui && ./node_modules/.bin/svelte-check --no-tsconfig || exit 1
+            else
+              npx svelte-check --no-tsconfig || exit 1
+            fi'
+        language: system
+        files: \.test\.(ts|tsx|mts|cts)$
+        pass_filenames: false
+# repo-guard:javascript:end
+
+# repo-guard:containers:start
+  - repo: local
+    hooks:
+      - id: trivy-fs
+        name: trivy filesystem scan
+        entry: >-
+          bash -lc 'trivy fs --severity HIGH,CRITICAL --exit-code 1 .'
+        language: system
+        pass_filenames: false
+      - id: trivy-config
+        name: trivy config scan
+        entry: >-
+          bash -lc 'trivy config --severity HIGH,CRITICAL --exit-code 1 .'
+        language: system
+        pass_filenames: false
+# repo-guard:containers:end
