@@ -75,7 +75,7 @@ def _bool_flag(value: Any) -> str:
     return "on" if bool(value) else "off"
 
 
-def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
+def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  # noqa: C901
     """Build llama-server argv for a single accepted model."""
     cfg = _config(metadata)
     alias = str(metadata.get("alias") or metadata.get("family") or "local-llm-model")
@@ -154,13 +154,20 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
         if cfg.get("mtp_draft_p_min") is not None:
             args.extend(["--spec-draft-p-min", str(cfg["mtp_draft_p_min"])])
 
+    if cfg.get("temperature") is not None:
+        args.extend(["--temp", str(cfg["temperature"])])
+    if cfg.get("top_p") is not None:
+        args.extend(["--top-p", str(cfg["top_p"])])
+    if cfg.get("top_k") is not None:
+        args.extend(["--top-k", str(cfg["top_k"])])
+
     if cfg.get("flash_attention"):
         args.extend(["-fa", "on"])
     if cfg.get("jinja"):
         args.append("--jinja")
 
     # Strip known-promoted flags from raw flags so they're not doubled
-    _PROMOTED_FLAGS = {
+    _PROMOTED_FLAGS = {  # noqa: N806
         "-fa",
         "--flash-attn",
         "--jinja",
@@ -191,7 +198,7 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:
     return args
 
 
-def build_runner_container_spec(
+def build_runner_container_spec(  # noqa: C901
     metadata: dict[str, Any], config: DockerRunnerConfig, models_dir: Path | None = None
 ) -> DockerContainerSpec:
     """Build a Docker container spec for the project-owned runner."""
@@ -257,7 +264,7 @@ def build_runner_container_spec(
         if visible_devices:
             environment["GGML_VK_VISIBLE_DEVICES"] = visible_devices
     elif cfg.get("nvidia_vulkan"):
-        # NVIDIA GPU on Vulkan backend: inject via nvidia container runtime with graphics capability.
+        # NVIDIA GPU on Vulkan backend: inject via nvidia container runtime with graphics capability.  # noqa: E501
         # Use the headless EGL ICD baked into the image (libEGL_nvidia.so.0) rather than
         # libGLX_nvidia.so.0 which requires an X11 display.
         device_requests = [
@@ -342,7 +349,7 @@ class DockerRunner:
         while not self._port_free():
             if time.monotonic() > deadline:
                 raise RuntimeError(
-                    f"port {self.config.port} is still occupied after stopping the runner container — "
+                    f"port {self.config.port} is still occupied after stopping the runner container — "  # noqa: E501
                     "a native llama-server process is likely running on the host; "
                     f"stop it before switching models (kill $(lsof -ti :{self.config.port}))"
                 )
