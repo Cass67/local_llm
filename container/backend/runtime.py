@@ -160,6 +160,10 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         args.extend(["--top-p", str(cfg["top_p"])])
     if cfg.get("top_k") is not None:
         args.extend(["--top-k", str(cfg["top_k"])])
+    if cfg.get("min_p") is not None:
+        args.extend(["--min-p", str(cfg["min_p"])])
+    if cfg.get("repetition_penalty") is not None:
+        args.extend(["--repeat-penalty", str(cfg["repetition_penalty"])])
 
     if cfg.get("flash_attention"):
         args.extend(["-fa", "on"])
