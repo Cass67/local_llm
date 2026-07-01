@@ -270,6 +270,35 @@ def idle_check(timeout_s: float) -> None:
             remove_active(cluster.id)
 
 
+def restart_running_for_profile(family: str, profile: str) -> list[str]:
+    """Relaunch any cluster currently running family+profile so a profile edit takes effect."""
+    accepted_path = config.ACCEPTED_DIR / f"{family}.json"
+    if not accepted_path.exists() or accepted_path.is_symlink():
+        return []
+    try:
+        accepted = json.loads(accepted_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(accepted, dict):
+        return []
+
+    clusters = {c.id: c for c in list_clusters()}
+    restarted: list[str] = []
+    for entry in list_active():
+        if entry.get("family") != family or entry.get("profile") != profile:
+            continue
+        cluster = clusters.get(str(entry.get("cluster_id") or ""))
+        if not cluster:
+            continue
+        accepted["profile"] = profile
+        try:
+            start(cluster, accepted)
+            restarted.append(cluster.id)
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("restart %s after profile edit failed: %s", cluster.id, exc)
+    return restarted
+
+
 def ensure_running(cluster: ClusterDef, resolve_accepted) -> None:
     """Start cluster if it is desired but not currently running."""
     if is_running(cluster):
