@@ -1,6 +1,7 @@
 """Tests for Pi models.json endpoint."""
 
 import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 

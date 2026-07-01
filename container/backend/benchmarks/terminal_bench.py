@@ -4,7 +4,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from .base import BaseBenchmarkRunner
 
@@ -22,7 +22,7 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         model: str,
         prompt_text: str,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute a benchmark where the LLM must provide correct terminal commands.
 
@@ -52,7 +52,8 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
             }
 
             import json
-            with open(task_file, 'w') as f:
+
+            with open(task_file, "w") as f:
                 json.dump(task_content, f)
 
             # Run Terminal-Bench (simplified invocation)
@@ -91,7 +92,9 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
                 "prompt_tokens": None,
                 "completion_tokens": completion_tokens,
                 "total_tokens": completion_tokens,
-                "throughput_tps": completion_tokens / duration_seconds if completion_tokens else None,
+                "throughput_tps": completion_tokens / duration_seconds
+                if completion_tokens
+                else None,
                 "throughput_cps": len(response_text) / duration_seconds if response_text else None,
                 "status": status,
                 "error": error,

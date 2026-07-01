@@ -12,9 +12,9 @@ echo "=== Migrating local_llm state to $HOST ==="
 LOCAL_RUNS="$HOME/.local/share/local_llm/runs"
 
 if [[ ! -d "$LOCAL_RUNS" ]]; then
-	echo "No local runs directory found at $LOCAL_RUNS"
-	echo "Nothing to migrate."
-	exit 0
+  echo "No local runs directory found at $LOCAL_RUNS"
+  echo "Nothing to migrate."
+  exit 0
 fi
 
 # Backup remote state if it exists
@@ -31,23 +31,23 @@ ssh "$HOST" "
 
 # Copy accepted metadata
 if [[ -d "$LOCAL_RUNS/accepted" ]]; then
-	echo "Copying accepted metadata..."
-	ssh "$HOST" "mkdir -p $REMOTE_SHARE/runs/accepted"
-	scp "$LOCAL_RUNS/accepted"/*.json "$HOST:$REMOTE_SHARE/runs/accepted/"
+  echo "Copying accepted metadata..."
+  ssh "$HOST" "mkdir -p $REMOTE_SHARE/runs/accepted"
+  scp "$LOCAL_RUNS/accepted"/*.json "$HOST:$REMOTE_SHARE/runs/accepted/"
 fi
 
 # Copy launchers
 if [[ -d "$LOCAL_RUNS/launchers" ]]; then
-	echo "Copying launchers..."
-	ssh "$HOST" "mkdir -p $REMOTE_SHARE/runs/launchers"
-	scp "$LOCAL_RUNS/launchers"/*.sh "$HOST:$REMOTE_SHARE/runs/launchers/"
-	ssh "$HOST" "chmod +x $REMOTE_SHARE/runs/launchers/*.sh"
+  echo "Copying launchers..."
+  ssh "$HOST" "mkdir -p $REMOTE_SHARE/runs/launchers"
+  scp "$LOCAL_RUNS/launchers"/*.sh "$HOST:$REMOTE_SHARE/runs/launchers/"
+  ssh "$HOST" "chmod +x $REMOTE_SHARE/runs/launchers/*.sh"
 fi
 
 # Copy config
 if [[ -f "$LOCAL_RUNS/config.json" ]]; then
-	echo "Copying config..."
-	scp "$LOCAL_RUNS/config.json" "$HOST:$REMOTE_SHARE/runs/config.json"
+  echo "Copying config..."
+  scp "$LOCAL_RUNS/config.json" "$HOST:$REMOTE_SHARE/runs/config.json"
 fi
 
 echo ""

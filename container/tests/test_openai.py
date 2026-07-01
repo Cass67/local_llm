@@ -1,8 +1,9 @@
 """Tests for project-owned OpenAI-compatible /v1/models endpoint."""
 
+from unittest.mock import patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-from unittest.mock import patch
 
 
 @pytest.fixture

@@ -1,9 +1,9 @@
 """Model router — picks model from keywords, forwards to backend."""
 
 import json
+import os
 import re
 import time
-import os
 from pathlib import Path
 
 import httpx
@@ -390,8 +390,9 @@ async def health():
 app.include_router(router)
 
 if __name__ == "__main__":
-    import uvicorn
     import asyncio
+
+    import uvicorn
 
     asyncio.run(_refresh_health())
     uvicorn.run(app, host="0.0.0.0", port=PORT)  # nosec B104

@@ -1,18 +1,17 @@
 """Tests for cluster CRUD and GPU-index derivation."""
 
 import pytest
-
 from backend.clusters import (
     create_cluster,
     delete_cluster,
     get_cluster,
+    list_active,
     list_clusters,
+    read_active,
+    remove_active,
     tensor_split_for,
     visible_devices_for,
-    list_active,
-    read_active,
     write_active,
-    remove_active,
 )
 from backend.gpu_inventory import GpuInfo
 

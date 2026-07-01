@@ -1,11 +1,11 @@
 """Tests for local_llm OpenAI chat proxy and metrics capture."""
 
 import json
+from unittest.mock import patch
 
 import httpx
-from httpx import ASGITransport, AsyncClient, Response
 import pytest
-from unittest.mock import patch
+from httpx import ASGITransport, AsyncClient, Response
 
 
 def _make_fake_client(captured=None, response_json=None):

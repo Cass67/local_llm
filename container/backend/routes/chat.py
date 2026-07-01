@@ -175,7 +175,7 @@ async def proxy_chat_completions(request: Request):
                 while not load_task.done():
                     try:
                         await asyncio.wait_for(asyncio.shield(load_task), timeout=10.0)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         yield b": keep-alive\n\n"
                 await load_task  # propagate any exception
 

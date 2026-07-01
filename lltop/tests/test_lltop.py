@@ -1,9 +1,8 @@
 import importlib.util
-from importlib.machinery import SourceFileLoader
 import tempfile
 import unittest
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "lltop"

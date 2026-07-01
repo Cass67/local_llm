@@ -1,6 +1,7 @@
 """Tests for models endpoint."""
 
 import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -38,7 +39,7 @@ def temp_state(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_models_returns_accepted_models(temp_state):
+async def test_list_models_returns_accepted_models(temp_state):  # noqa: ARG001
     from backend.main import app
 
     transport = ASGITransport(app=app)

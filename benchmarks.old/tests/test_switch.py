@@ -1,6 +1,7 @@
 """Tests for switch endpoint (now returns 501 — use clusters instead)."""
 
 import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 

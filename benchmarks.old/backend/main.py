@@ -1,27 +1,28 @@
 import logging
+from importlib import import_module
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
-from importlib import import_module
+
 from . import active_runners
 from .config import VERSION
-from .routes.models import router as models_router
-from .routes.switch import router as switch_router
-from .routes.logs import router as logs_router
-from .routes.pi import router as pi_router
 from .routes.chat import router as chat_router
-from .routes.search import router as search_router
-from .routes.manage import router as manage_router
-from .routes.init import router as init_router
-from .routes.openai import router as openai_router
-from .routes.stats import router as stats_router
-from .routes.runner import router as runner_router
 from .routes.clusters import router as clusters_router
-from .routes.router_config import router as router_config_router
 from .routes.idle_unload import router as idle_unload_router
+from .routes.init import router as init_router
+from .routes.logs import router as logs_router
+from .routes.manage import router as manage_router
+from .routes.models import router as models_router
+from .routes.openai import router as openai_router
+from .routes.pi import router as pi_router
 from .routes.profiles import router as profiles_router
+from .routes.router_config import router as router_config_router
+from .routes.runner import router as runner_router
+from .routes.search import router as search_router
+from .routes.stats import router as stats_router
+from .routes.switch import router as switch_router
 
 benchmark_router = import_module("backend.routes.benchmark").router
 
@@ -40,6 +41,7 @@ async def restore_desired_runners():
 
 async def _idle_unload_loop():
     import asyncio
+
     from .routes.idle_unload import load as _load_idle_cfg
 
     while True:

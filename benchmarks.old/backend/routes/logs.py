@@ -1,10 +1,12 @@
 """Log streaming routes."""
 
 import asyncio
-from fastapi import APIRouter, Request, Query
+
+from fastapi import APIRouter, Query, Request
 from sse_starlette.sse import EventSourceResponse
-from ..log_stream import stream_log_tail, _docker_logs_tail
+
 from ..clusters import list_active as list_active_clusters
+from ..log_stream import _docker_logs_tail, stream_log_tail
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 

@@ -1,8 +1,9 @@
 """Terminal benchmark runner for testing LLMs on command-line tasks."""
 
-import httpx
 import time
-from typing import Any, Dict
+from typing import Any
+
+import httpx
 
 from .base import BaseBenchmarkRunner
 
@@ -22,7 +23,7 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         model: str,
         prompt_text: str,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute a benchmark where the LLM must provide correct terminal commands.
 

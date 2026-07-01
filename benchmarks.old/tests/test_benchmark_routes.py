@@ -2,10 +2,9 @@ from importlib import import_module
 from pathlib import Path
 
 import httpx
-from fastapi.testclient import TestClient
-
 from backend import config
 from backend.main import app
+from fastapi.testclient import TestClient
 
 benchmark = import_module("backend.routes.benchmark")
 

@@ -7,7 +7,6 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-
 _NO_ACTIVE = []  # mock return for list_active_clusters in logs route
 
 
@@ -120,6 +119,7 @@ async def _noop(*_args, **_kwargs):
 @pytest.mark.asyncio
 async def test_stream_log_tail_yields_lines():
     import asyncio
+
     from backend.log_stream import stream_log_tail
 
     server, client = _socket.socketpair(_socket.AF_UNIX, _socket.SOCK_STREAM)
@@ -149,6 +149,7 @@ async def test_stream_log_tail_yields_lines():
 @pytest.mark.asyncio
 async def test_stream_log_tail_skip_existing_yields_only_new():
     import asyncio
+
     from backend.log_stream import stream_log_tail
 
     server, client = _socket.socketpair(_socket.AF_UNIX, _socket.SOCK_STREAM)

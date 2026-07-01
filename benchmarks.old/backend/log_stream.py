@@ -9,7 +9,6 @@ from urllib.parse import quote
 
 from . import config
 
-
 _NOISE_MGMT = '"GET /logs HTTP/1.1"'
 # Router gets polled for /health and /v1/models every ~10s — filter those so
 # actual routing decisions (router: [...]) are visible without the spam.
@@ -119,7 +118,7 @@ async def stream_log_tail(
                 return
             try:
                 chunk = await asyncio.wait_for(loop.sock_recv(sock, 4096), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return
             if not chunk:
                 return
@@ -141,7 +140,7 @@ async def stream_log_tail(
                 if not chunk:
                     return
                 buf += chunk
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
     finally:
         sock.close()

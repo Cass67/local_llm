@@ -181,12 +181,12 @@ wait_for_api() {
   local port="${1:-8080}"
   local max_attempts="${2:-30}"
   local attempt=0
-  while (( attempt < max_attempts )); do
+  while ((attempt < max_attempts)); do
     if curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
-    (( attempt++ ))
+    ((attempt++))
   done
   return 1
 }
@@ -195,7 +195,7 @@ wait_for_api() {
 # Usage: write_run_metadata "qwen:reliable" "start"
 write_run_metadata() {
   local profile_key="$1"
-  local phase="$2"   # start | stop | error
+  local phase="$2" # start | stop | error
   local ts
   ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   local run_file="$RUNS_DIR/${profile_key//:/_}_$(date -u +"%Y%m%dT%H%M%S").json"
@@ -208,15 +208,15 @@ write_run_metadata() {
     '{profile: $profile, phase: $phase, timestamp: $ts}')
 
   if [[ "$phase" == "start" ]]; then
-    echo "$meta" > "$run_file"
+    echo "$meta" >"$run_file"
     echo "$run_file"
   else
     # if file exists, patch it; otherwise create minimal
     if [[ -f "$run_file" ]]; then
-      jq --arg phase "$phase" --arg ts "$ts" '.phase = $phase | .stop_time = $ts' "$run_file" > "${run_file}.tmp"
+      jq --arg phase "$phase" --arg ts "$ts" '.phase = $phase | .stop_time = $ts' "$run_file" >"${run_file}.tmp"
       mv "${run_file}.tmp" "$run_file"
     else
-      echo "$meta" > "$run_file"
+      echo "$meta" >"$run_file"
     fi
   fi
 }

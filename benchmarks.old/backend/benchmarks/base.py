@@ -1,7 +1,7 @@
 """Base class for benchmark runners."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Protocol
 
 
 class BenchmarkResult(Protocol):
@@ -15,7 +15,7 @@ class BenchmarkResult(Protocol):
     latency_ms: float
     status: str
     error: str | None
-    extra_data: Dict[str, Any]
+    extra_data: dict[str, Any]
 
 
 class BaseBenchmarkRunner(ABC):
@@ -34,9 +34,18 @@ class BaseBenchmarkRunner(ABC):
         model: str,
         prompt_text: str,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run the benchmark. Returns a dict with keys matching BenchmarkRun schema.
+
+        Args:
+            endpoint_id: The endpoint ID to use for the benchmark.
+            model: The model name to use.
+            prompt_text: The text prompt for the benchmark.
+            **kwargs: Additional arguments (e.g., worker_port, system_prompt).
+
+        Returns:
+            A dict with benchmark results.
 
         Must include:
         - endpoint_id, endpoint_name, model, prompt_text, response_text
@@ -46,7 +55,7 @@ class BaseBenchmarkRunner(ABC):
         """
         pass
 
-    def validate(self, req: Dict[str, Any]) -> List[str]:
+    def validate(self, req: dict[str, Any]) -> list[str]:
         """Validate the request. Returns list of error messages."""
         errors = []
         if not req.get("endpoint_id"):

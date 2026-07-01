@@ -3,11 +3,9 @@
 from importlib import import_module
 from pathlib import Path
 
-import pytest
-from fastapi.testclient import TestClient
-
 from backend import config
 from backend.main import app
+from fastapi.testclient import TestClient
 
 benchmark = import_module("backend.routes.benchmark")
 
@@ -44,7 +42,7 @@ def test_run_benchmark_type(tmp_path: Path, monkeypatch):
 
     # Run a terminal-bench benchmark
     response = client.post(
-        f"/api/local-llm/benchmark/runs/terminal-bench",
+        "/api/local-llm/benchmark/runs/terminal-bench",
         json={
             "endpoint_id": endpoint["id"],
             "model": "test-model",

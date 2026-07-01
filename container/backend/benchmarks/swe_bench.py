@@ -1,10 +1,9 @@
 """SWE-bench runner for testing LLMs on software engineering tasks."""
 
 import os
-import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from .base import BaseBenchmarkRunner
 
@@ -22,7 +21,7 @@ class SwebenchRunner(BaseBenchmarkRunner):
         model: str,
         prompt_text: str,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run a software engineering benchmark.
 
@@ -74,7 +73,9 @@ class SwebenchRunner(BaseBenchmarkRunner):
                 "prompt_tokens": None,
                 "completion_tokens": completion_tokens,
                 "total_tokens": completion_tokens,
-                "throughput_tps": completion_tokens / duration_seconds if completion_tokens else None,
+                "throughput_tps": completion_tokens / duration_seconds
+                if completion_tokens
+                else None,
                 "throughput_cps": len(response_text) / duration_seconds if response_text else None,
                 "status": status,
                 "error": error,

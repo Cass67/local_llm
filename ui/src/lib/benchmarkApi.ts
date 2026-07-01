@@ -45,6 +45,21 @@ export interface BenchmarkType {
 	description: string;
 }
 
+export interface BenchmarkRunRequest {
+	endpoint_id: number;
+	model: string;
+	prompt_text: string;
+	system_prompt?: string;
+	prompt_id?: number;
+	prompt_name?: string;
+	temperature?: number;
+	max_tokens?: number;
+	seed?: number;
+	top_p?: number;
+	top_k?: number;
+	repeat_penalty?: number;
+}
+
 export interface BenchmarkSummary {
 	total_runs: number;
 	avg_latency_ms: number | null;
@@ -220,9 +235,15 @@ export async function listBenchmarkTypes(): Promise<{ types: BenchmarkType[] }> 
 	return res.json();
 }
 
+export interface RunBenchmarkByTypeRequest extends Omit<BenchmarkRunRequest, 'endpoint_id'> {
+	endpoint_id: number;
+	model: string;
+	prompt_text: string;
+}
+
 export async function runBenchmarkByType(
 	benchmark_type: string,
-	req: Omit<BenchmarkRunRequest, 'endpoint_id'> & { endpoint_id: number; model: string; prompt_text: string },
+	req: RunBenchmarkByTypeRequest,
 ): Promise<BenchmarkRun> {
 	const res = await fetch(`${BASE}/runs/${benchmark_type}`, {
 		method: "POST",

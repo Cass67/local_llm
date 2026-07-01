@@ -1,10 +1,11 @@
 """Tests for chat proxy model normalization."""
 
 import json
-import pytest
 from unittest.mock import patch
-from httpx import ASGITransport, AsyncClient, Response
+
+import pytest
 from backend.main import app
+from httpx import ASGITransport, AsyncClient, Response
 
 
 @pytest.mark.asyncio

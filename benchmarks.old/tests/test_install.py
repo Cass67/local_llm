@@ -6,8 +6,8 @@ import types
 from unittest.mock import patch
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 from backend.main import app
+from httpx import ASGITransport, AsyncClient
 
 
 @pytest.mark.asyncio
@@ -71,7 +71,7 @@ def test_run_install_error_includes_phase_context_and_logs(tmp_path, monkeypatch
         raise RuntimeError("HTTP 502 Bad Gateway")
 
     fake_hf = types.ModuleType("huggingface_hub")
-    setattr(fake_hf, "hf_hub_download", fake_hf_hub_download)
+    fake_hf.hf_hub_download = fake_hf_hub_download
     monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf)
     monkeypatch.setattr(cfg, "MODELS_CACHE_DIR", models)
     monkeypatch.setattr(cfg, "ACCEPTED_DIR", accepted)
@@ -116,7 +116,7 @@ def test_run_install_downloads_and_writes_project_metadata(tmp_path, monkeypatch
         return str(downloaded)
 
     fake_hf = types.ModuleType("huggingface_hub")
-    setattr(fake_hf, "hf_hub_download", fake_hf_hub_download)
+    fake_hf.hf_hub_download = fake_hf_hub_download
     monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf)
     monkeypatch.setattr(cfg, "MODELS_CACHE_DIR", models)
     monkeypatch.setattr(cfg, "ACCEPTED_DIR", accepted)
