@@ -216,6 +216,8 @@ When you start a model on a cluster in the **Architecture** tab, select a profil
 
 **Profile is the complete source of truth.** Only fields present in the profile are passed to llama-server — there are no hidden runtime defaults. What you see in the editor is exactly what runs.
 
+**Editing a profile that's currently running restarts it.** Saving a profile (`PUT /api/profiles/{family}/{name}`) automatically relaunches any cluster currently running that family+profile, so the new config (e.g. a changed `context` window) takes effect immediately — you don't need to manually stop/start.
+
 #### Single-GPU profile
 
 ```json

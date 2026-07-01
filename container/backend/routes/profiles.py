@@ -4,7 +4,7 @@ import json
 
 from fastapi import APIRouter, HTTPException
 
-from .. import config
+from .. import active_runners, config
 
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 
@@ -41,7 +41,8 @@ async def upsert_profile(family: str, name: str, body: dict):
         data["families"][family] = {"default": name, "profiles": {}}
     data["families"][family]["profiles"][name] = body
     _save(data)
-    return {"status": "saved"}
+    restarted = active_runners.restart_running_for_profile(family, name)
+    return {"status": "saved", "restarted_clusters": restarted}
 
 
 @router.delete("/{family}/{name}")
@@ -75,6 +76,16 @@ async def clone_profile(family: str, name: str, body: dict):
 _MODEL_IDENTITY_KEYS = {"backend", "quant"}
 
 
+# flag → (profile field, value caster), for flags that take a numeric argument
+_NUMERIC_FLAGS: dict[str, tuple[str, type]] = {
+    "--parallel": ("parallel", int),
+    "--cache-ram": ("cache_ram", int),
+    "--spec-draft-n-max": ("mtp_draft_n_max", int),
+    "--spec-draft-n-min": ("mtp_draft_n_min", int),
+    "--spec-draft-p-min": ("mtp_draft_p_min", float),
+}
+
+
 def _extract_flags(profile: dict) -> dict:
     """Promote known raw flags to structured fields, leave unknown ones in flags."""
     raw = str(profile.get("flags", "")).split()
@@ -89,23 +100,12 @@ def _extract_flags(profile: dict) -> dict:
         elif tok == "--jinja":
             profile["jinja"] = True
             i += 1
-        elif tok == "--parallel" and nxt is not None:
-            profile.setdefault("parallel", int(nxt))
-            i += 2
-        elif tok == "--cache-ram" and nxt is not None:
-            profile.setdefault("cache_ram", int(nxt))
-            i += 2
         elif tok == "--spec-type" and nxt == "draft-mtp":
             profile["mtp_enabled"] = True
             i += 2
-        elif tok == "--spec-draft-n-max" and nxt is not None:
-            profile.setdefault("mtp_draft_n_max", int(nxt))
-            i += 2
-        elif tok == "--spec-draft-n-min" and nxt is not None:
-            profile.setdefault("mtp_draft_n_min", int(nxt))
-            i += 2
-        elif tok == "--spec-draft-p-min" and nxt is not None:
-            profile.setdefault("mtp_draft_p_min", float(nxt))
+        elif tok in _NUMERIC_FLAGS and nxt is not None:
+            field, cast = _NUMERIC_FLAGS[tok]
+            profile.setdefault(field, cast(nxt))
             i += 2
         else:
             remaining.append(tok)
@@ -114,6 +114,56 @@ def _extract_flags(profile: dict) -> dict:
         profile["flags"] = " ".join(remaining)
     else:
         profile.pop("flags", None)
+    return profile
+
+
+_RUNTIME_DEFAULTS = {
+    "cache_prompt": True,
+    "cache_ram": 16384,
+    "context_shift": True,
+    "ctx_checkpoints": 64,
+    "checkpoint_min_step": 4096,
+    "timeout": 600,
+    "threads_http": 2,
+    "parallel": 1,
+    "no_cont_batching": True,
+    "prio": 2,
+    "no_warmup": True,
+}
+
+
+def _profile_from_model(model: dict) -> dict:
+    """Build a self-contained profile dict from an accepted model's full config."""
+    cfg = model.get("config") or {}
+
+    # Copy everything except model-identity fields
+    profile: dict = {k: v for k, v in cfg.items() if k not in _MODEL_IDENTITY_KEYS}
+
+    # Normalise ctx → context so the profile JSON is readable
+    if "ctx" in profile:
+        profile["context"] = profile.pop("ctx")
+    elif model.get("context"):
+        profile.setdefault("context", model["context"])
+
+    # Top-level reasoning flag (may not be in config block)
+    if "reasoning" not in profile and model.get("reasoning") is not None:
+        profile["reasoning"] = model["reasoning"]
+
+    # Flatten nested mtp block if present
+    if "mtp" in profile and isinstance(profile["mtp"], dict):
+        mtp = profile.pop("mtp")
+        profile.setdefault("mtp_enabled", bool(mtp.get("enabled")))
+        for k in ("draft_n_max", "draft_n_min", "draft_p_min"):
+            if mtp.get(k) is not None:
+                profile.setdefault(f"mtp_{k}", mtp[k])
+
+    # Promote known raw flags to proper fields
+    _extract_flags(profile)
+
+    # Fill in runtime defaults so the profile is fully self-contained
+    for field, value in _RUNTIME_DEFAULTS.items():
+        profile.setdefault(field, value)
+
     return profile
 
 
@@ -138,44 +188,7 @@ async def import_from_models():
 
         family = str(model.get("family", path.stem))
         profile_name = str(model.get("profile", "default"))
-        cfg = model.get("config") or {}
-
-        # Copy everything except model-identity fields
-        profile: dict = {k: v for k, v in cfg.items() if k not in _MODEL_IDENTITY_KEYS}
-
-        # Normalise ctx → context so the profile JSON is readable
-        if "ctx" in profile:
-            profile["context"] = profile.pop("ctx")
-        elif model.get("context"):
-            profile.setdefault("context", model["context"])
-
-        # Top-level reasoning flag (may not be in config block)
-        if "reasoning" not in profile and model.get("reasoning") is not None:
-            profile["reasoning"] = model["reasoning"]
-
-        # Flatten nested mtp block if present
-        if "mtp" in profile and isinstance(profile["mtp"], dict):
-            mtp = profile.pop("mtp")
-            profile.setdefault("mtp_enabled", bool(mtp.get("enabled")))
-            for k in ("draft_n_max", "draft_n_min", "draft_p_min"):
-                if mtp.get(k) is not None:
-                    profile.setdefault(f"mtp_{k}", mtp[k])
-
-        # Promote known raw flags to proper fields
-        _extract_flags(profile)
-
-        # Fill in runtime defaults so the profile is fully self-contained
-        profile.setdefault("cache_prompt", True)
-        profile.setdefault("cache_ram", 16384)
-        profile.setdefault("context_shift", True)
-        profile.setdefault("ctx_checkpoints", 64)
-        profile.setdefault("checkpoint_min_step", 4096)
-        profile.setdefault("timeout", 600)
-        profile.setdefault("threads_http", 2)
-        profile.setdefault("parallel", 1)
-        profile.setdefault("no_cont_batching", True)
-        profile.setdefault("prio", 2)
-        profile.setdefault("no_warmup", True)
+        profile = _profile_from_model(model)
 
         fam = data["families"].setdefault(family, {"default": profile_name, "profiles": {}})
         fam["profiles"][profile_name] = profile  # always overwrite
