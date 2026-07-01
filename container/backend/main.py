@@ -2,11 +2,11 @@ import logging
 from importlib import import_module
 from pathlib import Path
 
-from container.backend import active_runners
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import active_runners
 from .config import VERSION
 from .routes.chat import router as chat_router
 from .routes.clusters import router as clusters_router
