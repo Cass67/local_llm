@@ -175,6 +175,21 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
     if cfg.get("jinja"):
         args.append("--jinja")
 
+    if cfg.get("no_mmap"):
+        args.append("--no-mmap")
+    if cfg.get("mlock"):
+        args.append("--mlock")
+    if cfg.get("no_kv_offload"):
+        args.append("--no-kv-offload")
+    if cfg.get("numa"):
+        args.extend(["--numa", str(cfg["numa"])])
+    if cfg.get("main_gpu") is not None:
+        args.extend(["--main-gpu", str(cfg["main_gpu"])])
+    if cfg.get("threads") is not None:
+        args.extend(["-t", str(cfg["threads"])])
+    if cfg.get("threads_batch") is not None:
+        args.extend(["-tb", str(cfg["threads_batch"])])
+
     # Strip known-promoted flags from raw flags so they're not doubled
     _PROMOTED_FLAGS = {  # noqa: N806
         "-fa",

@@ -200,6 +200,12 @@ The UI shows a green dot when the runner is live.
 | flash attention | `-fa on` |
 | jinja templates | `--jinja` |
 | MTP | `--spec-type draft-mtp` + `--spec-draft-n-*` |
+| no_mmap | `--no-mmap` |
+| mlock | `--mlock` |
+| no_kv_offload | `--no-kv-offload` |
+| numa | `--numa <value>` |
+| main_gpu | `--main-gpu <index>` |
+| threads / threads_batch | `-t` / `-tb` |
 | flags | extra raw args appended verbatim |
 
 Changes take effect on the next model switch.
