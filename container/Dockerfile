@@ -1,12 +1,14 @@
 # Use the existing local-llm-runner image that's already on ubt26
-# This image should already have dependencies installed from a previous build
 FROM local-llm-runner:latest AS base
 
-# Add Python support if needed (we'll copy our backend directly)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY container/backend/ ./backend/
 COPY container/pyproject.toml .
-# Skip pip install - dependencies must be pre-installed
+RUN pip install --break-system-packages --no-cache-dir .
 ARG CACHEBUST=1
 RUN rm -rf ./ui-dist/assets/index-*.js ./ui-dist/assets/index-*.css ./ui-dist/index.html
 COPY --link container/ui-dist/ ./ui-dist/
