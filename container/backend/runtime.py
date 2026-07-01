@@ -165,6 +165,11 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
     if cfg.get("repetition_penalty") is not None:
         args.extend(["--repeat-penalty", str(cfg["repetition_penalty"])])
 
+    if cfg.get("cache_type_k") is not None:
+        args.extend(["--cache-type-k", str(cfg["cache_type_k"])])
+    if cfg.get("cache_type_v") is not None:
+        args.extend(["--cache-type-v", str(cfg["cache_type_v"])])
+
     if cfg.get("flash_attention"):
         args.extend(["-fa", "on"])
     if cfg.get("jinja"):
