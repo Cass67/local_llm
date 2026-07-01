@@ -203,9 +203,9 @@ class BenchmarkStore:
         if benchmark_type:
             conditions.append("benchmark_type = ?")
             params.append(benchmark_type)
-        
+
         where = f"where {' and '.join(conditions)}" if conditions else ""
-        
+
         with self._connect() as conn:
             row = conn.execute(
                 f"""
@@ -218,27 +218,27 @@ class BenchmarkStore:
                 from benchmark_runs
                 {where}
                 """,
-                params
+                params,
             ).fetchone()
             best = conn.execute(
                 f"""
                 select * from benchmark_runs
                 where status = 'ok'
-                {f'and {' and '.join(conditions)}' if conditions else ''}
+                {f"and {' and '.join(conditions)}" if conditions else ""}
                 order by throughput_tps desc nulls last, throughput_cps desc nulls last
                 limit 1
                 """,
-                params
+                params,
             ).fetchone()
             worst = conn.execute(
                 f"""
                 select * from benchmark_runs
                 where status = 'ok'
-                {f'and {' and '.join(conditions)}' if conditions else ''}
+                {f"and {' and '.join(conditions)}" if conditions else ""}
                 order by latency_ms desc nulls last
                 limit 1
                 """,
-                params
+                params,
             ).fetchone()
             trends = conn.execute(
                 f"""
@@ -249,7 +249,7 @@ class BenchmarkStore:
                 order by created_at asc
                 limit 200
                 """,
-                params
+                params,
             ).fetchall()
         total = row["total_runs"] or 0
         errors = row["error_runs"] or 0

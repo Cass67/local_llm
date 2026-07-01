@@ -2,8 +2,10 @@
 
 import json
 import re
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
 from .. import config
 
 router = APIRouter(prefix="/api", tags=["init"])

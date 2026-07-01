@@ -1,10 +1,11 @@
 """Tests for search endpoint."""
 
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from httpx import ASGITransport, AsyncClient
 from backend.main import app
+from httpx import ASGITransport, AsyncClient
 
 
 @pytest.mark.asyncio

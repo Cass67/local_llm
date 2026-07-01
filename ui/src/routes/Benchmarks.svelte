@@ -265,8 +265,8 @@
 			const req = {
 				endpoint_id: Number(selectedEndpointId),
 				model: selectedModel,
-				prompt_id: prompt?.id ?? null,
-				prompt_name: prompt?.name ?? null,
+				prompt_id: prompt?.id ?? undefined,
+				prompt_name: prompt?.name || undefined,
 				prompt_text: prompt?.text || promptText,
 				system_prompt: systemPrompt || undefined,
 				max_tokens: maxTokens,
@@ -276,7 +276,7 @@
 				top_k: topK,
 				repeat_penalty: repeatPenalty,
 			};
-			let result;
+			let result: BenchmarkRun | null = null;
 			if (benchmarkType === 'standard') {
 				for (let i = 0; i < Math.max(1, repeatCount); i++) {
 					result = await runBenchmark(req);
@@ -284,8 +284,10 @@
 			} else {
 				result = await runBenchmarkByType(benchmarkType, req);
 			}
-			latest = result;
-			selectedRun = latest;
+			if (result) {
+				latest = result;
+				selectedRun = result;
+			}
 			await loadAll();
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);

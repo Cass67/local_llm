@@ -18,7 +18,7 @@ from ..clusters import list_clusters
 BenchmarkStore = import_module("backend.benchmark_store").BenchmarkStore
 
 # Import benchmark runners
-from backend.benchmarks import TerminalBenchRunner, SwebenchRunner
+from backend.benchmarks import SwebenchRunner, TerminalBenchRunner
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/benchmark", tags=["benchmark"])
@@ -337,10 +337,10 @@ async def list_benchmark_types():
     ]
     return {
         "types": [
-            {"name": runner.name, "description": f"{runner.name} benchmark"}
-            for runner in runners
+            {"name": runner.name, "description": f"{runner.name} benchmark"} for runner in runners
         ]
     }
+
 
 @router.post("/runs/{benchmark_type}")
 async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
@@ -350,25 +350,27 @@ async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
         "terminal-bench": TerminalBenchRunner(),
         "swe-bench": SwebenchRunner(),
     }
-    
+
     if benchmark_type not in runners:
         raise HTTPException(status_code=404, detail=f"Unknown benchmark type: {benchmark_type}")
-    
+
     runner = runners[benchmark_type]
-    
+
     # Validate request
     errors = runner.validate(req.model_dump())
     if errors:
         raise HTTPException(status_code=400, detail=" | ".join(errors))
-    
+
     endpoint = _store().get_endpoint_secret(req.endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail="endpoint not found")
-    
+
     cluster_name = str(endpoint["name"]).removeprefix("Cluster: ").strip()
     prompt_snippet = req.prompt_text.strip()[:60].replace("\n", " ")
-    print(f"bench [{benchmark_type}]: [{cluster_name}] {req.model} ← {prompt_snippet!r}", flush=True)
-    
+    print(
+        f"bench [{benchmark_type}]: [{cluster_name}] {req.model} ← {prompt_snippet!r}", flush=True
+    )
+
     # Run the benchmark
     result = runner.run(
         endpoint_id=req.endpoint_id,
@@ -376,9 +378,9 @@ async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
         prompt_text=req.prompt_text,
         endpoint_name=endpoint["name"],
         endpoint_base_url=endpoint["base_url"],
-        **req.model_dump(exclude={'endpoint_id', 'model', 'prompt_text'}),
+        **req.model_dump(exclude={"endpoint_id", "model", "prompt_text"}),
     )
-    
+
     # Store the result
     stored_result = _store().create_run(
         benchmark_type=benchmark_type,
@@ -387,7 +389,11 @@ async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
         endpoint_base_url=result.pop("endpoint_base_url"),
         **result,
     )
-    
-    status_str = f"{stored_result['latency_ms']:.0f}ms tps={stored_result['throughput_tps']:.0f}" if stored_result['status'] == 'ok' else stored_result['status']
+
+    status_str = (
+        f"{stored_result['latency_ms']:.0f}ms tps={stored_result['throughput_tps']:.0f}"
+        if stored_result["status"] == "ok"
+        else stored_result["status"]
+    )
     print(f"bench [{benchmark_type}]: [{cluster_name}] {req.model} → {status_str}", flush=True)
     return stored_result

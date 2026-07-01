@@ -1,6 +1,7 @@
 """Pi models.json compatible endpoint."""
 
 from fastapi import APIRouter, Request
+
 from .models import _read_accepted_models
 
 router = APIRouter(prefix="/api/pi", tags=["pi"])

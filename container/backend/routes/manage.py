@@ -4,11 +4,13 @@ import json
 import re
 import subprocess
 from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+
 from .. import cli, config
-from ..model_variants import Backend, copy_backend_variant, migrate_backend_variant
 from ..clusters import list_active
+from ..model_variants import Backend, copy_backend_variant, migrate_backend_variant
 
 router = APIRouter(prefix="/api", tags=["manage"])
 

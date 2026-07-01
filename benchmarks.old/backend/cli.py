@@ -141,7 +141,7 @@ def run_install(repo: str, file: str, profile: str) -> dict:
     logs = [f"install {profile}: {repo} / {file}"]
     try:
         huggingface_hub = importlib.import_module("huggingface_hub")
-        hf_hub_download = getattr(huggingface_hub, "hf_hub_download")
+        hf_hub_download = huggingface_hub.hf_hub_download
     except (ImportError, AttributeError):
         return _install_error(
             "prepare", repo, file, profile, "huggingface_hub is not installed", logs

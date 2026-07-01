@@ -1,8 +1,9 @@
 """Tests for current model endpoint (cluster-based active runner state)."""
 
+from unittest.mock import patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-from unittest.mock import patch
 
 
 @pytest.fixture

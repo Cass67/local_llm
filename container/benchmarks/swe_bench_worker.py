@@ -2,15 +2,17 @@
 """Swe-Bench Worker Service."""
 
 import time
-from fastapi import FastAPI, HTTPException
+from typing import Any
+
+from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import Dict, Any
 
 app = FastAPI()
 
 
 class BenchmarkJob(BaseModel):
     """Request payload for a benchmark job."""
+
     prompt_text: str
     model: str
     endpoint_id: int
@@ -19,7 +21,7 @@ class BenchmarkJob(BaseModel):
 
 
 @app.post("/run")
-async def run_benchmark(job: BenchmarkJob) -> Dict[str, Any]:
+async def run_benchmark(job: BenchmarkJob) -> dict[str, Any]:
     """Execute a swe-bench job."""
     start_time = time.perf_counter()
     status = "ok"
@@ -97,5 +99,6 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.environ.get("BENCHMARK_PORT", 3102))
     uvicorn.run(app, host="0.0.0.0", port=port)

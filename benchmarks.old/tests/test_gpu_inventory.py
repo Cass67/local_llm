@@ -1,15 +1,15 @@
 """Tests for GPU inventory detection."""
 
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.gpu_inventory import (
     GpuInfo,
-    _rocminfo_indices,
-    _nvidia_smi_indices,
     _lspci_name,
-    _vulkaninfo_devices,
     _match_vulkan,
+    _nvidia_smi_indices,
+    _rocminfo_indices,
+    _vulkaninfo_devices,
     detect_gpus,
 )
 

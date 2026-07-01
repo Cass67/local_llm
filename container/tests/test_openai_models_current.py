@@ -1,8 +1,9 @@
 """Tests for OpenAI /v1/models reflects active runners."""
 
+from unittest.mock import patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-from unittest.mock import patch
 
 
 @pytest.mark.asyncio

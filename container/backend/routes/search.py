@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
+
 from .. import cli, config
 
 router = APIRouter(prefix="/api/search", tags=["search"])

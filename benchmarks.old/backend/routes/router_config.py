@@ -1,7 +1,7 @@
 """Router config management — read/write router_rules.json and proxy router health."""
 
-import json
 import http.client
+import json
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
