@@ -36,7 +36,13 @@ export interface BenchmarkRun {
 	throughput_cps: number | null;
 	status: string;
 	error: string | null;
+	benchmark_type: string;
 	created_at: string;
+}
+
+export interface BenchmarkType {
+	name: string;
+	description: string;
 }
 
 export interface BenchmarkSummary {
@@ -68,6 +74,7 @@ export interface BenchmarkRunFilters {
 	model?: string;
 	prompt_id?: number | "";
 	status?: string;
+	benchmark_type?: string;
 	from_date?: string;
 	to_date?: string;
 	limit?: number;
@@ -200,8 +207,28 @@ export async function listBenchmarkRuns(
 	return res.json();
 }
 
-export async function fetchBenchmarkSummary(): Promise<BenchmarkSummary> {
-	const res = await fetch(`${BASE}/summary`);
+export async function fetchBenchmarkSummary(benchmark_type?: string): Promise<BenchmarkSummary> {
+	const params = benchmark_type ? `?benchmark_type=${encodeURIComponent(benchmark_type)}` : "";
+	const res = await fetch(`${BASE}/summary${params}`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function listBenchmarkTypes(): Promise<{ types: BenchmarkType[] }> {
+	const res = await fetch(`${BASE}/types`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function runBenchmarkByType(
+	benchmark_type: string,
+	req: Omit<BenchmarkRunRequest, 'endpoint_id'> & { endpoint_id: number; model: string; prompt_text: string },
+): Promise<BenchmarkRun> {
+	const res = await fetch(`${BASE}/runs/${benchmark_type}`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.json();
 }

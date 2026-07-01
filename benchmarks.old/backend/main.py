@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from importlib import import_module
-from container.backend import active_runners
+from . import active_runners
 from .config import VERSION
 from .routes.models import router as models_router
 from .routes.switch import router as switch_router
@@ -23,7 +23,7 @@ from .routes.router_config import router as router_config_router
 from .routes.idle_unload import router as idle_unload_router
 from .routes.profiles import router as profiles_router
 
-benchmark_router = import_module("container.backend.routes.benchmark").router
+benchmark_router = import_module("backend.routes.benchmark").router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -89,14 +89,14 @@ async def health():
 @app.get("/chat/")
 @app.get("/chat")
 async def chat_redirect(request: Request):
-    host = request.url.hostname or "192.168.2.1"
+    host = request.url.hostname or "127.0.0.1"
     return RedirectResponse(f"{request.url.scheme}://{host}:3001/chat/")
 
 
 @app.get("/traces/")
 @app.get("/traces")
 async def traces_redirect(request: Request):
-    host = request.url.hostname or "192.168.2.1"
+    host = request.url.hostname or "127.0.0.1"
     return RedirectResponse(f"{request.url.scheme}://{host}:3004/")
 
 

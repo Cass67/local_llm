@@ -1,0 +1,20 @@
+[project]
+name = "local-llm-server"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.33",
+  "sse-starlette>=2.1",
+  "httpx>=0.28",
+  "pydantic>=2.10",
+  "huggingface_hub>=0.36",
+  "langfuse>=2.0,<3.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.25", "httpx>=0.28"]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"

@@ -321,16 +321,18 @@ async def list_runs(
         }
     )
 
-
 @router.get("/summary")
-async def summary(benchmark_type: str | None = None):
-    """Get benchmark summary, optionally filtered by type."""
+async def summary(
+    benchmark_type: str | None = None,
+):
     return _store().summary(benchmark_type=benchmark_type)
 
 
 @router.get("/types")
 async def list_benchmark_types():
     """List available benchmark types."""
+    from backend.benchmarks import BaseBenchmarkRunner
+    
     runners = [
         TerminalBenchRunner(),
         SwebenchRunner(),
@@ -376,6 +378,7 @@ async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
         prompt_text=req.prompt_text,
         endpoint_name=endpoint["name"],
         endpoint_base_url=endpoint["base_url"],
+        worker_port=runner.worker_port,
         **req.model_dump(exclude={'endpoint_id', 'model', 'prompt_text'}),
     )
     
@@ -391,3 +394,7 @@ async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
     status_str = f"{stored_result['latency_ms']:.0f}ms tps={stored_result['throughput_tps']:.0f}" if stored_result['status'] == 'ok' else stored_result['status']
     print(f"bench [{benchmark_type}]: [{cluster_name}] {req.model} → {status_str}", flush=True)
     return stored_result
+
+@router.get("/summary")
+async def summary():
+    return _store().summary()

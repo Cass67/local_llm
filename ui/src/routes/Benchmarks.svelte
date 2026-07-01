@@ -12,6 +12,8 @@
 		runBenchmark,
 		loadBenchmarkModels,
 		syncClusterBenchmarkEndpoints,
+		listBenchmarkTypes,
+		runBenchmarkByType,
 	} from "../lib/benchmarkApi";
 	import { fetchClusters } from "../lib/api";
 	import { formatMs, formatThroughput, runDelta } from "../lib/benchmarkMetrics";
@@ -47,6 +49,8 @@
 	let systemPrompt = $state("");
 	let repeatCount = $state(1);
 	let filterEndpointId = $state("");
+	let benchmarkType = $state("standard");
+	let benchmarkTypes: Array<{ name: string; description: string }> = $state([]);
 
 	const PROMPTS = {
 		small: [
@@ -96,6 +100,7 @@
 	let filterPromptId = $state("");
 	let filterModel = $state("");
 	let filterStatus = $state("");
+	let benchmarkTypeFilter = $state("");
 	let filterFrom = $state("");
 	let filterTo = $state("");
 
@@ -172,6 +177,11 @@
 			.join(" ");
 	}
 
+	function typeLabel(benchmarkType: string): string {
+		if (benchmarkType === 'standard') return 'Standard';
+		return benchmarkType;
+	}
+
 	async function syncEndpointsFromClusters() {
 		try {
 			const [clustersResult, endpointsResult] = await Promise.all([
@@ -187,17 +197,19 @@
 		loading = true;
 		error = "";
 		try {
-			const [endpointResult, promptResult, runResult, summaryResult] =
+			const [endpointResult, promptResult, runResult, summaryResult, typesResult] =
 				await Promise.all([
 					listBenchmarkEndpoints(),
 					listBenchmarkPrompts(),
 					listBenchmarkRuns({ limit: 100 }),
-					fetchBenchmarkSummary(),
+					fetchBenchmarkSummary(benchmarkType === 'standard' ? undefined : benchmarkType),
+					listBenchmarkTypes(),
 				]);
 			endpoints = endpointResult.endpoints;
 			prompts = promptResult.prompts;
 			runs = runResult.runs;
 			summary = summaryResult;
+			benchmarkTypes = typesResult.types;
 			await syncEndpointsFromClusters();
 			if (!selectedEndpointId && endpoints[0]) selectedEndpointId = String(endpoints[0].id);
 		} catch (e: unknown) {
@@ -236,6 +248,7 @@
 			model: filterModel,
 			prompt_id: filterPromptId ? Number(filterPromptId) : "",
 			status: filterStatus,
+			benchmark_type: benchmarkType === 'standard' ? undefined : benchmarkType,
 			from_date: filterFrom,
 			to_date: filterTo,
 			limit: 100,
@@ -263,9 +276,15 @@
 				top_k: topK,
 				repeat_penalty: repeatPenalty,
 			};
-			for (let i = 0; i < Math.max(1, repeatCount); i++) {
-				latest = await runBenchmark(req);
+			let result;
+			if (benchmarkType === 'standard') {
+				for (let i = 0; i < Math.max(1, repeatCount); i++) {
+					result = await runBenchmark(req);
+				}
+			} else {
+				result = await runBenchmarkByType(benchmarkType, req);
 			}
+			latest = result;
 			selectedRun = latest;
 			await loadAll();
 		} catch (e: unknown) {
@@ -351,6 +370,13 @@
 			</select>
 			<button onclick={executeRun} disabled={running || !selectedEndpointId || !selectedModel}>{running ? "Running…" : "Run"}</button>
 		</div>
+		{#if benchmarkType !== 'standard'}
+			<div class="form-row params" style="background: var(--bg-card); padding: 0.75rem; border-radius: 8px; margin-top: 0.5rem;">
+				<p style="margin: 0; color: var(--text-muted); font-size: 0.85rem;">
+					<b>{benchmarkType} mode:</b> This benchmark type will evaluate your model on structured tasks. Results are stored separately from standard benchmarks.
+				</p>
+			</div>
+		{/if}
 		<div class="form-row params">
 			<label>Max tokens<input type="number" min="1" max="8192" bind:value={maxTokens} /></label>
 			<label>Temperature<input type="number" min="0" max="2" step="0.05" bind:value={temperature} /></label>
@@ -390,24 +416,47 @@
 		</section>
 	{/if}
 
-	<div class="grid two">
-		<section class="panel chart">
-			<h3>Latency trend</h3>
-			{#if trendPoints("latency_ms")}
-				<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={trendPoints("latency_ms")} /></svg>
-			{:else}
-				<div class="chart-empty"><span class="muted">Need ≥2 runs to show trend</span></div>
-			{/if}
+	{#if benchmarkTypes.length > 0}
+		<section class="panel">
+			<h3>Leaderboard</h3>
+			<div class="form-row" style="margin-bottom: 1rem;">
+				{#each benchmarkTypes as type}
+					<button 
+						class="size-btn" 
+						onclick={() => { benchmarkType = type.name; loadAll(); }}
+						class:active={benchmarkType === type.name}
+					>
+						{type.name}
+					</button>
+				{/each}
+			</div>
+			<div class="cards">
+				<div class="metric"><span>Total runs</span><strong>{summary?.total_runs ?? 0}</strong></div>
+				<div class="metric"><span>Avg latency</span><strong>{formatMs(summary?.avg_latency_ms)}</strong></div>
+				<div class="metric"><span>Best throughput</span><strong>{formatThroughput(summary?.best_throughput_tps, null)}</strong></div>
+				<div class="metric"><span>Error rate</span><strong>{(((summary?.error_rate ?? 0) * 100).toFixed(1))}%</strong></div>
+			</div>
 		</section>
-		<section class="panel chart">
-			<h3>Throughput trend</h3>
-			{#if trendPoints("throughput_tps")}
-				<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={trendPoints("throughput_tps")} /></svg>
-			{:else}
-				<div class="chart-empty"><span class="muted">Need ≥2 runs to show trend</span></div>
-			{/if}
-		</section>
-	</div>
+
+		<div class="grid two">
+			<section class="panel chart">
+				<h3>Latency trend ({typeLabel(benchmarkType)})</h3>
+				{#if trendPoints("latency_ms")}
+					<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={trendPoints("latency_ms")} /></svg>
+				{:else}
+					<div class="chart-empty"><span class="muted">Need ≥2 runs to show trend</span></div>
+				{/if}
+			</section>
+			<section class="panel chart">
+				<h3>Throughput trend ({typeLabel(benchmarkType)})</h3>
+				{#if trendPoints("throughput_tps")}
+					<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={trendPoints("throughput_tps")} /></svg>
+				{:else}
+					<div class="chart-empty"><span class="muted">Need ≥2 runs to show trend</span></div>
+				{/if}
+			</section>
+		</div>
+	{/if}
 
 	<section class="panel">
 		<h3>History</h3>
@@ -416,12 +465,18 @@
 			<input bind:value={filterModel} placeholder="Model" />
 			<select bind:value={filterPromptId}><option value="">All prompts</option>{#each prompts as prompt}<option value={String(prompt.id)}>{prompt.name}</option>{/each}</select>
 			<select bind:value={filterStatus}><option value="">Any status</option><option value="ok">ok</option><option value="error">error</option></select>
+			<select bind:value={benchmarkTypeFilter}>
+				<option value="">All benchmark types</option>
+				{#each benchmarkTypes as type}
+					<option value={type.name}>{type.name}</option>
+				{/each}
+			</select>
 			<input type="date" bind:value={filterFrom} />
 			<input type="date" bind:value={filterTo} />
 			<button onclick={applyFilters}>Filter</button>
 		</div>
 		<table>
-			<thead><tr><th>Time</th><th>Endpoint</th><th>Model</th><th>Prompt</th><th>Latency</th><th>Throughput</th><th>Output</th><th>Status</th></tr></thead>
+			<thead><tr><th>Time</th><th>Endpoint</th><th>Model</th><th>Prompt</th><th>Latency</th><th>Throughput</th><th>Output</th><th>Status</th><th>Type</th></tr></thead>
 			<tbody>
 				{#each runs as run}
 					<tr onclick={() => (selectedRun = run)} class:active={selectedRun?.id === run.id}>
@@ -433,6 +488,7 @@
 						<td>{formatThroughput(run.throughput_tps, run.throughput_cps)}</td>
 						<td>{run.output_chars.toLocaleString()} chars</td>
 						<td>{run.status}</td>
+						<td style="font-size: 0.75rem; color: var(--text-muted);">{run.benchmark_type}</td>
 					</tr>
 				{/each}
 			</tbody>
@@ -468,7 +524,8 @@
 	textarea { width: 100%; box-sizing: border-box; margin-top: 0.4rem; font-family: inherit; }
 	.prompt-header { display: flex; align-items: center; justify-content: space-between; margin-top: 0.7rem; }
 	.prompt-sizes { display: flex; gap: 0.3rem; }
-	.size-btn { background: var(--bg); color: var(--text); font-size: 0.78rem; padding: 0.25rem 0.6rem; }
+	.size-btn { background: var(--bg); color: var(--text); font-size: 0.78rem; padding: 0.25rem 0.6rem; border: 1px solid var(--border); }
+	.size-btn.active, .size-btn:hover.active { background: var(--accent); color: white; border-color: var(--accent); }
 	.grid.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1rem; }
 	.panel { padding: 1rem; overflow: hidden; }
 	.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
