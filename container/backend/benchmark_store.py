@@ -60,6 +60,7 @@ class BenchmarkStore:
                     throughput_cps real,
                     status text not null,
                     error text,
+                    benchmark_type text not null default 'standard',
                     created_at text not null default current_timestamp
                 );
                 """
@@ -149,7 +150,8 @@ class BenchmarkStore:
             cur = conn.execute("delete from prompt_presets where id = ?", (prompt_id,))
         return cur.rowcount > 0
 
-    def create_run(self, **values: Any) -> dict[str, Any]:
+    def create_run(self, benchmark_type: str = "standard", **values: Any) -> dict[str, Any]:
+        values["benchmark_type"] = benchmark_type
         columns = ", ".join(values.keys())
         placeholders = ", ".join("?" for _ in values)
         with self._connect() as conn:
@@ -170,6 +172,7 @@ class BenchmarkStore:
             ("model", "model"),
             ("prompt_id", "prompt_id"),
             ("status", "status"),
+            ("benchmark_type", "benchmark_type"),
         ):
             value = filters.get(key)
             if value not in (None, ""):
@@ -194,10 +197,18 @@ class BenchmarkStore:
             ).fetchall()
         return {"total": total, "runs": [self._row(row) for row in rows]}
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self, benchmark_type: str | None = None) -> dict[str, Any]:
+        conditions = []
+        params = []
+        if benchmark_type:
+            conditions.append("benchmark_type = ?")
+            params.append(benchmark_type)
+        
+        where = f"where {' and '.join(conditions)}" if conditions else ""
+        
         with self._connect() as conn:
             row = conn.execute(
-                """
+                f"""
                 select
                   count(*) as total_runs,
                   avg(latency_ms) as avg_latency_ms,
@@ -205,32 +216,40 @@ class BenchmarkStore:
                   avg(throughput_tps) as avg_throughput_tps,
                   sum(case when status != 'ok' then 1 else 0 end) as error_runs
                 from benchmark_runs
-                """
+                {where}
+                """,
+                params
             ).fetchone()
             best = conn.execute(
-                """
+                f"""
                 select * from benchmark_runs
                 where status = 'ok'
+                {f'and {' and '.join(conditions)}' if conditions else ''}
                 order by throughput_tps desc nulls last, throughput_cps desc nulls last
                 limit 1
-                """
+                """,
+                params
             ).fetchone()
             worst = conn.execute(
-                """
+                f"""
                 select * from benchmark_runs
                 where status = 'ok'
+                {f'and {' and '.join(conditions)}' if conditions else ''}
                 order by latency_ms desc nulls last
                 limit 1
-                """
+                """,
+                params
             ).fetchone()
             trends = conn.execute(
-                """
+                f"""
                 select id, created_at, endpoint_name, model, prompt_name, latency_ms,
                        throughput_tps, throughput_cps, status
                 from benchmark_runs
+                {where}
                 order by created_at asc
                 limit 200
-                """
+                """,
+                params
             ).fetchall()
         total = row["total_runs"] or 0
         errors = row["error_runs"] or 0

@@ -1,27 +1,12 @@
-# rocminfo lives in the already-built runner image — no need to pull the 20GB dev image
-FROM local-llm-runner-rocm:latest AS rocm-tools
+# Use the existing local-llm-runner image that's already on ubt26
+# This image should already have dependencies installed from a previous build
+FROM local-llm-runner:latest AS base
 
-FROM python:3.12-slim-bookworm AS base
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    jq \
-    git \
-    build-essential \
-    pciutils \
-    libvulkan1 \
-    vulkan-tools \
-    mesa-vulkan-drivers \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=rocm-tools /usr/bin/rocminfo /usr/local/bin/rocminfo
-
+# Add Python support if needed (we'll copy our backend directly)
 WORKDIR /app
-
-COPY container/pyproject.toml .
-RUN pip install --no-cache-dir -e ".[dev]"
-
 COPY container/backend/ ./backend/
+COPY container/pyproject.toml .
+# Skip pip install - dependencies must be pre-installed
 ARG CACHEBUST=1
 RUN rm -rf ./ui-dist/assets/index-*.js ./ui-dist/assets/index-*.css ./ui-dist/index.html
 COPY --link container/ui-dist/ ./ui-dist/
