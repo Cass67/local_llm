@@ -10,6 +10,7 @@ dependencies = [
   "pydantic>=2.10",
   "huggingface_hub>=0.36",
   "langfuse>=2.0,<3.0",
+  "terminal-bench>=0.2.18",
 ]
 
 [project.optional-dependencies]

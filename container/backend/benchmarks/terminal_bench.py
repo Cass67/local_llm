@@ -1,20 +1,31 @@
-"""Terminal benchmark runner for testing LLMs on command-line tasks."""
+"""Terminal-Bench runner: drives the real terminal-bench CLI against a model endpoint."""
 
+import json
 import os
-import subprocess
+import subprocess  # noqa: S404 # nosec B404
 import time
 from pathlib import Path
 from typing import Any
 
 from .base import BaseBenchmarkRunner
 
+_RUNS_DIR = Path("/tmp/terminal_bench_runs")  # noqa: S108 # nosec B108
+
 
 class TerminalBenchRunner(BaseBenchmarkRunner):
-    """Runs terminal-based benchmarks using the actual Terminal-Bench framework."""
+    """Runs the actual Terminal-Bench harness against an OpenAI-compatible endpoint."""
 
     @property
     def name(self) -> str:
         return "terminal-bench"
+
+    def validate(self, req: dict[str, Any]) -> list[str]:
+        errors = []
+        if not req.get("endpoint_id"):
+            errors.append("endpoint_id is required")
+        if not req.get("model"):
+            errors.append("model is required")
+        return errors
 
     def run(
         self,
@@ -23,106 +34,106 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         prompt_text: str,
         **kwargs,
     ) -> dict[str, Any]:
-        """
-        Execute a benchmark where the LLM must provide correct terminal commands.
+        endpoint_name = kwargs.get("endpoint_name", "terminal-bench")
+        endpoint_base_url = kwargs.get("endpoint_base_url", "")
+        dataset_name = os.environ.get("TERMINAL_BENCH_DATASET_NAME", "terminal-bench-core")
+        dataset_version = os.environ.get("TERMINAL_BENCH_DATASET_VERSION", "0.1.1")
+        task_id = prompt_text.strip() or None
 
-        Uses the actual Terminal-Bench framework via CLI.
-        """
+        run_id = f"web-{int(time.time())}"
+        _RUNS_DIR.mkdir(parents=True, exist_ok=True)
+
+        cmd = [
+            "tb",
+            "run",
+            "--dataset-name",
+            dataset_name,
+            "--dataset-version",
+            dataset_version,
+            "--agent",
+            "terminus-2",
+            "--model",
+            f"openai/{model}",
+            "--n-concurrent",
+            "1",
+            "--n-tasks",
+            "1",
+            "--output-path",
+            str(_RUNS_DIR),
+            "--run-id",
+            run_id,
+        ]
+        if task_id:
+            cmd += ["--task-id", task_id]
+
+        env = {
+            **os.environ,
+            "OPENAI_API_BASE": endpoint_base_url,
+            "OPENAI_API_KEY": kwargs.get("api_key") or "local-llm",
+        }
+
         start_time = time.perf_counter()
         status = "ok"
         error = None
         response_text = ""
+        prompt_tokens = None
         completion_tokens = None
 
         try:
-            # Get dataset info from environment
-            dataset_name = os.environ.get("TERMINAL_BENCH_DATASET_NAME", "terminal-bench-core")
-            dataset_version = os.environ.get("TERMINAL_BENCH_DATASET_VERSION", "0.1.1")
-
-            # Create a temporary directory for this benchmark run
-            run_dir = Path("/tmp/terminal_bench_run")
-            run_dir.mkdir(parents=True, exist_ok=True)
-
-            # Write the prompt to a task file (simplified version)
-            task_file = run_dir / "task.json"
-            task_content = {
-                "task_id": f"custom_{int(time.time())}",
-                "instruction": prompt_text,
-                "test_script": "# Mock test - in production this would verify the command output",
-            }
-
-            import json
-
-            with open(task_file, "w") as f:
-                json.dump(task_content, f)
-
-            # Run Terminal-Bench (simplified invocation)
-            # In a full implementation, we would use:
-            # tb run --agent custom --model anthropic/claude-3-7-latest \
-            #   --dataset-name {dataset_name} --dataset-version {dataset_version} \
-            #   --task-dir {run_dir}
-
-            # For now, execute the prompt directly as a command (simplified)
-            # This is a placeholder until we integrate with the full TB framework
-            prompt_text = prompt_text.strip()
-            result = subprocess.run(
-                prompt_text,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30,
+            proc = subprocess.run(  # noqa: S603 # nosec B603
+                cmd, capture_output=True, text=True, timeout=900, env=env, check=False
             )
-            response_text = result.stdout + result.stderr
-            completion_tokens = len(response_text.split())
+            run_dir = _RUNS_DIR / run_id
+            results_path = run_dir / "results.json"
+            metadata_path = run_dir / "run_metadata.json"
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            duration_seconds = max(duration_ms / 1000, 0.001)
-
-            return {
-                "endpoint_id": endpoint_id,
-                "endpoint_name": kwargs.get("endpoint_name", "terminal-bench"),
-                "endpoint_base_url": kwargs.get("endpoint_base_url", ""),
-                "model": model,
-                "prompt_text": prompt_text,
-                "response_text": response_text,
-                "latency_ms": duration_ms,
-                "duration_ms": duration_ms,
-                "output_chars": len(response_text),
-                "output_words": len(response_text.split()),
-                "prompt_tokens": None,
-                "completion_tokens": completion_tokens,
-                "total_tokens": completion_tokens,
-                "throughput_tps": completion_tokens / duration_seconds
-                if completion_tokens
-                else None,
-                "throughput_cps": len(response_text) / duration_seconds if response_text else None,
-                "status": status,
-                "error": error,
-            }
+            if results_path.exists() and metadata_path.exists():
+                results = json.loads(results_path.read_text())
+                metadata = json.loads(metadata_path.read_text())
+                trials = results.get("results", [])
+                resolved = sum(1 for t in trials if t.get("is_resolved"))
+                prompt_tokens = sum(t.get("total_input_tokens") or 0 for t in trials) or None
+                completion_tokens = sum(t.get("total_output_tokens") or 0 for t in trials) or None
+                accuracy = metadata.get("accuracy")
+                response_text = f"{resolved}/{len(trials)} tasks resolved" + (
+                    f" (accuracy={accuracy:.2f})" if accuracy is not None else ""
+                )
+                if proc.returncode != 0 and not trials:
+                    status = "error"
+                    error = proc.stderr[-4000:] or "tb run failed"
+            else:
+                status = "error"
+                error = (proc.stderr or proc.stdout or "tb run produced no results")[-4000:]
         except subprocess.TimeoutExpired:
-            error = "Command timed out"
             status = "error"
-        except Exception as e:
+            error = "terminal-bench run timed out"
+        except Exception as e:  # noqa: BLE001
+            status = "error"
             error = str(e)
-            status = "error"
 
         duration_ms = (time.perf_counter() - start_time) * 1000
+        duration_seconds = max(duration_ms / 1000, 0.001)
+        total_tokens = (
+            (prompt_tokens or 0) + (completion_tokens or 0)
+            if prompt_tokens or completion_tokens
+            else None
+        )
         return {
             "endpoint_id": endpoint_id,
-            "endpoint_name": kwargs.get("endpoint_name", "terminal-bench"),
-            "endpoint_base_url": kwargs.get("endpoint_base_url", ""),
+            "endpoint_name": endpoint_name,
+            "endpoint_base_url": endpoint_base_url,
             "model": model,
             "prompt_text": prompt_text,
-            "response_text": "",
+            "response_text": response_text,
             "latency_ms": duration_ms,
             "duration_ms": duration_ms,
-            "output_chars": 0,
-            "output_words": 0,
-            "prompt_tokens": None,
-            "completion_tokens": None,
-            "total_tokens": None,
-            "throughput_tps": None,
-            "throughput_cps": None,
+            "output_chars": len(response_text),
+            "output_words": len(response_text.split()),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "throughput_tps": completion_tokens / duration_seconds if completion_tokens else None,
+            "throughput_cps": len(response_text) / duration_seconds if response_text else None,
             "status": status,
             "error": error,
         }
