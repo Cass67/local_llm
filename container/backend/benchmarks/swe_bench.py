@@ -23,12 +23,15 @@ _RUNS_DIR = _STATE_DIR / "runs" / "benchmarks" / "swe_bench"
 
 def _extract_patch(text: str) -> str:
     if "```diff" in text:
-        return text.split("```diff", 1)[1].split("```", 1)[0].strip()
-    if "```patch" in text:
-        return text.split("```patch", 1)[1].split("```", 1)[0].strip()
-    if "```" in text:
-        return text.split("```", 1)[1].rsplit("```", 1)[0].strip()
-    return text.strip()
+        patch = text.split("```diff", 1)[1].split("```", 1)[0].strip()
+    elif "```patch" in text:
+        patch = text.split("```patch", 1)[1].split("```", 1)[0].strip()
+    elif "```" in text:
+        patch = text.split("```", 1)[1].rsplit("```", 1)[0].strip()
+    else:
+        patch = text.strip()
+    # unified diffs must end with a trailing newline or `patch` rejects the last hunk
+    return patch + "\n" if patch else patch
 
 
 class SwebenchRunner(BaseBenchmarkRunner):
@@ -124,8 +127,8 @@ class SwebenchRunner(BaseBenchmarkRunner):
         prompt_text: str,
         **kwargs,
     ) -> dict[str, Any]:
-        endpoint_name = kwargs.get("endpoint_name", "swe-bench")
-        endpoint_base_url = kwargs.get("endpoint_base_url", "")
+        endpoint_name = kwargs.pop("endpoint_name", "swe-bench")
+        endpoint_base_url = kwargs.pop("endpoint_base_url", "")
         dataset_name = os.environ.get("SWE_BENCH_DATASET_NAME", "princeton-nlp/SWE-bench_Lite")
         split = os.environ.get("SWE_BENCH_SPLIT", "test")
         instance_id_filter = prompt_text.strip() or None
