@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess  # noqa: S404 # nosec B404
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -51,8 +52,14 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         run_id = kwargs.get("run_id") or f"web-{int(time.time())}"
         _RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
+        quiet_code = (
+            "import logging; logging.disable(logging.INFO); "
+            "from terminal_bench.cli.tb.main import app; app()"
+        )
         cmd = [
-            "tb",
+            sys.executable,
+            "-c",
+            quiet_code,
             "run",
             "--dataset-name",
             dataset_name,

@@ -1,6 +1,7 @@
 """SWE-bench runner: generates a real model patch and evaluates it with the actual harness."""
 
 import json
+import logging
 import os
 import subprocess  # noqa: S404 # nosec B404
 import sys
@@ -11,6 +12,10 @@ from typing import Any
 import httpx
 
 from .base import BaseBenchmarkRunner
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+logging.getLogger("datasets").setLevel(logging.WARNING)
 
 _STATE_DIR = Path(os.environ.get("LOCAL_LLM_STATE_DIR", "/state"))
 _RUNS_DIR = _STATE_DIR / "runs" / "benchmarks" / "swe_bench"
@@ -143,11 +148,16 @@ class SwebenchRunner(BaseBenchmarkRunner):
             with log_path.open("a") as log_f:
                 log_f.write(f"got patch ({len(patch)} chars), running evaluation harness...\n")
                 log_f.flush()
+                quiet_code = (
+                    "import logging; logging.disable(logging.INFO); "
+                    "import runpy; "
+                    "runpy.run_module('swebench.harness.run_evaluation', run_name='__main__')"
+                )
                 proc = subprocess.run(  # noqa: S603 # nosec B603
                     [
                         sys.executable,
-                        "-m",
-                        "swebench.harness.run_evaluation",
+                        "-c",
+                        quiet_code,
                         "--predictions_path",
                         str(predictions_path),
                         "--dataset_name",
