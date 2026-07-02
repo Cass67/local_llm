@@ -14,12 +14,12 @@
 		syncClusterBenchmarkEndpoints,
 		listBenchmarkTypes,
 		listBenchmarkTasks,
-		runBenchmarkByType,
 		startBenchmarkByType,
 		getBenchmarkJob,
 		benchmarkReportUrl,
 		listBenchmarkRunFiles,
 		getBenchmarkRunFile,
+		listActiveBenchmarkJobs,
 	} from "../lib/benchmarkApi";
 	import { fetchClusters } from "../lib/api";
 	import { formatMs, formatThroughput, runDelta } from "../lib/benchmarkMetrics";
@@ -351,6 +351,23 @@
 		}
 	}
 
+	async function attachToJob(type: string, jobId: string) {
+		running = true;
+		error = "";
+		try {
+			const result = await pollJob(type, jobId);
+			if (result) {
+				latest = result;
+				selectedRun = result;
+			}
+			await loadAll();
+		} catch (e: unknown) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			running = false;
+		}
+	}
+
 	async function executeRun() {
 		if (!selectedEndpointId || !selectedModel || !promptText) return;
 		running = true;
@@ -373,28 +390,44 @@
 				top_k: topK,
 				repeat_penalty: repeatPenalty,
 			};
-			let result: BenchmarkRun | null = null;
 			if (benchmarkType === 'standard') {
+				let result: BenchmarkRun | null = null;
 				for (let i = 0; i < Math.max(1, repeatCount); i++) {
 					result = await runBenchmark(req);
 				}
+				if (result) {
+					latest = result;
+					selectedRun = result;
+				}
+				await loadAll();
+				running = false;
 			} else {
 				const { job_id } = await startBenchmarkByType(benchmarkType, req);
-				result = await pollJob(benchmarkType, job_id);
+				await attachToJob(benchmarkType, job_id);
 			}
-			if (result) {
-				latest = result;
-				selectedRun = result;
-			}
-			await loadAll();
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);
-		} finally {
 			running = false;
 		}
 	}
 
-	onMount(loadAll);
+	async function reconnectToActiveJob() {
+		try {
+			const { jobs } = await listActiveBenchmarkJobs();
+			const active = jobs.find((j) => j.status === "running");
+			if (active) {
+				benchmarkType = active.benchmark_type;
+				await attachToJob(active.benchmark_type, active.job_id);
+			}
+		} catch {
+			// no active job to reconnect to — not an error worth surfacing
+		}
+	}
+
+	onMount(async () => {
+		await loadAll();
+		await reconnectToActiveJob();
+	});
 </script>
 
 <div class="benchmarks">
