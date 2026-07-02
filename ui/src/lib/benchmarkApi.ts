@@ -293,3 +293,24 @@ export async function getBenchmarkJob(
 export function benchmarkReportUrl(benchmark_type: string, run_id: string): string {
 	return `${BASE}/runs/${benchmark_type}/report/${run_id}`;
 }
+
+export async function listBenchmarkRunFiles(
+	benchmark_type: string,
+	run_id: string,
+): Promise<{ files: string[] }> {
+	const res = await fetch(`${BASE}/runs/${benchmark_type}/report/${run_id}/files`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function getBenchmarkRunFile(
+	benchmark_type: string,
+	run_id: string,
+	path: string,
+): Promise<string> {
+	const res = await fetch(
+		`${BASE}/runs/${benchmark_type}/report/${run_id}/file?path=${encodeURIComponent(path)}`,
+	);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.text();
+}
