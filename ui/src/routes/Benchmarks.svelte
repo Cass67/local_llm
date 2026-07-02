@@ -14,11 +14,15 @@
 		syncClusterBenchmarkEndpoints,
 		listBenchmarkTypes,
 		runBenchmarkByType,
+		startBenchmarkByType,
+		getBenchmarkJob,
 	} from "../lib/benchmarkApi";
 	import { fetchClusters } from "../lib/api";
 	import { formatMs, formatThroughput, runDelta } from "../lib/benchmarkMetrics";
 	import type { BenchmarkEndpoint, BenchmarkPrompt, BenchmarkRun, BenchmarkSummary } from "../lib/benchmarkApi";
 	import type { ClusterInfo } from "../lib/types";
+
+	const DEFAULT_PROMPT = "Write a concise Python function that reverses a string and explain it.";
 
 	let endpoints: BenchmarkEndpoint[] = $state([]);
 	let prompts: BenchmarkPrompt[] = $state([]);
@@ -35,7 +39,7 @@
 	let endpointUrl = $state("");
 	let endpointKey = $state("");
 	let promptName = $state("");
-	let promptText = $state("Write a concise Python function that reverses a string and explain it.");
+	let promptText = $state(DEFAULT_PROMPT);
 	let selectedEndpointId = $state("");
 	let endpointModels: string[] = $state([]);
 	let selectedPromptId = $state("");
@@ -51,6 +55,8 @@
 	let filterEndpointId = $state("");
 	let benchmarkType = $state("standard");
 	let benchmarkTypes: Array<{ name: string; description: string }> = $state([]);
+	let consoleLog = $state("");
+	let consoleVisible = $state(false);
 
 	const PROMPTS = {
 		small: [
@@ -256,10 +262,33 @@
 		runs = result.runs;
 	}
 
+	function onBenchmarkTypeChange() {
+		if (benchmarkType === 'standard') {
+			if (promptText.trim() === "") promptText = DEFAULT_PROMPT;
+		} else if (promptText === DEFAULT_PROMPT || promptText.trim() === "") {
+			promptText = " ";
+		}
+		loadAll();
+	}
+
+	async function pollJob(type: string, jobId: string): Promise<BenchmarkRun | null> {
+		consoleVisible = true;
+		consoleLog = "";
+		while (true) {
+			const job = await getBenchmarkJob(type, jobId);
+			consoleLog = job.log || consoleLog;
+			if (job.status === "done") return job.result;
+			if (job.status === "error") throw new Error(job.error || "benchmark job failed");
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+		}
+	}
+
 	async function executeRun() {
 		if (!selectedEndpointId || !selectedModel || !promptText) return;
 		running = true;
 		error = "";
+		consoleVisible = false;
+		consoleLog = "";
 		try {
 			const prompt = selectedPrompt();
 			const req = {
@@ -282,7 +311,8 @@
 					result = await runBenchmark(req);
 				}
 			} else {
-				result = await runBenchmarkByType(benchmarkType, req);
+				const { job_id } = await startBenchmarkByType(benchmarkType, req);
+				result = await pollJob(benchmarkType, job_id);
 			}
 			if (result) {
 				latest = result;
@@ -360,7 +390,7 @@
 	<section class="panel runner">
 		<h3>Run benchmark</h3>
 		<div class="form-row">
-			<select bind:value={benchmarkType} onchange={loadAll}>
+			<select bind:value={benchmarkType} onchange={onBenchmarkTypeChange}>
 				<option value="standard">Standard</option>
 				{#each benchmarkTypes as type}<option value={type.name}>{type.name}</option>{/each}
 			</select>
@@ -379,30 +409,44 @@
 		{#if benchmarkType !== 'standard'}
 			<div class="form-row params" style="background: var(--bg-card); padding: 0.75rem; border-radius: 8px; margin-top: 0.5rem;">
 				<p style="margin: 0; color: var(--text-muted); font-size: 0.85rem;">
-					<b>{benchmarkType} mode:</b> This benchmark type will evaluate your model on structured tasks. Results are stored separately from standard benchmarks.
+					<b>{benchmarkType} mode:</b> runs the real {benchmarkType} harness against your model. This can take several minutes (task containers are built on first run) — watch the console below for live progress.
 				</p>
 			</div>
 		{/if}
 		<div class="form-row params">
 			<label>Max tokens<input type="number" min="1" max="8192" bind:value={maxTokens} /></label>
 			<label>Temperature<input type="number" min="0" max="2" step="0.05" bind:value={temperature} /></label>
-			<label>Seed (-1=rand)<input type="number" min="-1" bind:value={seed} /></label>
-			<label>Top-P<input type="number" min="0" max="1" step="0.05" bind:value={topP} /></label>
-			<label>Top-K<input type="number" min="0" max="200" bind:value={topK} /></label>
-			<label>Repeat penalty<input type="number" min="1" max="2" step="0.05" bind:value={repeatPenalty} /></label>
-			<label>Runs<input type="number" min="1" max="20" bind:value={repeatCount} /></label>
+			{#if benchmarkType === 'standard'}
+				<label>Seed (-1=rand)<input type="number" min="-1" bind:value={seed} /></label>
+				<label>Top-P<input type="number" min="0" max="1" step="0.05" bind:value={topP} /></label>
+				<label>Top-K<input type="number" min="0" max="200" bind:value={topK} /></label>
+				<label>Repeat penalty<input type="number" min="1" max="2" step="0.05" bind:value={repeatPenalty} /></label>
+				<label>Runs<input type="number" min="1" max="20" bind:value={repeatCount} /></label>
+			{/if}
 		</div>
-		<textarea bind:value={systemPrompt} rows="2" placeholder="System prompt (optional)"></textarea>
-		<div class="prompt-header">
-			<span class="muted">Prompt</span>
-			<div class="prompt-sizes">
-				<button class="size-btn" onclick={() => randomPrompt("small")}>Small</button>
-				<button class="size-btn" onclick={() => randomPrompt("medium")}>Medium</button>
-				<button class="size-btn" onclick={() => randomPrompt("large")}>Large</button>
+		{#if benchmarkType === 'standard'}
+			<textarea bind:value={systemPrompt} rows="2" placeholder="System prompt (optional)"></textarea>
+			<div class="prompt-header">
+				<span class="muted">Prompt</span>
+				<div class="prompt-sizes">
+					<button class="size-btn" onclick={() => randomPrompt("small")}>Small</button>
+					<button class="size-btn" onclick={() => randomPrompt("medium")}>Medium</button>
+					<button class="size-btn" onclick={() => randomPrompt("large")}>Large</button>
+				</div>
 			</div>
-		</div>
-		<textarea bind:value={promptText} rows="5" placeholder="Benchmark prompt"></textarea>
+			<textarea bind:value={promptText} rows="5" placeholder="Benchmark prompt"></textarea>
+		{:else}
+			<label class="muted" for="task-id-filter">Task ID filter (optional — leave as a single space to run the first/default task)</label>
+			<textarea id="task-id-filter" bind:value={promptText} rows="2" placeholder="e.g. pytorch-model-cli.easy"></textarea>
+		{/if}
 	</section>
+
+	{#if consoleVisible}
+		<section class="panel">
+			<h3>Console {running ? "(running…)" : ""}</h3>
+			<pre class="console-log">{consoleLog || "waiting for output…"}</pre>
+		</section>
+	{/if}
 
 	{#if latest}
 		<section class="panel result">

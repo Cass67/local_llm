@@ -11,6 +11,8 @@ dependencies = [
   "huggingface_hub>=0.36",
   "langfuse>=2.0,<3.0",
   "terminal-bench>=0.2.18",
+  "swebench>=4.1.0",
+  "datasets>=3.0",
 ]
 
 [project.optional-dependencies]
