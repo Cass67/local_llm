@@ -48,6 +48,9 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         dataset_name = os.environ.get("TERMINAL_BENCH_DATASET_NAME", "terminal-bench-core")
         dataset_version = os.environ.get("TERMINAL_BENCH_DATASET_VERSION", "0.1.1")
         task_id = prompt_text.strip() or None
+        run_all = task_id == "__all__"
+        if run_all:
+            task_id = None
 
         run_id = kwargs.get("run_id") or f"web-{int(time.time())}"
         _RUNS_DIR.mkdir(parents=True, exist_ok=True)
@@ -70,16 +73,18 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
             "--model",
             f"openai/{model}",
             "--n-concurrent",
-            "1",
-            "--n-tasks",
-            "1",
+            "4" if run_all else "1",
             "--output-path",
             str(_RUNS_DIR),
             "--run-id",
             run_id,
         ]
-        if task_id:
-            cmd += ["--task-id", task_id]
+        if run_all:
+            pass  # no --task-id / --n-tasks limit: runs every task in the dataset
+        elif task_id:
+            cmd += ["--n-tasks", "1", "--task-id", task_id]
+        else:
+            cmd += ["--n-tasks", "1"]
 
         env = {
             **os.environ,
@@ -96,7 +101,12 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
 
         try:
             proc = subprocess.run(  # noqa: S603 # nosec B603
-                cmd, capture_output=True, text=True, timeout=1800, env=env, check=False
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=21600 if run_all else 1800,
+                env=env,
+                check=False,
             )
             run_dir = _RUNS_DIR / run_id
             results_path = run_dir / "results.json"

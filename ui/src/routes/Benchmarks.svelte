@@ -463,6 +463,7 @@
 			{:else if benchmarkTasks.length > 0}
 				<select id="task-id-filter" bind:value={promptText}>
 					<option value=" ">(first/default task)</option>
+					<option value="__all__">All {benchmarkTasks.length} tasks (full dataset — can take hours, produces a score)</option>
 					{#each benchmarkTasks as task}<option value={task}>{task}</option>{/each}
 				</select>
 			{:else}

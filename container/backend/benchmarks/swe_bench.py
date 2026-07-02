@@ -54,6 +54,69 @@ class SwebenchRunner(BaseBenchmarkRunner):
         dataset = load_dataset(dataset_name, split=split)  # nosec B615
         return sorted(dataset["instance_id"])
 
+    def _generate_predictions(
+        self,
+        instances: list[dict[str, Any]],
+        model: str,
+        endpoint_base_url: str,
+        log_path: Path,
+        **kwargs,
+    ) -> tuple[list[dict[str, str]], int, int]:
+        predictions: list[dict[str, str]] = []
+        prompt_tokens = 0
+        completion_tokens = 0
+        max_tokens = kwargs.get("max_tokens", 2048)
+        temperature = kwargs.get("temperature", 0.2)
+        api_key = kwargs.get("api_key")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+        with httpx.Client(timeout=600.0) as client:
+            for i, instance in enumerate(instances, start=1):
+                instance_id = instance["instance_id"]
+                with log_path.open("a") as log_f:
+                    log_f.write(
+                        f"[{i}/{len(instances)}] instance: {instance_id} — "
+                        "querying model for a patch...\n"
+                    )
+                user_prompt = (
+                    "You are fixing a bug in an open-source repository. Given the issue "
+                    "description below, produce a fix as a unified diff patch (git diff "
+                    "format). Only output the patch, wrapped in a ```diff code block.\n\n"
+                    f"Issue:\n{instance['problem_statement']}"
+                )
+                try:
+                    resp = client.post(
+                        f"{endpoint_base_url.rstrip('/')}/chat/completions",
+                        headers=headers,
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": user_prompt}],
+                            "max_tokens": max_tokens,
+                            "temperature": temperature,
+                        },
+                    )
+                    resp.raise_for_status()
+                    completion = resp.json()
+                    message = completion["choices"][0]["message"]["content"]
+                    patch = _extract_patch(message)
+                    usage = completion.get("usage") or {}
+                    prompt_tokens += usage.get("prompt_tokens") or 0
+                    completion_tokens += usage.get("completion_tokens") or 0
+                    predictions.append(
+                        {
+                            "instance_id": instance_id,
+                            "model_name_or_path": model,
+                            "model_patch": patch,
+                        }
+                    )
+                    with log_path.open("a") as log_f:
+                        log_f.write(f"  got patch ({len(patch)} chars)\n")
+                except Exception as e:  # noqa: BLE001
+                    with log_path.open("a") as log_f:
+                        log_f.write(f"  ERROR generating patch: {e}\n")
+
+        return predictions, prompt_tokens, completion_tokens
+
     def run(
         self,
         endpoint_id: int,
@@ -66,6 +129,7 @@ class SwebenchRunner(BaseBenchmarkRunner):
         dataset_name = os.environ.get("SWE_BENCH_DATASET_NAME", "princeton-nlp/SWE-bench_Lite")
         split = os.environ.get("SWE_BENCH_SPLIT", "test")
         instance_id_filter = prompt_text.strip() or None
+        run_all = instance_id_filter == "__all__"
 
         run_id = kwargs.get("run_id") or f"web-{int(time.time())}"
         run_dir = _RUNS_DIR / run_id
@@ -84,98 +148,61 @@ class SwebenchRunner(BaseBenchmarkRunner):
 
             log_path.write_text("loading dataset...\n")
             dataset = load_dataset(dataset_name, split=split)  # nosec B615
-            instance = None
-            if instance_id_filter:
-                for row in dataset:
-                    if row["instance_id"] == instance_id_filter:
-                        instance = row
-                        break
-                if instance is None:
+
+            if run_all:
+                instances = list(dataset)
+            elif instance_id_filter:
+                instances = [row for row in dataset if row["instance_id"] == instance_id_filter]
+                if not instances:
                     raise ValueError(f"instance_id {instance_id_filter!r} not found in dataset")
             else:
-                instance = dataset[0]
+                instances = [dataset[0]]
 
-            instance_id = instance["instance_id"]
-            problem_statement = instance["problem_statement"]
-
-            user_prompt = (
-                "You are fixing a bug in an open-source repository. Given the issue "
-                "description below, produce a fix as a unified diff patch (git diff format). "
-                "Only output the patch, wrapped in a ```diff code block.\n\n"
-                f"Issue:\n{problem_statement}"
+            predictions, prompt_tokens, completion_tokens = self._generate_predictions(
+                instances, model, endpoint_base_url, log_path, **kwargs
             )
 
-            with log_path.open("a") as log_f:
-                log_f.write(f"instance: {instance_id}\nquerying model for a patch...\n")
-
-            with httpx.Client(timeout=600.0) as client:
-                headers = {}
-                api_key = kwargs.get("api_key")
-                if api_key:
-                    headers["Authorization"] = f"Bearer {api_key}"
-                resp = client.post(
-                    f"{endpoint_base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": user_prompt}],
-                        "max_tokens": kwargs.get("max_tokens", 2048),
-                        "temperature": kwargs.get("temperature", 0.2),
-                    },
-                )
-                resp.raise_for_status()
-                completion = resp.json()
-
-            message = completion["choices"][0]["message"]["content"]
-            patch = _extract_patch(message)
-            usage = completion.get("usage") or {}
-            prompt_tokens = usage.get("prompt_tokens")
-            completion_tokens = usage.get("completion_tokens")
+            if not predictions:
+                raise RuntimeError("no patches were generated for any instance")
 
             predictions_path = run_dir / "predictions.json"
-            predictions_path.write_text(
-                json.dumps(
-                    [
-                        {
-                            "instance_id": instance_id,
-                            "model_name_or_path": model,
-                            "model_patch": patch,
-                        }
-                    ]
-                )
-            )
+            predictions_path.write_text(json.dumps(predictions))
 
             with log_path.open("a") as log_f:
-                log_f.write(f"got patch ({len(patch)} chars), running evaluation harness...\n")
+                log_f.write(
+                    f"generated {len(predictions)}/{len(instances)} patches, "
+                    "running evaluation harness...\n"
+                )
                 log_f.flush()
                 quiet_code = (
                     "import logging; logging.disable(logging.INFO); "
                     "import runpy; "
                     "runpy.run_module('swebench.harness.run_evaluation', run_name='__main__')"
                 )
+                harness_cmd = [
+                    sys.executable,
+                    "-c",
+                    quiet_code,
+                    "--predictions_path",
+                    str(predictions_path),
+                    "--dataset_name",
+                    dataset_name,
+                    "--split",
+                    split,
+                    "--run_id",
+                    run_id,
+                    "--max_workers",
+                    os.environ.get("SWE_BENCH_MAX_WORKERS", "4" if run_all else "1"),
+                    "--report_dir",
+                    str(run_dir),
+                ]
+                if not run_all:
+                    harness_cmd += ["--instance_ids", predictions[0]["instance_id"]]
                 proc = subprocess.run(  # noqa: S603 # nosec B603
-                    [
-                        sys.executable,
-                        "-c",
-                        quiet_code,
-                        "--predictions_path",
-                        str(predictions_path),
-                        "--dataset_name",
-                        dataset_name,
-                        "--split",
-                        split,
-                        "--instance_ids",
-                        instance_id,
-                        "--run_id",
-                        run_id,
-                        "--max_workers",
-                        "1",
-                        "--report_dir",
-                        str(run_dir),
-                    ],
+                    harness_cmd,
                     stdout=log_f,
                     stderr=subprocess.STDOUT,
-                    timeout=1800,
+                    timeout=21600 if run_all else 1800,
                     cwd=run_dir,
                     check=False,
                 )
