@@ -373,14 +373,26 @@
 		return status;
 	}
 
-	function groupFilesByInstance(files: string[], instanceIds: string[]): { groups: Record<string, string[]>; other: string[] } {
+	function instanceIdForFile(path: string): string | null {
+		const parts = path.split("/");
+		// top-level pattern: "<instance_id>/<instance_id>.traj.json"
+		if (parts.length === 2 && parts[1].startsWith(`${parts[0]}.`)) {
+			return parts[0];
+		}
+		// harness pattern: "logs/run_evaluation/<run_id>/<model>/<instance_id>/<file>"
+		if (parts[0] === "logs" && parts[1] === "run_evaluation" && parts.length >= 5) {
+			return parts[4];
+		}
+		return null;
+	}
+
+	function groupFilesByInstance(files: string[]): { groups: Record<string, string[]>; other: string[] } {
 		const groups: Record<string, string[]> = {};
 		const other: string[] = [];
-		const idSet = new Set(instanceIds);
 		for (const file of files) {
-			const segment = file.split("/").find((part) => idSet.has(part));
-			if (segment) {
-				(groups[segment] ||= []).push(file);
+			const id = instanceIdForFile(file);
+			if (id) {
+				(groups[id] ||= []).push(file);
 			} else {
 				other.push(file);
 			}
@@ -403,17 +415,22 @@
 		expandedInstances = {};
 		try {
 			const res = await fetch(benchmarkReportUrl(type, runId));
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = await res.json();
-			reportModalContent = formatSummary(type, data);
-			reportInstanceStatus = instanceStatusFromSummary(type, data);
+			if (res.status === 404) {
+				reportModalContent = "No final report yet — this run has no completed evaluation (it may still be running, or was interrupted before finishing).";
+			} else if (!res.ok) {
+				throw new Error(`HTTP ${res.status}`);
+			} else {
+				const data = await res.json();
+				reportModalContent = formatSummary(type, data);
+				reportInstanceStatus = instanceStatusFromSummary(type, data);
+			}
 		} catch (e: unknown) {
 			reportModalError = e instanceof Error ? e.message : String(e);
 		}
 		try {
 			const { files } = await listBenchmarkRunFiles(type, runId);
 			reportModalFiles = files;
-			const { groups, other } = groupFilesByInstance(files, Object.keys(reportInstanceStatus));
+			const { groups, other } = groupFilesByInstance(files);
 			reportInstanceFiles = groups;
 			reportOtherFiles = other;
 		} catch {
