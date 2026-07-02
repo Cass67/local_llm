@@ -67,7 +67,7 @@ def _checkout_repo(repo: str, base_commit: str) -> Path | None:
 
 
 def _relevant_files(
-    repo_dir: Path, problem_statement: str, top_n: int = 4, max_file_chars: int = 6000
+    repo_dir: Path, problem_statement: str, top_n: int = 4, total_budget_chars: int = 60000
 ) -> list[tuple[str, str]]:
     """Cheap keyword-overlap search over the repo for files likely relevant to the issue."""
     keywords = set(re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{3,}", problem_statement.lower()))
@@ -97,10 +97,16 @@ def _relevant_files(
             scored.append((score, path, content))
 
     scored.sort(key=lambda item: -item[0])
-    return [
-        (str(path.relative_to(repo_dir)), content[:max_file_chars])
-        for _, path, content in scored[:top_n]
-    ]
+    # include each candidate file in FULL (never truncated mid-content, which would
+    # scramble line numbers the model relies on) until the total budget is used up
+    result: list[tuple[str, str]] = []
+    used = 0
+    for _, path, content in scored[:top_n]:
+        if used + len(content) > total_budget_chars and result:
+            break
+        result.append((str(path.relative_to(repo_dir)), content))
+        used += len(content)
+    return result
 
 
 def _extract_patch(text: str) -> str:
