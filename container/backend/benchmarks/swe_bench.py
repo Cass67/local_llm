@@ -40,20 +40,21 @@ def _background_image_pruner(log_path: Path, interval_sec: float = 120.0):
     def _loop() -> None:
         while not stop_event.wait(interval_sec):
             docker_bin = shutil.which("docker") or "docker"
-            for cmd in (
-                [docker_bin, "image", "prune", "-af"],
-                [docker_bin, "builder", "prune", "-af"],
-            ):
-                try:
-                    proc = subprocess.run(  # noqa: S603 # nosec B603
-                        cmd, capture_output=True, text=True, timeout=120, check=False
-                    )
-                    reclaimed = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
-                    with log_path.open("a") as log_f:
-                        log_f.write(f"  [background cleanup] {' '.join(cmd[1:])}: {reclaimed}\n")
-                except Exception as e:  # noqa: BLE001
-                    with log_path.open("a") as log_f:
-                        log_f.write(f"  [background cleanup] {' '.join(cmd[1:])} failed: {e}\n")
+            # only prune fully-built, unreferenced images — never build cache. Pruning
+            # build cache mid-run can delete layers an in-progress `docker build` for a
+            # different instance is actively using, corrupting that build (observed as
+            # spurious "No such image" 404s on otherwise-healthy instances).
+            cmd = [docker_bin, "image", "prune", "-af"]
+            try:
+                proc = subprocess.run(  # noqa: S603 # nosec B603
+                    cmd, capture_output=True, text=True, timeout=120, check=False
+                )
+                reclaimed = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+                with log_path.open("a") as log_f:
+                    log_f.write(f"  [background cleanup] {' '.join(cmd[1:])}: {reclaimed}\n")
+            except Exception as e:  # noqa: BLE001
+                with log_path.open("a") as log_f:
+                    log_f.write(f"  [background cleanup] {' '.join(cmd[1:])} failed: {e}\n")
 
     thread = threading.Thread(target=_loop, daemon=True)
     thread.start()
