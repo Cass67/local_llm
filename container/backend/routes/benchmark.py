@@ -185,11 +185,12 @@ async def load_models(req: EndpointRef):
     endpoint = _store().get_endpoint_secret(req.endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail="endpoint not found")
-    cluster_name = str(endpoint.get("name", "")).removeprefix("Cluster: ").strip()
-    if cluster_name:
+    name = str(endpoint.get("name", ""))
+    if name.startswith("Cluster: "):
         # Cluster endpoint — return only the model running on this cluster
         from ..active_runners import list_active
 
+        cluster_name = name.removeprefix("Cluster: ").strip()
         active = list_active()
         models = []
         for entry in active:
