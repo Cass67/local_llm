@@ -40,7 +40,7 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         dataset_version = os.environ.get("TERMINAL_BENCH_DATASET_VERSION", "0.1.1")
         task_id = prompt_text.strip() or None
 
-        run_id = f"web-{int(time.time())}"
+        run_id = kwargs.get("run_id") or f"web-{int(time.time())}"
         _RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
         cmd = [
@@ -81,7 +81,7 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
 
         try:
             proc = subprocess.run(  # noqa: S603 # nosec B603
-                cmd, capture_output=True, text=True, timeout=900, env=env, check=False
+                cmd, capture_output=True, text=True, timeout=1800, env=env, check=False
             )
             run_dir = _RUNS_DIR / run_id
             results_path = run_dir / "results.json"

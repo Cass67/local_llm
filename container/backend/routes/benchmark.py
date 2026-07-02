@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+import uuid
 from functools import lru_cache
 from importlib import import_module
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -21,6 +24,16 @@ BenchmarkStore = import_module("backend.benchmark_store").BenchmarkStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/benchmark", tags=["benchmark"])
+
+_RUNNERS = {
+    "terminal-bench": TerminalBenchRunner(),
+    "swe-bench": SwebenchRunner(),
+}
+_LOG_DIRS = {
+    "terminal-bench": Path("/tmp/terminal_bench_runs"),  # noqa: S108 # nosec B108
+    "swe-bench": Path("/tmp/swe_bench_runs"),  # noqa: S108 # nosec B108
+}
+_JOBS: dict[str, dict[str, Any]] = {}
 
 
 class EndpointCreate(BaseModel):
@@ -340,25 +353,10 @@ async def list_benchmark_types():
     }
 
 
-@router.post("/runs/{benchmark_type}")
-async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
-    """Run a specific benchmark type."""
-    # Map benchmark type to runner
-    runners = {
-        "terminal-bench": TerminalBenchRunner(),
-        "swe-bench": SwebenchRunner(),
-    }
-
-    if benchmark_type not in runners:
-        raise HTTPException(status_code=404, detail=f"Unknown benchmark type: {benchmark_type}")
-
-    runner = runners[benchmark_type]
-
-    # Validate request
-    errors = runner.validate(req.model_dump())
-    if errors:
-        raise HTTPException(status_code=400, detail=" | ".join(errors))
-
+def _run_typed_benchmark(
+    benchmark_type: str, req: BenchmarkRunRequest, run_id: str
+) -> dict[str, Any]:
+    runner = _RUNNERS[benchmark_type]
     endpoint = _store().get_endpoint_secret(req.endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail="endpoint not found")
@@ -369,7 +367,6 @@ async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
         f"bench [{benchmark_type}]: [{cluster_name}] {req.model} ← {prompt_snippet!r}", flush=True
     )
 
-    # Run the benchmark
     result = runner.run(
         endpoint_id=req.endpoint_id,
         model=req.model,
@@ -377,10 +374,10 @@ async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
         endpoint_name=endpoint["name"],
         endpoint_base_url=endpoint["base_url"],
         api_key=endpoint.get("api_key"),
+        run_id=run_id,
         **req.model_dump(exclude={"endpoint_id", "model", "prompt_text"}),
     )
 
-    # Store the result
     stored_result = _store().create_run(
         benchmark_type=benchmark_type,
         endpoint_id=result.pop("endpoint_id"),
@@ -396,3 +393,59 @@ async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
     )
     print(f"bench [{benchmark_type}]: [{cluster_name}] {req.model} → {status_str}", flush=True)
     return stored_result
+
+
+@router.post("/runs/{benchmark_type}")
+async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
+    """Run a specific benchmark type synchronously (blocks until the run finishes)."""
+    if benchmark_type not in _RUNNERS:
+        raise HTTPException(status_code=404, detail=f"Unknown benchmark type: {benchmark_type}")
+
+    errors = _RUNNERS[benchmark_type].validate(req.model_dump())
+    if errors:
+        raise HTTPException(status_code=400, detail=" | ".join(errors))
+
+    run_id = f"web-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+    return await asyncio.to_thread(_run_typed_benchmark, benchmark_type, req, run_id)
+
+
+@router.post("/runs/{benchmark_type}/start")
+async def start_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
+    """Kick off a benchmark run in the background and return a job id to poll."""
+    if benchmark_type not in _RUNNERS:
+        raise HTTPException(status_code=404, detail=f"Unknown benchmark type: {benchmark_type}")
+
+    errors = _RUNNERS[benchmark_type].validate(req.model_dump())
+    if errors:
+        raise HTTPException(status_code=400, detail=" | ".join(errors))
+
+    run_id = f"web-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+    job: dict[str, Any] = {"status": "running", "result": None, "error": None, "task": None}
+    _JOBS[run_id] = job
+
+    async def _execute() -> None:
+        try:
+            result = await asyncio.to_thread(_run_typed_benchmark, benchmark_type, req, run_id)
+            job.update(status="done", result=result, error=None)
+        except Exception as e:  # noqa: BLE001
+            job.update(status="error", result=None, error=str(e))
+
+    job["task"] = asyncio.create_task(_execute())
+    return {"job_id": run_id}
+
+
+@router.get("/runs/{benchmark_type}/jobs/{job_id}")
+async def get_benchmark_job(benchmark_type: str, job_id: str):
+    """Poll a background benchmark job for status, live log tail, and final result."""
+    job = _JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    log = ""
+    log_dir = _LOG_DIRS.get(benchmark_type)
+    if log_dir is not None:
+        log_path = log_dir / job_id / "run.log"
+        if log_path.exists():
+            log = log_path.read_text()[-8000:]
+
+    return {"status": job["status"], "log": log, "result": job["result"], "error": job["error"]}

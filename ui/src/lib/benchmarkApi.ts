@@ -253,3 +253,32 @@ export async function runBenchmarkByType(
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.json();
 }
+
+export async function startBenchmarkByType(
+	benchmark_type: string,
+	req: RunBenchmarkByTypeRequest,
+): Promise<{ job_id: string }> {
+	const res = await fetch(`${BASE}/runs/${benchmark_type}/start`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export interface BenchmarkJob {
+	status: "running" | "done" | "error";
+	log: string;
+	result: BenchmarkRun | null;
+	error: string | null;
+}
+
+export async function getBenchmarkJob(
+	benchmark_type: string,
+	job_id: string,
+): Promise<BenchmarkJob> {
+	const res = await fetch(`${BASE}/runs/${benchmark_type}/jobs/${job_id}`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
