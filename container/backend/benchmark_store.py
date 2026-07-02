@@ -71,6 +71,8 @@ class BenchmarkStore:
                     "alter table benchmark_runs add column benchmark_type text not null"
                     " default 'standard'"
                 )
+            if "run_id" not in columns:
+                conn.execute("alter table benchmark_runs add column run_id text")
 
     @staticmethod
     def _row(row: sqlite3.Row) -> dict[str, Any]:

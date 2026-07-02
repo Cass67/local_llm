@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, HttpUrl
 
 from backend.benchmarks import SwebenchRunner, TerminalBenchRunner
@@ -380,6 +381,7 @@ def _run_typed_benchmark(
 
     stored_result = _store().create_run(
         benchmark_type=benchmark_type,
+        run_id=run_id,
         endpoint_id=result.pop("endpoint_id"),
         endpoint_name=result.pop("endpoint_name"),
         endpoint_base_url=result.pop("endpoint_base_url"),
@@ -449,3 +451,28 @@ async def get_benchmark_job(benchmark_type: str, job_id: str):
             log = log_path.read_text()[-8000:]
 
     return {"status": job["status"], "log": log, "result": job["result"], "error": job["error"]}
+
+
+def _report_path(benchmark_type: str, run_id: str) -> Path | None:
+    log_dir = _LOG_DIRS.get(benchmark_type)
+    if log_dir is None or "/" in run_id or ".." in run_id:
+        return None
+    run_dir = log_dir / run_id
+    if benchmark_type == "terminal-bench":
+        candidate = run_dir / "results.json"
+        return candidate if candidate.exists() else None
+    if benchmark_type == "swe-bench":
+        for candidate in run_dir.glob("*.json"):
+            if candidate.name != "predictions.json":
+                return candidate
+        return None
+    return None
+
+
+@router.get("/runs/{benchmark_type}/report/{run_id}")
+async def get_benchmark_report(benchmark_type: str, run_id: str):
+    """Serve the raw report file (results.json / swebench report) for a run."""
+    path = _report_path(benchmark_type, run_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="report not found")
+    return FileResponse(path, media_type="application/json", filename=path.name)
