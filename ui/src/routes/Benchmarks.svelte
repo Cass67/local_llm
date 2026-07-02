@@ -63,6 +63,9 @@
 	let consoleVisible = $state(false);
 	let consoleJobId = $state("");
 	let consoleType = $state("");
+	let progressPhase: "generating" | "evaluating" | null = $state(null);
+	let progressDone = $state(0);
+	let progressTotal = $state(0);
 	let benchmarkTasks: string[] = $state([]);
 	let tasksLoading = $state(false);
 	let reportModalOpen = $state(false);
@@ -385,14 +388,38 @@
 		}
 	}
 
+	function updateProgressFromLog(log: string) {
+		const evalMatches = [...log.matchAll(/Evaluation:\s+\d+%\|[^|]*\|\s*(\d+)\/(\d+)/g)];
+		if (evalMatches.length > 0) {
+			const last = evalMatches[evalMatches.length - 1];
+			progressPhase = "evaluating";
+			progressDone = Number(last[1]);
+			progressTotal = Number(last[2]);
+			return;
+		}
+		const totalMatch = log.match(/Running on (\d+) instances/);
+		const genCount = (log.match(/Saved trajectory to/g) || []).length;
+		if (totalMatch) {
+			progressPhase = "generating";
+			progressDone = genCount;
+			progressTotal = Number(totalMatch[1]);
+			return;
+		}
+		progressPhase = null;
+	}
+
 	async function pollJob(type: string, jobId: string): Promise<BenchmarkRun | null> {
 		consoleVisible = true;
 		consoleLog = "";
 		consoleJobId = jobId;
 		consoleType = type;
+		progressPhase = null;
+		progressDone = 0;
+		progressTotal = 0;
 		while (true) {
 			const job = await getBenchmarkJob(type, jobId);
 			consoleLog = job.log || consoleLog;
+			updateProgressFromLog(consoleLog);
 			if (job.status === "done") return job.result;
 			if (job.status === "error") throw new Error(job.error || "benchmark job failed");
 			await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -608,6 +635,12 @@
 					<button class="size-btn" onclick={() => openReport(consoleType, consoleJobId)}>View full report</button>
 				{/if}
 			</h3>
+			{#if progressPhase && progressTotal > 0}
+				<div class="progress-row">
+					<div class="progress-bar"><div class="progress-fill" style="width: {Math.min(100, (progressDone / progressTotal) * 100)}%"></div></div>
+					<span class="muted">{progressPhase === 'generating' ? 'Generating patches' : 'Evaluating'}: {progressDone}/{progressTotal}</span>
+				</div>
+			{/if}
 			<pre class="console-log">{consoleLog || "waiting for output…"}</pre>
 		</section>
 	{/if}
@@ -831,4 +864,7 @@
 	.modal-viewer { flex: 1; min-width: 0; overflow: auto; }
 	.modal-body { overflow: auto; background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; white-space: pre-wrap; height: 100%; box-sizing: border-box; }
 	.score-cell { font-weight: 600; font-variant-numeric: tabular-nums; }
+	.progress-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+	.progress-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+	.progress-fill { height: 100%; background: var(--accent); transition: width 0.3s ease; }
 </style>
