@@ -5,9 +5,12 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess  # noqa: S404 # nosec B404
 import sys
+import threading
 import time
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +22,46 @@ logging.getLogger("datasets").setLevel(logging.WARNING)
 
 _STATE_DIR = Path(os.environ.get("LOCAL_LLM_STATE_DIR", "/state"))
 _RUNS_DIR = _STATE_DIR / "runs" / "benchmarks" / "swe_bench"
+
+
+@contextmanager
+def _background_image_pruner(log_path: Path, interval_sec: float = 120.0):
+    """Periodically remove unused Docker images while a full-dataset run is in progress.
+
+    Each SWE-bench instance uses its own multi-GB image, and cleanup normally only
+    happens once at the very end of the harness run — for a 300-instance run that means
+    peak disk usage holds every image simultaneously, which can fill the disk long before
+    the run finishes. `docker image prune` only removes images with no container
+    referencing them, so already-finished instances (whose --rm containers already exited)
+    are safe to reclaim without touching instances still in progress.
+    """
+    stop_event = threading.Event()
+
+    def _loop() -> None:
+        while not stop_event.wait(interval_sec):
+            docker_bin = shutil.which("docker") or "docker"
+            for cmd in (
+                [docker_bin, "image", "prune", "-af"],
+                [docker_bin, "builder", "prune", "-af"],
+            ):
+                try:
+                    proc = subprocess.run(  # noqa: S603 # nosec B603
+                        cmd, capture_output=True, text=True, timeout=120, check=False
+                    )
+                    reclaimed = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+                    with log_path.open("a") as log_f:
+                        log_f.write(f"  [background cleanup] {' '.join(cmd[1:])}: {reclaimed}\n")
+                except Exception as e:  # noqa: BLE001
+                    with log_path.open("a") as log_f:
+                        log_f.write(f"  [background cleanup] {' '.join(cmd[1:])} failed: {e}\n")
+
+    thread = threading.Thread(target=_loop, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        thread.join(timeout=5)
 
 
 class SwebenchRunner(BaseBenchmarkRunner):
@@ -107,58 +150,66 @@ class SwebenchRunner(BaseBenchmarkRunner):
                 agent_cmd += ["--filter", f"^{re.escape(target_instance_id)}$"]
 
             log_path.write_text("running mini-swe-agent to generate patch(es)...\n")
-            with log_path.open("a") as log_f:
-                log_f.flush()
-                agent_proc = subprocess.run(  # noqa: S603 # nosec B603
-                    agent_cmd,
-                    stdout=log_f,
-                    stderr=subprocess.STDOUT,
-                    timeout=21600 if run_all else 1800,
-                    env=env,
-                    check=False,
-                )
+            if run_all:
+                with log_path.open("a") as log_f:
+                    log_f.write("  background image cleanup enabled (pruning every 2 min)\n")
 
-            predictions_path = run_dir / "preds.json"
-            if not predictions_path.exists():
-                raise RuntimeError(
-                    f"mini-swe-agent produced no predictions (exit {agent_proc.returncode})"
-                )
+            pruner = _background_image_pruner(log_path) if run_all else nullcontext()
+            with pruner:
+                with log_path.open("a") as log_f:
+                    log_f.flush()
+                    agent_proc = subprocess.run(  # noqa: S603 # nosec B603
+                        agent_cmd,
+                        stdout=log_f,
+                        stderr=subprocess.STDOUT,
+                        timeout=21600 if run_all else 1800,
+                        env=env,
+                        check=False,
+                    )
 
-            with log_path.open("a") as log_f:
-                log_f.write("running evaluation harness...\n")
-                log_f.flush()
-                quiet_code = (
-                    "import logging; logging.disable(logging.INFO); "
-                    "import runpy; "
-                    "runpy.run_module('swebench.harness.run_evaluation', run_name='__main__')"
-                )
-                harness_cmd = [
-                    sys.executable,
-                    "-c",
-                    quiet_code,
-                    "--predictions_path",
-                    str(predictions_path),
-                    "--dataset_name",
-                    dataset_name,
-                    "--split",
-                    split,
-                    "--run_id",
-                    run_id,
-                    "--max_workers",
-                    workers,
-                    "--report_dir",
-                    str(run_dir),
-                ]
-                if target_instance_id:
-                    harness_cmd += ["--instance_ids", target_instance_id]
-                harness_proc = subprocess.run(  # noqa: S603 # nosec B603
-                    harness_cmd,
-                    stdout=log_f,
-                    stderr=subprocess.STDOUT,
-                    timeout=21600 if run_all else 1800,
-                    cwd=run_dir,
-                    check=False,
-                )
+                predictions_path = run_dir / "preds.json"
+                if not predictions_path.exists():
+                    raise RuntimeError(
+                        f"mini-swe-agent produced no predictions (exit {agent_proc.returncode})"
+                    )
+
+                with log_path.open("a") as log_f:
+                    log_f.write("running evaluation harness...\n")
+                    log_f.flush()
+                    quiet_code = (
+                        "import logging; logging.disable(logging.INFO); "
+                        "import runpy; "
+                        "runpy.run_module('swebench.harness.run_evaluation', run_name='__main__')"
+                    )
+                    harness_cmd = [
+                        sys.executable,
+                        "-c",
+                        quiet_code,
+                        "--predictions_path",
+                        str(predictions_path),
+                        "--dataset_name",
+                        dataset_name,
+                        "--split",
+                        split,
+                        "--run_id",
+                        run_id,
+                        "--max_workers",
+                        workers,
+                        "--report_dir",
+                        str(run_dir),
+                        "--clean",
+                        "true",
+                    ]
+                    if target_instance_id:
+                        harness_cmd += ["--instance_ids", target_instance_id]
+                    harness_proc = subprocess.run(  # noqa: S603 # nosec B603
+                        harness_cmd,
+                        stdout=log_f,
+                        stderr=subprocess.STDOUT,
+                        timeout=21600 if run_all else 1800,
+                        cwd=run_dir,
+                        check=False,
+                    )
 
             report_path = next(run_dir.glob(f"*.{run_id}.json"), None)
             if report_path is not None and report_path.exists():
