@@ -513,10 +513,11 @@ def _report_path(benchmark_type: str, run_id: str) -> Path | None:
         candidate = run_dir / "results.json"
         return candidate if candidate.exists() else None
     if benchmark_type == "swe-bench":
-        for candidate in run_dir.glob("*.json"):
-            if candidate.name != "preds.json":
-                return candidate
-        return None
+        # the real aggregate report is always named "<model>.<run_id>.json" — anything
+        # else at the top level (preds.json, manifest.json) is not a report, and matching
+        # "any json that isn't preds.json" would wrongly pick manifest.json for a run
+        # that was interrupted before the harness ever produced a final report
+        return next(run_dir.glob(f"*.{run_id}.json"), None)
     return None
 
 
