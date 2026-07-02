@@ -13,6 +13,7 @@
 		loadBenchmarkModels,
 		syncClusterBenchmarkEndpoints,
 		listBenchmarkTypes,
+		listBenchmarkTasks,
 		runBenchmarkByType,
 		startBenchmarkByType,
 		getBenchmarkJob,
@@ -60,6 +61,8 @@
 	let consoleVisible = $state(false);
 	let consoleJobId = $state("");
 	let consoleType = $state("");
+	let benchmarkTasks: string[] = $state([]);
+	let tasksLoading = $state(false);
 
 	const PROMPTS = {
 		small: [
@@ -265,11 +268,24 @@
 		runs = result.runs;
 	}
 
-	function onBenchmarkTypeChange() {
+	async function onBenchmarkTypeChange() {
 		if (benchmarkType === 'standard') {
 			if (promptText.trim() === "") promptText = DEFAULT_PROMPT;
-		} else if (promptText === DEFAULT_PROMPT || promptText.trim() === "") {
-			promptText = " ";
+			benchmarkTasks = [];
+		} else {
+			if (promptText === DEFAULT_PROMPT || promptText.trim() === "") {
+				promptText = " ";
+			}
+			benchmarkTasks = [];
+			tasksLoading = true;
+			try {
+				const result = await listBenchmarkTasks(benchmarkType);
+				benchmarkTasks = result.tasks;
+			} catch {
+				benchmarkTasks = [];
+			} finally {
+				tasksLoading = false;
+			}
 		}
 		loadAll();
 	}
@@ -441,8 +457,17 @@
 			</div>
 			<textarea bind:value={promptText} rows="5" placeholder="Benchmark prompt"></textarea>
 		{:else}
-			<label class="muted" for="task-id-filter">Task ID filter (optional — leave as a single space to run the first/default task)</label>
-			<textarea id="task-id-filter" bind:value={promptText} rows="2" placeholder="e.g. pytorch-model-cli.easy"></textarea>
+			<label class="muted" for="task-id-filter">Task / instance to run</label>
+			{#if tasksLoading}
+				<p class="muted">Loading available tasks…</p>
+			{:else if benchmarkTasks.length > 0}
+				<select id="task-id-filter" bind:value={promptText}>
+					<option value=" ">(first/default task)</option>
+					{#each benchmarkTasks as task}<option value={task}>{task}</option>{/each}
+				</select>
+			{:else}
+				<textarea id="task-id-filter" bind:value={promptText} rows="2" placeholder="e.g. pytorch-model-cli.easy"></textarea>
+			{/if}
 		{/if}
 	</section>
 

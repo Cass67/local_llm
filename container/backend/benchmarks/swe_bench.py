@@ -41,6 +41,14 @@ class SwebenchRunner(BaseBenchmarkRunner):
             errors.append("model is required")
         return errors
 
+    def list_tasks(self) -> list[str]:
+        from datasets import load_dataset
+
+        dataset_name = os.environ.get("SWE_BENCH_DATASET_NAME", "princeton-nlp/SWE-bench_Lite")
+        split = os.environ.get("SWE_BENCH_SPLIT", "test")
+        dataset = load_dataset(dataset_name, split=split)  # nosec B615
+        return sorted(dataset["instance_id"])
+
     def run(
         self,
         endpoint_id: int,

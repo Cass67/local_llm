@@ -65,3 +65,7 @@ class BaseBenchmarkRunner(ABC):
         if not req.get("prompt_text"):
             errors.append("prompt_text is required")
         return errors
+
+    def list_tasks(self) -> list[str]:
+        """Return the selectable task/instance IDs for this benchmark's dataset."""
+        return []

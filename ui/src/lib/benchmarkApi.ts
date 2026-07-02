@@ -236,6 +236,12 @@ export async function listBenchmarkTypes(): Promise<{ types: BenchmarkType[] }> 
 	return res.json();
 }
 
+export async function listBenchmarkTasks(benchmark_type: string): Promise<{ tasks: string[] }> {
+	const res = await fetch(`${BASE}/types/${benchmark_type}/tasks`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
 export interface RunBenchmarkByTypeRequest extends Omit<BenchmarkRunRequest, 'endpoint_id'> {
 	endpoint_id: number;
 	model: string;
