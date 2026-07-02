@@ -390,7 +390,7 @@ async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
     )
 
     status_str = (
-        f"{stored_result['latency_ms']:.0f}ms tps={stored_result['throughput_tps']:.0f}"
+        f"{stored_result['latency_ms']:.0f}ms tps={stored_result['throughput_tps'] or 0:.0f}"
         if stored_result["status"] == "ok"
         else stored_result["status"]
     )
