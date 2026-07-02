@@ -67,6 +67,7 @@
 	let progressDone = $state(0);
 	let progressTotal = $state(0);
 	let benchmarkTasks: string[] = $state([]);
+	let firstNCount = $state("");
 	let tasksLoading = $state(false);
 	let reportModalOpen = $state(false);
 	let reportModalTitle = $state("");
@@ -288,6 +289,7 @@
 	}
 
 	async function onBenchmarkTypeChange() {
+		firstNCount = "";
 		if (benchmarkType === 'standard') {
 			if (promptText.trim() === "") promptText = DEFAULT_PROMPT;
 			benchmarkTasks = [];
@@ -446,12 +448,17 @@
 		consoleLog = "";
 		try {
 			const prompt = selectedPrompt();
+			const firstN = parseInt(firstNCount, 10);
+			const effectivePromptText =
+				benchmarkType !== 'standard' && firstN > 0
+					? `__first_${firstN}__`
+					: prompt?.text || promptText;
 			const req = {
 				endpoint_id: Number(selectedEndpointId),
 				model: selectedModel,
 				prompt_id: prompt?.id ?? undefined,
 				prompt_name: prompt?.name || undefined,
-				prompt_text: prompt?.text || promptText,
+				prompt_text: effectivePromptText,
 				system_prompt: systemPrompt || undefined,
 				max_tokens: maxTokens,
 				temperature,
@@ -611,11 +618,24 @@
 			{#if tasksLoading}
 				<p class="muted">Loading available tasks…</p>
 			{:else if benchmarkTasks.length > 0}
-				<select id="task-id-filter" bind:value={promptText}>
-					<option value=" ">(first/default task)</option>
-					<option value="__all__">All {benchmarkTasks.length} tasks (full dataset — can take hours, produces a score)</option>
-					{#each benchmarkTasks as task}<option value={task}>{task}</option>{/each}
-				</select>
+				<div class="form-row">
+					<select id="task-id-filter" bind:value={promptText} style="flex: 1;">
+						<option value=" ">(first/default task)</option>
+						<option value="__all__">All {benchmarkTasks.length} tasks (full dataset — can take hours, produces a score)</option>
+						{#each benchmarkTasks as task}<option value={task}>{task}</option>{/each}
+					</select>
+					<input
+						type="number"
+						min="1"
+						max={benchmarkTasks.length}
+						bind:value={firstNCount}
+						placeholder="or run first N…"
+						style="width: 140px;"
+					/>
+				</div>
+				{#if firstNCount && Number(firstNCount) > 0}
+					<p class="muted" style="margin: 0.25rem 0 0;">Will run the first {firstNCount} tasks instead of the dropdown selection.</p>
+				{/if}
 			{:else}
 				<textarea id="task-id-filter" bind:value={promptText} rows="2" placeholder="e.g. pytorch-model-cli.easy"></textarea>
 			{/if}

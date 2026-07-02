@@ -88,6 +88,30 @@ class SwebenchRunner(BaseBenchmarkRunner):
         dataset = load_dataset(dataset_name, split=split)  # nosec B615
         return sorted(dataset["instance_id"])
 
+    @staticmethod
+    def _resolve_instance_selection(
+        dataset_name: str,
+        split: str,
+        instance_id_filter: str | None,
+        run_all: bool,
+        run_first_n: int | None,
+    ) -> tuple[str | None, int, str | None]:
+        """Return (target_instance_id, total_instances, slice_spec) for the requested mode."""
+        if run_first_n is not None:
+            return None, run_first_n, f"0:{run_first_n}"
+        if run_all:
+            from datasets import load_dataset
+
+            total = len(load_dataset(dataset_name, split=split))  # nosec B615
+            return None, total, None
+        target_instance_id = instance_id_filter
+        if target_instance_id is None:
+            from datasets import load_dataset
+
+            dataset = load_dataset(dataset_name, split=split)  # nosec B615
+            target_instance_id = sorted(dataset["instance_id"])[0]
+        return target_instance_id, 1, None
+
     def run(
         self,
         endpoint_id: int,
@@ -101,6 +125,9 @@ class SwebenchRunner(BaseBenchmarkRunner):
         split = os.environ.get("SWE_BENCH_SPLIT", "test")
         instance_id_filter = prompt_text.strip() or None
         run_all = instance_id_filter == "__all__"
+        first_n_match = re.match(r"^__first_(\d+)__$", instance_id_filter or "")
+        run_first_n = int(first_n_match.group(1)) if first_n_match else None
+        run_batch = run_all or run_first_n is not None
 
         run_id = kwargs.get("run_id") or f"web-{int(time.time())}"
         run_dir = _RUNS_DIR / run_id
@@ -115,23 +142,13 @@ class SwebenchRunner(BaseBenchmarkRunner):
         completion_tokens = None
 
         try:
-            target_instance_id = None
-            total_instances = 1
-            if not run_all:
-                target_instance_id = instance_id_filter
-                if target_instance_id is None:
-                    from datasets import load_dataset
-
-                    dataset = load_dataset(dataset_name, split=split)  # nosec B615
-                    target_instance_id = sorted(dataset["instance_id"])[0]
-            else:
-                from datasets import load_dataset
-
-                total_instances = len(load_dataset(dataset_name, split=split))  # nosec B615
+            target_instance_id, total_instances, slice_spec = self._resolve_instance_selection(
+                dataset_name, split, instance_id_filter, run_all, run_first_n
+            )
 
             (run_dir / "manifest.json").write_text(json.dumps({"total": total_instances}))
 
-            workers = os.environ.get("SWE_BENCH_MAX_WORKERS", "4" if run_all else "1")
+            workers = os.environ.get("SWE_BENCH_MAX_WORKERS", "4" if run_batch else "1")
             env = {
                 **os.environ,
                 "OPENAI_API_BASE": endpoint_base_url,
@@ -155,13 +172,15 @@ class SwebenchRunner(BaseBenchmarkRunner):
             ]
             if target_instance_id:
                 agent_cmd += ["--filter", f"^{re.escape(target_instance_id)}$"]
+            if slice_spec:
+                agent_cmd += ["--slice", slice_spec]
 
             log_path.write_text("running mini-swe-agent to generate patch(es)...\n")
-            if run_all:
+            if run_batch:
                 with log_path.open("a") as log_f:
                     log_f.write("  background image cleanup enabled (pruning every 2 min)\n")
 
-            pruner = _background_image_pruner(log_path) if run_all else nullcontext()
+            pruner = _background_image_pruner(log_path) if run_batch else nullcontext()
             with pruner:
                 with log_path.open("a") as log_f:
                     log_f.flush()
@@ -169,7 +188,7 @@ class SwebenchRunner(BaseBenchmarkRunner):
                         agent_cmd,
                         stdout=log_f,
                         stderr=subprocess.STDOUT,
-                        timeout=21600 if run_all else 1800,
+                        timeout=21600 if run_batch else 1800,
                         env=env,
                         check=False,
                     )
@@ -213,7 +232,7 @@ class SwebenchRunner(BaseBenchmarkRunner):
                         harness_cmd,
                         stdout=log_f,
                         stderr=subprocess.STDOUT,
-                        timeout=21600 if run_all else 1800,
+                        timeout=21600 if run_batch else 1800,
                         cwd=run_dir,
                         check=False,
                     )

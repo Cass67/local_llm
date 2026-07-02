@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess  # noqa: S404 # nosec B404
 import sys
 import time
@@ -49,7 +50,10 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         dataset_version = os.environ.get("TERMINAL_BENCH_DATASET_VERSION", "0.1.1")
         task_id = prompt_text.strip() or None
         run_all = task_id == "__all__"
-        if run_all:
+        first_n_match = re.match(r"^__first_(\d+)__$", task_id or "")
+        run_first_n = int(first_n_match.group(1)) if first_n_match else None
+        run_batch = run_all or run_first_n is not None
+        if run_batch:
             task_id = None
 
         run_id = kwargs.get("run_id") or f"web-{int(time.time())}"
@@ -73,7 +77,7 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
             "--model",
             f"openai/{model}",
             "--n-concurrent",
-            "4" if run_all else "1",
+            "4" if run_batch else "1",
             "--output-path",
             str(_RUNS_DIR),
             "--run-id",
@@ -81,6 +85,8 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         ]
         if run_all:
             pass  # no --task-id / --n-tasks limit: runs every task in the dataset
+        elif run_first_n is not None:
+            cmd += ["--n-tasks", str(run_first_n)]
         elif task_id:
             cmd += ["--n-tasks", "1", "--task-id", task_id]
         else:
@@ -104,7 +110,7 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=21600 if run_all else 1800,
+                timeout=21600 if run_batch else 1800,
                 env=env,
                 check=False,
             )
