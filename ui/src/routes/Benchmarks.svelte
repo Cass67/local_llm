@@ -360,6 +360,10 @@
 	<section class="panel runner">
 		<h3>Run benchmark</h3>
 		<div class="form-row">
+			<select bind:value={benchmarkType} onchange={loadAll}>
+				<option value="standard">Standard</option>
+				{#each benchmarkTypes as type}<option value={type.name}>{type.name}</option>{/each}
+			</select>
 			<select bind:value={selectedEndpointId}>
 				<option value="">Endpoint</option>
 				{#each endpoints as endpoint}<option value={String(endpoint.id)}>{endpoint.name}</option>{/each}
