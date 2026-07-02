@@ -496,7 +496,7 @@ def _report_path(benchmark_type: str, run_id: str) -> Path | None:
         return candidate if candidate.exists() else None
     if benchmark_type == "swe-bench":
         for candidate in run_dir.glob("*.json"):
-            if candidate.name != "predictions.json":
+            if candidate.name != "preds.json":
                 return candidate
         return None
     return None
