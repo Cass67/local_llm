@@ -1,4 +1,52 @@
 {
-  "families": {},
+  "families": {
+    "deepreinforce-ai_ornith-1.0-35b-q6": {
+      "default": "balanced",
+      "profiles": {
+        "balanced": {
+          "batch": 4096,
+          "ngl": 999,
+          "reasoning": false,
+          "split_mode": "layer",
+          "tensor_split": "1,1",
+          "ubatch": 256,
+          "visible_devices": "0,1",
+          "context": 99500,
+          "cache_prompt": true,
+          "cache_ram": 16384,
+          "context_shift": true,
+          "ctx_checkpoints": 64,
+          "checkpoint_min_step": 4096,
+          "timeout": 600,
+          "threads_http": 2,
+          "parallel": 1,
+          "no_cont_batching": true,
+          "prio": 2,
+          "no_warmup": true
+        },
+        "bench": {
+          "batch": 4096,
+          "ngl": 999,
+          "reasoning": false,
+          "split_mode": "layer",
+          "tensor_split": "1,1",
+          "ubatch": 256,
+          "visible_devices": "0,1",
+          "context": 248000,
+          "cache_prompt": true,
+          "cache_ram": 16384,
+          "context_shift": true,
+          "ctx_checkpoints": 64,
+          "checkpoint_min_step": 4096,
+          "timeout": 600,
+          "threads_http": 2,
+          "parallel": 4,
+          "no_cont_batching": true,
+          "prio": 2,
+          "no_warmup": true
+        }
+      }
+    }
+  },
   "profiles": {}
 }
