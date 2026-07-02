@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { onMount, tick } from "svelte";
 	import {
 		createBenchmarkEndpoint,
 		createBenchmarkPrompt,
@@ -80,6 +80,7 @@
 	let reportInstanceStatus: Record<string, "resolved" | "unresolved" | "error"> = $state({});
 	let reportInstanceFiles: Record<string, string[]> = $state({});
 	let reportOtherFiles: string[] = $state([]);
+	let modalFilesEl: HTMLDivElement | undefined = $state();
 	let reportSearch = $state("");
 	let expandedInstances: Record<string, boolean> = $state({});
 
@@ -436,6 +437,8 @@
 		} catch {
 			reportModalFiles = [];
 		}
+		await tick();
+		if (modalFilesEl) modalFilesEl.scrollTop = 0;
 	}
 
 	async function selectReportFile(path: string) {
@@ -879,7 +882,7 @@
 			</div>
 			<div class="modal-columns">
 				{#if reportModalFiles.length > 0}
-					<div class="modal-files">
+					<div class="modal-files" bind:this={modalFilesEl}>
 						<button
 							class="size-btn"
 							class:active={reportModalSelectedFile === ""}
