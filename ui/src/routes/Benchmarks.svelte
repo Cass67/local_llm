@@ -63,6 +63,10 @@
 	let consoleType = $state("");
 	let benchmarkTasks: string[] = $state([]);
 	let tasksLoading = $state(false);
+	let reportModalOpen = $state(false);
+	let reportModalTitle = $state("");
+	let reportModalContent = $state("");
+	let reportModalError = $state("");
 
 	const PROMPTS = {
 		small: [
@@ -290,6 +294,21 @@
 		loadAll();
 	}
 
+	async function openReport(type: string, runId: string) {
+		reportModalOpen = true;
+		reportModalTitle = `${type} report — ${runId}`;
+		reportModalContent = "";
+		reportModalError = "";
+		try {
+			const res = await fetch(benchmarkReportUrl(type, runId));
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+			reportModalContent = JSON.stringify(data, null, 2);
+		} catch (e: unknown) {
+			reportModalError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
 	async function pollJob(type: string, jobId: string): Promise<BenchmarkRun | null> {
 		consoleVisible = true;
 		consoleLog = "";
@@ -477,7 +496,7 @@
 			<h3>
 				Console {running ? "(running…)" : ""}
 				{#if !running}
-					<a href={benchmarkReportUrl(consoleType, consoleJobId)} target="_blank" rel="noopener">View full report ↗</a>
+					<button class="size-btn" onclick={() => openReport(consoleType, consoleJobId)}>View full report</button>
 				{/if}
 			</h3>
 			<pre class="console-log">{consoleLog || "waiting for output…"}</pre>
@@ -577,7 +596,7 @@
 						<td style="font-size: 0.75rem; color: var(--text-muted);">{run.benchmark_type}</td>
 						<td>
 							{#if run.run_id && run.benchmark_type !== 'standard'}
-								<a href={benchmarkReportUrl(run.benchmark_type, run.run_id)} target="_blank" rel="noopener" onclick={(e) => e.stopPropagation()}>↗</a>
+								<button class="size-btn" onclick={(e) => { e.stopPropagation(); openReport(run.benchmark_type, run.run_id ?? ""); }}>↗</button>
 							{/if}
 						</td>
 					</tr>
@@ -602,6 +621,30 @@
 		</section>
 	{/if}
 </div>
+
+{#if reportModalOpen}
+	<div
+		class="modal-backdrop"
+		role="button"
+		tabindex="0"
+		onclick={() => (reportModalOpen = false)}
+		onkeydown={(e) => e.key === "Escape" && (reportModalOpen = false)}
+	>
+		<div class="modal" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+			<div class="modal-header">
+				<h3>{reportModalTitle}</h3>
+				<button class="size-btn" onclick={() => (reportModalOpen = false)}>Close</button>
+			</div>
+			{#if reportModalError}
+				<div class="error">{reportModalError}</div>
+			{:else if reportModalContent}
+				<pre class="modal-body">{reportModalContent}</pre>
+			{:else}
+				<p class="muted">Loading report…</p>
+			{/if}
+		</div>
+	</div>
+{/if}
 
 <style>
 	.benchmarks { display: flex; flex-direction: column; gap: 1rem; }
@@ -644,4 +687,8 @@
 	th { color: var(--text-muted); font-weight: normal; }
 	tr { cursor: pointer; }
 	@media (max-width: 760px) { .hero { align-items: flex-start; flex-direction: column; gap: 0.75rem; } .list-item { grid-template-columns: 1fr; } }
+	.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; width: min(90vw, 900px); max-height: 85vh; display: flex; flex-direction: column; padding: 1rem; }
+	.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+	.modal-body { overflow: auto; background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; white-space: pre-wrap; }
 </style>
