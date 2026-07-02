@@ -436,7 +436,14 @@ async def start_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
         raise HTTPException(status_code=400, detail=" | ".join(errors))
 
     run_id = f"web-{int(time.time())}-{uuid.uuid4().hex[:8]}"
-    job: dict[str, Any] = {"status": "running", "result": None, "error": None, "task": None}
+    job: dict[str, Any] = {
+        "status": "running",
+        "result": None,
+        "error": None,
+        "task": None,
+        "benchmark_type": benchmark_type,
+        "started_at": time.time(),
+    }
     _JOBS[run_id] = job
 
     async def _execute() -> None:
@@ -448,6 +455,18 @@ async def start_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
 
     job["task"] = asyncio.create_task(_execute())
     return {"job_id": run_id}
+
+
+@router.get("/jobs")
+async def list_active_jobs():
+    """List currently-running benchmark jobs so any client can reconnect to their console."""
+    return {
+        "jobs": [
+            {"job_id": job_id, "benchmark_type": job["benchmark_type"], "status": job["status"]}
+            for job_id, job in _JOBS.items()
+            if job["status"] == "running"
+        ]
+    }
 
 
 @router.get("/runs/{benchmark_type}/jobs/{job_id}")

@@ -290,6 +290,18 @@ export async function getBenchmarkJob(
 	return res.json();
 }
 
+export interface ActiveBenchmarkJob {
+	job_id: string;
+	benchmark_type: string;
+	status: string;
+}
+
+export async function listActiveBenchmarkJobs(): Promise<{ jobs: ActiveBenchmarkJob[] }> {
+	const res = await fetch(`${BASE}/jobs`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
 export function benchmarkReportUrl(benchmark_type: string, run_id: string): string {
 	return `${BASE}/runs/${benchmark_type}/report/${run_id}`;
 }
