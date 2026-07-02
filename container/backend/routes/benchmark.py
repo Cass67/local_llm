@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -477,13 +478,30 @@ async def get_benchmark_job(benchmark_type: str, job_id: str):
         raise HTTPException(status_code=404, detail="job not found")
 
     log = ""
+    progress = None
     log_dir = _LOG_DIRS.get(benchmark_type)
     if log_dir is not None:
-        log_path = log_dir / job_id / "run.log"
+        run_dir = log_dir / job_id
+        log_path = run_dir / "run.log"
         if log_path.exists():
             log = log_path.read_text()[-8000:]
+        manifest_path = run_dir / "manifest.json"
+        if manifest_path.exists():
+            try:
+                total = json.loads(manifest_path.read_text())["total"]
+                generated = len(list(run_dir.glob("*/*.traj.json")))
+                evaluated = len(list(run_dir.glob("logs/run_evaluation/*/*/*/report.json")))
+                progress = {"total": total, "generated": generated, "evaluated": evaluated}
+            except (OSError, KeyError, json.JSONDecodeError):
+                progress = None
 
-    return {"status": job["status"], "log": log, "result": job["result"], "error": job["error"]}
+    return {
+        "status": job["status"],
+        "log": log,
+        "result": job["result"],
+        "error": job["error"],
+        "progress": progress,
+    }
 
 
 def _report_path(benchmark_type: str, run_id: str) -> Path | None:

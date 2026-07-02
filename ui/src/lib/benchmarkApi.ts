@@ -274,11 +274,18 @@ export async function startBenchmarkByType(
 	return res.json();
 }
 
+export interface BenchmarkJobProgress {
+	total: number;
+	generated: number;
+	evaluated: number;
+}
+
 export interface BenchmarkJob {
 	status: "running" | "done" | "error";
 	log: string;
 	result: BenchmarkRun | null;
 	error: string | null;
+	progress: BenchmarkJobProgress | null;
 }
 
 export async function getBenchmarkJob(

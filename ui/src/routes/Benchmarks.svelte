@@ -23,7 +23,7 @@
 	} from "../lib/benchmarkApi";
 	import { fetchClusters } from "../lib/api";
 	import { formatMs, formatThroughput, runDelta } from "../lib/benchmarkMetrics";
-	import type { BenchmarkEndpoint, BenchmarkPrompt, BenchmarkRun, BenchmarkSummary } from "../lib/benchmarkApi";
+	import type { BenchmarkEndpoint, BenchmarkPrompt, BenchmarkRun, BenchmarkSummary, BenchmarkJobProgress } from "../lib/benchmarkApi";
 	import type { ClusterInfo } from "../lib/types";
 
 	const DEFAULT_PROMPT = "Write a concise Python function that reverses a string and explain it.";
@@ -388,24 +388,19 @@
 		}
 	}
 
-	function updateProgressFromLog(log: string) {
-		const evalMatches = [...log.matchAll(/Evaluation:\s+\d+%\|[^|]*\|\s*(\d+)\/(\d+)/g)];
-		if (evalMatches.length > 0) {
-			const last = evalMatches[evalMatches.length - 1];
+	function updateProgress(progress: BenchmarkJobProgress | null) {
+		if (!progress || progress.total <= 1) {
+			progressPhase = null;
+			return;
+		}
+		if (progress.evaluated > 0) {
 			progressPhase = "evaluating";
-			progressDone = Number(last[1]);
-			progressTotal = Number(last[2]);
-			return;
-		}
-		const totalMatch = log.match(/Running on (\d+) instances/);
-		const genCount = (log.match(/Saved trajectory to/g) || []).length;
-		if (totalMatch) {
+			progressDone = progress.evaluated;
+		} else {
 			progressPhase = "generating";
-			progressDone = genCount;
-			progressTotal = Number(totalMatch[1]);
-			return;
+			progressDone = progress.generated;
 		}
-		progressPhase = null;
+		progressTotal = progress.total;
 	}
 
 	async function pollJob(type: string, jobId: string): Promise<BenchmarkRun | null> {
@@ -419,7 +414,7 @@
 		while (true) {
 			const job = await getBenchmarkJob(type, jobId);
 			consoleLog = job.log || consoleLog;
-			updateProgressFromLog(consoleLog);
+			updateProgress(job.progress);
 			if (job.status === "done") return job.result;
 			if (job.status === "error") throw new Error(job.error || "benchmark job failed");
 			await new Promise((resolve) => setTimeout(resolve, 2000));
