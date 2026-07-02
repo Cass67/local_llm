@@ -28,6 +28,13 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
             errors.append("model is required")
         return errors
 
+    def list_tasks(self) -> list[str]:
+        from terminal_bench.dataset.dataset import Dataset
+
+        dataset_name = os.environ.get("TERMINAL_BENCH_DATASET_NAME", "terminal-bench-core")
+        dataset_version = os.environ.get("TERMINAL_BENCH_DATASET_VERSION", "0.1.1")
+        return sorted(Dataset(name=dataset_name, version=dataset_version).task_ids)
+
     def run(
         self,
         endpoint_id: int,

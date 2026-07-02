@@ -354,6 +354,20 @@ async def list_benchmark_types():
     }
 
 
+@lru_cache(maxsize=8)
+def _list_tasks_cached(benchmark_type: str) -> tuple[str, ...]:
+    return tuple(_RUNNERS[benchmark_type].list_tasks())
+
+
+@router.get("/types/{benchmark_type}/tasks")
+async def list_benchmark_tasks(benchmark_type: str):
+    """List the selectable task/instance IDs for a benchmark type's dataset."""
+    if benchmark_type not in _RUNNERS:
+        raise HTTPException(status_code=404, detail=f"Unknown benchmark type: {benchmark_type}")
+    tasks = await asyncio.to_thread(_list_tasks_cached, benchmark_type)
+    return {"tasks": list(tasks)}
+
+
 def _run_typed_benchmark(
     benchmark_type: str, req: BenchmarkRunRequest, run_id: str
 ) -> dict[str, Any]:
