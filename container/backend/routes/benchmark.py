@@ -376,6 +376,7 @@ async def run_benchmark_type(benchmark_type: str, req: BenchmarkRunRequest):
         prompt_text=req.prompt_text,
         endpoint_name=endpoint["name"],
         endpoint_base_url=endpoint["base_url"],
+        api_key=endpoint.get("api_key"),
         **req.model_dump(exclude={"endpoint_id", "model", "prompt_text"}),
     )
 
