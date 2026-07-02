@@ -13,6 +13,7 @@ dependencies = [
   "terminal-bench>=0.2.18",
   "swebench>=4.1.0",
   "datasets>=3.0",
+  "mini-swe-agent>=2.4.3",
 ]
 
 [project.optional-dependencies]
