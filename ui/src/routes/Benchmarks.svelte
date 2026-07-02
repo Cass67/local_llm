@@ -16,6 +16,7 @@
 		runBenchmarkByType,
 		startBenchmarkByType,
 		getBenchmarkJob,
+		benchmarkReportUrl,
 	} from "../lib/benchmarkApi";
 	import { fetchClusters } from "../lib/api";
 	import { formatMs, formatThroughput, runDelta } from "../lib/benchmarkMetrics";
@@ -57,6 +58,8 @@
 	let benchmarkTypes: Array<{ name: string; description: string }> = $state([]);
 	let consoleLog = $state("");
 	let consoleVisible = $state(false);
+	let consoleJobId = $state("");
+	let consoleType = $state("");
 
 	const PROMPTS = {
 		small: [
@@ -274,6 +277,8 @@
 	async function pollJob(type: string, jobId: string): Promise<BenchmarkRun | null> {
 		consoleVisible = true;
 		consoleLog = "";
+		consoleJobId = jobId;
+		consoleType = type;
 		while (true) {
 			const job = await getBenchmarkJob(type, jobId);
 			consoleLog = job.log || consoleLog;
@@ -443,7 +448,12 @@
 
 	{#if consoleVisible}
 		<section class="panel">
-			<h3>Console {running ? "(running…)" : ""}</h3>
+			<h3>
+				Console {running ? "(running…)" : ""}
+				{#if !running}
+					<a href={benchmarkReportUrl(consoleType, consoleJobId)} target="_blank" rel="noopener">View full report ↗</a>
+				{/if}
+			</h3>
 			<pre class="console-log">{consoleLog || "waiting for output…"}</pre>
 		</section>
 	{/if}
@@ -526,7 +536,7 @@
 			<button onclick={applyFilters}>Filter</button>
 		</div>
 		<table>
-			<thead><tr><th>Time</th><th>Endpoint</th><th>Model</th><th>Prompt</th><th>Latency</th><th>Throughput</th><th>Output</th><th>Status</th><th>Type</th></tr></thead>
+			<thead><tr><th>Time</th><th>Endpoint</th><th>Model</th><th>Prompt</th><th>Latency</th><th>Throughput</th><th>Output</th><th>Status</th><th>Type</th><th>Report</th></tr></thead>
 			<tbody>
 				{#each runs as run}
 					<tr onclick={() => (selectedRun = run)} class:active={selectedRun?.id === run.id}>
@@ -539,6 +549,11 @@
 						<td>{run.output_chars.toLocaleString()} chars</td>
 						<td>{run.status}</td>
 						<td style="font-size: 0.75rem; color: var(--text-muted);">{run.benchmark_type}</td>
+						<td>
+							{#if run.run_id && run.benchmark_type !== 'standard'}
+								<a href={benchmarkReportUrl(run.benchmark_type, run.run_id)} target="_blank" rel="noopener" onclick={(e) => e.stopPropagation()}>↗</a>
+							{/if}
+						</td>
 					</tr>
 				{/each}
 			</tbody>

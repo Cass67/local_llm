@@ -37,6 +37,7 @@ export interface BenchmarkRun {
 	status: string;
 	error: string | null;
 	benchmark_type: string;
+	run_id: string | null;
 	created_at: string;
 }
 
@@ -281,4 +282,8 @@ export async function getBenchmarkJob(
 	const res = await fetch(`${BASE}/runs/${benchmark_type}/jobs/${job_id}`);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.json();
+}
+
+export function benchmarkReportUrl(benchmark_type: string, run_id: string): string {
+	return `${BASE}/runs/${benchmark_type}/report/${run_id}`;
 }
