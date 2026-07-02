@@ -24,6 +24,7 @@ A self-hosted LLM management system for AMD and Nvidia GPU workstations. Models 
 - **Profiles** — named load configurations per model family, stored in `profiles.json`. Select a profile when starting a model on a cluster. Edit as raw JSON, clone, set a default, or auto-seed from existing model configs. Profile fields (tensor split, context, flash attention, etc.) are merged into the launch metadata at start time.
 - **Audit** — scan registered models against the HF cache; remove stale registrations whose GGUF files have been deleted from disk. Available on the Models and Status tabs.
 - **Benchmark** models with configurable llama.cpp parameters (temperature, seed, top-p, top-k, repeat penalty, system prompt) and track latency/throughput trends across runs.
+- **Terminal-Bench / SWE-bench** — run real agentic evals against any installed model: Terminal-Bench drives the `terminus-2` agent against real task containers, SWE-bench generates and evaluates a real patch against SWE-bench Lite instances. Pick a single task/instance or **run the entire dataset** for an aggregate `resolved/total` score to compare models. A live console tails harness output during the run, and a report link exposes the raw `results.json`/evaluation report afterward.
 - **Chat** via Open WebUI at `/chat/` — full conversation UI with web search (SearXNG), model selection, history, and streaming.
 - **Router** — keyword-based request router with live config reload, routing rules editor in the Architecture tab, and per-request routing audit. Open WebUI defaults to the `router` model so all chats are automatically dispatched to the best cluster.
 - **Idle unload** — clusters auto-stop after a configurable idle timeout (5 min–2 hr) to save GPU power. Models reload automatically on the next request. Toggle and timeout in the Architecture tab.
@@ -289,6 +290,19 @@ When you start a model on a cluster in the **Architecture** tab, select a profil
 
 **Benchmarks** tab. Select a model from the installed list, set parameters, enter or generate a prompt, and run. Results are stored in SQLite and trend graphs update across runs. The model auto-switches if the selected model is not currently loaded.
 
+#### Terminal-Bench / SWE-bench
+
+The benchmark type selector in the Run panel switches from Standard prompt/response benchmarking to a real agentic eval:
+
+- **terminal-bench** — runs the actual [Terminal-Bench](https://github.com/laude-institute/terminal-bench) harness with the `terminus-2` agent, pointed at your model via an OpenAI-compatible endpoint. Each task builds and runs its own Docker container.
+- **swe-bench** — generates a real unified-diff patch from your model for a [SWE-bench Lite](https://www.swebench.com/) instance, then scores it with the actual `swebench` evaluation harness (build + test run in a per-instance Docker container).
+
+For either type, pick a specific task/instance from the dropdown, or select **All N tasks** to run the entire dataset and get an aggregate `resolved/total` score — useful for comparing models against each other. Full-dataset runs are genuinely slow (each task/instance needs its own container build + eval), so expect terminal-bench-core (~80 tasks) or SWE-bench Lite (300 instances) to take hours, not minutes.
+
+Runs execute as background jobs so they don't block the UI or the API; a live console below the Run panel tails the harness's real output while it's in progress, and a **report link** (in the console once done, and per-row in the History table) opens the raw `results.json` / swebench evaluation report. Run artifacts live under `$LOCAL_LLM_STATE_DIR/runs/benchmarks/{terminal_bench,swe_bench}/<run_id>/` so they survive container restarts.
+
+Relevant environment variables: `TERMINAL_BENCH_DATASET_NAME` (default `terminal-bench-core`), `TERMINAL_BENCH_DATASET_VERSION` (default `0.1.1`), `SWE_BENCH_DATASET_NAME` (default `princeton-nlp/SWE-bench_Lite`), `SWE_BENCH_SPLIT` (default `test`), `SWE_BENCH_MAX_WORKERS` (default `1` for a single instance, `4` when running the full dataset).
+
 ### Chat
 
 **Chat** link in the nav opens Open WebUI in the same tab with a back link.
@@ -362,6 +376,11 @@ Open WebUI has web search built in, powered by a local SearXNG container on `:30
 | `LANGFUSE_PUBLIC_KEY` | — | Langfuse project public key. Tracing disabled if absent. |
 | `LANGFUSE_SECRET_KEY` | — | Langfuse project secret key. |
 | `LANGFUSE_HOST` | `http://localhost:3004` | Langfuse server URL reachable from the mgmt container. |
+| `TERMINAL_BENCH_DATASET_NAME` | `terminal-bench-core` | Terminal-Bench dataset used by the Benchmarks tab. |
+| `TERMINAL_BENCH_DATASET_VERSION` | `0.1.1` | Terminal-Bench dataset version. |
+| `SWE_BENCH_DATASET_NAME` | `princeton-nlp/SWE-bench_Lite` | SWE-bench dataset used by the Benchmarks tab. |
+| `SWE_BENCH_SPLIT` | `test` | SWE-bench dataset split. |
+| `SWE_BENCH_MAX_WORKERS` | `1` (single instance) / `4` (full dataset) | Parallel workers for the swebench evaluation harness. |
 
 ### Accepted model metadata
 
