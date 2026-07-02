@@ -3,6 +3,8 @@
 import json
 import logging
 import os
+import re
+import shutil
 import subprocess  # noqa: S404 # nosec B404
 import sys
 import time
@@ -19,6 +21,77 @@ logging.getLogger("datasets").setLevel(logging.WARNING)
 
 _STATE_DIR = Path(os.environ.get("LOCAL_LLM_STATE_DIR", "/state"))
 _RUNS_DIR = _STATE_DIR / "runs" / "benchmarks" / "swe_bench"
+_REPOS_DIR = _STATE_DIR / "runs" / "benchmarks" / "swe_bench_repos"
+_SKIP_DIR_PARTS = {".git", "tests", "test", "testing", "migrations", "docs", "examples"}
+_STOPWORDS = {
+    "this",
+    "that",
+    "with",
+    "from",
+    "have",
+    "when",
+    "does",
+    "should",
+    "would",
+    "could",
+    "which",
+    "there",
+    "using",
+    "into",
+    "your",
+    "also",
+}
+
+
+def _git(*args: str, timeout: float) -> None:
+    git_bin = shutil.which("git") or "git"
+    subprocess.run([git_bin, *args], check=True, timeout=timeout)  # noqa: S603 # nosec B603
+
+
+def _checkout_repo(repo: str, base_commit: str) -> Path | None:
+    """Shallow-clone a repo at a specific commit, cached by (repo, commit)."""
+    dest = _REPOS_DIR / f"{repo.replace('/', '__')}_{base_commit}"
+    if (dest / ".git").is_dir():
+        return dest
+    dest.mkdir(parents=True, exist_ok=True)
+    url = f"https://github.com/{repo}.git"
+    try:
+        _git("init", "-q", str(dest), timeout=60)
+        _git("-C", str(dest), "remote", "add", "origin", url, timeout=60)
+        _git("-C", str(dest), "fetch", "--depth", "1", "origin", base_commit, timeout=300)
+        _git("-C", str(dest), "checkout", "-q", "FETCH_HEAD", timeout=60)
+        return dest
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _relevant_files(
+    repo_dir: Path, problem_statement: str, top_n: int = 3, max_file_chars: int = 6000
+) -> list[tuple[str, str]]:
+    """Cheap keyword-overlap search over the repo for files likely relevant to the issue."""
+    keywords = set(re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{3,}", problem_statement.lower()))
+    keywords -= _STOPWORDS
+    if not keywords:
+        return []
+
+    scored: list[tuple[int, Path, str]] = []
+    for path in repo_dir.rglob("*.py"):
+        if _SKIP_DIR_PARTS & set(path.relative_to(repo_dir).parts):
+            continue
+        try:
+            content = path.read_text(errors="ignore")
+        except OSError:
+            continue
+        text = content.lower()
+        score = sum(text.count(kw) for kw in keywords)
+        if score > 0:
+            scored.append((score, path, content))
+
+    scored.sort(key=lambda item: -item[0])
+    return [
+        (str(path.relative_to(repo_dir)), content[:max_file_chars])
+        for _, path, content in scored[:top_n]
+    ]
 
 
 def _extract_patch(text: str) -> str:
@@ -78,14 +151,34 @@ class SwebenchRunner(BaseBenchmarkRunner):
                 instance_id = instance["instance_id"]
                 with log_path.open("a") as log_f:
                     log_f.write(
-                        f"[{i}/{len(instances)}] instance: {instance_id} — "
-                        "querying model for a patch...\n"
+                        f"[{i}/{len(instances)}] instance: {instance_id} — checking out repo...\n"
                     )
+                repo_dir = _checkout_repo(instance["repo"], instance["base_commit"])
+                context = ""
+                if repo_dir is not None:
+                    files = _relevant_files(repo_dir, instance["problem_statement"])
+                    if files:
+                        context = "\n\n".join(
+                            f"--- current contents of {path} ---\n{content}"
+                            for path, content in files
+                        )
+                        with log_path.open("a") as log_f:
+                            names = ", ".join(p for p, _ in files)
+                            log_f.write(f"  found likely-relevant files: {names}\n")
+                else:
+                    with log_path.open("a") as log_f:
+                        log_f.write("  repo checkout failed, falling back to issue text only\n")
+
+                with log_path.open("a") as log_f:
+                    log_f.write("  querying model for a patch...\n")
                 user_prompt = (
                     "You are fixing a bug in an open-source repository. Given the issue "
-                    "description below, produce a fix as a unified diff patch (git diff "
-                    "format). Only output the patch, wrapped in a ```diff code block.\n\n"
+                    "description and the current contents of the likely-relevant file(s) "
+                    "below, produce a fix as a unified diff patch (git diff format) against "
+                    "the file contents shown. Only output the patch, wrapped in a ```diff "
+                    "code block.\n\n"
                     f"Issue:\n{instance['problem_statement']}"
+                    + (f"\n\n{context}" if context else "")
                 )
                 try:
                     resp = client.post(
