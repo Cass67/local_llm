@@ -8,6 +8,7 @@ import shutil
 import subprocess  # noqa: S404 # nosec B404
 import sys
 import time
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -84,13 +85,15 @@ def _relevant_files(
             continue
         text = content.lower()
         # normalize by file length so one huge file doesn't win purely on size,
-        # then add a strong bonus if a keyword appears in the filename itself
+        # then add a strong bonus if a longer/specific keyword fuzzy-matches the filename
         hits = sum(text.count(kw) for kw in keywords)
         density = hits / max(len(text), 1) * 1000
         stem = path.stem.lower()
-        name_bonus = 50 * sum(kw in stem or stem in kw for kw in keywords if len(stem) >= 4)
-        score = density + name_bonus
-        if hits > 0 or name_bonus > 0:
+        name_matches = sum(
+            1 for kw in keywords if len(kw) >= 6 and SequenceMatcher(None, kw, stem).ratio() > 0.7
+        )
+        score = density + 50 * name_matches
+        if hits > 0 or name_matches > 0:
             scored.append((score, path, content))
 
     scored.sort(key=lambda item: -item[0])
