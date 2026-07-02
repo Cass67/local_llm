@@ -66,7 +66,7 @@ def _checkout_repo(repo: str, base_commit: str) -> Path | None:
 
 
 def _relevant_files(
-    repo_dir: Path, problem_statement: str, top_n: int = 3, max_file_chars: int = 6000
+    repo_dir: Path, problem_statement: str, top_n: int = 4, max_file_chars: int = 6000
 ) -> list[tuple[str, str]]:
     """Cheap keyword-overlap search over the repo for files likely relevant to the issue."""
     keywords = set(re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{3,}", problem_statement.lower()))
@@ -74,7 +74,7 @@ def _relevant_files(
     if not keywords:
         return []
 
-    scored: list[tuple[int, Path, str]] = []
+    scored: list[tuple[float, Path, str]] = []
     for path in repo_dir.rglob("*.py"):
         if _SKIP_DIR_PARTS & set(path.relative_to(repo_dir).parts):
             continue
@@ -83,8 +83,14 @@ def _relevant_files(
         except OSError:
             continue
         text = content.lower()
-        score = sum(text.count(kw) for kw in keywords)
-        if score > 0:
+        # normalize by file length so one huge file doesn't win purely on size,
+        # then add a strong bonus if a keyword appears in the filename itself
+        hits = sum(text.count(kw) for kw in keywords)
+        density = hits / max(len(text), 1) * 1000
+        stem = path.stem.lower()
+        name_bonus = 50 * sum(kw in stem or stem in kw for kw in keywords if len(stem) >= 4)
+        score = density + name_bonus
+        if hits > 0 or name_bonus > 0:
             scored.append((score, path, content))
 
     scored.sort(key=lambda item: -item[0])
