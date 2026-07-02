@@ -150,7 +150,9 @@ class SwebenchRunner(BaseBenchmarkRunner):
         predictions: list[dict[str, str]] = []
         prompt_tokens = 0
         completion_tokens = 0
-        max_tokens = kwargs.get("max_tokens", 2048)
+        # a truncated patch is a guaranteed malformed/unresolved instance, so enforce a
+        # floor well above what the generic benchmark form's default (often 512) provides
+        max_tokens = max(kwargs.get("max_tokens") or 0, 4096)
         temperature = kwargs.get("temperature", 0.2)
         api_key = kwargs.get("api_key")
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -214,8 +216,14 @@ class SwebenchRunner(BaseBenchmarkRunner):
                             "model_patch": patch,
                         }
                     )
+                    finish_reason = completion["choices"][0].get("finish_reason")
                     with log_path.open("a") as log_f:
                         log_f.write(f"  got patch ({len(patch)} chars)\n")
+                        if finish_reason == "length":
+                            log_f.write(
+                                "  WARNING: completion was truncated (hit max_tokens) — "
+                                "patch is likely incomplete/malformed\n"
+                            )
                 except Exception as e:  # noqa: BLE001
                     with log_path.open("a") as log_f:
                         log_f.write(f"  ERROR generating patch: {e}\n")
