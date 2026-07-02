@@ -911,10 +911,11 @@
 							<p class="muted" style="margin: 0.5rem 0 0.25rem;">Other files</p>
 							{#each reportOtherFiles as file}
 								<button
-									class="size-btn"
+									class="size-btn other-file"
 									class:active={reportModalSelectedFile === file}
 									onclick={() => selectReportFile(file)}
-								>{file}</button>
+									title={file}
+								>{file.split("/").pop()}</button>
 							{/each}
 						{/if}
 					</div>
