@@ -156,6 +156,12 @@
 		return alias;
 	}
 
+	function scoreLabel(run: BenchmarkRun): string {
+		const match = run.response_text?.match(/(\d+)\/(\d+)/);
+		if (match) return `${match[1]}/${match[2]}`;
+		return run.status === "error" ? "0/1" : "-";
+	}
+
 	function sameRunBaseline(run: BenchmarkRun | null): BenchmarkRun[] {
 		if (!run) return [];
 		return runs.filter(
@@ -300,6 +306,48 @@
 		loadAll();
 	}
 
+	function formatSummary(type: string, data: unknown): string {
+		if (type === 'swe-bench' && data && typeof data === 'object' && 'resolved_ids' in data) {
+			const d = data as Record<string, any>;
+			const lines: string[] = [
+				`Score: ${d.resolved_instances}/${d.submitted_instances} resolved`,
+				"",
+				`✓ Resolved (${d.resolved_ids.length}):`,
+				...d.resolved_ids.map((id: string) => `  ${id}`),
+			];
+			if (d.unresolved_ids?.length) {
+				lines.push("", `✗ Unresolved (${d.unresolved_ids.length}):`);
+				lines.push(...d.unresolved_ids.map((id: string) => `  ${id}`));
+			}
+			if (d.error_ids?.length) {
+				lines.push("", `⚠ Errored (${d.error_ids.length}):`);
+				lines.push(...d.error_ids.map((id: string) => `  ${id}`));
+			}
+			if (d.empty_patch_ids?.length) {
+				lines.push("", `(empty patch, ${d.empty_patch_ids.length}):`);
+				lines.push(...d.empty_patch_ids.map((id: string) => `  ${id}`));
+			}
+			return lines.join("\n");
+		}
+		if (type === 'terminal-bench' && data && typeof data === 'object' && Array.isArray((data as any).results)) {
+			const trials = (data as any).results as Array<Record<string, any>>;
+			const resolved = trials.filter((t) => t.is_resolved);
+			const unresolved = trials.filter((t) => !t.is_resolved);
+			const lines: string[] = [
+				`Score: ${resolved.length}/${trials.length} resolved`,
+				"",
+				`✓ Resolved (${resolved.length}):`,
+				...resolved.map((t) => `  ${t.task_id}`),
+			];
+			if (unresolved.length) {
+				lines.push("", `✗ Unresolved (${unresolved.length}):`);
+				lines.push(...unresolved.map((t) => `  ${t.task_id}${t.failure_mode ? ` (${t.failure_mode})` : ""}`));
+			}
+			return lines.join("\n");
+		}
+		return JSON.stringify(data, null, 2);
+	}
+
 	async function openReport(type: string, runId: string) {
 		reportModalOpen = true;
 		reportModalType = type;
@@ -313,7 +361,7 @@
 			const res = await fetch(benchmarkReportUrl(type, runId));
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = await res.json();
-			reportModalContent = JSON.stringify(data, null, 2);
+			reportModalContent = formatSummary(type, data);
 		} catch (e: unknown) {
 			reportModalError = e instanceof Error ? e.message : String(e);
 		}
@@ -642,7 +690,7 @@
 			<button onclick={applyFilters}>Filter</button>
 		</div>
 		<table>
-			<thead><tr><th>Time</th><th>Endpoint</th><th>Model</th><th>Prompt</th><th>Latency</th><th>Throughput</th><th>Output</th><th>Status</th><th>Type</th><th>Report</th></tr></thead>
+			<thead><tr><th>Time</th><th>Endpoint</th><th>Model</th><th>Prompt</th><th>Latency</th><th>Throughput</th><th>Output</th><th>Status</th><th>Type</th><th>Score</th><th>Report</th></tr></thead>
 			<tbody>
 				{#each runs as run}
 					<tr onclick={() => (selectedRun = run)} class:active={selectedRun?.id === run.id}>
@@ -655,6 +703,11 @@
 						<td>{run.output_chars.toLocaleString()} chars</td>
 						<td>{run.status}</td>
 						<td style="font-size: 0.75rem; color: var(--text-muted);">{run.benchmark_type}</td>
+						<td class="score-cell">
+							{#if run.benchmark_type !== 'standard'}
+								{scoreLabel(run)}
+							{/if}
+						</td>
 						<td>
 							{#if run.run_id && run.benchmark_type !== 'standard'}
 								<button class="size-btn" onclick={(e) => { e.stopPropagation(); openReport(run.benchmark_type, run.run_id ?? ""); }}>↗</button>
@@ -777,4 +830,5 @@
 	.modal-files .size-btn.active { background: var(--accent); color: #fff; }
 	.modal-viewer { flex: 1; min-width: 0; overflow: auto; }
 	.modal-body { overflow: auto; background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; white-space: pre-wrap; height: 100%; box-sizing: border-box; }
+	.score-cell { font-weight: 600; font-variant-numeric: tabular-nums; }
 </style>
