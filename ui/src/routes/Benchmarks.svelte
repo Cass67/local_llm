@@ -77,6 +77,11 @@
 	let reportModalRunId = $state("");
 	let reportModalFiles: string[] = $state([]);
 	let reportModalSelectedFile = $state("");
+	let reportInstanceStatus: Record<string, "resolved" | "unresolved" | "error"> = $state({});
+	let reportInstanceFiles: Record<string, string[]> = $state({});
+	let reportOtherFiles: string[] = $state([]);
+	let reportSearch = $state("");
+	let expandedInstances: Record<string, boolean> = $state({});
 
 	const PROMPTS = {
 		small: [
@@ -353,6 +358,36 @@
 		return JSON.stringify(data, null, 2);
 	}
 
+	function instanceStatusFromSummary(type: string, data: unknown): Record<string, "resolved" | "unresolved" | "error"> {
+		const status: Record<string, "resolved" | "unresolved" | "error"> = {};
+		if (type === 'swe-bench' && data && typeof data === 'object' && 'resolved_ids' in data) {
+			const d = data as Record<string, any>;
+			for (const id of d.resolved_ids || []) status[id] = "resolved";
+			for (const id of d.unresolved_ids || []) status[id] = "unresolved";
+			for (const id of [...(d.error_ids || []), ...(d.empty_patch_ids || [])]) status[id] = "error";
+		} else if (type === 'terminal-bench' && data && typeof data === 'object' && Array.isArray((data as any).results)) {
+			for (const t of (data as any).results as Array<Record<string, any>>) {
+				status[t.task_id] = t.is_resolved ? "resolved" : "unresolved";
+			}
+		}
+		return status;
+	}
+
+	function groupFilesByInstance(files: string[], instanceIds: string[]): { groups: Record<string, string[]>; other: string[] } {
+		const groups: Record<string, string[]> = {};
+		const other: string[] = [];
+		const idSet = new Set(instanceIds);
+		for (const file of files) {
+			const segment = file.split("/").find((part) => idSet.has(part));
+			if (segment) {
+				(groups[segment] ||= []).push(file);
+			} else {
+				other.push(file);
+			}
+		}
+		return { groups, other };
+	}
+
 	async function openReport(type: string, runId: string) {
 		reportModalOpen = true;
 		reportModalType = type;
@@ -362,17 +397,25 @@
 		reportModalError = "";
 		reportModalFiles = [];
 		reportModalSelectedFile = "";
+		reportInstanceStatus = {};
+		reportOtherFiles = [];
+		reportSearch = "";
+		expandedInstances = {};
 		try {
 			const res = await fetch(benchmarkReportUrl(type, runId));
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = await res.json();
 			reportModalContent = formatSummary(type, data);
+			reportInstanceStatus = instanceStatusFromSummary(type, data);
 		} catch (e: unknown) {
 			reportModalError = e instanceof Error ? e.message : String(e);
 		}
 		try {
 			const { files } = await listBenchmarkRunFiles(type, runId);
 			reportModalFiles = files;
+			const { groups, other } = groupFilesByInstance(files, Object.keys(reportInstanceStatus));
+			reportInstanceFiles = groups;
+			reportOtherFiles = other;
 		} catch {
 			reportModalFiles = [];
 		}
@@ -383,11 +426,31 @@
 		reportModalError = "";
 		reportModalContent = "loading…";
 		try {
-			reportModalContent = await getBenchmarkRunFile(reportModalType, reportModalRunId, path);
+			const raw = await getBenchmarkRunFile(reportModalType, reportModalRunId, path);
+			if (path.endsWith(".json")) {
+				try {
+					reportModalContent = JSON.stringify(JSON.parse(raw), null, 2);
+					return;
+				} catch {
+					// not valid JSON despite the extension — fall through to raw text
+				}
+			}
+			reportModalContent = raw;
 		} catch (e: unknown) {
 			reportModalContent = "";
 			reportModalError = e instanceof Error ? e.message : String(e);
 		}
+	}
+
+	function toggleInstance(id: string) {
+		expandedInstances = { ...expandedInstances, [id]: !expandedInstances[id] };
+	}
+
+	function statusIcon(status: "resolved" | "unresolved" | "error" | undefined): string {
+		if (status === "resolved") return "✓";
+		if (status === "unresolved") return "✗";
+		if (status === "error") return "⚠";
+		return "•";
 	}
 
 	function updateProgress(progress: BenchmarkJobProgress | null) {
@@ -804,14 +867,39 @@
 							class="size-btn"
 							class:active={reportModalSelectedFile === ""}
 							onclick={() => { reportModalSelectedFile = ""; openReport(reportModalType, reportModalRunId); }}
-						>summary</button>
-						{#each reportModalFiles as file}
-							<button
-								class="size-btn"
-								class:active={reportModalSelectedFile === file}
-								onclick={() => selectReportFile(file)}
-							>{file}</button>
-						{/each}
+						>Summary</button>
+						{#if Object.keys(reportInstanceFiles).length > 0}
+							<input type="search" placeholder="Filter instances…" bind:value={reportSearch} class="report-search" />
+							{#each Object.keys(reportInstanceFiles).sort() as id}
+								{#if id.toLowerCase().includes(reportSearch.toLowerCase())}
+									<div class="instance-group">
+										<button class="size-btn instance-header" onclick={() => toggleInstance(id)}>
+											<span class="status-icon status-{reportInstanceStatus[id] || 'unknown'}">{statusIcon(reportInstanceStatus[id])}</span>
+											{id}
+										</button>
+										{#if expandedInstances[id]}
+											{#each reportInstanceFiles[id] as file}
+												<button
+													class="size-btn instance-file"
+													class:active={reportModalSelectedFile === file}
+													onclick={() => selectReportFile(file)}
+												>{file.split("/").pop()}</button>
+											{/each}
+										{/if}
+									</div>
+								{/if}
+							{/each}
+						{/if}
+						{#if reportOtherFiles.length > 0}
+							<p class="muted" style="margin: 0.5rem 0 0.25rem;">Other files</p>
+							{#each reportOtherFiles as file}
+								<button
+									class="size-btn"
+									class:active={reportModalSelectedFile === file}
+									onclick={() => selectReportFile(file)}
+								>{file}</button>
+							{/each}
+						{/if}
 					</div>
 				{/if}
 				<div class="modal-viewer">
@@ -873,11 +961,19 @@
 	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; width: min(95vw, 1200px); height: 85vh; display: flex; flex-direction: column; padding: 1rem; }
 	.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
 	.modal-columns { display: flex; gap: 0.75rem; flex: 1; min-height: 0; }
-	.modal-files { display: flex; flex-direction: column; gap: 0.25rem; width: 260px; flex-shrink: 0; overflow: auto; }
+	.modal-files { display: flex; flex-direction: column; gap: 0.25rem; width: 300px; flex-shrink: 0; overflow: auto; }
 	.modal-files .size-btn { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.modal-files .size-btn.active { background: var(--accent); color: #fff; }
 	.modal-viewer { flex: 1; min-width: 0; overflow: auto; }
 	.modal-body { overflow: auto; background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; white-space: pre-wrap; height: 100%; box-sizing: border-box; }
+	.report-search { margin: 0.25rem 0; }
+	.instance-group { display: flex; flex-direction: column; gap: 0.15rem; }
+	.instance-header { font-weight: 600; }
+	.instance-file { padding-left: 1.5rem; font-size: 0.8rem; color: var(--text-muted); }
+	.status-icon { display: inline-block; width: 1.1rem; text-align: center; }
+	.status-resolved { color: #4caf50; }
+	.status-unresolved { color: #e57373; }
+	.status-error { color: #ffb74d; }
 	.score-cell { font-weight: 600; font-variant-numeric: tabular-nums; }
 	.progress-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
 	.progress-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
