@@ -160,8 +160,8 @@ class SwebenchRunner(BaseBenchmarkRunner):
                     check=False,
                 )
 
-            report_path = run_dir / f"{model.replace('/', '__')}.{run_id}.json"
-            if report_path.exists():
+            report_path = next(run_dir.glob(f"*.{run_id}.json"), None)
+            if report_path is not None and report_path.exists():
                 report = json.loads(report_path.read_text())
                 resolved = report.get("resolved_instances", 0)
                 total = report.get("submitted_instances", 1)
