@@ -18,6 +18,8 @@
 		startBenchmarkByType,
 		getBenchmarkJob,
 		benchmarkReportUrl,
+		listBenchmarkRunFiles,
+		getBenchmarkRunFile,
 	} from "../lib/benchmarkApi";
 	import { fetchClusters } from "../lib/api";
 	import { formatMs, formatThroughput, runDelta } from "../lib/benchmarkMetrics";
@@ -67,6 +69,10 @@
 	let reportModalTitle = $state("");
 	let reportModalContent = $state("");
 	let reportModalError = $state("");
+	let reportModalType = $state("");
+	let reportModalRunId = $state("");
+	let reportModalFiles: string[] = $state([]);
+	let reportModalSelectedFile = $state("");
 
 	const PROMPTS = {
 		small: [
@@ -296,15 +302,37 @@
 
 	async function openReport(type: string, runId: string) {
 		reportModalOpen = true;
+		reportModalType = type;
+		reportModalRunId = runId;
 		reportModalTitle = `${type} report — ${runId}`;
 		reportModalContent = "";
 		reportModalError = "";
+		reportModalFiles = [];
+		reportModalSelectedFile = "";
 		try {
 			const res = await fetch(benchmarkReportUrl(type, runId));
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = await res.json();
 			reportModalContent = JSON.stringify(data, null, 2);
 		} catch (e: unknown) {
+			reportModalError = e instanceof Error ? e.message : String(e);
+		}
+		try {
+			const { files } = await listBenchmarkRunFiles(type, runId);
+			reportModalFiles = files;
+		} catch {
+			reportModalFiles = [];
+		}
+	}
+
+	async function selectReportFile(path: string) {
+		reportModalSelectedFile = path;
+		reportModalError = "";
+		reportModalContent = "loading…";
+		try {
+			reportModalContent = await getBenchmarkRunFile(reportModalType, reportModalRunId, path);
+		} catch (e: unknown) {
+			reportModalContent = "";
 			reportModalError = e instanceof Error ? e.message : String(e);
 		}
 	}
@@ -635,13 +663,33 @@
 				<h3>{reportModalTitle}</h3>
 				<button class="size-btn" onclick={() => (reportModalOpen = false)}>Close</button>
 			</div>
-			{#if reportModalError}
-				<div class="error">{reportModalError}</div>
-			{:else if reportModalContent}
-				<pre class="modal-body">{reportModalContent}</pre>
-			{:else}
-				<p class="muted">Loading report…</p>
-			{/if}
+			<div class="modal-columns">
+				{#if reportModalFiles.length > 0}
+					<div class="modal-files">
+						<button
+							class="size-btn"
+							class:active={reportModalSelectedFile === ""}
+							onclick={() => { reportModalSelectedFile = ""; openReport(reportModalType, reportModalRunId); }}
+						>summary</button>
+						{#each reportModalFiles as file}
+							<button
+								class="size-btn"
+								class:active={reportModalSelectedFile === file}
+								onclick={() => selectReportFile(file)}
+							>{file}</button>
+						{/each}
+					</div>
+				{/if}
+				<div class="modal-viewer">
+					{#if reportModalError}
+						<div class="error">{reportModalError}</div>
+					{:else if reportModalContent}
+						<pre class="modal-body">{reportModalContent}</pre>
+					{:else}
+						<p class="muted">Loading…</p>
+					{/if}
+				</div>
+			</div>
 		</div>
 	</div>
 {/if}
@@ -688,7 +736,12 @@
 	tr { cursor: pointer; }
 	@media (max-width: 760px) { .hero { align-items: flex-start; flex-direction: column; gap: 0.75rem; } .list-item { grid-template-columns: 1fr; } }
 	.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
-	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; width: min(90vw, 900px); max-height: 85vh; display: flex; flex-direction: column; padding: 1rem; }
+	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; width: min(95vw, 1200px); height: 85vh; display: flex; flex-direction: column; padding: 1rem; }
 	.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
-	.modal-body { overflow: auto; background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; white-space: pre-wrap; }
+	.modal-columns { display: flex; gap: 0.75rem; flex: 1; min-height: 0; }
+	.modal-files { display: flex; flex-direction: column; gap: 0.25rem; width: 260px; flex-shrink: 0; overflow: auto; }
+	.modal-files .size-btn { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.modal-files .size-btn.active { background: var(--accent); color: #fff; }
+	.modal-viewer { flex: 1; min-width: 0; overflow: auto; }
+	.modal-body { overflow: auto; background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; white-space: pre-wrap; height: 100%; box-sizing: border-box; }
 </style>

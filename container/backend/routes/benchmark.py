@@ -490,3 +490,33 @@ async def get_benchmark_report(benchmark_type: str, run_id: str):
     if path is None:
         raise HTTPException(status_code=404, detail="report not found")
     return FileResponse(path, media_type="application/json", filename=path.name)
+
+
+def _run_dir(benchmark_type: str, run_id: str) -> Path | None:
+    log_dir = _LOG_DIRS.get(benchmark_type)
+    if log_dir is None or "/" in run_id or ".." in run_id:
+        return None
+    run_dir = log_dir / run_id
+    return run_dir if run_dir.is_dir() else None
+
+
+@router.get("/runs/{benchmark_type}/report/{run_id}/files")
+async def list_benchmark_run_files(benchmark_type: str, run_id: str):
+    """List every artifact file produced by a run (patches, per-instance logs, reports)."""
+    run_dir = _run_dir(benchmark_type, run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    files = sorted(str(p.relative_to(run_dir)) for p in run_dir.rglob("*") if p.is_file())
+    return {"files": files}
+
+
+@router.get("/runs/{benchmark_type}/report/{run_id}/file")
+async def get_benchmark_run_file(benchmark_type: str, run_id: str, path: str = Query(...)):
+    """Serve the raw content of one artifact file from a run, scoped to its run directory."""
+    run_dir = _run_dir(benchmark_type, run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    target = (run_dir / path).resolve()
+    if run_dir.resolve() not in target.parents or not target.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(target, media_type="text/plain")
