@@ -116,6 +116,7 @@ class SwebenchRunner(BaseBenchmarkRunner):
 
         try:
             target_instance_id = None
+            total_instances = 1
             if not run_all:
                 target_instance_id = instance_id_filter
                 if target_instance_id is None:
@@ -123,6 +124,12 @@ class SwebenchRunner(BaseBenchmarkRunner):
 
                     dataset = load_dataset(dataset_name, split=split)  # nosec B615
                     target_instance_id = sorted(dataset["instance_id"])[0]
+            else:
+                from datasets import load_dataset
+
+                total_instances = len(load_dataset(dataset_name, split=split))  # nosec B615
+
+            (run_dir / "manifest.json").write_text(json.dumps({"total": total_instances}))
 
             workers = os.environ.get("SWE_BENCH_MAX_WORKERS", "4" if run_all else "1")
             env = {
