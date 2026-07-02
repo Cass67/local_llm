@@ -12,13 +12,12 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, HttpUrl
 
+from backend.benchmarks import SwebenchRunner, TerminalBenchRunner
+
 from .. import config
 from ..clusters import list_clusters
 
 BenchmarkStore = import_module("backend.benchmark_store").BenchmarkStore
-
-# Import benchmark runners
-from backend.benchmarks import SwebenchRunner, TerminalBenchRunner
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/benchmark", tags=["benchmark"])
@@ -151,11 +150,9 @@ async def sync_cluster_endpoints():
             c.backend,
             ",".join(c.gpu_pci_ids),
         )
-    synced = [
+    for cluster in clusters:
         _store().upsert_endpoint(f"Cluster: {cluster.name}", "http://127.0.0.1:3200/v1")
-        for cluster in clusters
-    ]
-    return {"endpoints": synced}
+    return {"endpoints": _store().list_endpoints()}
 
 
 @router.post("/endpoints")
