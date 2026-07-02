@@ -43,6 +43,8 @@ services:
       DOCKER_HOST: unix:///var/run/docker.sock
       TERMINAL_BENCH_DATASET_NAME: terminal-bench-core
       TERMINAL_BENCH_DATASET_VERSION: "0.1.1"
+      # Raises HF Hub rate limits for dataset/model downloads (terminal-bench, swe-bench)
+      HF_TOKEN: "${HF_TOKEN:-}"
 
   # ── Model Router ─────────────────────────────────────────────────────────────
   # Keyword-based request router on :3200.

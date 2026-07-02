@@ -381,6 +381,7 @@ Open WebUI has web search built in, powered by a local SearXNG container on `:30
 | `SWE_BENCH_DATASET_NAME` | `princeton-nlp/SWE-bench_Lite` | SWE-bench dataset used by the Benchmarks tab. |
 | `SWE_BENCH_SPLIT` | `test` | SWE-bench dataset split. |
 | `SWE_BENCH_MAX_WORKERS` | `1` (single instance) / `4` (full dataset) | Parallel workers for the swebench evaluation harness. |
+| `HF_TOKEN` | — | HuggingFace access token. Optional; raises HF Hub rate limits for the dataset/model downloads terminal-bench and swe-bench do. Get one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens). |
 
 ### Accepted model metadata
 
