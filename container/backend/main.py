@@ -1,5 +1,4 @@
 import logging
-from importlib import import_module
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -8,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import active_runners
 from .config import VERSION
+from .routes.benchmark import router as benchmark_router
 from .routes.chat import router as chat_router
 from .routes.clusters import router as clusters_router
 from .routes.idle_unload import router as idle_unload_router
@@ -23,8 +23,6 @@ from .routes.runner import router as runner_router
 from .routes.search import router as search_router
 from .routes.stats import router as stats_router
 from .routes.switch import router as switch_router
-
-benchmark_router = import_module("container.backend.routes.benchmark").router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
