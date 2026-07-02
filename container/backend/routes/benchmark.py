@@ -31,8 +31,8 @@ _RUNNERS = {
     "swe-bench": SwebenchRunner(),
 }
 _LOG_DIRS = {
-    "terminal-bench": Path("/tmp/terminal_bench_runs"),  # noqa: S108 # nosec B108
-    "swe-bench": Path("/tmp/swe_bench_runs"),  # noqa: S108 # nosec B108
+    "terminal-bench": import_module("backend.benchmarks.terminal_bench")._RUNS_DIR,
+    "swe-bench": import_module("backend.benchmarks.swe_bench")._RUNS_DIR,
 }
 _JOBS: dict[str, dict[str, Any]] = {}
 

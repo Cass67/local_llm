@@ -9,7 +9,8 @@ from typing import Any
 
 from .base import BaseBenchmarkRunner
 
-_RUNS_DIR = Path("/tmp/terminal_bench_runs")  # noqa: S108 # nosec B108
+_STATE_DIR = Path(os.environ.get("LOCAL_LLM_STATE_DIR", "/state"))
+_RUNS_DIR = _STATE_DIR / "runs" / "benchmarks" / "terminal_bench"
 
 
 class TerminalBenchRunner(BaseBenchmarkRunner):

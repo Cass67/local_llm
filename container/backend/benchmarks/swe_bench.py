@@ -12,7 +12,8 @@ import httpx
 
 from .base import BaseBenchmarkRunner
 
-_RUNS_DIR = Path("/tmp/swe_bench_runs")  # noqa: S108 # nosec B108
+_STATE_DIR = Path(os.environ.get("LOCAL_LLM_STATE_DIR", "/state"))
+_RUNS_DIR = _STATE_DIR / "runs" / "benchmarks" / "swe_bench"
 
 
 def _extract_patch(text: str) -> str:
