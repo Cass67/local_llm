@@ -65,6 +65,12 @@ class BenchmarkStore:
                 );
                 """
             )
+            columns = {row[1] for row in conn.execute("pragma table_info(benchmark_runs)")}
+            if "benchmark_type" not in columns:
+                conn.execute(
+                    "alter table benchmark_runs add column benchmark_type text not null"
+                    " default 'standard'"
+                )
 
     @staticmethod
     def _row(row: sqlite3.Row) -> dict[str, Any]:
@@ -100,7 +106,8 @@ class BenchmarkStore:
             ).fetchone()
             if row:
                 conn.execute(
-                    "update endpoints set base_url = ?, updated_at = current_timestamp where id = ?",
+                    "update endpoints set base_url = ?, updated_at = current_timestamp"
+                    " where id = ?",
                     (clean_url, row["id"]),
                 )
                 row = conn.execute("select * from endpoints where id = ?", (row["id"],)).fetchone()
@@ -156,7 +163,7 @@ class BenchmarkStore:
         placeholders = ", ".join("?" for _ in values)
         with self._connect() as conn:
             cur = conn.execute(
-                f"insert into benchmark_runs ({columns}) values ({placeholders})",  # nosec B608 -- columns from code
+                f"insert into benchmark_runs ({columns}) values ({placeholders})",  # noqa: S608 # nosec B608 -- columns from code
                 tuple(values.values()),
             )
             row = conn.execute(
@@ -188,11 +195,11 @@ class BenchmarkStore:
         limit = min(int(filters.get("limit", 100)), 500)
         offset = max(int(filters.get("offset", 0)), 0)
         with self._connect() as conn:
-            total = conn.execute(f"select count(*) from benchmark_runs {where}", params).fetchone()[  # nosec B608
+            total = conn.execute(f"select count(*) from benchmark_runs {where}", params).fetchone()[  # noqa: S608 # nosec B608
                 0
             ]
             rows = conn.execute(
-                f"select * from benchmark_runs {where} order by created_at desc limit ? offset ?",  # nosec B608
+                f"select * from benchmark_runs {where} order by created_at desc limit ? offset ?",  # noqa: S608 # nosec B608
                 [*params, limit, offset],
             ).fetchall()
         return {"total": total, "runs": [self._row(row) for row in rows]}
@@ -206,51 +213,44 @@ class BenchmarkStore:
 
         where = f"where {' and '.join(conditions)}" if conditions else ""
 
+        summary_sql = f"""
+            select
+              count(*) as total_runs,
+              avg(latency_ms) as avg_latency_ms,
+              max(throughput_tps) as best_throughput_tps,
+              avg(throughput_tps) as avg_throughput_tps,
+              sum(case when status != 'ok' then 1 else 0 end) as error_runs
+            from benchmark_runs
+            {where}
+            """  # noqa: S608 # nosec B608
+        extra = f"and {' and '.join(conditions)}" if conditions else ""
+        best_sql = f"""
+            select * from benchmark_runs
+            where status = 'ok'
+            {extra}
+            order by throughput_tps desc nulls last, throughput_cps desc nulls last
+            limit 1
+            """  # noqa: S608 # nosec B608
+        worst_sql = f"""
+            select * from benchmark_runs
+            where status = 'ok'
+            {extra}
+            order by latency_ms desc nulls last
+            limit 1
+            """  # noqa: S608 # nosec B608
+        trends_sql = f"""
+            select id, created_at, endpoint_name, model, prompt_name, latency_ms,
+                   throughput_tps, throughput_cps, status
+            from benchmark_runs
+            {where}
+            order by created_at asc
+            limit 200
+            """  # noqa: S608 # nosec B608
         with self._connect() as conn:
-            row = conn.execute(
-                f"""
-                select
-                  count(*) as total_runs,
-                  avg(latency_ms) as avg_latency_ms,
-                  max(throughput_tps) as best_throughput_tps,
-                  avg(throughput_tps) as avg_throughput_tps,
-                  sum(case when status != 'ok' then 1 else 0 end) as error_runs
-                from benchmark_runs
-                {where}
-                """,
-                params,
-            ).fetchone()
-            best = conn.execute(
-                f"""
-                select * from benchmark_runs
-                where status = 'ok'
-                {f"and {' and '.join(conditions)}" if conditions else ""}
-                order by throughput_tps desc nulls last, throughput_cps desc nulls last
-                limit 1
-                """,
-                params,
-            ).fetchone()
-            worst = conn.execute(
-                f"""
-                select * from benchmark_runs
-                where status = 'ok'
-                {f"and {' and '.join(conditions)}" if conditions else ""}
-                order by latency_ms desc nulls last
-                limit 1
-                """,
-                params,
-            ).fetchone()
-            trends = conn.execute(
-                f"""
-                select id, created_at, endpoint_name, model, prompt_name, latency_ms,
-                       throughput_tps, throughput_cps, status
-                from benchmark_runs
-                {where}
-                order by created_at asc
-                limit 200
-                """,
-                params,
-            ).fetchall()
+            row = conn.execute(summary_sql, params).fetchone()
+            best = conn.execute(best_sql, params).fetchone()
+            worst = conn.execute(worst_sql, params).fetchone()
+            trends = conn.execute(trends_sql, params).fetchall()
         total = row["total_runs"] or 0
         errors = row["error_runs"] or 0
         return {
