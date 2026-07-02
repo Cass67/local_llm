@@ -589,17 +589,17 @@
 				</p>
 			</div>
 		{/if}
-		<div class="form-row params">
-			<label>Max tokens<input type="number" min="1" max="8192" bind:value={maxTokens} /></label>
-			<label>Temperature<input type="number" min="0" max="2" step="0.05" bind:value={temperature} /></label>
-			{#if benchmarkType === 'standard'}
+		{#if benchmarkType === 'standard'}
+			<div class="form-row params">
+				<label>Max tokens<input type="number" min="1" max="8192" bind:value={maxTokens} /></label>
+				<label>Temperature<input type="number" min="0" max="2" step="0.05" bind:value={temperature} /></label>
 				<label>Seed (-1=rand)<input type="number" min="-1" bind:value={seed} /></label>
 				<label>Top-P<input type="number" min="0" max="1" step="0.05" bind:value={topP} /></label>
 				<label>Top-K<input type="number" min="0" max="200" bind:value={topK} /></label>
 				<label>Repeat penalty<input type="number" min="1" max="2" step="0.05" bind:value={repeatPenalty} /></label>
 				<label>Runs<input type="number" min="1" max="20" bind:value={repeatCount} /></label>
-			{/if}
-		</div>
+			</div>
+		{/if}
 		{#if benchmarkType === 'standard'}
 			<textarea bind:value={systemPrompt} rows="2" placeholder="System prompt (optional)"></textarea>
 			<div class="prompt-header">
