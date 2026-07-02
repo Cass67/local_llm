@@ -152,7 +152,7 @@ class SwebenchRunner(BaseBenchmarkRunner):
         completion_tokens = 0
         # a truncated patch is a guaranteed malformed/unresolved instance, so enforce a
         # floor well above what the generic benchmark form's default (often 512) provides
-        max_tokens = max(kwargs.get("max_tokens") or 0, 4096)
+        max_tokens = max(kwargs.get("max_tokens") or 0, 8192)
         temperature = kwargs.get("temperature", 0.2)
         api_key = kwargs.get("api_key")
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -186,8 +186,10 @@ class SwebenchRunner(BaseBenchmarkRunner):
                     "You are fixing a bug in an open-source repository. Given the issue "
                     "description and the current contents of the likely-relevant file(s) "
                     "below, produce a fix as a unified diff patch (git diff format) against "
-                    "the file contents shown. Only output the patch, wrapped in a ```diff "
-                    "code block.\n\n"
+                    "the file contents shown. Keep the patch minimal: change only the lines "
+                    "necessary to fix the bug, do not reformat, rewrite docstrings, or touch "
+                    "unrelated code. Only output the patch, wrapped in a ```diff code block, "
+                    "with no explanation before or after it.\n\n"
                     f"Issue:\n{instance['problem_statement']}"
                     + (f"\n\n{context}" if context else "")
                 )
