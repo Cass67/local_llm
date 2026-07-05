@@ -282,6 +282,60 @@ When you start a model on a cluster in the **Architecture** tab, select a profil
 
 `tensor_split` is a comma-separated weight list — `"1,1"` distributes evenly across two GPUs. For unequal VRAM use ratios like `"2,1"`. `visible_devices` maps to `HIP_VISIBLE_DEVICES` / `CUDA_VISIBLE_DEVICES`. Use **Import from models** to seed profiles automatically from each model's current config.
 
+#### All profile fields
+
+Every field a profile can set, exactly as read by `container/backend/runtime.py` (`_config()`/`build_llama_server_args()`/`build_runner_container_spec()`). Fields not listed here are silently ignored — there are no hidden defaults, only what's shown is passed to `llama-server`.
+
+| Field | Maps to | Notes |
+|---|---|---|
+| `ngl` | `-ngl` | Layers offloaded to GPU. `999` = all. |
+| `split_mode` | `--split-mode` | `"layer"` or `"row"` for multi-GPU. |
+| `tensor_split` | `--tensor-split` | Comma-separated weights, e.g. `"1,1"`. |
+| `ctx` | `-c` | Context size. Falls back to top-level `context` if `ctx` isn't set. |
+| `batch` | `-b` | Logical batch size. |
+| `ubatch` | `-ub` | Physical micro-batch size. |
+| `reasoning` | `--reasoning on/off` | Falls back to top-level `reasoning` if unset in `config`. |
+| `context_shift` | `--context-shift` | Boolean flag. |
+| `cache_prompt` | `--cache-prompt --cache-ram <cache_ram>` | If false but `cache_ram` is set, only `--cache-ram` is passed. |
+| `cache_ram` | `--cache-ram` | MB of RAM for the prompt cache. |
+| `ctx_checkpoints` | `--ctx-checkpoints` | `0` disables; >0 also emits `checkpoint_min_step`. |
+| `checkpoint_min_step` | `--checkpoint-min-step` | Only applied when `ctx_checkpoints > 0`. |
+| `repeat_penalty` | `--repeat-penalty` | Also settable via `repetition_penalty` (same flag, alternate key). |
+| `presence_penalty` | `--presence-penalty` | |
+| `frequency_penalty` | `--frequency-penalty` | |
+| `timeout` | `--timeout` | Request timeout, seconds. |
+| `threads_http` | `--threads-http` | HTTP worker threads. |
+| `parallel` | `--parallel` | Concurrent inference slots. Also drives benchmark worker counts. |
+| `no_cont_batching` | `--no-cont-batching` | Boolean flag. |
+| `prio` | `--prio` | Process scheduling priority. |
+| `no_warmup` | `--no-warmup` | Boolean flag. |
+| `mtp_enabled` | `--spec-type draft-mtp` | Enables multi-token-prediction speculative decoding. See below. |
+| `mtp_draft_model` | `-md <path>` | Explicit draft model path. |
+| `mtp_draft_hf_repo` / `mtp_draft_hf_file` | — | Resolves a draft model from the HF cache when `mtp_draft_model` isn't set directly. |
+| `mtp_draft_n_max` | `--spec-draft-n-max` | |
+| `mtp_draft_n_min` | `--spec-draft-n-min` | |
+| `mtp_draft_p_min` | `--spec-draft-p-min` | |
+| `temperature` | `--temp` | |
+| `top_p` | `--top-p` | |
+| `top_k` | `--top-k` | |
+| `min_p` | `--min-p` | |
+| `cache_type_k` / `cache_type_v` | `--cache-type-k` / `-v` | KV cache quantization (e.g. `q8_0`). |
+| `flash_attention` | `-fa on` | |
+| `jinja` | `--jinja` | Use the model's Jinja chat template. |
+| `no_mmap` | `--no-mmap` | |
+| `mlock` | `--mlock` | |
+| `no_kv_offload` | `--no-kv-offload` | |
+| `numa` | `--numa <value>` | |
+| `main_gpu` | `--main-gpu` | |
+| `threads` | `-t` | |
+| `threads_batch` | `-tb` | |
+| `backend` | — | `"rocm"` (default), `"cuda"`, `"vulkan"`, or `"mixed_vulkan"`. Controls container device/runtime wiring, not a llama-server flag. |
+| `visible_devices` | `HIP_VISIBLE_DEVICES` / `CUDA_VISIBLE_DEVICES` / `GGML_VK_VISIBLE_DEVICES` | Env var chosen based on `backend`. |
+| `nvidia_vulkan` | — | Boolean; routes an NVIDIA GPU through the Vulkan backend via the nvidia container runtime. |
+| `flags` | raw CLI args | Free-text extra flags appended verbatim. Any flag already covered by a promoted field above (`-fa`, `-md`, `--spec-*`, `--parallel`, `--cache-ram`, etc.) is stripped from here automatically so it isn't passed twice. |
+
+**MTP/speculative-decoding note:** the only fields `runtime.py` actually reads are the flat `mtp_*` keys above. A nested `"mtp": {"enabled": true, ...}` object or raw-flag-named keys like `"draft-mtp"`/`"spec-draft-n-max"` are **not recognized** and are silently ignored — some profiles in `configs/profiles.json` currently have this stale shape and have no working MTP despite looking configured. Use the flat `mtp_*` keys for anything that needs to actually take effect.
+
 ### Audit
 
 **Models** or **Status** → **Audit** button. Scans all registered model entries and checks whether their GGUF files still exist in the HF cache. Orphaned entries (file deleted from disk) are listed. Click **Remove N** to clean them up.
