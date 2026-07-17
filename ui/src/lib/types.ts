@@ -318,3 +318,33 @@ export interface BenchmarkRunFilters {
 	limit?: number;
 	offset?: number;
 }
+
+export interface UpdateBackendStatus {
+	backend: string;
+	image: string;
+	present: boolean;
+	commit: string | null;
+	behind: number | null;
+}
+
+export interface UpdateCommit {
+	sha: string;
+	message: string;
+	date: string;
+	author: string;
+}
+
+export interface UpdateStatus {
+	latest: { sha: string; message: string; date: string };
+	backends: UpdateBackendStatus[];
+	commits: UpdateCommit[];
+}
+
+export interface BuildStatus {
+	running: boolean;
+	backends: string[];
+	current: string | null;
+	started: number | null;
+	results: Record<string, number>;
+	log_tail: string;
+}

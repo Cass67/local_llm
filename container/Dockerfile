@@ -13,6 +13,7 @@ ARG CACHEBUST=1
 RUN rm -rf ./ui-dist/assets/index-*.js ./ui-dist/assets/index-*.css ./ui-dist/index.html
 COPY --link container/ui-dist/ ./ui-dist/
 COPY scripts/ /scripts/
+COPY runner/ ./runner/
 COPY container/entrypoint.sh .
 
 EXPOSE 3100
