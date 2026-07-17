@@ -53,7 +53,7 @@ def _image_commit(image: str) -> tuple[bool, str | None]:
     if result.returncode != 0:
         return False, None
     image_id, _, label = result.stdout.strip().partition(" ")
-    if label:
+    if label and label != "<no value>":  # docker prints "<no value>" for a missing label
         return True, label[:12]
     if image_id in _version_cache:
         return True, _version_cache[image_id]
