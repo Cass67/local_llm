@@ -23,6 +23,7 @@ from .routes.runner import router as runner_router
 from .routes.search import router as search_router
 from .routes.stats import router as stats_router
 from .routes.switch import router as switch_router
+from .routes.update import router as update_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -79,6 +80,7 @@ app.include_router(router_config_router)
 app.include_router(idle_unload_router)
 app.include_router(benchmark_router)
 app.include_router(profiles_router)
+app.include_router(update_router)
 
 
 @app.get("/api/health")

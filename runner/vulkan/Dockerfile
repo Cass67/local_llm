@@ -19,9 +19,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /src
-RUN git clone --depth 1 --branch "$LLAMA_CPP_REF" https://github.com/ggml-org/llama.cpp.git
+# init+fetch instead of clone --branch so LLAMA_CPP_REF can be a commit sha
 WORKDIR /src/llama.cpp
+RUN git init . \
+    && git remote add origin https://github.com/ggml-org/llama.cpp.git \
+    && git fetch --depth 1 origin "$LLAMA_CPP_REF" \
+    && git checkout FETCH_HEAD
 RUN cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLAMA_CURL=ON \

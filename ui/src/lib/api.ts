@@ -24,6 +24,8 @@ import type {
 	RouterConfig,
 	RouterHealth,
 	IdleUnloadConfig,
+	UpdateStatus,
+	BuildStatus,
 	ModelProfile,
 	FamilyProfiles,
 	ProfilesData,
@@ -539,6 +541,36 @@ export async function initTarget(target: string): Promise<any> {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ target }),
 	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+// --- llama.cpp updates ---
+
+export async function fetchUpdateStatus(): Promise<UpdateStatus> {
+	const res = await fetch(`${BASE}/update/status`);
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function startRunnerBuild(backends: string[]): Promise<{ status: string; ref: string }> {
+	const res = await fetch(`${BASE}/update/build`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ backends }),
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function fetchBuildStatus(): Promise<BuildStatus> {
+	const res = await fetch(`${BASE}/update/build/status`);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.json();
 }
