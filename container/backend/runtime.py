@@ -175,6 +175,8 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
     if cfg.get("jinja"):
         args.append("--jinja")
 
+    if cfg.get("mmproj"):
+        args.extend(["--mmproj", str(cfg["mmproj"])])
     if cfg.get("no_mmap"):
         args.append("--no-mmap")
     if cfg.get("mlock"):
@@ -203,6 +205,7 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         "--spec-draft-p-min",
         "--parallel",
         "--cache-ram",
+        "--mmproj",
     }
     raw_tokens = str(cfg.get("flags") or "").split()
     filtered: list[str] = []
