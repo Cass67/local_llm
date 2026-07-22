@@ -57,7 +57,13 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
             task_id = None
 
         run_id = kwargs.get("run_id") or f"web-{int(time.time())}"
-        _RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        # Our run_dir holds run.log for the live console. tb gets its own nested dir
+        # (tb_run_dir) so it doesn't see our pre-created dir and mistake it for a resume
+        # (which fails on the missing lock file). run_id stays in the cmdline/container
+        # names so _cancel_run still matches.
+        run_dir = _RUNS_DIR / run_id
+        tb_run_dir = run_dir / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
 
         quiet_code = (
             "import logging; logging.disable(logging.INFO); "
@@ -79,7 +85,7 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
             "--n-concurrent",
             "4" if run_batch else "1",
             "--output-path",
-            str(_RUNS_DIR),
+            str(run_dir),
             "--run-id",
             run_id,
         ]
@@ -106,8 +112,6 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         prompt_tokens = None
         completion_tokens = None
 
-        run_dir = _RUNS_DIR / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_dir / "run.log"
 
         try:
@@ -121,8 +125,8 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
                     check=False,
                 )
             log_tail = log_path.read_text()[-4000:] if log_path.exists() else ""
-            results_path = run_dir / "results.json"
-            metadata_path = run_dir / "run_metadata.json"
+            results_path = tb_run_dir / "results.json"
+            metadata_path = tb_run_dir / "run_metadata.json"
 
             if results_path.exists() and metadata_path.exists():
                 results = json.loads(results_path.read_text())
