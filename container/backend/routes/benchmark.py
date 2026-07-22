@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
+import subprocess  # noqa: S404 # nosec B404
 import time
 import uuid
 from functools import lru_cache
@@ -468,6 +470,41 @@ async def list_active_jobs():
             if job["status"] == "running"
         ]
     }
+
+
+def _cancel_run(run_id: str) -> None:
+    """Kill the benchmark subprocess tree for run_id and reap its docker containers.
+
+    Both terminal-bench and swe-bench embed run_id in their subprocess cmdlines and in
+    the container/compose-project names, so matching on run_id catches everything a run
+    spawned — including builds and containers orphaned by a mgmt restart.
+    """
+    pkill = shutil.which("pkill") or "pkill"
+    docker = shutil.which("docker") or "docker"
+    subprocess.run([pkill, "-TERM", "-f", run_id], check=False)  # noqa: S603 # nosec B603
+    ids = subprocess.run(  # noqa: S603 # nosec B603
+        [docker, "ps", "-aq", "--filter", f"name={run_id}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.split()
+    if ids:
+        subprocess.run([docker, "rm", "-f", *ids], check=False)  # noqa: S603 # nosec B603
+
+
+@router.post("/runs/{benchmark_type}/jobs/{job_id}/cancel")
+async def cancel_benchmark_job(benchmark_type: str, job_id: str):
+    """Kill a running benchmark job and clean up any containers it spawned."""
+    if "/" in job_id or ".." in job_id:
+        raise HTTPException(status_code=400, detail="invalid job id")
+    await asyncio.to_thread(_cancel_run, job_id)
+    job = _JOBS.get(job_id)
+    if job is not None:
+        task = job.get("task")
+        if task is not None:
+            task.cancel()
+        job.update(status="error", error="cancelled by user")
+    return {"cancelled": True}
 
 
 @router.get("/runs/{benchmark_type}/jobs/{job_id}")
