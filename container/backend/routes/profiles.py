@@ -1,5 +1,6 @@
 """Profile management — named load configs per model family."""
 
+import asyncio
 import json
 
 from fastapi import APIRouter, HTTPException
@@ -41,7 +42,9 @@ async def upsert_profile(family: str, name: str, body: dict):
         data["families"][family] = {"default": name, "profiles": {}}
     data["families"][family]["profiles"][name] = body
     _save(data)
-    restarted = active_runners.restart_running_for_profile(family, name)
+    # Blocking: relaunch + _wait_ready sleep-loops up to 120s per cluster.
+    # Run off the event loop so other requests (Architecture tab) aren't frozen.
+    restarted = await asyncio.to_thread(active_runners.restart_running_for_profile, family, name)
     return {"status": "saved", "restarted_clusters": restarted}
 
 
