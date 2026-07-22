@@ -24,6 +24,9 @@
 	let cloning = $state(false);
 	let cloneName = $state("");
 
+	const familyBackend = $derived(
+		Object.fromEntries(models.map((m) => [m.family, m.backend])) as Record<string, string>,
+	);
 	const families = $derived([...new Set(models.map((m) => m.family))].sort());
 	const currentFam = $derived(allProfiles[selectedFamily] ?? { default: "", profiles: {} });
 	const profileNames = $derived(Object.keys(currentFam.profiles).sort());
@@ -163,7 +166,7 @@
 			onchange={(e) => onFamilyChange(e.currentTarget.value)}
 			class="sel-family"
 		>
-			{#each families as f}<option value={f}>{f}</option>{/each}
+			{#each families as f}<option value={f}>{f}{familyBackend[f] ? ` · ${familyBackend[f]}` : ""}</option>{/each}
 		</select>
 
 		{#if isNew}

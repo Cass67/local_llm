@@ -218,9 +218,6 @@ def collect_nvidia_gpus() -> list[dict[str, Any]]:
             continue
         memory_used = csv_int(parts[4])
         memory_total = csv_int(parts[5])
-        # nvidia-smi reports 0 for Vulkan allocations — treat as unknown
-        if memory_used == 0:
-            memory_used = None
         sclk = csv_int(parts[8])
         mclk = csv_int(parts[9])
         fan = csv_int(parts[10])
