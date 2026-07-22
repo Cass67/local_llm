@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install dependencies directly
-RUN pip install --no-cache-dir fastapi uvicorn httpx pydantic orjson
+RUN pip install --no-cache-dir fastapi uvicorn httpx pydantic
 
 # Copy the benchmark service code
 COPY terminal_bench_worker.py ./
