@@ -291,11 +291,16 @@ def build_runner_container_spec(  # noqa: C901
         if visible_devices:
             environment["GGML_VK_VISIBLE_DEVICES"] = visible_devices
     elif cfg.get("nvidia_vulkan"):
-        # NVIDIA GPU on Vulkan backend: inject via nvidia container runtime with graphics capability.  # noqa: E501
-        # Use the headless EGL ICD baked into the image (libEGL_nvidia.so.0) rather than
-        # libGLX_nvidia.so.0 which requires an X11 display.
+        # NVIDIA GPU on Vulkan backend: inject via nvidia container runtime.
+        # Use the headless EGL ICD baked into the image (libEGL_nvidia.so.0).
+        # "compute" is required: without it the runtime omits libnvidia-gpucomp.so and
+        # the Vulkan ICD fails to init ("no usable GPU"), silently falling back to CPU.
         device_requests = [
-            {"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu", "graphics", "utility"]]}
+            {
+                "Driver": "nvidia",
+                "Count": -1,
+                "Capabilities": [["gpu", "graphics", "compute", "utility"]],
+            }
         ]
         environment["VK_ICD_FILENAMES"] = "/usr/share/vulkan/icd.d/nvidia_egl_icd.json"
         if visible_devices:

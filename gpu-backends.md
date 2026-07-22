@@ -285,10 +285,14 @@ EGL doesn't need X11.
 
 ```python
 # runtime.py — NVIDIA Vulkan path
-device_requests = [{"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu", "graphics", "utility"]]}]
+device_requests = [{"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu", "graphics", "compute", "utility"]]}]
 environment["VK_ICD_FILENAMES"] = "/usr/share/vulkan/icd.d/nvidia_egl_icd.json"
 environment["GGML_VK_VISIBLE_DEVICES"] = "0"   # always 0 — only one GPU injected
 ```
+
+`compute` is mandatory. Without it the nvidia runtime omits `libnvidia-gpucomp.so`,
+the Vulkan ICD fails to init (`vkCreateInstance: Found no drivers!`), llama.cpp logs
+`no usable GPU found`, and the model runs on CPU with 0 VRAM used — no hard error.
 
 Note: `GGML_VK_VISIBLE_DEVICES` is always `"0"` for NVIDIA Vulkan because
 `visible_devices_for()` returns the host Vulkan index (which might be e.g. `2`),
@@ -332,12 +336,12 @@ running a Q6_K 40B model split `1:1:1` across all three.
 The container must satisfy both AMD and NVIDIA access simultaneously:
 
 - **AMD**: `/dev/kfd` + `/dev/dri` bind-mount + render group (same as regular Vulkan)
-- **NVIDIA**: `DeviceRequests` with `gpu+graphics+utility` capabilities (same as NVIDIA Vulkan)
-- **NVIDIA Vulkan graphics libs**: the NVIDIA container runtime does NOT inject the graphics
-  support libraries (`libnvidia-glcore`, `libnvidia-gpucomp`, `libnvidia-glvkspirv`, etc.)
-  even when `graphics` is in the capabilities list. These are required for
-  `libEGL_nvidia.so.0` to initialize its Vulkan ICD. They must be bind-mounted
-  from the host.
+- **NVIDIA**: `DeviceRequests` with `gpu+graphics+compute+utility` capabilities (same as NVIDIA Vulkan)
+- **NVIDIA Vulkan graphics libs**: `libnvidia-gpucomp.so` (needed by the Vulkan ICD) is only
+  injected when `compute` is in the capabilities list — `graphics` alone is not enough. The
+  pure NVIDIA Vulkan path fixes this by adding `compute`. This mixed path instead bind-mounts
+  the support libs (`libnvidia-glcore`, `libnvidia-gpucomp`, `libnvidia-glvkspirv`, etc.) from
+  the host, since it already mounts host libs for the AMD side.
 - **ICD selection**: `VK_ICD_FILENAMES` explicitly lists both the NVIDIA EGL ICD
   (baked into the image) and the AMD RADV ICD, so the Vulkan loader enumerates
   all cards in one pass.
