@@ -16,6 +16,7 @@
 		listBenchmarkTasks,
 		startBenchmarkByType,
 		getBenchmarkJob,
+		cancelBenchmarkJob,
 		benchmarkReportUrl,
 		listBenchmarkRunFiles,
 		getBenchmarkRunFile,
@@ -506,6 +507,20 @@
 		}
 	}
 
+	let cancelling = $state(false);
+
+	async function cancelJob() {
+		if (!consoleJobId || cancelling) return;
+		cancelling = true;
+		try {
+			await cancelBenchmarkJob(consoleType, consoleJobId);
+		} catch (e: unknown) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			cancelling = false;
+		}
+	}
+
 	async function attachToJob(type: string, jobId: string) {
 		running = true;
 		error = "";
@@ -729,6 +744,9 @@
 		<section class="panel">
 			<h3>
 				Console {running ? "(running…)" : ""}
+				{#if running && consoleJobId}
+					<button class="size-btn" onclick={cancelJob} disabled={cancelling}>{cancelling ? "Cancelling…" : "Kill run"}</button>
+				{/if}
 				{#if !running}
 					<button class="size-btn" onclick={() => openReport(consoleType, consoleJobId)}>View full report</button>
 				{/if}

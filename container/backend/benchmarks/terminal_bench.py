@@ -88,7 +88,7 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         elif run_first_n is not None:
             cmd += ["--n-tasks", str(run_first_n)]
         elif task_id:
-            cmd += ["--n-tasks", "1", "--task-id", task_id]
+            cmd += ["--task-id", task_id]
         else:
             cmd += ["--n-tasks", "1"]
 
@@ -96,6 +96,7 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
             **os.environ,
             "OPENAI_API_BASE": endpoint_base_url,
             "OPENAI_API_KEY": kwargs.get("api_key") or "local-llm",
+            "PYTHONUNBUFFERED": "1",  # flush tb output to run.log live so the UI console tails it
         }
 
         start_time = time.perf_counter()
@@ -105,16 +106,21 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
         prompt_tokens = None
         completion_tokens = None
 
+        run_dir = _RUNS_DIR / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        log_path = run_dir / "run.log"
+
         try:
-            proc = subprocess.run(  # noqa: S603 # nosec B603
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=21600 if run_batch else 1800,
-                env=env,
-                check=False,
-            )
-            run_dir = _RUNS_DIR / run_id
+            with log_path.open("w") as log_f:
+                proc = subprocess.run(  # noqa: S603 # nosec B603
+                    cmd,
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                    timeout=21600 if run_batch else 1800,
+                    env=env,
+                    check=False,
+                )
+            log_tail = log_path.read_text()[-4000:] if log_path.exists() else ""
             results_path = run_dir / "results.json"
             metadata_path = run_dir / "run_metadata.json"
 
@@ -131,10 +137,10 @@ class TerminalBenchRunner(BaseBenchmarkRunner):
                 )
                 if proc.returncode != 0 and not trials:
                     status = "error"
-                    error = proc.stderr[-4000:] or "tb run failed"
+                    error = log_tail or "tb run failed"
             else:
                 status = "error"
-                error = (proc.stderr or proc.stdout or "tb run produced no results")[-4000:]
+                error = log_tail or "tb run produced no results"
         except subprocess.TimeoutExpired:
             status = "error"
             error = "terminal-bench run timed out"

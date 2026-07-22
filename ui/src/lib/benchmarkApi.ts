@@ -297,6 +297,17 @@ export async function getBenchmarkJob(
 	return res.json();
 }
 
+export async function cancelBenchmarkJob(
+	benchmark_type: string,
+	job_id: string,
+): Promise<{ cancelled: boolean }> {
+	const res = await fetch(`${BASE}/runs/${benchmark_type}/jobs/${job_id}/cancel`, {
+		method: "POST",
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
 export interface ActiveBenchmarkJob {
 	job_id: string;
 	benchmark_type: string;
