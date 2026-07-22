@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Swe-Bench Worker Service."""
 
+import os
 import time
 from typing import Any
 
