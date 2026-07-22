@@ -547,7 +547,8 @@ def _report_path(benchmark_type: str, run_id: str) -> Path | None:
         return None
     run_dir = log_dir / run_id
     if benchmark_type == "terminal-bench":
-        candidate = run_dir / "results.json"
+        # tb writes into a nested <run_id>/<run_id> dir (see terminal_bench.py)
+        candidate = run_dir / run_id / "results.json"
         return candidate if candidate.exists() else None
     if benchmark_type == "swe-bench":
         # the real aggregate report is always named "<model>.<run_id>.json" — anything
