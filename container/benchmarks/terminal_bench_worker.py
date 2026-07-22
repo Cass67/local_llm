@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Terminal-Bench Worker Service."""
 
+import os
 import subprocess
 import time
 from typing import Any
