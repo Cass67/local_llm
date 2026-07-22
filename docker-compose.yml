@@ -113,8 +113,9 @@ services:
       BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL: "True"
 
   # ── Langfuse observability ───────────────────────────────────────────────────
-  # LLM request tracing — UI at http://ubt26:3002
-  # API keys are bootstrapped on first start; no manual setup needed.
+  # LLM request tracing — UI at http://ubt26:3004
+  # First-time setup is manual: register at the Langfuse UI, create a project,
+  # generate API keys, and set LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY (see README §4).
   local-llm-postgres:
     image: postgres:16-alpine
     container_name: local-llm-postgres
