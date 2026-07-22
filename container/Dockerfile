@@ -5,6 +5,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip docker.io docker-compose-v2 git curl \
     && rm -rf /var/lib/apt/lists/*
 
+ARG DOCKER_BUILDX_VERSION=0.35.0
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) buildx_arch="linux-amd64" ;; \
+        arm64) buildx_arch="linux-arm64" ;; \
+        *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p /usr/local/lib/docker/cli-plugins; \
+    curl -fsSL \
+        -o /usr/local/lib/docker/cli-plugins/docker-buildx \
+        "https://github.com/docker/buildx/releases/download/v${DOCKER_BUILDX_VERSION}/buildx-v${DOCKER_BUILDX_VERSION}.${buildx_arch}"; \
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
+
 WORKDIR /app
 COPY container/backend/ ./backend/
 COPY container/pyproject.toml .
