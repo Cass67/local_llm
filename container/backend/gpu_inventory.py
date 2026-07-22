@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-import subprocess
+import subprocess  # noqa: S404 # nosec B404
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +27,7 @@ _VENDOR_IDS = {
 
 _PCI_CLASS_DISPLAY = {"0300", "0302"}
 _NVIDIA_VRAM_FALLBACK_MB = {
-    "1b38": 23040,  # Tesla P40 with ECC enabled, as reported by nvidia-smi
+    "1b38": 24576,  # Tesla P40, 24 GB (ECC off) as reported by nvidia-smi
 }
 
 
@@ -91,7 +91,7 @@ def _sysfs_vram(dev_path: Path) -> int | None:
 
 def _run(cmd: list[str], timeout: int = 5) -> str:
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)  # noqa: S603
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)  # noqa: S603 # nosec B603
         return r.stdout if r.returncode == 0 else ""
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return ""
@@ -235,7 +235,7 @@ def _sysfs_amd_vram() -> dict[str, int]:
     return result
 
 
-def detect_gpus() -> list[GpuInfo]:
+def detect_gpus() -> list[GpuInfo]:  # noqa: C901
     """Enumerate physical GPUs with per-backend device indices."""
     sysfs = _sysfs_gpus()
     # Fill in VRAM from /sys/class/drm symlinks where sysfs_gpus didn't find it
