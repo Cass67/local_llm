@@ -9,7 +9,7 @@ A self-hosted LLM management system for AMD and Nvidia GPU workstations. Models 
 | [![Models](screenshot-models.png)](screenshot-models.png) | **Models** — browse installed models, view details, edit config, audit orphaned registrations |
 | [![Search](screenshot-search.png)](screenshot-search.png) | **Search** — discover and install GGUF models from HuggingFace |
 | [![Architecture](screenshot-architecture.png)](screenshot-architecture.png) | **Architecture** — system diagram, cluster management, profile selection when loading a model |
-| [![Profiles](screenshot-profiles.png)](screenshot-profiles.png) | **Profiles** — named load configs per model family: edit raw JSON, clone, set default, import from models |
+| **Profiles** | **Profiles** — named load configs per model family: edit raw JSON, clone, set default, import from models |
 | [![Status](screenshot-status.png)](screenshot-status.png) | **Status** — live TPS sparkline, runner health, active model, system stats, audit orphaned registrations |
 | [![Benchmarks](screenshot-benchmarks.png)](screenshot-benchmarks.png) | **Benchmarks** — run configurable benchmarks, view latency/throughput trends across runs |
 | [![Logs](screenshot-logs.png)](screenshot-logs.png) | **Logs** — real-time Docker container log streaming (runner, mgmt, router) |
@@ -103,6 +103,7 @@ cp .env.example .env
 #
 # Other variables use sensible defaults. See .env.example for each field's
 # purpose and default value.
+```
 
 ### 2. Build the runner images
 

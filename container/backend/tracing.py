@@ -22,9 +22,9 @@ def _get_client() -> Any:
             _client = Langfuse(
                 public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
                 secret_key=os.environ["LANGFUSE_SECRET_KEY"],
-                host=os.environ.get("LANGFUSE_HOST", "http://localhost:3002"),
+                host=os.environ.get("LANGFUSE_HOST", "http://localhost:3004"),
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — tracing must never break client init
             return None
     return _client
 
@@ -56,7 +56,7 @@ def open_generation(body: bytes, *, stream: bool) -> Any:
             model=model or "unknown",
             input=messages,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 — tracing must never break a request
         return None
 
 
@@ -95,5 +95,5 @@ def close_generation(
             usage=usage or None,
             metadata=meta or None,
         )
-    except Exception:  # nosec B110
+    except Exception:  # noqa: BLE001, S110  # nosec B110  (tracing must never break a request)
         pass
