@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+log(){ echo "[fan-tune] $*"; }
+
+apply_gpu_curve() {
+  local card="$1" minpwm="$2" target="$3" acoustic="$4" p0="$5" p1="$6" p2="$7" p3="$8" p4="$9"
+  local base="/sys/class/drm/${card}/device/gpu_od/fan_ctrl"
+  [[ -d "$base" ]] || { log "$card no fan_ctrl"; return 0; }
+  log "$card fan controls"
+  [[ -e "$base/fan_zero_rpm_enable" ]] && { echo 0 > "$base/fan_zero_rpm_enable" || true; echo c > "$base/fan_zero_rpm_enable" || true; }
+  [[ -e "$base/fan_zero_rpm_stop_temperature" ]] && { echo 25 > "$base/fan_zero_rpm_stop_temperature" || true; echo c > "$base/fan_zero_rpm_stop_temperature" || true; }
+  [[ -e "$base/fan_minimum_pwm" ]] && { echo "$minpwm" > "$base/fan_minimum_pwm" || true; echo c > "$base/fan_minimum_pwm" || true; }
+  [[ -e "$base/fan_target_temperature" ]] && { echo "$target" > "$base/fan_target_temperature" || true; echo c > "$base/fan_target_temperature" || true; }
+  [[ -e "$base/acoustic_target_rpm_threshold" ]] && { echo "$acoustic" > "$base/acoustic_target_rpm_threshold" || true; echo c > "$base/acoustic_target_rpm_threshold" || true; }
+  if [[ -e "$base/fan_curve" ]]; then
+    echo r > "$base/fan_curve" || true
+    echo "0 $p0" > "$base/fan_curve" || true
+    echo "1 $p1" > "$base/fan_curve" || true
+    echo "2 $p2" > "$base/fan_curve" || true
+    echo "3 $p3" > "$base/fan_curve" || true
+    echo "4 $p4" > "$base/fan_curve" || true
+    echo c > "$base/fan_curve" || true
+  fi
+}
+
+apply_nvidia_eco() {
+  command -v nvidia-smi >/dev/null || return 0
+  log "apply P40 eco power tune"
+  nvidia-smi -pm 1 >/dev/null 2>&1 || true
+  # ECC was disabled once with `sudo nvidia-smi -e 0` to expose full 24GB VRAM; it persists across reboots.
+  # ponytail: P40 is passive; cap watts first, raise only if throughput matters.
+  nvidia-smi -i 0 -pl "${P40_POWER_LIMIT_W:-125}" >/dev/null 2>&1 || true
+}
+
+
+apply_hard_eco() {
+  log "apply hard eco power tune"
+  local c
+  c=/sys/class/drm/card0/device
+  if [[ -d "$c" ]]; then
+    echo manual > "$c/power_dpm_force_performance_level" 2>/dev/null || true
+    echo 4 > "$c/pp_power_profile_mode" 2>/dev/null || true
+    echo "0 1" > "$c/pp_dpm_sclk" 2>/dev/null || true
+    echo 3 > "$c/pp_dpm_mclk" 2>/dev/null || true
+    echo "s 1 1900" > "$c/pp_od_clk_voltage" 2>/dev/null || true
+    echo "vo -75" > "$c/pp_od_clk_voltage" 2>/dev/null || true
+    echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
+    for f in "$c"/hwmon/hwmon*/power1_cap; do [[ -e "$f" ]] && echo 238000000 > "$f" || true; done
+  fi
+  c=/sys/class/drm/card1/device
+  if [[ -d "$c" ]]; then
+    echo manual > "$c/power_dpm_force_performance_level" 2>/dev/null || true
+    echo 4 > "$c/pp_power_profile_mode" 2>/dev/null || true
+    echo "0 1" > "$c/pp_dpm_sclk" 2>/dev/null || true
+    echo 3 > "$c/pp_dpm_mclk" 2>/dev/null || true
+    echo "s 1 1900" > "$c/pp_od_clk_voltage" 2>/dev/null || true
+    echo "vo -75" > "$c/pp_od_clk_voltage" 2>/dev/null || true
+    echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
+    for f in "$c"/hwmon/hwmon*/power1_cap; do [[ -e "$f" ]] && echo 253000000 > "$f" || true; done
+  fi
+}
+
+apply_gpu_curve card0 30 70 1500 "25 25" "45 30" "60 42" "75 60" "88 90"
+apply_gpu_curve card1 30 70 1500 "25 25" "45 30" "60 42" "75 60" "88 90"
+apply_hard_eco
+apply_nvidia_eco
+log "done"

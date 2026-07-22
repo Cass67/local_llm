@@ -147,13 +147,12 @@ P40 currently forced to Gen1 x4
 P40 power cap: 125 W
 ```
 
-Boot script state:
+Boot script state as of 2026-07-21:
 
 ```text
-/usr/local/sbin/ubt26-fan-tune currently forces Gen2, not Gen1
+/usr/local/sbin/ubt26-fan-tune no longer forces Gen2/Gen1.
+The root port target was restored to Gen3 runtime, but current bad adapters still show x0/no GPU when they fail to power/link.
 ```
-
-This means a reboot or `systemctl restart ubt26-fan-tune` will put it back to Gen2 unless changed.
 
 ## Persistent script and service
 
@@ -176,11 +175,9 @@ sudo systemctl restart ubt26-fan-tune.service
 systemctl status ubt26-fan-tune.service --no-pager -l
 ```
 
-Current script P40 section uses:
+Current script P40 section uses only the 125 W cap; no `setpci` forcing:
 
 ```bash
-setpci -s "$p40_root_port" CAP_EXP+30.w=0002:000f  # Gen2
-setpci -s "$p40_root_port" CAP_EXP+10.w=0020:0020  # retrain
 nvidia-smi -i 0 -pl "${P40_POWER_LIMIT_W:-125}"
 ```
 
@@ -222,6 +219,7 @@ Backups created:
 ```text
 /usr/local/sbin/ubt26-fan-tune.bak.20260719-000130  # before P40 125 W default
 /usr/local/sbin/ubt26-fan-tune.bak.20260719-003543  # before adding P40 Gen2 retrain
+/usr/local/sbin/ubt26-fan-tune.bak.20260721-133943-remove-p40-gen2  # before removing Gen2 retrain
 ```
 
 Rollback only Gen2 retrain, keep whatever was in that backup:
