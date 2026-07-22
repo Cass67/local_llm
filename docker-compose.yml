@@ -41,6 +41,7 @@ services:
       LANGFUSE_HOST: "${LANGFUSE_HOST:-http://localhost:3004}"
       # Terminal-Bench needs Docker access
       DOCKER_HOST: unix:///var/run/docker.sock
+      DOCKER_BUILDKIT: "1"
       TERMINAL_BENCH_DATASET_NAME: terminal-bench-core
       TERMINAL_BENCH_DATASET_VERSION: "0.1.1"
       # Raises HF Hub rate limits for dataset/model downloads (terminal-bench, swe-bench)
