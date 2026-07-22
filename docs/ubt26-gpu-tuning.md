@@ -10,6 +10,12 @@ Live script:
 /usr/local/sbin/ubt26-fan-tune
 ```
 
+Repo copy:
+
+```text
+scripts/ubt26-fan-tune
+```
+
 Systemd unit:
 
 ```text
@@ -36,22 +42,22 @@ Connection:            M.2 -> OCuLink -> eGPU adapter -> Tesla P40
 Current tuning:
 
 ```bash
-# Force upstream PCIe root port to Gen2 and retrain link.
-setpci -s 0000:00:1b.0 CAP_EXP+30.w=0002:000f
-setpci -s 0000:00:1b.0 CAP_EXP+10.w=0020:0020
-
 # Enable persistence and cap P40 to its minimum supported power limit.
+# ECC was disabled once with `sudo nvidia-smi -e 0` to expose full 24GB VRAM; it persists across reboots.
 nvidia-smi -pm 1
 nvidia-smi -i 0 -pl 125
 ```
+
+Note: the earlier boot-time Gen2 `setpci` workaround was removed on 2026-07-21. The root port is no longer forced by `ubt26-fan-tune`.
 
 Why:
 
 - At Gen3 x4, the P40 repeatedly logged NVIDIA `Xid 79` / "GPU has fallen off the bus".
 - This happened even near idle after swapping to a longer-cable M.2/OCuLink adapter.
 - Earlier hardware had PCIe AER corrected errors; `pcie_aspm=off` helped those, but the new adapter produced hard off-bus failures.
-- Gen2 x4 trades bandwidth for signal margin and has been stable in bench runs so far.
-- The eGPU power supply is 250 W and the P40 default power limit is 250 W, so the 125 W cap keeps transient load away from the PSU edge.
+- Gen2/Gen1 runtime tests helped diagnose signal-margin problems, but boot-time Gen2 forcing has been removed.
+- ECC was disabled once to recover full 24GB VRAM for local inference; this is noted in the script, not rerun every boot.
+- The P40 default power limit is 250 W, so the 125 W cap keeps transient load lower while testing.
 
 Expected verification:
 
@@ -64,8 +70,9 @@ journalctl -k --since '10 minutes ago' --no-pager | grep -E 'NVRM|Xid|fallen|AER
 Good state looks like:
 
 ```text
+Tesla P40 ECC:         disabled
 Tesla P40 power.limit: 125 W
-PCIe current link:    Gen2 x4 / 5GT/s x4
+PCIe current link:    Gen3 x4 normally, or manually forced lower only for diagnostics
 No fresh Xid/AER logs
 ```
 
@@ -113,12 +120,13 @@ Backups currently known on `ubt26`:
 ```text
 /usr/local/sbin/ubt26-fan-tune.bak.20260719-000130  # before P40 125 W default
 /usr/local/sbin/ubt26-fan-tune.bak.20260719-003543  # before adding P40 Gen2 retrain
+/usr/local/sbin/ubt26-fan-tune.bak.20260722-171027-p40-ecc-off  # before adding the ECC note
 ```
 
-Rollback only the Gen2 change but keep the P40 125 W cap:
+Re-apply the old Gen2 workaround if needed:
 
 ```bash
-sudo cp -a /usr/local/sbin/ubt26-fan-tune.bak.20260719-003543 /usr/local/sbin/ubt26-fan-tune
+sudo cp -a /usr/local/sbin/ubt26-fan-tune.bak.20260721-133943-remove-p40-gen2 /usr/local/sbin/ubt26-fan-tune
 sudo systemctl restart ubt26-fan-tune.service
 ```
 
