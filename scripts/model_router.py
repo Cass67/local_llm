@@ -193,11 +193,21 @@ def _match_signals(signals: list[str], prompt: str) -> str | None:
     return next((s for s in signals if _eval_signal(s, prompt)), None)
 
 
+# Length/shape-only signals: they describe the *input* size, not the task, so a
+# short prompt asking for a huge answer ("write a game") must never route on
+# them. Kept as gates elsewhere but excluded from triggering a rule.
+_WEAK_SIGNALS = {"short_prompt", "is_question"}
+
+
 def _match_rule(prompt: str) -> dict | None:
     """Return routing result for a single prompt string, or None if no rule matched."""
     for rule in RULES:
         keywords = rule.get("keywords", [])
-        signals = rule.get("signals", [])
+        # Content-blind signals (length/shape only) must NOT trigger a rule on
+        # their own — a bare "continue" or short edit would hijack the whole
+        # turn to the "easy" cluster. Only keywords and content-based signals
+        # (has_code_block, has_math) can trigger; weak signals are ignored.
+        signals = [s for s in rule.get("signals", []) if s not in _WEAK_SIGNALS]
         matched_kw = next((kw for kw in keywords if _keyword_in(str(kw), prompt)), None)
         matched_sig = _match_signals(signals, prompt) if not matched_kw else None
         matched = matched_kw or (f"signal:{matched_sig}" if matched_sig else None)
@@ -234,13 +244,15 @@ def _match_rule(prompt: str) -> dict | None:
 
 
 def _route_detail(messages: list[dict]) -> dict:
-    """First-match-wins keyword routing across conversation history.
+    """Anchor routing on the conversation's first classifiable message.
 
-    Scans user messages most-recent first so a short reply like "yes" inherits
-    the routing context of earlier messages in the same conversation.
-    ponytail: walk history rather than adding session state
+    Tiering is per-session: the opening intent picks the cluster and the whole
+    conversation sticks to it. Scanning oldest-first means later short turns
+    ("continue", "add friction") inherit the original tier instead of being
+    re-classified as "easy" and bounced to the wrong cluster. Stateless — the
+    resent history is the session state. ponytail: walk history, no session store
     """
-    for prompt in _extract_user_messages(messages):
+    for prompt in reversed(_extract_user_messages(messages)):
         result = _match_rule(prompt)
         if result is not None:
             return result
