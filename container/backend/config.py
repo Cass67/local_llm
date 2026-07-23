@@ -12,6 +12,7 @@ RUNNER_IMAGES = {
     "vulkan": os.environ.get("RUNNER_IMAGE_VULKAN", "local-llm-runner-vulkan:latest"),
     "mixed_vulkan": os.environ.get("RUNNER_IMAGE_VULKAN", "local-llm-runner-vulkan:latest"),
     "rocm": os.environ.get("RUNNER_IMAGE_ROCM", "local-llm-runner-rocm:latest"),
+    "rocmfp4": os.environ.get("RUNNER_IMAGE_ROCMFP4", "local-llm-runner-rocmfp4:latest"),
     "cuda": os.environ.get("RUNNER_IMAGE_CUDA", "local-llm-runner-cuda:latest"),
 }
 

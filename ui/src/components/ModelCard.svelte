@@ -44,8 +44,13 @@
 		if (e.key === "Escape") { editingLabel = false; }
 	}
 
-	const BACKEND_LABELS: Record<Backend, string> = { rocm: "ROCm", vulkan: "Vulkan", cuda: "CUDA" };
-	const ALL_BACKENDS: Backend[] = ["rocm", "vulkan", "cuda"];
+	const BACKEND_LABELS: Record<Backend, string> = {
+		rocm: "ROCm",
+		rocmfp4: "ROCmFP4",
+		vulkan: "Vulkan",
+		cuda: "CUDA",
+	};
+	const ALL_BACKENDS: Backend[] = ["rocm", "rocmfp4", "vulkan", "cuda"];
 	const STANDARD_PROFILES = ["speed", "fastlong", "balanced", "reliable", "tiny"];
 
 	let selectedProfile = $state("");
@@ -92,6 +97,7 @@
 		<span
 			class="backend-badge"
 			class:rocm={model.backend === "rocm"}
+			class:rocmfp4={model.backend === "rocmfp4"}
 			class:vulkan={model.backend === "vulkan"}
 			class:cuda={model.backend === "cuda"}
 		>{model.backend}</span>
@@ -199,6 +205,7 @@
 		font-weight: bold;
 	}
 	.backend-badge.rocm { background: #ef444422; color: #ef4444; box-shadow: 0 0 8px #ef444433; }
+	.backend-badge.rocmfp4 { background: #f59e0b22; color: #f59e0b; box-shadow: 0 0 8px #f59e0b33; }
 	.backend-badge.vulkan { background: #8b5cf622; color: #8b5cf6; box-shadow: 0 0 8px #8b5cf633; }
 	.backend-badge.cuda { background: #22c55e22; color: #22c55e; box-shadow: 0 0 8px #22c55e33; }
 	.card-body { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
