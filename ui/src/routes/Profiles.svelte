@@ -497,7 +497,7 @@
 		font-size: 0.85rem;
 		white-space: nowrap;
 	}
-	.btn-save { border-color: var(--accent, #6c8ebf); color: var(--accent, #6c8ebf); }
+	.btn-save { min-width: 60px; text-align: center; border-color: var(--accent, #6c8ebf); color: var(--accent, #6c8ebf); }
 	.btn-save:hover { background: color-mix(in srgb, var(--accent, #6c8ebf) 15%, transparent); }
 	.btn-del { color: #e57373; border-color: #e5737333; }
 	.btn-del:hover { background: #e5737322; }
