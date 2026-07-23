@@ -107,6 +107,21 @@ def test_build_llama_server_args_can_disable_prompt_cache_for_swa_models():
     assert "--context-shift" not in args
 
 
+def test_build_llama_server_args_emits_zero_checkpoints_when_key_absent():
+    # Absent key must not leak llama-server's built-in default (32); profile is authoritative.
+    metadata = {
+        "alias": "qwen",
+        "model_path": "/models/qwen.gguf",
+        "config": {"context_shift": True},
+    }
+
+    args = build_llama_server_args(metadata, port=8080)
+
+    assert args[args.index("--ctx-checkpoints") + 1] == "0"
+    assert "--checkpoint-min-step" not in args
+    assert "--checkpoint-every-n-tokens" not in args
+
+
 def test_build_llama_server_args_omits_legacy_raw_mtp_flags_when_structured_mtp_enabled():
     metadata = {
         "alias": "qwopus",

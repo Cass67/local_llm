@@ -110,25 +110,27 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
 
     if cfg.get("context_shift"):
         args.append("--context-shift")
+    # Always emit --cache-ram so the profile is authoritative; omitting it lets
+    # llama-server fall back to its built-in RAM cache default, overriding "off".
     if cfg.get("cache_prompt"):
-        args.extend(["--cache-prompt", "--cache-ram", str(cfg["cache_ram"])])
-    elif "cache_ram" in cfg:
-        args.extend(["--cache-ram", str(cfg["cache_ram"])])
-    ctx_chk = cfg.get("ctx_checkpoints")
-    if ctx_chk is not None:
-        if int(ctx_chk or 0) > 0:
-            args.extend(["--ctx-checkpoints", str(ctx_chk)])
-            # The ROCmFPX fork renamed --checkpoint-min-step to --checkpoint-every-n-tokens
-            # and rejects the stock flag; emit the fork's name on rocmfp4.
-            if cfg.get("checkpoint_min_step") is not None:
-                flag = (
-                    "--checkpoint-every-n-tokens"
-                    if cfg.get("backend") == "rocmfp4"
-                    else "--checkpoint-min-step"
-                )
-                args.extend([flag, str(cfg["checkpoint_min_step"])])
-        else:
-            args.extend(["--ctx-checkpoints", "0"])
+        args.append("--cache-prompt")
+    args.extend(["--cache-ram", str(cfg.get("cache_ram") or 0)])
+    # Always emit --ctx-checkpoints so the profile is authoritative; omitting it
+    # lets llama-server fall back to its built-in default (32), overriding "off".
+    ctx_chk = int(cfg.get("ctx_checkpoints") or 0)
+    if ctx_chk > 0:
+        args.extend(["--ctx-checkpoints", str(ctx_chk)])
+        # The ROCmFPX fork renamed --checkpoint-min-step to --checkpoint-every-n-tokens
+        # and rejects the stock flag; emit the fork's name on rocmfp4.
+        if cfg.get("checkpoint_min_step") is not None:
+            flag = (
+                "--checkpoint-every-n-tokens"
+                if cfg.get("backend") == "rocmfp4"
+                else "--checkpoint-min-step"
+            )
+            args.extend([flag, str(cfg["checkpoint_min_step"])])
+    else:
+        args.extend(["--ctx-checkpoints", "0"])
     if cfg.get("repeat_penalty") is not None:
         args.extend(["--repeat-penalty", str(cfg["repeat_penalty"])])
     if cfg.get("presence_penalty") is not None:
