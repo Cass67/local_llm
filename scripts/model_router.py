@@ -24,6 +24,10 @@ _config_mtime: float = 0.0
 
 # Runtime config — reloaded when the file changes
 BACKEND_URL = "http://127.0.0.1:3100"
+
+# No read timeout: long generations are bounded by the runner's own --timeout,
+# not this proxy. connect/write stay bounded so a dead backend still fails fast.
+_PROXY_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 DEFAULT_MODEL: str | None = None
 HEALTH_INTERVAL: int = 10
 RULES: list[dict] = []
@@ -255,7 +259,7 @@ def _is_stream(payload: dict) -> bool:
 
 
 async def _proxy_stream(payload: dict, request: Request) -> Response:
-    client = httpx.AsyncClient(timeout=300.0)
+    client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT)
     stream_ctx = client.stream(
         "POST",
         f"{BACKEND_URL}/v1/chat/completions",
@@ -292,7 +296,7 @@ async def _proxy_stream(payload: dict, request: Request) -> Response:
 
 
 async def _proxy_nonstream(payload: dict) -> Response:
-    async with httpx.AsyncClient(timeout=300.0) as client:
+    async with httpx.AsyncClient(timeout=_PROXY_TIMEOUT) as client:
         upstream = await client.post(
             f"{BACKEND_URL}/v1/chat/completions",
             content=json.dumps(payload).encode("utf-8"),
