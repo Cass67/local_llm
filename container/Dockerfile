@@ -1,8 +1,11 @@
-# Use the existing local-llm-runner image that's already on ubt26
-FROM local-llm-runner:latest AS base
+# Self-contained base. mgmt orchestrates runner containers via the Docker socket and
+# never runs llama-server itself; GPU inventory reads sysfs (/sys/bus/pci, /sys/class/drm),
+# not vendor tools. So it needs no runner/ROCm base — just python + docker CLI + git/curl.
+# (Previously FROM an untracked local-llm-runner:latest, which a `docker prune -a` deleted.)
+FROM ubuntu:24.04 AS base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip docker.io docker-compose-v2 git curl \
+    ca-certificates python3 python3-pip docker.io docker-compose-v2 git curl \
     && rm -rf /var/lib/apt/lists/*
 
 ARG DOCKER_BUILDX_VERSION=0.35.0
