@@ -120,6 +120,7 @@
 	let importing = $state(false);
 	let cloning = $state(false);
 	let cloneName = $state("");
+	let showDeleteConfirm = $state(false);
 
 	const familyBackend = $derived(
 		Object.fromEntries(models.map((m) => [m.family, m.backend])) as Record<string, string>,
@@ -305,9 +306,14 @@
 		}
 	}
 
+	function confirmDelete() {
+		if (!selectedProfile || isNew) return;
+		showDeleteConfirm = true;
+	}
+
 	async function handleDelete() {
 		if (!selectedProfile || isNew) return;
-		if (!confirm(`Delete "${selectedProfile}" from ${selectedFamily}?`)) return;
+		showDeleteConfirm = false;
 		error = "";
 		try {
 			await deleteProfile(selectedFamily, selectedProfile);
@@ -373,9 +379,21 @@
 			{importing ? "Importing…" : "Import from models"}
 		</button>
 		{#if !isNew && selectedProfile}
-			<button class="btn-del" onclick={handleDelete}>Delete</button>
+			<button class="btn-del" onclick={confirmDelete}>Delete</button>
 		{/if}
 		<button class="btn-save" onclick={handleSave}>{saved ? "Saved ✓" : "Save"}</button>
+
+		{#if showDeleteConfirm}
+			<div class="confirm-overlay">
+				<div class="confirm-box">
+					<p>Delete profile <strong>{selectedProfile}</strong> from <strong>{selectedFamily}</strong>?</p>
+					<div class="confirm-actions">
+						<button onclick={() => (showDeleteConfirm = false)}>Cancel</button>
+						<button class="btn-del" onclick={handleDelete}>Yes, delete</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	{#if error}<p class="error">{error}</p>{/if}
@@ -497,7 +515,7 @@
 		font-size: 0.85rem;
 		white-space: nowrap;
 	}
-	.btn-save { min-width: 60px; text-align: center; border-color: var(--accent, #6c8ebf); color: var(--accent, #6c8ebf); }
+	.btn-save { min-width: 90px; text-align: center; border-color: var(--accent, #6c8ebf); color: var(--accent, #6c8ebf); }
 	.btn-save:hover { background: color-mix(in srgb, var(--accent, #6c8ebf) 15%, transparent); }
 	.btn-del { color: #e57373; border-color: #e5737333; }
 	.btn-del:hover { background: #e5737322; }
@@ -566,4 +584,33 @@
 	textarea:focus { outline: none; border-color: var(--accent, #6c8ebf); }
 	.error { color: #e57373; margin: 0; }
 	.muted { color: var(--text-muted); }
+
+	.confirm-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 100;
+	}
+	.confirm-box {
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 1.5rem;
+		max-width: 400px;
+		width: 90%;
+		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+	}
+	.confirm-box p {
+		margin: 0 0 1rem;
+		font-size: 0.95rem;
+		color: var(--text);
+	}
+	.confirm-actions {
+		display: flex;
+		gap: 0.5rem;
+		justify-content: flex-end;
+	}
 </style>
