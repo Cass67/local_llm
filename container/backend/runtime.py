@@ -107,6 +107,10 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         reasoning = metadata.get("reasoning")
     if reasoning is not None:
         args.extend(["--reasoning", _bool_flag(reasoning)])
+    # Cap thinking tokens; without it the budget defaults to unrestricted and the
+    # model can waffle until it exhausts the context window. -1 = unrestricted.
+    if cfg.get("reasoning_budget") is not None:
+        args.extend(["--reasoning-budget", str(cfg["reasoning_budget"])])
 
     if cfg.get("context_shift"):
         args.append("--context-shift")
@@ -131,6 +135,11 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
             args.extend([flag, str(cfg["checkpoint_min_step"])])
     else:
         args.extend(["--ctx-checkpoints", "0"])
+    # Cheap KV-shift reuse across small prefix mismatches (e.g. per-turn tail
+    # re-render under MTP spec); recovers cache hits when cache-ram/checkpoints
+    # are off for VRAM. 0 disables.
+    if cfg.get("cache_reuse") is not None:
+        args.extend(["--cache-reuse", str(cfg["cache_reuse"])])
     if cfg.get("repeat_penalty") is not None:
         args.extend(["--repeat-penalty", str(cfg["repeat_penalty"])])
     if cfg.get("presence_penalty") is not None:
@@ -214,6 +223,8 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         "--spec-draft-p-min",
         "--parallel",
         "--cache-ram",
+        "--cache-reuse",
+        "--reasoning-budget",
         "--mmproj",
     }
     raw_tokens = str(cfg.get("flags") or "").split()
