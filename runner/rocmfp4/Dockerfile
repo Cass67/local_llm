@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     git \
     hipblas-dev \
+    hipcub-dev \
     libcurl4-openssl-dev \
     pkg-config \
     python3 \
@@ -29,6 +30,9 @@ RUN git init . \
     && git remote add origin "$LLAMA_CPP_REPO" \
     && git fetch --depth 1 origin "$LLAMA_CPP_REF" \
     && git checkout FETCH_HEAD
+COPY top-k-hip.patch /tmp/top-k-hip.patch
+RUN git apply --check /tmp/top-k-hip.patch \
+    && git apply /tmp/top-k-hip.patch
 RUN cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
