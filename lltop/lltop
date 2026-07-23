@@ -317,15 +317,27 @@ def _decode_docker_log_bytes(content: bytes) -> str:
     return content.decode("utf-8", errors="replace")
 
 
+# llama-server logs a WARN per queued task when a client aborts/disconnects a
+# request (PR 22907). Benign, but one aborted stream buries the tail in noise.
+_LOG_NOISE = (
+    '"GET /logs HTTP/1.1"',
+    "stopping wait for next result due to should_stop condition",
+    "next: ref: https://github.com/ggml-org/llama.cpp/pull/22907",
+    "stop: cancel task, id_task",
+)
+
+
 def docker_log_tail(socket_path: Path, container: str, lines: int = 10) -> list[str]:
     if not socket_path.exists():
         return [f"docker socket not found: {socket_path}"]
-    path = f"/containers/{container}/logs?stdout=1&stderr=1&tail={lines}&timestamps=0"
+    # Over-fetch so filtered noise doesn't starve the tail of real lines.
+    path = f"/containers/{container}/logs?stdout=1&stderr=1&tail={lines * 8}&timestamps=0"
     raw = _docker_request(socket_path, "GET", path)
     if not raw:
         return []
     text = _decode_docker_log_bytes(raw)
-    return [line for line in text.splitlines() if '"GET /logs HTTP/1.1"' not in line]
+    kept = [line for line in text.splitlines() if not any(n in line for n in _LOG_NOISE)]
+    return kept[-lines:]
 
 
 def docker_container_running(socket_path: Path, container: str) -> bool:
