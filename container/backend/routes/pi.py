@@ -14,12 +14,14 @@ async def pi_models_json(request: Request):
 
     provider_models = []
     for model in models:
+        context = model.context or 131072
         provider_models.append(
             {
                 "id": model.alias,
                 "name": model.model_name,
-                "context": model.context or 131072,
-                "contextWindow": model.context or 131072,
+                "context": context,
+                "contextWindow": context,
+                "maxTokens": min(context // 2, 32768),
                 "reasoning": model.reasoning,
                 "backend": model.backend,
             }
