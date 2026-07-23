@@ -30,8 +30,9 @@
 <style>
 	header {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
-		justify-content: space-between;
+		gap: 0.5rem;
 		padding: 0.5rem 1rem;
 		background: color-mix(in srgb, var(--bg-card), transparent 20%);
 		backdrop-filter: blur(12px);
@@ -42,7 +43,7 @@
 		z-index: 10;
 	}
 	h1 { margin: 0; font-size: 1.2rem; }
-	nav { display: flex; gap: 1rem; }
+	nav { display: flex; flex-wrap: wrap; gap: 1rem; }
 	a { color: var(--text-muted); text-decoration: none; }
 	a.active { color: var(--text); font-weight: bold; }
 </style>
