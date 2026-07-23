@@ -21,7 +21,7 @@ async def pi_models_json(request: Request):
                 "name": model.model_name,
                 "context": context,
                 "contextWindow": context,
-                "maxTokens": min(context // 2, 32768),
+                "maxTokens": min(context // 2, 49152),
                 "reasoning": model.reasoning,
                 "backend": model.backend,
             }
