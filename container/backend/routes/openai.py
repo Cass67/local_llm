@@ -22,36 +22,52 @@ def _context_window_for(family: str) -> int | None:
     return None
 
 
+# Effort levels advertised to harnesses. The Qwen3.6 template is binary, so the
+# backend normalizes any level to enable_thinking=true (see routes/chat.py); the
+# levels exist only so harnesses (Forge, opencode) expose a reasoning control.
+_REASONING_OPTIONS = [{"type": "effort", "values": ["low", "medium", "high"]}]
+
+
+def _model_entry(ctx: int | None) -> dict:
+    """Capability record in the models.dev/Forge map shape."""
+    return {
+        "reasoning": True,
+        "temperature": True,
+        "tool_call": True,
+        "reasoning_options": _REASONING_OPTIONS,
+        "limit": {"context": ctx or 0, "output": 0},
+    }
+
+
 @router.get("/models")
 async def v1_models():
-    """Router sentinel first, then running, then desired-but-idle."""
+    """Router sentinel first, then running, then desired-but-idle.
+
+    Emits both the standard OpenAI ``data`` list and a ``models`` map carrying
+    reasoning capability. Forge parses ``models`` (and only there picks up
+    ``reasoning_options`` -> the /effort control); plain OpenAI clients read
+    ``data`` and ignore the extra key.
+    """
     seen: set[str] = set()
     data = [{"id": "router", "object": "model", "owned_by": "local_llm"}]
+    models: dict[str, dict] = {"router": _model_entry(None)}
     seen.add("router")
 
-    for entry in active_runners.list_active():
-        alias = str(entry.get("model") or "")
-        family = str(entry.get("family") or alias)
-        if alias and alias not in seen:
+    for source in (active_runners.list_active(), list_desired()):
+        for entry in source:
+            alias = str(entry.get("model") or "")
+            family = str(entry.get("family") or alias)
+            if not alias or alias in seen:
+                continue
             seen.add(alias)
+            ctx = _context_window_for(family)
             rec: dict = {"id": alias, "object": "model", "owned_by": "local_llm"}
-            ctx = _context_window_for(family)
             if ctx:
                 rec["context_window"] = ctx
             data.append(rec)
+            models[alias] = _model_entry(ctx)
 
-    for entry in list_desired():
-        alias = str(entry.get("model") or "")
-        family = str(entry.get("family") or alias)
-        if alias and alias not in seen:
-            seen.add(alias)
-            rec = {"id": alias, "object": "model", "owned_by": "local_llm"}
-            ctx = _context_window_for(family)
-            if ctx:
-                rec["context_window"] = ctx
-            data.append(rec)
-
-    return {"object": "list", "data": data}
+    return {"object": "list", "data": data, "models": models}
 
 
 @router.post("/chat/completions")
