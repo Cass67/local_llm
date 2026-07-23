@@ -17,11 +17,23 @@ _NOISE_ROUTER = (
     '"GET /v1/models HTTP/1.1"',
     '"GET /route/preview HTTP/1.1"',
 )
+# llama-server logs a WARN per queued task whenever a client disconnects/aborts
+# a request (PR 22907). Benign, but a single aborted stream can dump dozens of
+# lines and drown the runner log. Strip the trio it emits.
+_NOISE_RUNNER = (
+    "stopping wait for next result due to should_stop condition",
+    "next: ref: https://github.com/ggml-org/llama.cpp/pull/22907",
+    "stop: cancel task, id_task",
+)
 
 
 def _filter_log_noise(lines: list[str], container: str = "") -> list[str]:
     """Remove log lines caused by log viewers polling runtime endpoints."""
-    result = [line for line in lines if _NOISE_MGMT not in line]
+    result = [
+        line
+        for line in lines
+        if _NOISE_MGMT not in line and not any(n in line for n in _NOISE_RUNNER)
+    ]
     if "router" in container:
         result = [line for line in result if not any(n in line for n in _NOISE_ROUTER)]
     return result
@@ -91,7 +103,7 @@ def read_log_tail(lines: int = 100, source: str = "runner") -> list[str]:
     return all_lines[-lines:] if len(all_lines) > lines else all_lines
 
 
-async def stream_log_tail(
+async def stream_log_tail(  # noqa: C901
     disconnect: asyncio.Event,
     source: str = "runner",
     container: str | None = None,
