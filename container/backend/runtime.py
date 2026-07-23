@@ -119,9 +119,14 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         if int(ctx_chk or 0) > 0:
             args.extend(["--ctx-checkpoints", str(ctx_chk)])
             # The ROCmFPX fork renamed --checkpoint-min-step to --checkpoint-every-n-tokens
-            # and rejects the stock flag; skip it for rocmfp4 (ctx-checkpoints still applies).
-            if cfg.get("checkpoint_min_step") is not None and cfg.get("backend") != "rocmfp4":
-                args.extend(["--checkpoint-min-step", str(cfg["checkpoint_min_step"])])
+            # and rejects the stock flag; emit the fork's name on rocmfp4.
+            if cfg.get("checkpoint_min_step") is not None:
+                flag = (
+                    "--checkpoint-every-n-tokens"
+                    if cfg.get("backend") == "rocmfp4"
+                    else "--checkpoint-min-step"
+                )
+                args.extend([flag, str(cfg["checkpoint_min_step"])])
         else:
             args.extend(["--ctx-checkpoints", "0"])
     if cfg.get("repeat_penalty") is not None:
