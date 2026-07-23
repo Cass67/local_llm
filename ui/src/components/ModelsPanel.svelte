@@ -112,6 +112,7 @@
 	<div class="toolbar">
 		<div class="backend-toggle">
 			<button class:active={selectedBackend === "rocm"} onclick={() => (selectedBackend = "rocm")}>ROCm</button>
+			<button class:active={selectedBackend === "rocmfp4"} onclick={() => (selectedBackend = "rocmfp4")}>ROCmFP4</button>
 			<button class:active={selectedBackend === "vulkan"} onclick={() => (selectedBackend = "vulkan")}>Vulkan</button>
 			<button class:active={selectedBackend === "cuda"} onclick={() => (selectedBackend = "cuda")}>CUDA</button>
 		</div>

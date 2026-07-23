@@ -320,7 +320,7 @@
 	}
 
 	function backendIndex(g: GpuInfo, backend: Backend) {
-		if (backend === "rocm") return g.rocm_index;
+		if (backend === "rocm" || backend === "rocmfp4") return g.rocm_index;
 		if (backend === "cuda") return g.cuda_index;
 		return g.vulkan_index;
 	}
@@ -376,6 +376,7 @@
 				<input bind:value={newName} placeholder="Cluster name" />
 				<select bind:value={newBackend}>
 					<option value="rocm">ROCm</option>
+					<option value="rocmfp4">ROCmFP4</option>
 					<option value="vulkan">Vulkan</option>
 					<option value="cuda">CUDA</option>
 				</select>
@@ -787,6 +788,10 @@
 	}
 	.badge-rocm {
 		background: #c13333;
+		color: #fff;
+	}
+	.badge-rocmfp4 {
+		background: #e0872a;
 		color: #fff;
 	}
 	.badge-vulkan {
