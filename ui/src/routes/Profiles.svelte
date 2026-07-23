@@ -131,7 +131,7 @@
 	const unknownKeys = $derived(Object.keys(form).filter((k) => !KNOWN_KEYS.has(k)));
 
 	function loadInto(obj: any) {
-		form = structuredClone(obj ?? {});
+		form = structuredClone($state.snapshot(obj ?? {}));
 		draftText = JSON.stringify(obj ?? {}, null, 2);
 	}
 
