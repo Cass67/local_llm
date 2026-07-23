@@ -1,0 +1,156 @@
+diff --git a/ggml/src/ggml-cuda/argsort.cu b/ggml/src/ggml-cuda/argsort.cu
+index c4f0809..108fa93 100644
+--- a/ggml/src/ggml-cuda/argsort.cu
++++ b/ggml/src/ggml-cuda/argsort.cu
+@@ -1,5 +1,9 @@
+ #include "argsort.cuh"
+ 
++#ifdef GGML_USE_HIP
++#include <hipcub/hipcub.hpp>
++#endif
++
+ #ifdef GGML_CUDA_USE_CUB
+ #    include <cub/cub.cuh>
+ #    if (CCCL_MAJOR_VERSION >= 3 && CCCL_MINOR_VERSION >= 1)
+@@ -141,6 +145,56 @@ void argsort_f32_i32_cuda_cub(ggml_cuda_pool & pool,
+ }
+ #endif  // GGML_CUDA_USE_CUB
+ 
++#ifdef GGML_USE_HIP
++
++void argsort_f32_i32_hip(ggml_cuda_pool & pool,
++                         const float *    x,
++                         int *            dst,
++                         const int        ncols,
++                         const int        nrows,
++                         ggml_sort_order  order,
++                         cudaStream_t     stream) {
++    ggml_cuda_pool_alloc<float> keys_out_alloc(pool, ncols);
++    ggml_cuda_pool_alloc<int> indices_in_alloc(pool, ncols);
++
++    float * keys_out = keys_out_alloc.get();
++    int * indices_in = indices_in_alloc.get();
++
++    const dim3 block_size(256);
++    const dim3 grid_size((ncols + block_size.x - 1) / block_size.x, 1);
++
++    size_t temp_storage_bytes = 0;
++    if (order == GGML_SORT_ORDER_ASC) {
++        CUDA_CHECK(hipcub::DeviceRadixSort::SortPairs(
++            nullptr, temp_storage_bytes, x, keys_out, indices_in, dst,
++            ncols, 0, sizeof(float) * 8, stream));
++    } else {
++        CUDA_CHECK(hipcub::DeviceRadixSort::SortPairsDescending(
++            nullptr, temp_storage_bytes, x, keys_out, indices_in, dst,
++            ncols, 0, sizeof(float) * 8, stream));
++    }
++
++    ggml_cuda_pool_alloc<uint8_t> temp_storage_alloc(pool, temp_storage_bytes);
++    void * temp_storage = temp_storage_alloc.get();
++
++    for (int row = 0; row < nrows; ++row) {
++        init_indices<<<grid_size, block_size, 0, stream>>>(indices_in, ncols, 1);
++        CUDA_CHECK(cudaGetLastError());
++
++        if (order == GGML_SORT_ORDER_ASC) {
++            CUDA_CHECK(hipcub::DeviceRadixSort::SortPairs(
++                temp_storage, temp_storage_bytes, x + row * ncols, keys_out,
++                indices_in, dst + row * ncols, ncols, 0, sizeof(float) * 8, stream));
++        } else {
++            CUDA_CHECK(hipcub::DeviceRadixSort::SortPairsDescending(
++                temp_storage, temp_storage_bytes, x + row * ncols, keys_out,
++                indices_in, dst + row * ncols, ncols, 0, sizeof(float) * 8, stream));
++        }
++    }
++}
++
++#endif
++
+ // Bitonic sort implementation
+ template<typename T>
+ static inline __device__ void ggml_cuda_swap(T & a, T & b) {
+@@ -249,7 +303,10 @@ void ggml_cuda_op_argsort(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+ 
+     enum ggml_sort_order order = (enum ggml_sort_order) dst->op_params[0];
+ 
+-#ifdef GGML_CUDA_USE_CUB
++#ifdef GGML_USE_HIP
++    ggml_cuda_pool & pool = ctx.pool();
++    argsort_f32_i32_hip(pool, src0_d, (int *) dst_d, ncols, nrows, order, stream);
++#elif defined(GGML_CUDA_USE_CUB)
+     const int    ncols_pad      = next_power_of_2(ncols);
+     const size_t shared_mem     = ncols_pad * sizeof(int);
+     const size_t max_shared_mem = ggml_cuda_info().devices[ggml_cuda_get_device()].smpb;
+diff --git a/ggml/src/ggml-cuda/argsort.cuh b/ggml/src/ggml-cuda/argsort.cuh
+index 22b7306..a03a670 100644
+--- a/ggml/src/ggml-cuda/argsort.cuh
++++ b/ggml/src/ggml-cuda/argsort.cuh
+@@ -2,6 +2,16 @@
+ 
+ void ggml_cuda_op_argsort(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
+ 
++#ifdef GGML_USE_HIP
++void argsort_f32_i32_hip(ggml_cuda_pool & pool,
++                         const float *    x,
++                         int *            dst,
++                         const int        ncols,
++                         const int        nrows,
++                         ggml_sort_order  order,
++                         cudaStream_t     stream);
++#endif
++
+ #ifdef GGML_CUDA_USE_CUB
+ void argsort_f32_i32_cuda_cub(ggml_cuda_pool & pool,
+                               const float *    x,
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index 3896cac..990e41e 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -5928,11 +5928,28 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
+         case GGML_OP_SUM:
+             return ggml_is_contiguous_rows(op->src[0]);
+         case GGML_OP_TOP_K:
++#ifdef GGML_USE_HIP
++            return op->src[0]->type == GGML_TYPE_F32 &&
++                   op->type == GGML_TYPE_I32 &&
++                   ggml_is_contiguous(op->src[0]);
++#else
++#ifndef GGML_CUDA_USE_CUB
++            return op->src[0]->ne[0] <= 1024;
++#else
++            return true;
++#endif
++#endif
+         case GGML_OP_ARGSORT:
++#ifdef GGML_USE_HIP
++            return op->src[0]->type == GGML_TYPE_F32 &&
++                   op->type == GGML_TYPE_I32 &&
++                   ggml_is_contiguous(op->src[0]);
++#else
+ #ifndef GGML_CUDA_USE_CUB
+             return op->src[0]->ne[0] <= 1024;
+ #else
+             return true;
++#endif
+ #endif
+         case GGML_OP_SUM_ROWS:
+         case GGML_OP_MEAN:
+diff --git a/ggml/src/ggml-cuda/top-k.cu b/ggml/src/ggml-cuda/top-k.cu
+index 59ce36f..3f1c741 100644
+--- a/ggml/src/ggml-cuda/top-k.cu
++++ b/ggml/src/ggml-cuda/top-k.cu
+@@ -62,7 +62,13 @@ void ggml_cuda_op_top_k(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+     const int64_t    nrows = ggml_nrows(src0);
+     const int64_t    k     = dst->ne[0];
+     ggml_cuda_pool & pool  = ctx.pool();
+-#ifdef CUB_TOP_K_AVAILABLE
++#ifdef GGML_USE_HIP
++    ggml_cuda_pool_alloc<int> temp_dst_alloc(pool, ncols * nrows);
++    int * tmp_dst = temp_dst_alloc.get();
++    argsort_f32_i32_hip(pool, src0_d, tmp_dst, ncols, nrows, GGML_SORT_ORDER_DESC, stream);
++    CUDA_CHECK(cudaMemcpy2DAsync(dst_d, k * sizeof(int), tmp_dst, ncols * sizeof(int), k * sizeof(int), nrows,
++                                 cudaMemcpyDeviceToDevice, stream));
++#elif defined(CUB_TOP_K_AVAILABLE)
+     // TODO: Switch to `DeviceSegmentedTopK` for multi-row TopK once implemented
+     // https://github.com/NVIDIA/cccl/issues/6391
+     // TODO: investigate if there exists a point where parallelized argsort is faster than sequential top-k

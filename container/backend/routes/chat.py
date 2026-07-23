@@ -13,6 +13,10 @@ from .stats import append_chat_metric
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
+# No read timeout: long generations are bounded by the runner's own --timeout,
+# not the proxy. connect/write stay bounded so a dead runner still fails fast.
+_PROXY_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+
 
 def _prepare_runner_payload(body: bytes) -> bytes:
     """Normalize model names and default OpenWebUI-style requests to visible answers."""
@@ -192,7 +196,7 @@ async def proxy_chat_completions(request: Request):
             prompt_tokens: int | None = None
             completion_tokens: int | None = None
 
-            client = httpx.AsyncClient(timeout=300.0)
+            client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT)
             stream_context = client.stream(
                 "POST", f"{runner_url}/chat/completions", content=body, headers=headers
             )
@@ -258,7 +262,7 @@ async def proxy_chat_completions(request: Request):
     generation = tracing.open_generation(body, stream=False)
     req_start = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=_PROXY_TIMEOUT) as client:
             upstream = await client.post(
                 f"{runner_url}/chat/completions",
                 content=body,
