@@ -17,9 +17,54 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 # not the proxy. connect/write stay bounded so a dead runner still fails fast.
 _PROXY_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 
+# Strings that mean "no thinking". Any other effort level maps to thinking-on,
+# since the Qwen3.6 template is binary (graded budgets are ignored by the runner).
+_THINKING_OFF = {"none", "off", "false", "disabled", "no"}
+
+
+def _as_thinking_bool(v: object) -> bool | None:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() not in _THINKING_OFF
+    return None
+
+
+def _resolve_thinking(payload: dict) -> bool | None:
+    """Reduce whatever thinking signal a client sent (any harness format) to on/off.
+
+    Returns None when the request carries no thinking signal at all, so the caller
+    can fall back to the server default.
+    """
+    tk = payload.get("chat_template_kwargs")
+    if isinstance(tk, dict) and "enable_thinking" in tk:
+        return _as_thinking_bool(tk["enable_thinking"])
+    if "enable_thinking" in payload:
+        return _as_thinking_bool(payload["enable_thinking"])
+    if "reasoning_effort" in payload:
+        return _as_thinking_bool(payload["reasoning_effort"])
+    reasoning = payload.get("reasoning")  # openrouter/together: {effort|enabled}
+    if isinstance(reasoning, dict):
+        if "enabled" in reasoning:
+            return _as_thinking_bool(reasoning["enabled"])
+        if "effort" in reasoning:
+            return _as_thinking_bool(reasoning["effort"])
+    elif isinstance(reasoning, (bool, str)):
+        return _as_thinking_bool(reasoning)
+    thinking = payload.get("thinking")  # deepseek: {type: enabled|disabled}
+    if isinstance(thinking, dict):
+        if "type" in thinking:
+            return thinking["type"] != "disabled"
+        if "enabled" in thinking:
+            return _as_thinking_bool(thinking["enabled"])
+    elif isinstance(thinking, bool):
+        return thinking
+    return None
+
 
 def _prepare_runner_payload(body: bytes) -> bytes:
-    """Normalize model names and default OpenWebUI-style requests to visible answers."""
+    """Normalize model names and translate any harness's thinking control to the
+    runner's chat_template_kwargs.enable_thinking (the model is binary on/off)."""
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
@@ -33,14 +78,16 @@ def _prepare_runner_payload(body: bytes) -> bytes:
         payload["model"] = model.rsplit("/", 1)[1]
         changed = True
 
-    template_kwargs = payload.get("chat_template_kwargs")
-    if config.DISABLE_THINKING_BY_DEFAULT:
+    want = _resolve_thinking(payload)
+    if want is None and config.DISABLE_THINKING_BY_DEFAULT:
+        want = False
+    if want is not None:
+        template_kwargs = payload.get("chat_template_kwargs")
         if not isinstance(template_kwargs, dict):
             template_kwargs = {}
             payload["chat_template_kwargs"] = template_kwargs
-            changed = True
-        if "enable_thinking" not in template_kwargs:
-            template_kwargs["enable_thinking"] = False
+        if template_kwargs.get("enable_thinking") != want:
+            template_kwargs["enable_thinking"] = want
             changed = True
 
     return json.dumps(payload).encode("utf-8") if changed else body
