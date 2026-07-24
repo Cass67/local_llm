@@ -123,13 +123,16 @@ def _build_launch_metadata(
 
     cfg["backend"] = cluster.backend
 
-    # Detect NVIDIA GPU on a Vulkan cluster — needs different container wiring
-    if cluster.backend == "vulkan":
+    # Vulkan-family clusters need vendor-specific container wiring. Detect the mix:
+    #   both vendors → mixed_vulkan (AMD devices + NVIDIA runtime in one container)
+    #   NVIDIA only  → nvidia_vulkan (inject via nvidia runtime, headless EGL ICD)
+    #   AMD only     → plain vulkan (default kfd/dri wiring)
+    if cluster.backend in ("vulkan", "laguna"):
         cluster_pci_ids = set(cluster.gpu_pci_ids)
-        nvidia_in_cluster = any(
-            g.vendor == "nvidia" for g in inventory if g.pci_id in cluster_pci_ids
-        )
-        if nvidia_in_cluster:
+        vendors = {g.vendor for g in inventory if g.pci_id in cluster_pci_ids}
+        if {"amd", "nvidia"} <= vendors:
+            cfg["mixed_vulkan"] = True
+        elif "nvidia" in vendors:
             cfg["nvidia_vulkan"] = True
 
     vd = visible_devices_for(cluster, inventory)

@@ -278,7 +278,9 @@ def build_runner_container_spec(  # noqa: C901
         device_requests = [{"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu"]]}]
         if visible_devices:
             environment["CUDA_VISIBLE_DEVICES"] = visible_devices
-    elif backend == "mixed_vulkan":
+    elif backend == "mixed_vulkan" or cfg.get("mixed_vulkan"):
+        # backend "mixed_vulkan", or a laguna cluster spanning both AMD+NVIDIA
+        # (flagged via cfg["mixed_vulkan"] in _build_launch_metadata).
         # AMD + NVIDIA in one container: AMD devices + NVIDIA runtime.
         # Bind-mount host NVIDIA graphics libs so libEGL_nvidia.so.0 (headless Vulkan ICD)
         # can initialize — the container runtime doesn't inject them with gpu+graphics caps.
