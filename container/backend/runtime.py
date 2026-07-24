@@ -111,6 +111,10 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
     # model can waffle until it exhausts the context window. -1 = unrestricted.
     if cfg.get("reasoning_budget") is not None:
         args.extend(["--reasoning-budget", str(cfg["reasoning_budget"])])
+    # Injected before the end-of-thinking tag when the budget runs out, so the
+    # model transitions into a final answer instead of getting cut mid-thought.
+    if cfg.get("reasoning_budget_message"):
+        args.extend(["--reasoning-budget-message", str(cfg["reasoning_budget_message"])])
 
     if cfg.get("context_shift"):
         args.append("--context-shift")
@@ -164,7 +168,9 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         draft_path = cfg.get("mtp_draft_model")
         if draft_path:
             args.extend(["-md", str(draft_path)])
-        args.extend(["--spec-type", "draft-mtp"])
+        # draft-mtp (self-speculation) by default; Laguna's DFlash draft uses
+        # draft-dflash. Both drive the same -md + --spec-draft-n-* plumbing.
+        args.extend(["--spec-type", str(cfg.get("spec_type") or "draft-mtp")])
         if cfg.get("mtp_draft_n_max") is not None:
             args.extend(["--spec-draft-n-max", str(cfg["mtp_draft_n_max"])])
         if cfg.get("mtp_draft_n_min") is not None:
@@ -225,6 +231,7 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         "--cache-ram",
         "--cache-reuse",
         "--reasoning-budget",
+        "--reasoning-budget-message",
         "--mmproj",
     }
     raw_tokens = str(cfg.get("flags") or "").split()
@@ -329,7 +336,7 @@ def build_runner_container_spec(  # noqa: C901
         devices = ["/dev/kfd", "/dev/dri"]
         group_add = [config.render_group]
         if visible_devices:
-            if backend == "vulkan":
+            if backend in ("vulkan", "laguna"):
                 environment["GGML_VK_VISIBLE_DEVICES"] = visible_devices
             else:
                 environment["HIP_VISIBLE_DEVICES"] = visible_devices

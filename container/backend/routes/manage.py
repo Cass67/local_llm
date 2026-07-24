@@ -272,6 +272,7 @@ class EditRequest(BaseModel):
     mtp_draft_n_max: int | None = None
     mtp_draft_n_min: int | None = None
     mtp_draft_p_min: float | None = None
+    spec_type: str | None = None
 
 
 @router.put("/models/{family}")
@@ -324,7 +325,13 @@ async def edit_model(family: str, req: EditRequest):
     if req.backend is not None:
         cfg["backend"] = req.backend
     cfg.pop("mtp", None)  # remove any old nested mtp block
-    for field in ("mtp_enabled", "mtp_draft_n_max", "mtp_draft_n_min", "mtp_draft_p_min"):
+    for field in (
+        "mtp_enabled",
+        "mtp_draft_n_max",
+        "mtp_draft_n_min",
+        "mtp_draft_p_min",
+        "spec_type",
+    ):
         val = getattr(req, field, None)
         if val is not None:
             cfg[field] = val

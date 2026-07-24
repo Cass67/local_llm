@@ -1,4 +1,4 @@
-export type Backend = "rocm" | "rocmfp4" | "vulkan" | "cuda";
+export type Backend = "rocm" | "rocmfp4" | "vulkan" | "cuda" | "laguna";
 
 export interface ModelProfile {
 	batch: number;
@@ -30,6 +30,7 @@ export interface ModelConfig {
 	mtp_draft_n_max?: number;
 	mtp_draft_n_min?: number;
 	mtp_draft_p_min?: number;
+	spec_type?: string;
 }
 
 export interface ModelInfo {
