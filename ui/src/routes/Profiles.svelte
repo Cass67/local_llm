@@ -51,6 +51,7 @@
 				{ key: "context_shift", label: "Context shift", type: "bool" },
 				{ key: "ctx_checkpoints", label: "Ctx checkpoints", type: "int", placeholder: "64" },
 				{ key: "checkpoint_min_step", label: "Checkpoint min step", type: "int", placeholder: "4096" },
+				{ key: "cache_reuse", label: "Cache reuse (min chunk)", type: "int", placeholder: "256" },
 			],
 		},
 		{
