@@ -103,8 +103,9 @@ def _extract_flags(profile: dict) -> dict:
         elif tok == "--jinja":
             profile["jinja"] = True
             i += 1
-        elif tok == "--spec-type" and nxt == "draft-mtp":
+        elif tok == "--spec-type" and nxt in ("draft-mtp", "draft-dflash"):
             profile["mtp_enabled"] = True
+            profile["spec_type"] = nxt
             i += 2
         elif tok in _NUMERIC_FLAGS and nxt is not None:
             field, cast = _NUMERIC_FLAGS[tok]

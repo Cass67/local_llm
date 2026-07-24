@@ -3,9 +3,15 @@
 from copy import deepcopy
 from typing import Any, Literal
 
-Backend = Literal["rocm", "rocmfp4", "vulkan", "cuda"]
-_BACKEND_SUFFIXES = ("-rocmfp4", "-rocm", "-vulkan", "-cuda")
-_BACKEND_LABELS = {"rocm": "ROCm", "rocmfp4": "ROCmFP4", "vulkan": "Vulkan", "cuda": "CUDA"}
+Backend = Literal["rocm", "rocmfp4", "vulkan", "cuda", "laguna"]
+_BACKEND_SUFFIXES = ("-rocmfp4", "-rocm", "-vulkan", "-cuda", "-laguna")
+_BACKEND_LABELS = {
+    "rocm": "ROCm",
+    "rocmfp4": "ROCmFP4",
+    "vulkan": "Vulkan",
+    "cuda": "CUDA",
+    "laguna": "Laguna",
+}
 
 
 def base_variant_id(model_id: str) -> str:
@@ -36,7 +42,7 @@ def copy_backend_variant(metadata: dict[str, Any], backend: Backend) -> dict[str
     copied["alias"] = variant_id
     copied["backend"] = backend
     name = str(metadata.get("model_name") or base_variant_id(_source_id(metadata)))
-    for suffix in (" (ROCm)", " (Vulkan)", " (CUDA)"):
+    for suffix in (" (ROCm)", " (ROCmFP4)", " (Vulkan)", " (CUDA)", " (Laguna)"):
         if name.endswith(suffix):
             name = name[: -len(suffix)]
     copied["model_name"] = f"{name} ({_backend_label(backend)})"
@@ -52,6 +58,6 @@ def migrate_backend_variant(metadata: dict[str, Any]) -> dict[str, Any]:
     config_value = metadata.get("config")
     cfg: dict[str, Any] = config_value if isinstance(config_value, dict) else {}
     backend = str(metadata.get("backend") or cfg.get("backend") or "rocm")
-    if backend not in ("rocm", "rocmfp4", "vulkan", "cuda"):
+    if backend not in ("rocm", "rocmfp4", "vulkan", "cuda", "laguna"):
         backend = "rocm"
     return copy_backend_variant(metadata, backend)  # type: ignore[arg-type]
