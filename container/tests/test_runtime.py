@@ -161,6 +161,40 @@ def test_build_runner_container_spec_uses_project_owned_runner_name_and_gpu_moun
     assert spec.command[:3] == ["llama-server", "--port", "8080"]
 
 
+def test_build_runner_container_spec_pins_radeon_icd_for_amd_only_laguna():
+    # AMD-only laguna cluster (P40 dropped): visible_devices can be empty when the
+    # inventory has no vulkan_index. The radeon ICD must still be pinned so the image's
+    # non-functional NVIDIA ICD / lavapipe can't perturb GGML device enumeration.
+    metadata = {
+        "alias": "laguna-s-2.1-iq2m",
+        "model_path": "/models/laguna.gguf",
+        "config": {"backend": "laguna", "visible_devices": ""},
+    }
+    config = DockerRunnerConfig(image="local-llm-runner-laguna:latest", port=8085)
+
+    spec = build_runner_container_spec(metadata, config)
+
+    assert spec.devices == ["/dev/kfd", "/dev/dri"]
+    assert spec.environment["VK_ICD_FILENAMES"] == "/usr/share/vulkan/icd.d/radeon_icd.json"
+    assert "GGML_VK_VISIBLE_DEVICES" not in spec.environment  # empty → not set
+    assert "HIP_VISIBLE_DEVICES" not in spec.environment
+
+
+def test_build_runner_container_spec_rocm_backend_does_not_pin_vulkan_icd():
+    # rocm/rocmfp4 also reach the AMD else-branch but use HIP, not Vulkan.
+    metadata = {
+        "alias": "qwopus-q5km",
+        "model_path": "/models/qwopus.gguf",
+        "config": {"backend": "rocmfp4", "visible_devices": "0,1"},
+    }
+    config = DockerRunnerConfig(image="local-llm-runner:latest", port=8080)
+
+    spec = build_runner_container_spec(metadata, config)
+
+    assert "VK_ICD_FILENAMES" not in spec.environment
+    assert spec.environment["HIP_VISIBLE_DEVICES"] == "0,1"
+
+
 def test_build_runner_container_spec_uses_nvidia_device_requests_for_cuda():
     metadata = {
         "alias": "qwopus-q5km",
