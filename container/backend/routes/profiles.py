@@ -35,11 +35,28 @@ async def get_family_profiles(family: str):
     return data["families"].get(family, {"default": "", "profiles": {}})
 
 
+def _resolve_name(fam: dict, name: str) -> str:
+    """Map a requested profile name onto the existing key that differs only by case.
+
+    Profile lookups elsewhere (restart_running_for_profile, _apply_profile_config) are
+    exact string matches, so a differently-cased save would fork the profile and silently
+    strand every later edit. Existing odd-cased names stay addressable; new ones are
+    normalised to lowercase so the fork cannot happen again.
+    """
+    for existing in fam.get("profiles", {}):
+        if existing.lower() == name.lower():
+            return existing
+    return name.strip().lower()
+
+
 @router.put("/{family}/{name}")
 async def upsert_profile(family: str, name: str, body: dict):
     data = _load()
     if family not in data["families"]:
+        name = name.strip().lower()
         data["families"][family] = {"default": name, "profiles": {}}
+    else:
+        name = _resolve_name(data["families"][family], name)
     data["families"][family]["profiles"][name] = body
     _save(data)
     # Blocking: relaunch + _wait_ready sleep-loops up to 120s per cluster.
@@ -52,6 +69,8 @@ async def upsert_profile(family: str, name: str, body: dict):
 async def delete_profile(family: str, name: str):
     data = _load()
     fam = data.get("families", {}).get(family)
+    if fam:
+        name = _resolve_name(fam, name)
     if not fam or name not in fam["profiles"]:
         raise HTTPException(status_code=404, detail="profile not found")
     del fam["profiles"][name]
@@ -69,8 +88,11 @@ async def clone_profile(family: str, name: str, body: dict):
         raise HTTPException(status_code=422, detail="new_name required")
     data = _load()
     fam = data.get("families", {}).get(family)
+    if fam:
+        name = _resolve_name(fam, name)
     if not fam or name not in fam["profiles"]:
         raise HTTPException(status_code=404, detail="profile not found")
+    new_name = _resolve_name(fam, new_name)
     fam["profiles"][new_name] = dict(fam["profiles"][name])
     _save(data)
     return {"status": "cloned", "name": new_name}
@@ -208,6 +230,7 @@ async def set_default(family: str, name: str):
     fam = data.get("families", {}).get(family)
     if not fam:
         raise HTTPException(status_code=404, detail="family not found")
+    name = _resolve_name(fam, name)
     if name not in fam["profiles"]:
         raise HTTPException(status_code=404, detail="profile not found")
     fam["default"] = name
