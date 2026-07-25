@@ -337,11 +337,18 @@ def build_runner_container_spec(  # noqa: C901
     else:
         devices = ["/dev/kfd", "/dev/dri"]
         group_add = [config.render_group]
-        if visible_devices:
-            if backend in ("vulkan", "laguna"):
+        if backend in ("vulkan", "laguna"):
+            # AMD-only Vulkan/laguna: pin the radeon ICD so only Mesa RADV enumerates.
+            # The image also ships the NVIDIA ICD (present but non-functional here — no
+            # libs injected) and lavapipe (CPU software); either could otherwise perturb
+            # GGML's Vulkan device order or add a phantom device. Set unconditionally —
+            # independent of visible_devices, which is empty when the inventory has no
+            # vulkan_index for these cards.
+            environment["VK_ICD_FILENAMES"] = "/usr/share/vulkan/icd.d/radeon_icd.json"
+            if visible_devices:
                 environment["GGML_VK_VISIBLE_DEVICES"] = visible_devices
-            else:
-                environment["HIP_VISIBLE_DEVICES"] = visible_devices
+        elif visible_devices:
+            environment["HIP_VISIBLE_DEVICES"] = visible_devices
 
     return DockerContainerSpec(
         name=config.name,
