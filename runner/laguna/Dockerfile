@@ -1,11 +1,14 @@
 # local-llm-runner-laguna
-# Project-owned runner image built from poolside's llama.cpp fork, laguna branch.
+# Project-owned runner image built from mainline llama.cpp (ggml-org), which carries
+# Laguna model support (LLM_ARCH_LAGUNA) as of release b10087.
 # Vulkan backend so it runs on both AMD (radeon ICD) and NVIDIA (nvidia_egl ICD).
-# Carries Laguna model support + DFlash speculative decoding (--spec-type draft-dflash).
+# Was previously built from poolside's fork for DFlash speculative decoding; DFlash
+# benchmarked net-negative under real sampling and is disabled, so we run stock —
+# ~10% faster decode / ~6% faster prefill than the fork on Laguna-S-2.1 IQ2 (2x7900).
 FROM ubuntu:24.04 AS build
 
-# laguna is a branch on the fork; can also be a commit sha on that branch.
-ARG LLAMA_CPP_REF=laguna
+# Pin a mainline release tag (>= b10087 for laguna arch); can also be a commit sha.
+ARG LLAMA_CPP_REF=b10107
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,14 +28,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # init+fetch instead of clone --branch so LLAMA_CPP_REF can be a commit sha
 WORKDIR /src/llama.cpp
 RUN git init . \
-    && git remote add origin https://github.com/poolsideai/llama.cpp.git \
+    && git remote add origin https://github.com/ggml-org/llama.cpp.git \
     && git fetch --depth 1 origin "$LLAMA_CPP_REF" \
     && git checkout FETCH_HEAD
-# The laguna branch's DFlash code (common/speculative.cpp) calls std::isfinite
-# without including <cmath>, which GCC on Ubuntu 24.04 rejects. Force-include it.
 RUN cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_CXX_FLAGS="-include cmath" \
     -DLLAMA_CURL=ON \
     -DGGML_VULKAN=ON \
     -DLLAMA_BUILD_UI=OFF \
