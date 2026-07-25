@@ -118,7 +118,10 @@ class StartRequest(BaseModel):
 def _default_profile(family: str) -> str:
     try:
         data = json.loads(config.PROFILES_CONFIG.read_text())
-        return data.get("families", {}).get(family, {}).get("default", "") or "balanced"
+        fam = data.get("families", {}).get(family, {})
+        # An empty default used to fall through to the literal "balanced", which silently
+        # applies nothing when the family names its profiles anything else.
+        return fam.get("default", "") or next(iter(fam.get("profiles", {})), "balanced")
     except (OSError, json.JSONDecodeError):
         return "balanced"
 

@@ -85,6 +85,15 @@ def _apply_profile_config(meta: dict[str, Any]) -> None:
         meta["profile"] = profile_name
     profile_cfg = fam_data.get("profiles", {}).get(profile_name)
     if not isinstance(profile_cfg, dict):
+        # Launching with the bare accepted config is almost never what was wanted —
+        # say so, or it looks like the profile is being ignored.
+        logging.warning(
+            "no profile config for family=%s profile=%s — launching without profile settings "
+            "(known profiles: %s)",
+            family,
+            profile_name,
+            sorted(fam_data.get("profiles", {})) or "none",
+        )
         return
     # Wipe accepted config — profile is authoritative; cluster keys added after
     meta["config"] = {}
