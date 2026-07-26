@@ -73,11 +73,12 @@ _reload_config()
 
 _healthy_aliases: set[str] = set()
 _cluster_to_model: dict[str, str] = {}  # cluster name → current model alias
+_vision_aliases: set[str] = set()  # aliases whose *running* profile loaded an mmproj
 _last_health_check: float = 0.0
 
 
 async def _refresh_health() -> None:
-    global _healthy_aliases, _cluster_to_model, _last_health_check
+    global _healthy_aliases, _cluster_to_model, _vision_aliases, _last_health_check
     _reload_config()
     try:
         async with httpx.AsyncClient(timeout=5.0) as c:
@@ -85,14 +86,33 @@ async def _refresh_health() -> None:
             models_resp.raise_for_status()
             _healthy_aliases = {m["id"] for m in models_resp.json().get("data", [])}
 
+            profiles_resp = await c.get(f"{BACKEND_URL}/api/profiles")
+            families = (
+                profiles_resp.json().get("families", {}) if profiles_resp.status_code == 200 else {}
+            )
+
             clusters_resp = await c.get(f"{BACKEND_URL}/api/clusters")
             if clusters_resp.status_code == 200:
                 clusters = clusters_resp.json().get("clusters", [])
                 old_map = _cluster_to_model.copy()
+                active = [
+                    c["active"]
+                    for c in clusters
+                    if c.get("active") and c["active"].get("running") and c["active"].get("model")
+                ]
                 _cluster_to_model = {
                     c["name"]: c["active"]["model"]
                     for c in clusters
                     if c.get("active") and c["active"].get("running") and c["active"].get("model")
+                }
+                # A model only sees images if the profile it was *launched with* set mmproj.
+                _vision_aliases = {
+                    a["model"]
+                    for a in active
+                    if families.get(a.get("family"), {})
+                    .get("profiles", {})
+                    .get(a.get("profile"), {})
+                    .get("mmproj")
                 }
                 for name, model in sorted(_cluster_to_model.items()):
                     if old_map.get(name) != model:
@@ -152,6 +172,17 @@ def _extract_user_messages(messages: list[dict]) -> list[str]:
                     result.append(part["text"].strip().lower())
                     break
     return result
+
+
+_IMAGE_PART_TYPES = {"image_url", "image", "input_image"}
+
+
+def _has_image(messages: list[dict]) -> bool:
+    return any(
+        isinstance(part, dict) and part.get("type") in _IMAGE_PART_TYPES
+        for msg in messages
+        for part in (msg.get("content") if isinstance(msg.get("content"), list) else [])
+    )
 
 
 def _keyword_in(keyword: str, prompt: str) -> bool:
@@ -252,6 +283,14 @@ def _route_detail(messages: list[dict]) -> dict:
     re-classified as "easy" and bounced to the wrong cluster. Stateless — the
     resent history is the session state. ponytail: walk history, no session store
     """
+    # Images are a hard constraint, not a preference: a text-only runner silently
+    # drops the image parts and answers about nothing. Override any keyword rule.
+    if _has_image(messages):
+        vision = sorted(_vision_aliases & _healthy_aliases)
+        if vision:
+            return {"model": vision[0], "reason": "vision"}
+        print("router: image in request but no vision-capable model running", flush=True)
+
     for prompt in reversed(_extract_user_messages(messages)):
         result = _match_rule(prompt)
         if result is not None:

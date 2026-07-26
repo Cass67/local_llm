@@ -28,7 +28,20 @@ def _context_window_for(family: str) -> int | None:
 _REASONING_OPTIONS = [{"type": "effort", "values": ["low", "medium", "high"]}]
 
 
-def _model_entry(ctx: int | None) -> dict:
+def _vision_for(family: str, profile: str | None) -> bool:
+    """True when the profile this model runs under loads an mmproj."""
+    try:
+        from .profiles import _load
+
+        fam = _load().get("families", {}).get(family, {})
+        profiles = fam.get("profiles", {})
+        cfg = profiles.get(profile or fam.get("default")) or {}
+        return bool(cfg.get("mmproj"))
+    except Exception:  # nosec B110  # noqa: BLE001, S110
+        return False
+
+
+def _model_entry(ctx: int | None, vision: bool = False) -> dict:
     """Capability record in the models.dev/Forge map shape."""
     return {
         "reasoning": True,
@@ -36,6 +49,9 @@ def _model_entry(ctx: int | None) -> dict:
         "tool_call": True,
         "reasoning_options": _REASONING_OPTIONS,
         "limit": {"context": ctx or 0, "output": 0},
+        # Clients cannot infer this: llama-server never reports the projector,
+        # so a vision model looks text-only and images get dropped client-side.
+        "input": ["text", "image"] if vision else ["text"],
     }
 
 
@@ -61,11 +77,13 @@ async def v1_models():
                 continue
             seen.add(alias)
             ctx = _context_window_for(family)
+            vision = _vision_for(family, entry.get("profile"))
             rec: dict = {"id": alias, "object": "model", "owned_by": "local_llm"}
             if ctx:
                 rec["context_window"] = ctx
+            rec["input"] = ["text", "image"] if vision else ["text"]
             data.append(rec)
-            models[alias] = _model_entry(ctx)
+            models[alias] = _model_entry(ctx, vision)
 
     return {"object": "list", "data": data, "models": models}
 

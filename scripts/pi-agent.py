@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Pi agent — agentic chat client using DiffusionGemma on ubt26."""
 
+import base64
 import json
+import mimetypes
 import os
 import re
 import subprocess
 import urllib.request
 from pathlib import Path
 
+# Router, not a bare llama-server: it picks a vision-capable model when the
+# conversation carries images, which a single runner on :8080 cannot do.
 HOST = os.environ.get("DIFFUSION_HOST", "ubt26")
-PORT = int(os.environ.get("DIFFUSION_PORT", "8080"))
+PORT = int(os.environ.get("DIFFUSION_PORT", "3200"))
 URL = f"http://{HOST}:{PORT}/v1/chat/completions"
 TIMEOUT = 300
 
@@ -24,7 +28,9 @@ Available tools:
 Run a shell command on the Raspberry Pi. Use for system info, files, network, etc.
 
 <read>/absolute/path/to/file</read>
-Read a file from the Pi filesystem.
+Read a file from the Pi filesystem. Images (png/jpg/gif/webp/bmp) come back as
+actual pictures you can see — use this to look at screenshots, never claim you
+cannot read images.
 
 <write path="/absolute/path">file content here</write>
 Write content to a file on the Pi filesystem.
@@ -42,7 +48,7 @@ _WRITE_RE = re.compile(r'<write\s+path="([^"]+)">(.*?)</write>', re.DOTALL)
 
 
 def _ask(messages: list) -> str:
-    body = json.dumps({"messages": messages}).encode()
+    body = json.dumps({"model": "auto", "messages": messages}).encode()
     req = urllib.request.Request(URL, data=body, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # nosec B310 -- internal URL
         return json.load(r)["choices"][0]["message"]["content"]
@@ -54,9 +60,25 @@ def _tool_bash(cmd: str) -> str:
     return out.strip() or "(no output)"
 
 
-def _tool_read(path: str) -> str:
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
+
+def _image_part(path: Path) -> dict:
+    mime = mimetypes.guess_type(path.name)[0] or "image/png"
+    data = base64.b64encode(path.read_bytes()).decode()
+    return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}}
+
+
+def _tool_read(path: str) -> str | list[dict]:
+    """Text files come back as text; images as an OpenAI image part the model can see."""
     try:
-        return Path(path.strip()).read_text()
+        p = Path(path.strip())
+        if p.suffix.lower() in _IMAGE_SUFFIXES:
+            return [
+                {"type": "text", "text": f"<tool_result>image {p.name}</tool_result>"},
+                _image_part(p),
+            ]
+        return p.read_text()
     except Exception as e:
         return f"error: {e}"
 
@@ -71,7 +93,7 @@ def _tool_write(path: str, content: str) -> str:
         return f"error: {e}"
 
 
-def _run_tools(response: str) -> tuple[bool, str]:
+def _run_tools(response: str) -> tuple[bool, str | list[dict]]:
     """Return (did_run_tool, tool_result_text)."""
     if m := _BASH_RE.search(response):
         cmd = m.group(1).strip()
@@ -84,6 +106,8 @@ def _run_tools(response: str) -> tuple[bool, str]:
         path = m.group(1).strip()
         print(f"\n[read] {path}")
         result = _tool_read(path)
+        if isinstance(result, list):
+            return True, result
         return True, f"<tool_result>\n{result}\n</tool_result>"
 
     if m := _WRITE_RE.search(response):
@@ -96,8 +120,21 @@ def _run_tools(response: str) -> tuple[bool, str]:
     return False, ""
 
 
+_PATH_RE = re.compile(r"(?:~|/)[^\s'\"]+")
+
+
+def _user_content(text: str) -> str | list[dict]:
+    """Attach any image paths the user mentioned, so dragged-in screenshots are seen."""
+    parts = []
+    for raw in _PATH_RE.findall(text):
+        p = Path(raw).expanduser()
+        if p.suffix.lower() in _IMAGE_SUFFIXES and p.is_file():
+            parts.append(_image_part(p))
+    return [{"type": "text", "text": text}, *parts] if parts else text
+
+
 def _agent_turn(history: list, user_input: str) -> str:
-    history.append({"role": "user", "content": user_input})
+    history.append({"role": "user", "content": _user_content(user_input)})
     for _ in range(10):  # max tool iterations per turn
         print("thinking...", end="\r", flush=True)
         reply = _ask(history)
