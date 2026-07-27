@@ -108,6 +108,9 @@ _NUMERIC_FLAGS: dict[str, tuple[str, type]] = {
     "--spec-draft-n-max": ("mtp_draft_n_max", int),
     "--spec-draft-n-min": ("mtp_draft_n_min", int),
     "--spec-draft-p-min": ("mtp_draft_p_min", float),
+    "--spec-ngram-mod-n-match": ("ngram_mod_n_match", int),
+    "--spec-ngram-mod-n-min": ("ngram_mod_n_min", int),
+    "--spec-ngram-mod-n-max": ("ngram_mod_n_max", int),
 }
 
 
@@ -125,9 +128,10 @@ def _extract_flags(profile: dict) -> dict:
         elif tok == "--jinja":
             profile["jinja"] = True
             i += 1
-        elif tok == "--spec-type" and nxt in ("draft-mtp", "draft-dflash"):
-            profile["mtp_enabled"] = True
+        elif tok == "--spec-type" and nxt and not nxt.startswith("-"):
             profile["spec_type"] = nxt
+            if any(t.startswith("draft-") for t in nxt.split(",")):
+                profile["mtp_enabled"] = True
             i += 2
         elif tok in _NUMERIC_FLAGS and nxt is not None:
             field, cast = _NUMERIC_FLAGS[tok]

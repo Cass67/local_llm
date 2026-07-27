@@ -88,13 +88,23 @@
 			],
 		},
 		{
-			title: "Speculative (MTP)",
+			title: "Speculative",
 			fields: [
 				{ key: "mtp_enabled", label: "MTP enabled", type: "bool" },
+				{
+					key: "spec_type",
+					label: "Spec type",
+					type: "text",
+					placeholder: "draft-mtp,ngram-mod",
+					hint: "comma-separated; ngram-mod needs no draft model",
+				},
 				{ key: "mtp_draft_model", label: "Draft model path", type: "text" },
 				{ key: "mtp_draft_n_max", label: "Draft n-max", type: "int" },
 				{ key: "mtp_draft_n_min", label: "Draft n-min", type: "int" },
 				{ key: "mtp_draft_p_min", label: "Draft p-min", type: "float" },
+				{ key: "ngram_mod_n_match", label: "ngram n-match", type: "int" },
+				{ key: "ngram_mod_n_min", label: "ngram n-min", type: "int" },
+				{ key: "ngram_mod_n_max", label: "ngram n-max", type: "int" },
 			],
 		},
 		{
@@ -190,11 +200,9 @@
 	}
 	function toggleInclude(key: string, field: Field) {
 		if (key in form) delete form[key];
-		else form[key] = field.type === "select" ? (field.options?.[0] ?? "") : "";
-	}
-	function setBool(key: string, val: boolean) {
-		if (val) form[key] = true;
-		else delete form[key];
+		else if (field.type === "select") form[key] = field.options?.[0] ?? "";
+		else if (field.type === "bool") form[key] = true;
+		else form[key] = "";
 	}
 	function num(key: string, raw: string, float: boolean) {
 		if (raw.trim() === "") {
@@ -416,26 +424,25 @@
 						<fieldset>
 							<legend>{group.title}</legend>
 							{#each group.fields as f}
-								{#if f.type === "bool"}
-									<label class="row bool-row">
+								<div class="row">
+									<label class="inc" title="include this option">
 										<input
 											type="checkbox"
-											checked={form[f.key] === true}
-											onchange={(e) => setBool(f.key, e.currentTarget.checked)}
+											checked={has(f.key)}
+											onchange={() => toggleInclude(f.key, f)}
 										/>
-										<span class="fname">{f.label}</span>
 									</label>
-								{:else}
-									<div class="row">
-										<label class="inc" title="include this option">
-											<input
-												type="checkbox"
-												checked={has(f.key)}
-												onchange={() => toggleInclude(f.key, f)}
-											/>
-										</label>
-										<span class="fname" class:off={!has(f.key)}>{f.label}</span>
-										{#if f.type === "select"}
+									<span class="fname" class:off={!has(f.key)}>{f.label}</span>
+										{#if f.type === "bool"}
+											<select
+												disabled={!has(f.key)}
+												value={form[f.key] === false ? "off" : "on"}
+												onchange={(e) => (form[f.key] = e.currentTarget.value === "on")}
+											>
+												<option value="on">on</option>
+												<option value="off">off</option>
+											</select>
+										{:else if f.type === "select"}
 											<select
 												disabled={!has(f.key)}
 												value={form[f.key] ?? ""}
@@ -462,7 +469,6 @@
 											/>
 										{/if}
 									</div>
-								{/if}
 							{/each}
 						</fieldset>
 					{/each}
@@ -555,9 +561,8 @@
 		gap: 0.5rem;
 		padding: 0.15rem 0;
 	}
-	.bool-row { cursor: pointer; }
 	.inc { display: flex; align-items: center; }
-	.inc input, .bool-row input { cursor: pointer; }
+	.inc input { cursor: pointer; }
 	.fname { flex: 1; font-size: 0.85rem; }
 	.fname.off { color: var(--text-muted); }
 	.row input[type="number"],
