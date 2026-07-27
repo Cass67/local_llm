@@ -14,9 +14,11 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 PORT = int(os.environ.get("ROUTER_PORT", "3200"))
 
+_env_config = os.environ.get("ROUTER_CONFIG", "")
 _STATE_CONFIG = (
-    Path(os.environ.get("ROUTER_CONFIG", ""))
-    or Path(os.environ.get("LOCAL_LLM_STATE_DIR", "/state")) / "router_rules.json"
+    Path(_env_config)
+    if _env_config
+    else Path(os.environ.get("LOCAL_LLM_STATE_DIR", "/state")) / "router_rules.json"
 )
 _REPO_CONFIG = Path(__file__).parent.parent / "configs" / "router_rules.json"
 _CONFIG_PATH = _STATE_CONFIG if _STATE_CONFIG.exists() else _REPO_CONFIG
@@ -29,6 +31,7 @@ BACKEND_URL = "http://127.0.0.1:3100"
 # not this proxy. connect/write stay bounded so a dead backend still fails fast.
 _PROXY_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 DEFAULT_MODEL: str | None = None
+DEFAULT_CLUSTER: str | None = None
 HEALTH_INTERVAL: int = 10
 RULES: list[dict] = []
 ENABLED: bool = True
@@ -39,6 +42,7 @@ def _reload_config() -> None:
     global \
         BACKEND_URL, \
         DEFAULT_MODEL, \
+        DEFAULT_CLUSTER, \
         HEALTH_INTERVAL, \
         RULES, \
         ENABLED, \
@@ -56,6 +60,7 @@ def _reload_config() -> None:
         cfg = json.loads(path.read_text())
         BACKEND_URL = cfg.get("backend_url", BACKEND_URL).rstrip("/")
         DEFAULT_MODEL = cfg.get("default_model")
+        DEFAULT_CLUSTER = cfg.get("default_cluster")
         HEALTH_INTERVAL = cfg.get("health_check_interval_s", 10)
         RULES = cfg.get("rules", [])
         ENABLED = cfg.get("enabled", True)
@@ -84,7 +89,10 @@ async def _refresh_health() -> None:
         async with httpx.AsyncClient(timeout=5.0) as c:
             models_resp = await c.get(f"{BACKEND_URL}/v1/models")
             models_resp.raise_for_status()
-            _healthy_aliases = {m["id"] for m in models_resp.json().get("data", [])}
+            # "router" is this proxy's own alias — routing to it loops back here.
+            _healthy_aliases = {
+                m["id"] for m in models_resp.json().get("data", []) if m["id"] != "router"
+            }
 
             profiles_resp = await c.get(f"{BACKEND_URL}/api/profiles")
             families = (
@@ -144,9 +152,19 @@ def _resolve_model(rule_model: str | None, rule_cluster: str | None) -> str | No
 
 
 def _default_model() -> str:
-    """Return configured default, or first healthy model if default is unset/unavailable."""
+    """Configured default → default cluster's live model → any healthy model.
+
+    The default_cluster hop matters: default_model names a specific alias, so it
+    goes stale the moment that profile stops being the one loaded. Without it we
+    fall to sorted-first, which is alphabetical, not "best" — that quietly parked
+    every unmatched prompt on whichever cluster happened to sort first.
+    """
     if DEFAULT_MODEL and DEFAULT_MODEL in _healthy_aliases:
         return DEFAULT_MODEL
+    if DEFAULT_CLUSTER:
+        alias = _cluster_to_model.get(_remap_cluster(DEFAULT_CLUSTER))
+        if alias and alias in _healthy_aliases:
+            return alias
     return next(iter(sorted(_healthy_aliases)), "")
 
 
@@ -198,6 +216,16 @@ def _keyword_in(keyword: str, prompt: str) -> bool:
 _SIGNAL_CHECKS: dict[str, "re.Pattern[str] | None"] = {}
 
 _CODE_BLOCK_RE = re.compile(r"```|^\s{4}\S", re.MULTILINE)
+# Mentioning a file, path, or identifier means the prompt is about a codebase,
+# whatever verb it uses. Catches the long tail of phrasings no keyword list
+# covers: "port this to go", "update the readme", "why is foo_bar returning 0".
+_CODE_REF_RE = re.compile(
+    r"`[^`]+`"
+    r"|\b[\w-]+\.(?:py|ts|tsx|js|jsx|go|rs|rb|java|c|h|cpp|sh|json|ya?ml|toml|md|css|html|sql)\b"
+    r"|(?:^|\s)[~.]?/[\w./-]+"
+    r"|\b\w+_\w+\b"  # snake_case (prompts are lowercased, so camelCase is unreachable)
+    r"|\b\w+\(\)"
+)
 _MATH_RE = re.compile(r"[∑∫∂∇∏√≈≠≤≥±×÷∈∉∩∪⊂⊃]|\$[^$]+\$|\\frac|\\sum|\\int")
 _WORD_RE = re.compile(r"\S+")
 
@@ -206,6 +234,8 @@ def _eval_signal(signal: str, prompt: str) -> bool:
     match signal:
         case "has_code_block":
             return bool(_CODE_BLOCK_RE.search(prompt))
+        case "has_code_ref":
+            return bool(_CODE_REF_RE.search(prompt))
         case "has_math":
             return bool(_MATH_RE.search(prompt))
         case "long_prompt":
@@ -230,9 +260,14 @@ def _match_signals(signals: list[str], prompt: str) -> str | None:
 _WEAK_SIGNALS = {"short_prompt", "is_question"}
 
 
-def _match_rule(prompt: str) -> dict | None:
-    """Return routing result for a single prompt string, or None if no rule matched."""
-    for rule in RULES:
+def _match_rule(prompt: str) -> tuple[int, dict] | None:
+    """Return (rule index, routing result) for a prompt, or None if no rule matched.
+
+    The index is the rule's position in the config, which is also its priority:
+    hard-tier rules are listed first. Callers use it to pick the strongest match
+    across a conversation.
+    """
+    for idx, rule in enumerate(RULES):
         keywords = rule.get("keywords", [])
         # Content-blind signals (length/shape only) must NOT trigger a rule on
         # their own — a bare "continue" or short edit would hijack the whole
@@ -248,7 +283,7 @@ def _match_rule(prompt: str) -> dict | None:
         remapped_cluster = _remap_cluster(raw_cluster) if raw_cluster else None
         chosen = _resolve_model(rule.get("model"), raw_cluster)
         if chosen:
-            return {
+            return idx, {
                 "model": chosen,
                 "reason": "rule",
                 "rule": rule.get("name"),
@@ -260,7 +295,7 @@ def _match_rule(prompt: str) -> dict | None:
             fb_cluster = _remap_cluster(fb)
             fb_alias = _cluster_to_model.get(fb_cluster, fb)
             if fb_alias in _healthy_aliases:
-                return {
+                return idx, {
                     "model": fb_alias,
                     "reason": "fallback",
                     "rule": rule.get("name"),
@@ -270,18 +305,26 @@ def _match_rule(prompt: str) -> dict | None:
                     "fallback": fb,
                     "remapped_fallback": fb_cluster,
                 }
-        # primary + fallbacks all down — skip rule, try next
+        # Primary + fallbacks all down. Falling through to a later rule silently
+        # demotes the prompt to an easier tier, so say so.
+        print(
+            f"router: rule {rule.get('name')!r} matched {matched!r} but cluster "
+            f"{remapped_cluster!r} is not running — falling through",
+            flush=True,
+        )
     return None
 
 
 def _route_detail(messages: list[dict]) -> dict:
-    """Anchor routing on the conversation's first classifiable message.
+    """Route on the strongest match anywhere in the conversation.
 
-    Tiering is per-session: the opening intent picks the cluster and the whole
-    conversation sticks to it. Scanning oldest-first means later short turns
-    ("continue", "add friction") inherit the original tier instead of being
-    re-classified as "easy" and bounced to the wrong cluster. Stateless — the
-    resent history is the session state. ponytail: walk history, no session store
+    Rules are ordered hard-tier first, so the lowest matching index is the most
+    demanding intent the session has expressed — and difficulty only ratchets up.
+    This replaces anchoring on the *first* classifiable message, which pinned the
+    tier symmetrically: one incidental "look that up on the internet" turn sent
+    every later coding turn to the easy cluster for the rest of the session.
+    Short follow-ups ("continue", "now add tests") still inherit the hard tier,
+    which is what anchoring was for. Stateless — resent history is the state.
     """
     # Images are a hard constraint, not a preference: a text-only runner silently
     # drops the image parts and answers about nothing. Override any keyword rule.
@@ -291,10 +334,13 @@ def _route_detail(messages: list[dict]) -> dict:
             return {"model": vision[0], "reason": "vision"}
         print("router: image in request but no vision-capable model running", flush=True)
 
-    for prompt in reversed(_extract_user_messages(messages)):
-        result = _match_rule(prompt)
-        if result is not None:
-            return result
+    best: tuple[int, dict] | None = None
+    for prompt in _extract_user_messages(messages):
+        match = _match_rule(prompt)
+        if match is not None and (best is None or match[0] < best[0]):
+            best = match
+    if best is not None:
+        return best[1]
     return {"model": _default_model(), "reason": "default"}
 
 
