@@ -164,19 +164,32 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
     if cfg.get("no_warmup"):
         args.append("--no-warmup")
 
-    if cfg.get("mtp_enabled"):
-        draft_path = cfg.get("mtp_draft_model")
-        if draft_path:
-            args.extend(["-md", str(draft_path)])
-        # draft-mtp (self-speculation) by default; Laguna's DFlash draft uses
-        # draft-dflash. Both drive the same -md + --spec-draft-n-* plumbing.
-        args.extend(["--spec-type", str(cfg.get("spec_type") or "draft-mtp")])
-        if cfg.get("mtp_draft_n_max") is not None:
-            args.extend(["--spec-draft-n-max", str(cfg["mtp_draft_n_max"])])
-        if cfg.get("mtp_draft_n_min") is not None:
-            args.extend(["--spec-draft-n-min", str(cfg["mtp_draft_n_min"])])
-        if cfg.get("mtp_draft_p_min") is not None:
-            args.extend(["--spec-draft-p-min", str(cfg["mtp_draft_p_min"])])
+    # spec_type is a comma-separated list: draft-mtp / draft-dflash (need -md and
+    # --spec-draft-n-*) and/or ngram-mod (needs no draft model, works on any model).
+    spec_type = str(cfg.get("spec_type") or "").strip()
+    if cfg.get("mtp_enabled") and not spec_type:
+        spec_type = "draft-mtp"
+    if spec_type:
+        kinds = {t.strip() for t in spec_type.split(",")}
+        args.extend(["--spec-type", spec_type])
+        if kinds & {"draft-mtp", "draft-dflash", "draft-simple", "draft-eagle3"}:
+            draft_path = cfg.get("mtp_draft_model")
+            if draft_path:
+                args.extend(["-md", str(draft_path)])
+            if cfg.get("mtp_draft_n_max") is not None:
+                args.extend(["--spec-draft-n-max", str(cfg["mtp_draft_n_max"])])
+            if cfg.get("mtp_draft_n_min") is not None:
+                args.extend(["--spec-draft-n-min", str(cfg["mtp_draft_n_min"])])
+            if cfg.get("mtp_draft_p_min") is not None:
+                args.extend(["--spec-draft-p-min", str(cfg["mtp_draft_p_min"])])
+        if "ngram-mod" in kinds:
+            for key, flag in (
+                ("ngram_mod_n_match", "--spec-ngram-mod-n-match"),
+                ("ngram_mod_n_min", "--spec-ngram-mod-n-min"),
+                ("ngram_mod_n_max", "--spec-ngram-mod-n-max"),
+            ):
+                if cfg.get(key) is not None:
+                    args.extend([flag, str(cfg[key])])
 
     if cfg.get("temperature") is not None:
         args.extend(["--temp", str(cfg["temperature"])])
@@ -227,6 +240,9 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         "--spec-draft-n-max",
         "--spec-draft-n-min",
         "--spec-draft-p-min",
+        "--spec-ngram-mod-n-match",
+        "--spec-ngram-mod-n-min",
+        "--spec-ngram-mod-n-max",
         "--parallel",
         "--cache-ram",
         "--cache-reuse",
