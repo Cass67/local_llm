@@ -64,7 +64,6 @@
         "bench",
         "benchmark",
         "golang",
-        "go ",
         "rust",
         "javascript",
         "typescript code",
@@ -148,7 +147,10 @@
         "remove the",
         "delete the",
         "replace the",
-        "move the"
+        "move the",
+        "go code",
+        "go module",
+        "go func"
       ],
       "signals": [
         "has_code_block",
@@ -391,7 +393,17 @@
         "find online",
         "latest news",
         "web search",
-        "current version"
+        "current version",
+        "go online",
+        "online",
+        "download",
+        "look online",
+        "search for",
+        "find some",
+        "grab some",
+        "source some",
+        "free sample",
+        "royalty free"
       ],
       "cluster": "P40",
       "fallback": [

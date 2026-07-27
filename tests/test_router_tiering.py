@@ -1,5 +1,6 @@
 """Code prompts must not silently degrade to the easy cluster."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -104,9 +105,31 @@ def test_router_alias_never_selected():
     assert mr._route_detail([{"role": "user", "content": "hello there"}])["model"] != "router"
 
 
+def test_hard_rules_have_no_substring_matched_keywords():
+    """`_keyword_in` only word-bounds keywords that start AND end alphanumeric.
+
+    Anything else is a raw substring match, which on a hard rule is a one-way
+    trip: "go " (for Golang) fired on "go online for crowd noises" and, because
+    difficulty ratchets, pinned the whole session to the hard cluster.
+    """
+    cfg = json.loads((Path(__file__).parent.parent / "configs" / "router_rules.json").read_text())
+    loose = [
+        (r["name"], k)
+        for r in cfg["rules"]
+        if r.get("cluster") == "7900sv"
+        for k in r["keywords"]
+        if not (k[-1:].isalnum() and k[:1].isalnum())
+    ]
+    assert not loose, loose
+
+
 if __name__ == "__main__":
     test_code_prompt_uses_hard_cluster()
     test_hard_cluster_down_uses_declared_fallback_not_later_rule()
     test_stale_default_model_falls_back_to_default_cluster()
+    test_easy_turn_does_not_pin_later_coding_turns()
+    test_easy_only_conversation_still_uses_easy_cluster()
+    test_code_ref_signal_catches_unkeyworded_prompts()
     test_router_alias_never_selected()
+    test_hard_rules_have_no_substring_matched_keywords()
     print("ok")
