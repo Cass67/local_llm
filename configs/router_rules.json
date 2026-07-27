@@ -1,8 +1,9 @@
 {
   "backend_url": "http://127.0.0.1:3100",
-  "default_model": "qwopus3.6-27b-coder-mtp-q5km",
+  "default_model": null,
+  "default_cluster": "7900sv",
   "health_check_interval_s": 10,
-  "enabled": false,
+  "enabled": true,
   "rules": [
     {
       "name": "agent/system/tooling prompts",
@@ -33,7 +34,9 @@
         "fastapi"
       ],
       "cluster": "7900sv",
-      "fallback": []
+      "fallback": [
+        "P40"
+      ]
     },
     {
       "name": "code implementation & features",
@@ -74,11 +77,87 @@
         "web server",
         "web service",
         "http server",
-        "fancy"
+        "fancy",
+        "optimize",
+        "optimise",
+        "performance",
+        "faster",
+        "slow",
+        "memory leak",
+        "clean this up",
+        "cleanup",
+        "tidy",
+        "rename",
+        "extract",
+        "inline",
+        "migrate",
+        "port this",
+        "port it",
+        "stub",
+        "scaffold",
+        "wire up",
+        "hook up",
+        "docstring",
+        "type hint",
+        "type hints",
+        "annotate",
+        "logging",
+        "log statement",
+        "try/except",
+        "error handling",
+        "handle the",
+        "edge case",
+        "null check",
+        "validate",
+        "async",
+        "await",
+        "concurrency",
+        "thread",
+        "goroutine",
+        "regex",
+        "parse",
+        "serialize",
+        "deserialize",
+        "encode",
+        "decode",
+        "schema",
+        "migration",
+        "query",
+        "sql",
+        "css",
+        "html",
+        "helper",
+        "wrapper",
+        "handler",
+        "middleware",
+        "decorator",
+        "sidebar",
+        "modal",
+        "dropdown",
+        "form",
+        "dark mode",
+        "collapsible",
+        "animation",
+        "layout",
+        "responsive",
+        "add support",
+        "make it",
+        "make the",
+        "change the",
+        "update the",
+        "remove the",
+        "delete the",
+        "replace the",
+        "move the"
       ],
-      "signals": ["has_code_block"],
+      "signals": [
+        "has_code_block",
+        "has_code_ref"
+      ],
       "cluster": "7900sv",
-      "fallback": []
+      "fallback": [
+        "P40"
+      ]
     },
     {
       "name": "debugging & fixing",
@@ -99,10 +178,35 @@
         "runner unavailable",
         "failed",
         "stale",
-        "wrong model"
+        "wrong model",
+        "stack trace",
+        "returning null",
+        "returning none",
+        "undefined",
+        "segfault",
+        "panic",
+        "timeout",
+        "race condition",
+        "deadlock",
+        "regression",
+        "flaky",
+        "why is",
+        "why does",
+        "why isn't",
+        "what's wrong",
+        "doesn't work",
+        "isn't working",
+        "unexpected",
+        "hangs",
+        "leaking",
+        "off by one",
+        "wrong output",
+        "wrong result"
       ],
       "cluster": "7900sv",
-      "fallback": []
+      "fallback": [
+        "P40"
+      ]
     },
     {
       "name": "git actions (do it)",
@@ -138,7 +242,9 @@
         "resolve conflict"
       ],
       "cluster": "7900sv",
-      "fallback": []
+      "fallback": [
+        "P40"
+      ]
     },
     {
       "name": "git info & repo lookup",
@@ -160,7 +266,9 @@
         "where is this implemented"
       ],
       "cluster": "7900sv",
-      "fallback": []
+      "fallback": [
+        "P40"
+      ]
     },
     {
       "name": "code review & audit",
@@ -176,10 +284,23 @@
         "look at this",
         "what do you think",
         "over-engineered",
-        "simplify"
+        "simplify",
+        "what does this",
+        "how does this",
+        "explain this",
+        "explain the",
+        "walk me through",
+        "summarize this",
+        "summarise this",
+        "where does",
+        "what is this",
+        "understand",
+        "trace through"
       ],
       "cluster": "7900sv",
-      "fallback": []
+      "fallback": [
+        "P40"
+      ]
     },
     {
       "name": "architecture & design",
@@ -194,10 +315,19 @@
         "should i",
         "trade-off",
         "tradeoff",
-        "strategy"
+        "strategy",
+        "refactor plan",
+        "how should",
+        "what's the best",
+        "options for",
+        "pros and cons",
+        "compare",
+        "alternative"
       ],
       "cluster": "7900sv",
-      "fallback": []
+      "fallback": [
+        "P40"
+      ]
     },
     {
       "name": "testing",
@@ -210,10 +340,17 @@
         "coverage",
         "assertion",
         "pytest",
-        "spec"
+        "spec",
+        "repro",
+        "reproduce",
+        "test case",
+        "fixture",
+        "regression test"
       ],
       "cluster": "7900sv",
-      "fallback": []
+      "fallback": [
+        "P40"
+      ]
     },
     {
       "name": "devops & infrastructure",
@@ -239,7 +376,9 @@
         "nvidia"
       ],
       "cluster": "7900sv",
-      "fallback": []
+      "fallback": [
+        "P40"
+      ]
     },
     {
       "name": "web & internet search",
@@ -255,7 +394,9 @@
         "current version"
       ],
       "cluster": "P40",
-      "fallback": ["7900sv"]
+      "fallback": [
+        "7900sv"
+      ]
     },
     {
       "name": "quick lookup & definitions",
@@ -268,9 +409,14 @@
         "one word answer",
         "yes or no"
       ],
-      "signals": ["is_question", "short_prompt"],
+      "signals": [
+        "is_question",
+        "short_prompt"
+      ],
       "cluster": "P40",
-      "fallback": ["7900sv"]
+      "fallback": [
+        "7900sv"
+      ]
     },
     {
       "name": "shell command syntax",
@@ -288,7 +434,9 @@
         "wget syntax"
       ],
       "cluster": "P40",
-      "fallback": ["7900sv"]
+      "fallback": [
+        "7900sv"
+      ]
     },
     {
       "name": "translation & language",
@@ -304,7 +452,9 @@
         "proofread"
       ],
       "cluster": "P40",
-      "fallback": ["7900sv"]
+      "fallback": [
+        "7900sv"
+      ]
     },
     {
       "name": "math & calculations",
@@ -316,9 +466,13 @@
         "percentage",
         "equation"
       ],
-      "signals": ["has_math"],
+      "signals": [
+        "has_math"
+      ],
       "cluster": "P40",
-      "fallback": ["7900sv"]
+      "fallback": [
+        "7900sv"
+      ]
     },
     {
       "name": "docs & api lookup",
@@ -330,7 +484,9 @@
         "signature of"
       ],
       "cluster": "P40",
-      "fallback": ["7900sv"]
+      "fallback": [
+        "7900sv"
+      ]
     }
   ],
   "cluster_remap": {}
