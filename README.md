@@ -201,7 +201,7 @@ The UI shows a green dot when the runner is live.
 | tensor split | `--tensor-split` |
 | flash attention | `-fa on` |
 | jinja templates | `--jinja` |
-| MTP | `--spec-type draft-mtp` + `--spec-draft-n-*` |
+| speculative decoding | `--spec-type` + `--spec-draft-n-*` / `--spec-ngram-mod-*` |
 | no_mmap | `--no-mmap` |
 | mlock | `--mlock` |
 | no_kv_offload | `--no-kv-offload` |
@@ -310,12 +310,16 @@ Every field a profile can set, exactly as read by `container/backend/runtime.py`
 | `no_cont_batching` | `--no-cont-batching` | Boolean flag. |
 | `prio` | `--prio` | Process scheduling priority. |
 | `no_warmup` | `--no-warmup` | Boolean flag. |
-| `mtp_enabled` | `--spec-type draft-mtp` | Enables multi-token-prediction speculative decoding. See below. |
+| `mtp_enabled` | `--spec-type draft-mtp` | Shorthand: turns on MTP self-speculation when `spec_type` isn't set. See below. |
+| `spec_type` | `--spec-type` | Comma-separated list, e.g. `draft-mtp`, `ngram-mod`, `draft-mtp,ngram-mod`, `draft-dflash`. Composes. |
 | `mtp_draft_model` | `-md <path>` | Explicit draft model path. |
 | `mtp_draft_hf_repo` / `mtp_draft_hf_file` | — | Resolves a draft model from the HF cache when `mtp_draft_model` isn't set directly. |
 | `mtp_draft_n_max` | `--spec-draft-n-max` | |
 | `mtp_draft_n_min` | `--spec-draft-n-min` | |
 | `mtp_draft_p_min` | `--spec-draft-p-min` | |
+| `ngram_mod_n_match` | `--spec-ngram-mod-n-match` | ngram lookup length. Values below 24 trigger a llama.cpp quality warning. |
+| `ngram_mod_n_min` | `--spec-ngram-mod-n-min` | Should track `n_match`; leaving it at 0 costs ~20%. |
+| `ngram_mod_n_max` | `--spec-ngram-mod-n-max` | Max drafted tokens per step. |
 | `temperature` | `--temp` | |
 | `top_p` | `--top-p` | |
 | `top_k` | `--top-k` | |
@@ -336,6 +340,24 @@ Every field a profile can set, exactly as read by `container/backend/runtime.py`
 | `flags` | raw CLI args | Free-text extra flags appended verbatim. Any flag already covered by a promoted field above (`-fa`, `-md`, `--spec-*`, `--parallel`, `--cache-ram`, etc.) is stripped from here automatically so it isn't passed twice. |
 
 **MTP/speculative-decoding note:** the only fields `runtime.py` actually reads are the flat `mtp_*` keys above. A nested `"mtp": {"enabled": true, ...}` object or raw-flag-named keys like `"draft-mtp"`/`"spec-draft-n-max"` are **not recognized** and are silently ignored — some profiles in `configs/profiles.json` currently have this stale shape and have no working MTP despite looking configured. Use the flat `mtp_*` keys for anything that needs to actually take effect.
+
+**Choosing a `spec_type`.** The two mechanisms accelerate different things and compose:
+
+- `ngram-mod` drafts by matching the last `n_match` tokens against the context and proposing what followed. Needs no draft model or MTP head, so it works on any model. Huge on output that echoes the context (file edits, refactors); does nothing for genuinely new text.
+- `draft-mtp` drafts from the model's own hidden state via an MTP head, so it works on unseen output — the only lever that speeds up novel generation.
+
+Measured on a 40B Q4_K_M across two 7900 XTs (decode t/s, edit-echo vs novel prose):
+
+| spec config | echo/edit | novel |
+|---|---|---|
+| none | 17.9 | 18.0 |
+| `ngram-mod` | 113.0 | 17.8 |
+| `draft-mtp` | 29.9 | 19.9 |
+| `draft-mtp,ngram-mod` | 117.5 | 20.7 |
+
+Good defaults: `n_match`/`n_min` 24, `n_max` 86, `mtp_draft_n_max` 2. Leave `mtp_draft_p_min` unset on grafted MTP heads — their confidence isn't calibrated to the host model, and gating on it loses more than it saves. Depth above 2 degrades on grafts.
+
+Two caveats worth knowing before enabling it everywhere. On CUDA the ngram half is not free: a P40 gained 2.6x on edits but lost 6.5% on novel prose, where the Vulkan cards lost nothing. And `--cache-reuse` is silently disabled both by a loaded `mmproj` and by any model whose context can't do KV shifting, so check the startup log for `cache_reuse ... will be disabled` rather than assuming the knob took.
 
 ### Audit
 
