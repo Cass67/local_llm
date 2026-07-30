@@ -46,6 +46,46 @@
           "no_warmup": true
         }
       }
+    },
+    "qwen3.6-27b-fable-fusion-711-uncensored-heretic-nm-dau-neo-max-mtp-gguf-rocm": {
+      "default": "rccl",
+      "profiles": {
+        "rccl": {
+          "batch": 4096,
+          "ngl": 999,
+          "split_mode": "tensor",
+          "tensor_split": "1,1,1",
+          "ubatch": 2048,
+          "visible_devices": "0,1,2",
+          "context": 262144,
+          "reasoning": false,
+          "cache_ram": 16384,
+          "ctx_checkpoints": 8,
+          "checkpoint_min_step": 2048,
+          "timeout": 600,
+          "threads_http": 2,
+          "parallel": 1,
+          "prio": 2,
+          "flash_attention": true,
+          "jinja": true,
+          "mtp_enabled": true,
+          "mtp_draft_n_max": 2,
+          "temperature": 0.7,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0,
+          "repetition_penalty": 1,
+          "presence_penalty": 0,
+          "mmproj": "/models/models--DavidAU--Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF/snapshots/b73a29e861a1922ca7b508790c254c91158ec4bb/mmproj-F16.gguf",
+          "flags": "--image-min-tokens 1024 -fit off",
+          "cache_type_k": "f16",
+          "cache_type_v": "f16",
+          "spec_type": "draft-mtp,ngram-mod",
+          "ngram_mod_n_match": 24,
+          "ngram_mod_n_min": 24,
+          "ngram_mod_n_max": 86
+        }
+      }
     }
   },
   "profiles": {}

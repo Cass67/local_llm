@@ -564,6 +564,8 @@ Each backend is its own multi-stage Docker build under `runner/<backend>/Dockerf
   (override `AMDGPU_TARGETS` for other RDNA/CDNA chips) using the ROCm devel image. RCCL runtime libraries
   are included. `GGML_CUDA_FORCE_CUBLAS=ON` is the default: despite its CUDA name, upstream uses it for HIP
   too, and forced hipBLAS was 2.9× faster than auto/MMQ on pp4096 for the measured Q8 tensor workload.
+  Runner containers receive 1 GiB `/dev/shm`; Docker's 64 MiB default exhausts during larger RCCL
+  communicator setup and silently forces llama.cpp onto slower all-reduce fallbacks.
 - **cuda**: compiles llama.cpp with `-DGGML_CUDA=ON` using Nvidia's `cuda:12.6.3-devel` image. Runtime
   stage uses the matching `cuda:12.6.3-runtime` image.
 

@@ -373,6 +373,34 @@ Artifacts on ubt26:
 This section is the canonical result; the Vulkan and continuous-batching benchmark
 docs link here where their older cross-backend conclusions are superseded.
 
+### Three-card RCCL follow-up
+
+A third RX 7900 XT was added at `09:00.0` behind the PCH's Gen3 x4 root port;
+the original pair remain behind separate Gen3 x8 root ports. The three-card
+profile used tensor split `1,1,1` at the same 92k/ubatch-512 shape.
+
+Initial RCCL startup failed because Docker's default 64 MiB `/dev/shm` was too
+small. `NCCL_DEBUG=INFO` showed ring construction succeeding, then
+`failed to extend /dev/shm/...: No space left on device`. Raising runner
+`ShmSize` to 1 GiB allowed RCCL to initialize and consumed about 216 MiB; no
+butterfly/internal-all-reduce fallback warnings remained.
+
+That did **not** make three-way execution viable. First full requests caused an
+abrupt host reboot before completion, both before and after:
+
+- adding `iommu=pt` (IOMMU default domain changed from translated to passthrough),
+- tuning all three cards to 1900 MHz / -75 mV,
+- capping them at 238/253/238 W, and
+- using the exact forced-hipBLAS cublas image from the successful two-card run.
+
+No amdgpu fault/reset was persisted before either reboot. AMD topology reports
+P2P disabled between every pair; RCCL therefore uses shared-memory/host transport,
+and the third card is additionally separated behind the PCH x4 path and its own
+IOMMU group. **Decision: reject three-card RCCL tensor mode on this topology.**
+Keep `03:00.0` + `06:00.0` as the production RCCL pair and use `09:00.0` as an
+independent lane. The 1 GiB runner shm fix remains correct and required for larger
+RCCL communicators, but does not override the hardware/topology failure.
+
 References: [upstream multi-GPU guide](https://github.com/ggml-org/llama.cpp/blob/master/docs/multi-gpu.md),
 [RCCL](https://github.com/ROCm/rccl), and an example of current RX 7900 XT tensor
 mode immaturity ([#22793](https://github.com/ggml-org/llama.cpp/issues/22793)).
