@@ -43,6 +43,7 @@ def test_runner_launch_resolves_model_path_from_hf_cache(tmp_path):
     ]
     assert create_payload["Image"] == "runner:latest"
     assert create_payload["HostConfig"]["NetworkMode"] == "host"
+    assert create_payload["HostConfig"]["ShmSize"] == 1024 * 1024 * 1024
     assert create_payload["HostConfig"]["Binds"] == [f"{host_models}:/models:rw"]
 
 

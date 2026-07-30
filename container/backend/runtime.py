@@ -19,6 +19,7 @@ class DockerRunnerConfig:
     name: str = "local-llm-runner"
     port: int = 8080
     render_group: str = "991"
+    shm_size: int = 1024 * 1024 * 1024
     socket_path: Path = Path("/var/run/docker.sock")
 
 
@@ -443,6 +444,10 @@ class DockerRunner:
         binds = [f"{self.host_models_dir}:/models:rw"] + spec.binds
         host_config: dict[str, Any] = {
             "NetworkMode": "host",
+            # RCCL uses shared-memory transport when PCIe peer access is unavailable.
+            # Docker's 64 MiB default is too small for three-GPU communicators and
+            # makes llama.cpp silently fall back to its slow butterfly all-reduce.
+            "ShmSize": self.config.shm_size,
             "Binds": binds,
             "Devices": [
                 {"PathOnHost": device, "PathInContainer": device, "CgroupPermissions": "rwm"}
