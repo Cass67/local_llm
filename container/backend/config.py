@@ -14,7 +14,6 @@ RUNNER_IMAGES = {
     "rocm": os.environ.get("RUNNER_IMAGE_ROCM", "local-llm-runner-rocm:latest"),
     "rocmfp4": os.environ.get("RUNNER_IMAGE_ROCMFP4", "local-llm-runner-rocmfp4:latest"),
     "cuda": os.environ.get("RUNNER_IMAGE_CUDA", "local-llm-runner-cuda:latest"),
-    "laguna": os.environ.get("RUNNER_IMAGE_LAGUNA", "local-llm-runner-laguna:latest"),
 }
 
 

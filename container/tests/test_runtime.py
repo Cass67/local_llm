@@ -161,16 +161,16 @@ def test_build_runner_container_spec_uses_project_owned_runner_name_and_gpu_moun
     assert spec.command[:3] == ["llama-server", "--port", "8080"]
 
 
-def test_build_runner_container_spec_pins_radeon_icd_for_amd_only_laguna():
-    # AMD-only laguna cluster (P40 dropped): visible_devices can be empty when the
-    # inventory has no vulkan_index. The radeon ICD must still be pinned so the image's
-    # non-functional NVIDIA ICD / lavapipe can't perturb GGML device enumeration.
+def test_build_runner_container_spec_pins_radeon_icd_for_amd_only_vulkan():
+    # AMD-only vulkan cluster: visible_devices can be empty when the inventory has no
+    # vulkan_index. The radeon ICD must still be pinned so the image's non-functional
+    # NVIDIA ICD / lavapipe can't perturb GGML device enumeration.
     metadata = {
-        "alias": "laguna-s-2.1-iq2m",
-        "model_path": "/models/laguna.gguf",
-        "config": {"backend": "laguna", "visible_devices": ""},
+        "alias": "qwen3.6-27b-fable-fusion",
+        "model_path": "/models/fable.gguf",
+        "config": {"backend": "vulkan", "visible_devices": ""},
     }
-    config = DockerRunnerConfig(image="local-llm-runner-laguna:latest", port=8085)
+    config = DockerRunnerConfig(image="local-llm-runner-vulkan:latest", port=8085)
 
     spec = build_runner_container_spec(metadata, config)
 

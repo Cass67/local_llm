@@ -152,7 +152,7 @@
 					<label>Cache V<input bind:value={form.cache_type_v} /></label>
 					<label>Ctx Shift<input bind:value={form.ctx_shift} /></label>
 					<label>Reasoning<select bind:value={form.reasoning}><option value="on">on</option><option value="off">off</option></select></label>
-					<label>Backend<select bind:value={form.backend}><option value="rocm">rocm</option><option value="rocmfp4">rocmfp4</option><option value="vulkan">vulkan</option><option value="cuda">cuda</option><option value="laguna">laguna</option></select></label>
+					<label>Backend<select bind:value={form.backend}><option value="rocm">rocm</option><option value="rocmfp4">rocmfp4</option><option value="vulkan">vulkan</option><option value="cuda">cuda</option></select></label>
 					<label>Visible Devices<input bind:value={form.visible_devices} /></label>
 					<label>Split Mode<input bind:value={form.split_mode} /></label>
 					<label>Tensor Split<input bind:value={form.tensor_split} /></label>
@@ -167,7 +167,7 @@
 						</label>
 						{#if form.mtp_enabled === "on"}
 							<div class="form-grid mtp-grid">
-								<label>Spec type<select bind:value={form.spec_type}><option value="draft-mtp">draft-mtp</option><option value="draft-dflash">draft-dflash (Laguna)</option></select></label>
+								<label>Spec type<select bind:value={form.spec_type}><option value="draft-mtp">draft-mtp</option><option value="draft-dflash">draft-dflash</option></select></label>
 								<label>Draft max<input type="number" bind:value={form.mtp_draft_n_max} /></label>
 								<label>Draft min<input type="number" bind:value={form.mtp_draft_n_min} /></label>
 								<label>P min<input type="number" step="0.01" bind:value={form.mtp_draft_p_min} /></label>

@@ -122,6 +122,9 @@ repos:
           "$@"; else bandit -q "$@"; fi' --
         language: system
         files: \.pyi?$
+        # B101 (assert_used) fires on every pytest assert. Bandit is for shipped
+        # code; ruff's S rules already cover the same ground there.
+        exclude: (^|/)tests?/|(^|/)test_[^/]*\.py$
       - id: radon-cc
         name: radon complexity
         entry: >-

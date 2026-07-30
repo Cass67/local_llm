@@ -14,9 +14,7 @@ from .gpu_inventory import GpuInfo
 
 # rocmfp4: same AMD/HIP device wiring as rocm, but the runner image is built from
 # the ROCmFPX fork (ROCmFP4 weight quants + MTP self-speculation).
-# laguna: Vulkan device wiring (portable across AMD+NVIDIA), image built from
-# poolside's llama.cpp fork for Laguna models + DFlash speculative decoding.
-_VALID_BACKENDS = {"rocm", "rocmfp4", "vulkan", "cuda", "laguna"}
+_VALID_BACKENDS = {"rocm", "rocmfp4", "vulkan", "cuda"}
 _SINGLE_VENDOR_BACKENDS = {"rocm": "amd", "rocmfp4": "amd", "cuda": "nvidia"}
 
 # Base port for cluster-allocated runner ports (8080 + cluster slot)
@@ -148,11 +146,7 @@ def delete_cluster(cluster_id: str) -> None:
 def visible_devices_for(cluster: ClusterDef, inventory: list[GpuInfo]) -> str:
     """Return comma-separated backend device indices for this cluster."""
     inv_map = {g.pci_id: g for g in inventory}
-    cluster_vendors = {inv_map[p].vendor for p in cluster.gpu_pci_ids if p in inv_map}
-    is_mixed = cluster.backend == "mixed_vulkan" or (
-        cluster.backend == "laguna" and {"amd", "nvidia"} <= cluster_vendors
-    )
-    if is_mixed:
+    if cluster.backend == "mixed_vulkan":
         # Container enumerates NVIDIA (via nvidia_egl ICD) before AMD (via radeon ICD).
         # Assign sequential indices: NVIDIA cards first, then AMD by rocm_index.
         nvidia = sorted(
@@ -173,7 +167,7 @@ def visible_devices_for(cluster: ClusterDef, inventory: list[GpuInfo]) -> str:
             idx = gpu.rocm_index
         elif cluster.backend == "cuda":
             idx = gpu.cuda_index
-        else:  # vulkan / laguna
+        else:  # vulkan
             idx = gpu.vulkan_index
         if idx is not None:
             indices.append(idx)
