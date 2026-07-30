@@ -242,6 +242,160 @@ def collect_nvidia_gpus() -> list[dict[str, Any]]:
     return gpus
 
 
+# ── per-runner GPU engine attribution (DRM fdinfo) ───────────────────────────
+# rocm-smi/amd-smi only report whole-card busy%, which cannot tell a layer-split
+# pipeline (GPUs take turns) from a tensor split (GPUs overlap): both look like
+# two half-busy cards. DRM fdinfo exposes cumulative per-client engine
+# nanoseconds per PCI device, so deltas give real per-GPU occupancy plus an
+# aggregate "GPU-equivalents" figure — if that stays near 1.0 on N GPUs, the
+# work is serialized and adding GPUs bought nothing.
+
+FDINFO_PROBE = r'tr "\0" " " < /proc/1/cmdline; echo; cat /proc/1/fdinfo/* 2>/dev/null'
+
+
+def _kib_to_bytes(value: str | None) -> int:
+    if not value:
+        return 0
+    parts = value.split()
+    return int(parts[0]) * 1024 if parts and parts[0].isdigit() else 0
+
+
+def parse_fdinfo(text: str) -> dict[str, dict[str, Any]]:
+    """Aggregate DRM fdinfo records per PCI device, deduped by client id."""
+    devices: dict[str, dict[str, Any]] = {}
+    seen: set[tuple[str, str]] = set()
+
+    def flush(record: dict[str, str]) -> None:
+        pdev = record.get("drm-pdev")
+        if not pdev:
+            return
+        key = (pdev, record.get("drm-client-id", ""))
+        if key in seen:  # every fd of a client repeats the same counters
+            return
+        seen.add(key)
+        device = devices.setdefault(pdev, {"engines": {}, "vram": 0, "clients": 0})
+        device["clients"] += 1
+        device["vram"] += _kib_to_bytes(record.get("drm-memory-vram"))
+        for name, value in record.items():
+            if not name.startswith("drm-engine-"):
+                continue
+            parts = value.split()
+            if not parts or not parts[0].isdigit():
+                continue
+            engine = name[len("drm-engine-"):]
+            device["engines"][engine] = device["engines"].get(engine, 0) + int(parts[0])
+
+    record: dict[str, str] = {}
+    for line in text.splitlines():
+        key, separator, value = line.partition(":")
+        if not separator:
+            continue
+        key = key.strip()
+        if key == "pos":  # first line of each fdinfo file
+            flush(record)
+            record = {}
+        record[key] = value.strip()
+    flush(record)
+    return devices
+
+
+def parse_split_config(cmdline: str) -> dict[str, str | None]:
+    args = cmdline.split()
+
+    def flag(*names: str) -> str | None:
+        for name in names:
+            if name in args:
+                index = args.index(name)
+                if index + 1 < len(args):
+                    return args[index + 1]
+        return None
+
+    return {
+        "split_mode": flag("--split-mode", "-sm") or "layer",
+        "tensor_split": flag("--tensor-split", "-ts"),
+        "ngl": flag("-ngl", "--n-gpu-layers", "--gpu-layers"),
+        "parallel": flag("--parallel", "-np"),
+    }
+
+
+def collect_container_engines(container: str) -> dict[str, Any]:
+    output = run_command(["docker", "exec", container, "sh", "-c", FDINFO_PROBE], timeout=3.0)
+    if not output:
+        return {}
+    cmdline, _, fdinfo = output.partition("\n")
+    devices = parse_fdinfo(fdinfo)
+    if not devices:
+        return {}
+    return {"split": parse_split_config(cmdline), "devices": devices}
+
+
+class EngineTracker:
+    def __init__(self) -> None:
+        self.previous: dict[str, tuple[dict[str, int], float]] = {}
+
+    def update(
+        self, devices: dict[str, dict[str, Any]], now: float | None = None
+    ) -> dict[str, dict[str, Any]]:
+        sample_time = time.monotonic() if now is None else now
+        current: dict[str, tuple[dict[str, int], float]] = {}
+        result: dict[str, dict[str, Any]] = {}
+        for pdev, data in devices.items():
+            engines: dict[str, int] = dict(data["engines"])
+            current[pdev] = (engines, sample_time)
+            entry: dict[str, Any] = {
+                "vram": data["vram"],
+                "clients": data["clients"],
+                "busy": None,
+                "engine_busy": {},
+            }
+            previous = self.previous.get(pdev)
+            if previous:
+                previous_engines, previous_time = previous
+                elapsed = sample_time - previous_time
+                if elapsed > 0:
+                    per_engine: dict[str, float] = {}
+                    for name, ns in engines.items():
+                        delta = ns - previous_engines.get(name, ns)
+                        if delta > 0:
+                            per_engine[name] = clamp(delta / (elapsed * 1e9) * 100.0, 0.0, 100.0)
+                    entry["engine_busy"] = per_engine
+                    entry["busy"] = clamp(sum(per_engine.values()), 0.0, 100.0)
+            result[pdev] = entry
+        self.previous = current
+        return result
+
+
+def measure_runner_engines(
+    container: str, engine_trackers: dict[str, EngineTracker]
+) -> dict[str, Any]:
+    engines = collect_container_engines(container)
+    if not engines:
+        return {}
+    tracker = engine_trackers.setdefault(container, EngineTracker())
+    measured = tracker.update(engines["devices"])
+    if all(entry["busy"] is None for entry in measured.values()):
+        # First frame has no baseline — take a short second sample.
+        time.sleep(0.25)
+        second = collect_container_engines(container)
+        if second:
+            measured = tracker.update(second["devices"])
+    return {"split": engines["split"], "engines": measured}
+
+
+def parallelism_verdict(busy_values: list[float], split_mode: str | None) -> str:
+    """Classify multi-GPU behaviour from aggregate engine occupancy."""
+    count = len(busy_values)
+    aggregate = sum(busy_values) / 100.0
+    if count < 2 or aggregate < 0.05:
+        return ""
+    if aggregate <= 1.15:
+        mode = f" ({split_mode})" if split_mode else ""
+        return f"serialized: 1 GPU of work over {count}{mode}"
+    if aggregate >= count * 0.75:
+        return "concurrent"
+    return "partial overlap"
+
+
 def collect_gpu(drm_root: Path = DEFAULT_DRM_ROOT) -> dict[str, Any]:
     gpus = [*collect_amd_gpus(drm_root), *collect_nvidia_gpus()]
     if gpus:
@@ -608,8 +762,11 @@ def collect_snapshot(
     state_dir: Path,
     socket_path: Path,
     tps_trackers: dict[int, TpsTracker],
+    engine_trackers: dict[str, EngineTracker] | None = None,
 ) -> dict[str, Any]:
     runners = collect_runners(state_dir, socket_path)
+    if engine_trackers is None:
+        engine_trackers = {}
 
     # Per-runner API + TPS (only for running containers)
     for runner in runners:
@@ -618,6 +775,8 @@ def collect_snapshot(
             if port not in tps_trackers:
                 tps_trackers[port] = TpsTracker()
             runner["api"] = collect_runner_api(port, tps_trackers[port])
+            if runner["container"]:
+                runner.update(measure_runner_engines(runner["container"], engine_trackers))
         else:
             runner["api"] = {"health": "stopped", "models": "n/a", "tps": {}}
 
@@ -675,7 +834,7 @@ def line_style(line: str) -> str:
         return "header"
     if line.startswith("+-- "):
         return "panel"
-    if any(word in lower for word in ("unreachable", "error", "failed", "stopped")):
+    if any(word in lower for word in ("unreachable", "error", "failed", "stopped", "serialized")):
         return "bad"
     if lower.startswith("health:") or lower.startswith("models:") or lower.startswith("  health:"):
         return "good"
@@ -860,6 +1019,57 @@ def render_gpu_device(device: dict[str, Any], runners: list[dict[str, Any]]) -> 
     ]
 
 
+def render_parallelism(runners: list[dict[str, Any]], gpus: list[dict[str, Any]]) -> list[str]:
+    vram_totals = {str(gpu.get("pci_id")): gpu.get("vram_total") for gpu in gpus}
+    lines: list[str] = []
+    for runner in runners:
+        engines: dict[str, dict[str, Any]] = runner.get("engines") or {}
+        if not engines:
+            continue
+        if lines:
+            lines.append("")
+        split = runner.get("split") or {}
+        name = runner.get("cluster_name") or runner.get("cluster_id") or "?"
+        head = f"  [{name}] split-mode {split.get('split_mode') or '?'}"
+        if split.get("tensor_split"):
+            head += f"  -ts {split['tensor_split']}"
+        if split.get("ngl"):
+            head += f"  ngl {split['ngl']}"
+        if split.get("parallel"):
+            head += f"  slots {split['parallel']}"
+        lines.append(head)
+
+        busy_values: list[float] = []
+        for pdev in sorted(engines):
+            entry = engines[pdev]
+            busy = entry.get("busy")
+            if busy is not None:
+                busy_values.append(float(busy))
+            vram = entry.get("vram") or 0
+            total = vram_totals.get(pdev)
+            share = f" ({vram / total * 100:.0f}% of card)" if total else ""
+            engine_busy: dict[str, float] = entry.get("engine_busy") or {}
+            hot = [f"{k} {v:.0f}" for k, v in sorted(engine_busy.items()) if v >= 1.0]
+            queues = f"  queues {' '.join(hot)}" if len(hot) > 1 else ""
+            busy_text = "n/a" if busy is None else f"{busy:.1f}%"
+            lines.append(
+                f"    {pdev}  engine {busy_text:>6} {bar(busy, 16)}"
+                f"  vram {format_bytes(vram)}{share}{queues}"
+            )
+
+        if len(busy_values) >= 2:
+            aggregate = sum(busy_values) / 100.0
+            count = len(busy_values)
+            verdict = parallelism_verdict(busy_values, split.get("split_mode"))
+            spread = max(busy_values) - min(busy_values)
+            lines.append(
+                f"    aggregate {aggregate:.2f} / {count}.00 GPU-equiv"
+                f" ({aggregate / count * 100:.0f}% util)  imbalance {spread:.1f}pt"
+                + (f"  {verdict}" if verdict else "")
+            )
+    return lines
+
+
 def render_runner(runner: dict[str, Any]) -> list[str]:
     name = runner.get("cluster_name") or runner.get("cluster_id") or "?"
     model = runner.get("model") or "unknown"
@@ -914,6 +1124,11 @@ def render_snapshot(snapshot: dict[str, Any], width: int | None = None, height: 
             gpu_lines.extend(render_gpu_device(device, runners))
         lines.extend(section("GPU", gpu_lines or ["  no GPU metrics found"], width))
 
+    # Split / parallelism section (per-runner engine time, from DRM fdinfo)
+    parallelism_lines = render_parallelism(runners, gpu.get("gpus") or [])
+    if parallelism_lines:
+        lines.extend(section("Split / parallelism", parallelism_lines, width))
+
     # Runners section
     runner_lines: list[str] = []
     if runners:
@@ -953,12 +1168,15 @@ def draw(stdscr: Any, args: argparse.Namespace) -> None:
     stdscr.nodelay(True)
     stdscr.timeout(250)
     tps_trackers: dict[int, TpsTracker] = {}
+    engine_trackers: dict[str, EngineTracker] = {}
     last_refresh = 0.0
     output = ""
     while True:
         now = time.monotonic()
         if now - last_refresh >= args.interval or not output:
-            snapshot = collect_snapshot(args.drm_root, args.state_dir, args.docker_socket, tps_trackers)
+            snapshot = collect_snapshot(
+                args.drm_root, args.state_dir, args.docker_socket, tps_trackers, engine_trackers
+            )
             snapshot["state_dir"] = str(args.state_dir)
             height, width = stdscr.getmaxyx()
             output = render_snapshot(snapshot, width=width, height=height)

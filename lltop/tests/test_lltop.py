@@ -102,7 +102,10 @@ class LltopTests(unittest.TestCase):
 
     def test_summarize_iostat_compacts_long_device_row(self):
         lltop = load_lltop()
-        row = "nvme0n1 8.04 610.05 5.11 38.87 0.15 75.92 9.43 778.72 16.79 64.03 9.77 82.57 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00"
+        row = (
+            "nvme0n1 8.04 610.05 5.11 38.87 0.15 75.92 9.43 778.72 16.79 64.03 9.77 82.57 "
+            "0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00"
+        )
 
         summary = lltop.summarize_iostat(row)
 
@@ -139,7 +142,10 @@ class LltopTests(unittest.TestCase):
 
     def test_parse_slots_extracts_decoded_counts(self):
         lltop = load_lltop()
-        body = '[{"id":0,"is_processing":true,"id_task":7,"next_token":[{"n_decoded":42}]},{"id":1,"is_processing":false,"id_task":8,"next_token":[{"n_decoded":3}]}]'
+        body = (
+            '[{"id":0,"is_processing":true,"id_task":7,"next_token":[{"n_decoded":42}]},'
+            '{"id":1,"is_processing":false,"id_task":8,"next_token":[{"n_decoded":3}]}]'
+        )
 
         self.assertEqual(
             lltop.parse_slots(body),
@@ -403,7 +409,10 @@ class LltopTests(unittest.TestCase):
         snapshot["system"].update(
             {
                 "cpu_cores": [(str(index), 10 * index) for index in range(4)],
-                "mem": "Mem:            61Gi       8.2Gi       7.0Gi       123Mi        46Gi        53Gi",
+                "mem": (
+                    "Mem:            61Gi       8.2Gi       7.0Gi       123Mi"
+                    "        46Gi        53Gi"
+                ),
                 "swap": "Swap: 8.0Gi 811Mi 7.2Gi",
                 "vmstat": "r 1 b 0 free 1 KiB in 2 cs 3 cpu 4u/5s/91i",
                 "iostat": "nvme0n1 r/s 1 w/s 2 read 3 KiB/s write 4 KiB/s util 5%",
@@ -437,6 +446,103 @@ class LltopTests(unittest.TestCase):
         self.assertIn("junction", output)
         self.assertIn("Fan 30%", output)
         self.assertIn("900 RPM", output)
+
+    def fdinfo_text(self, client_id, pdev, gfx_ns, compute_ns, vram_kib):
+        record = (
+            "pos:\t0\n"
+            "flags:\t02100002\n"
+            "drm-driver:\tamdgpu\n"
+            f"drm-client-id:\t{client_id}\n"
+            f"drm-pdev:\t{pdev}\n"
+            f"drm-memory-vram:\t{vram_kib} KiB\n"
+            f"drm-engine-gfx:\t{gfx_ns} ns\n"
+            f"drm-engine-compute:\t{compute_ns} ns\n"
+        )
+        return record * 2  # every fd of a client repeats the counters
+
+    def test_parse_fdinfo_dedupes_clients_and_sums_per_device(self):
+        lltop = load_lltop()
+        text = self.fdinfo_text(608, "0000:03:00.0", 100, 900, 17825792) + self.fdinfo_text(
+            609, "0000:06:00.0", 50, 450, 17301504
+        )
+
+        devices = lltop.parse_fdinfo(text)
+
+        self.assertEqual(sorted(devices), ["0000:03:00.0", "0000:06:00.0"])
+        self.assertEqual(devices["0000:03:00.0"]["clients"], 1)
+        self.assertEqual(devices["0000:03:00.0"]["engines"], {"gfx": 100, "compute": 900})
+        self.assertEqual(devices["0000:03:00.0"]["vram"], 17825792 * 1024)
+
+    def test_engine_tracker_converts_ns_deltas_to_percent(self):
+        lltop = load_lltop()
+        tracker = lltop.EngineTracker()
+        first = lltop.parse_fdinfo(self.fdinfo_text(1, "0000:03:00.0", 0, 0, 1024))
+        second = lltop.parse_fdinfo(
+            self.fdinfo_text(1, "0000:03:00.0", 100_000_000, 300_000_000, 1024)
+        )
+
+        self.assertIsNone(tracker.update(first, now=10.0)["0000:03:00.0"]["busy"])
+        measured = tracker.update(second, now=11.0)["0000:03:00.0"]
+
+        self.assertAlmostEqual(measured["busy"], 40.0, places=1)
+        self.assertAlmostEqual(measured["engine_busy"]["compute"], 30.0, places=1)
+
+    def test_parallelism_verdict_flags_layer_split_as_serialized(self):
+        lltop = load_lltop()
+
+        self.assertIn("serialized", lltop.parallelism_verdict([42.9, 49.8], "layer"))
+        self.assertIn("concurrent", lltop.parallelism_verdict([88.0, 91.0], "row"))
+        self.assertEqual(lltop.parallelism_verdict([60.0, 70.0], "row"), "partial overlap")
+        self.assertEqual(lltop.parallelism_verdict([50.0], "layer"), "")
+        self.assertEqual(lltop.parallelism_verdict([0.0, 0.0], "layer"), "")
+
+    def test_parse_split_config_reads_llama_server_flags(self):
+        lltop = load_lltop()
+
+        split = lltop.parse_split_config(
+            "llama-server --port 8081 -ngl 999 --split-mode layer "
+            "--tensor-split 1,0.92 --parallel 1"
+        )
+
+        self.assertEqual(split["split_mode"], "layer")
+        self.assertEqual(split["tensor_split"], "1,0.92")
+        self.assertEqual(split["ngl"], "999")
+        self.assertEqual(split["parallel"], "1")
+
+    def test_parallelism_section_shows_per_gpu_engine_time(self):
+        lltop = load_lltop()
+        snapshot = self.sample_snapshot()
+        snapshot["gpu"]["gpus"][0]["pci_id"] = "0000:03:00.0"
+        snapshot["runners"][0]["split"] = {
+            "split_mode": "layer",
+            "tensor_split": "1,0.92",
+            "ngl": "999",
+            "parallel": "1",
+        }
+        snapshot["runners"][0]["engines"] = {
+            "0000:03:00.0": {
+                "vram": 18_253_611_008,
+                "clients": 1,
+                "busy": 42.9,
+                "engine_busy": {"compute": 42.7, "gfx": 0.2},
+            },
+            "0000:06:00.0": {
+                "vram": 18_431_000_000,
+                "clients": 1,
+                "busy": 49.8,
+                "engine_busy": {"compute": 49.8},
+            },
+        }
+
+        output = lltop.render_snapshot(snapshot, width=140, height=60)
+
+        self.assertIn("+-- Split / parallelism ", output)
+        self.assertIn("split-mode layer", output)
+        self.assertIn("-ts 1,0.92", output)
+        self.assertIn("engine  42.9%", output)
+        self.assertIn("0.93 / 2.00 GPU-equiv", output)
+        self.assertIn("serialized", output)
+        self.assertIn("85% of card", output)
 
     def test_read_json_dir_returns_empty_for_missing_dir(self):
         lltop = load_lltop()
