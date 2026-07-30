@@ -40,7 +40,7 @@ async def test_v1_models_lists_only_running_instances(temp_state):
 
 
 @pytest.mark.asyncio
-async def test_v1_models_empty_when_nothing_running(temp_state):
+async def test_v1_models_only_router_sentinel_when_nothing_running(temp_state):
     _ = temp_state
     from backend.main import app
 
@@ -50,4 +50,5 @@ async def test_v1_models_empty_when_nothing_running(temp_state):
             response = await client.get("/v1/models")
 
     assert response.status_code == 200
-    assert response.json()["data"] == []
+    # The router sentinel is always advertised; with no runners it is the only entry.
+    assert response.json()["data"] == [{"id": "router", "object": "model", "owned_by": "local_llm"}]

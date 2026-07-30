@@ -8,12 +8,27 @@ from backend.main import app
 from fastapi.testclient import TestClient
 
 benchmark = import_module("backend.routes.benchmark")
+terminal_bench = import_module("backend.benchmarks.terminal_bench")
+swe_bench = import_module("backend.benchmarks.swe_bench")
+
+
+def _isolate_state(tmp_path: Path, monkeypatch):
+    """Redirect every run-output path at tmp_path.
+
+    The benchmark modules derive _RUNS_DIR from _STATE_DIR at import time, so
+    patching config.RUNS_DIR alone leaves them writing to the real /state.
+    """
+    monkeypatch.setattr(config, "RUNS_DIR", tmp_path)
+    monkeypatch.setattr(terminal_bench, "_RUNS_DIR", tmp_path / "terminal_bench")
+    monkeypatch.setattr(swe_bench, "_RUNS_DIR", tmp_path / "swe_bench")
+    monkeypatch.setitem(benchmark._LOG_DIRS, "terminal-bench", tmp_path / "terminal_bench")
+    monkeypatch.setitem(benchmark._LOG_DIRS, "swe-bench", tmp_path / "swe_bench")
+    benchmark._store.cache_clear()
 
 
 def test_list_benchmark_types(tmp_path: Path, monkeypatch):
     """Test that benchmark types are listed correctly."""
-    monkeypatch.setattr(config, "RUNS_DIR", tmp_path)
-    benchmark._store.cache_clear()
+    _isolate_state(tmp_path, monkeypatch)
 
     client = TestClient(app)
     response = client.get("/api/local-llm/benchmark/types")
@@ -29,8 +44,7 @@ def test_list_benchmark_types(tmp_path: Path, monkeypatch):
 
 def test_run_benchmark_type(tmp_path: Path, monkeypatch):
     """Test running a benchmark by type."""
-    monkeypatch.setattr(config, "RUNS_DIR", tmp_path)
-    benchmark._store.cache_clear()
+    _isolate_state(tmp_path, monkeypatch)
 
     client = TestClient(app)
 
