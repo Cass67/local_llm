@@ -113,6 +113,20 @@ done
 
 These were pre-existing in the live tune script before the P40 Gen2 change.
 
+### RCCL load and clock finding
+
+The first uncapped two-card ROCm/RCCL tensor request hard-reset the host at roughly
+488 W combined GPU socket power and ~2.9 GHz. With the persisted 1900 MHz ceiling
+restored, the repeated workload was stable, peaked near 306 W combined, and
+observed about 1.995 GHz. No higher clock is needed for the accepted performance:
+forcing hipBLAS, not clocking, reduced the full 92k request from 35.10 s to
+18.03–18.64 s.
+
+Keep telemetry running for new tensor shapes and stop tests that exceed the proven
+power envelope. The 230 W cap attempted during diagnosis is unsupported; firmware
+minimums are 238 W and 253 W. Full performance and VRAM results:
+[ROCm/RCCL tensor + hipBLAS](multi-gpu-parallelism-findings-2026-07-30.md#local-rccl-result).
+
 ## Rollback
 
 Backups currently known on `ubt26`:
@@ -121,6 +135,7 @@ Backups currently known on `ubt26`:
 /usr/local/sbin/ubt26-fan-tune.bak.20260719-000130  # before P40 125 W default
 /usr/local/sbin/ubt26-fan-tune.bak.20260719-003543  # before adding P40 Gen2 retrain
 /usr/local/sbin/ubt26-fan-tune.bak.20260722-171027-p40-ecc-off  # before adding the ECC note
+/usr/local/sbin/ubt26-fan-tune.bak.20260730-143651-pre-1900-restore  # before restoring 1900 MHz
 ```
 
 Re-apply the old Gen2 workaround if needed:
