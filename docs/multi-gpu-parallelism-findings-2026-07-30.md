@@ -256,8 +256,8 @@ ubt26-specific constraints and their resolution:
 - Tensor mode cannot auto-fit and requires f16/bf16 KV. Manual fitting proved the
   production Q8 model fits at 92,160 context; ubatch, not context alone, determines
   safe request-time headroom.
-- Build space was reclaimed, then a pinned ROCm 7.2/RCCL 2.27.7 image was built
-  with `-DGGML_HIP_RCCL=ON`.
+- Build space was reclaimed, then a ROCm 7.2/RCCL 2.27.7 image was built with
+  `-DGGML_HIP_RCCL=ON`.
 - The Vulkan TP work in PR #25051 remains draft. Its AMD direct-DMA path regressed
   badly and was removed; do not revive the local Vulkan peer-copy patches.
 
@@ -268,7 +268,11 @@ stability, VRAM headroom, power, and correctness. The acceptance threshold was
 
 ### Local RCCL result
 
-Built llama.cpp `9ebfc3a` with ROCm 7.2 and RCCL 2.27.7. The production Q8
+Built llama.cpp `9ebfc3a` with ROCm 7.2 and RCCL 2.27.7. That sha was pinned in
+`runner/rocm/Dockerfile` on the belief that an earlier llama.cpp was faster; that
+finding did not hold up, so the pin was removed and the ROCm runner tracks
+`master` like the Vulkan and CUDA runners. The sha below is only what these
+numbers were measured on. The production Q8
 model fit at 92,160 context with f16 KV, MTP+ngram, and mmproj: 19.29/18.15 GiB
 VRAM used. RCCL initialized both cards correctly.
 
@@ -337,11 +341,25 @@ headroom is rejected; ub2048 at 92k died during the request. Keep Vulkan
 fallback warning because that context is single-device; target-model tensor RCCL
 continues to operate.
 
+### KV cache must stay f16 under RCCL
+
+The `rccl` profile runs `--cache-type-k f16 --cache-type-v f16`, and that is not
+an oversight carried over from benchmarking — tensor split + RCCL requires it.
+Do not copy the q8_0 KV tuning from the Vulkan `balanced` profile, which uses
+`split_mode: layer` and is free to quantize. The cost is VRAM: f16 KV at 92,160
+context is what puts the pair at 19.29/18.15 GiB, so there is no headroom to
+raise context without dropping back to layer split.
+
+This bit once already: the UI opened on `balanced` (q8_0 KV, layer split) while
+the live RCCL runner was on `rccl` (f16 KV, tensor split), which reads as a
+config drift bug but is just two profiles in one family. The family default is
+now `rccl` so the UI opens on the profile that is actually serving.
+
 Active deployment:
 
 - image: `local-llm-runner-rocm:latest` (same image as experimental `:cublas`)
 - cluster: `7900srccl`, ROCm, port 8086
-- profile: `rccl`; Vulkan `balanced` retained
+- profile: `rccl` (family default); Vulkan `balanced` retained
 - router remap: `7900sv` → `7900srccl`
 - tuning: 1900 MHz / -75 mV / 238+253 W
 
