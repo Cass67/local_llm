@@ -3,6 +3,7 @@
 import json
 from unittest.mock import patch
 
+import backend.routes.chat as chat_routes
 import pytest
 from backend.main import app
 from httpx import ASGITransport, AsyncClient, Response
@@ -20,7 +21,9 @@ async def test_chat_proxy_strips_provider_prefix_from_model(tmp_path, monkeypatc
     class FakeUpstreamClient:
         def __init__(self, *args, **kwargs):
             assert args == ()
-            assert kwargs == {"timeout": 300.0}
+            # Incidental to this test: assert the proxy passes its own configured
+            # timeout, not a literal, so tuning _PROXY_TIMEOUT does not break this.
+            assert kwargs == {"timeout": chat_routes._PROXY_TIMEOUT}
 
         async def __aenter__(self):
             return self

@@ -26,4 +26,5 @@ async def test_v1_models_lists_active_runners_in_order(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     ids = [m["id"] for m in response.json()["data"]]
-    assert ids == ["qwopus", "gemma"]
+    # "router" is the always-present sentinel, listed before any real runner.
+    assert ids == ["router", "qwopus", "gemma"]

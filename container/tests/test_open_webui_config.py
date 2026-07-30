@@ -27,7 +27,8 @@ def test_compose_defines_open_webui_chat_service():
     assert service["network_mode"] == "host"
     assert any("/app/backend/data" in mount for mount in service["volumes"])
     env = service["environment"]
-    assert env["OPENAI_API_BASE_URL"] == "http://127.0.0.1:3100/v1"
+    # OpenWebUI points at the keyword router (:3200), not the mgmt API (:3100).
+    assert env["OPENAI_API_BASE_URL"] == "http://127.0.0.1:3200/v1"
     assert env["WEBUI_AUTH"] == "False"
     assert env["WEBUI_URL"] == "/chat/"
     assert env["LOCAL_LLM_BACK_URL"] == "/ui/"

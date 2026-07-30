@@ -5,7 +5,7 @@ import json
 import time
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
 from .. import active_runners, config, tracing
@@ -30,7 +30,7 @@ def _as_thinking_bool(v: object) -> bool | None:
     return None
 
 
-def _resolve_thinking(payload: dict) -> bool | None:
+def _resolve_thinking(payload: dict) -> bool | None:  # noqa: C901  # pre-existing
     """Reduce whatever thinking signal a client sent (any harness format) to on/off.
 
     Returns None when the request carries no thinking signal at all, so the caller
@@ -91,6 +91,27 @@ def _prepare_runner_payload(body: bytes) -> bytes:
             changed = True
 
     return json.dumps(payload).encode("utf-8") if changed else body
+
+
+async def _preopen_stream(body: bytes, headers: dict, generation) -> tuple:
+    """Open the upstream stream before the response starts.
+
+    Once StreamingResponse begins emitting, the status is fixed at 200, so a dead
+    runner would reach the client as an empty 200 stream rather than an error.
+    Connecting here keeps a 503 possible. Not usable on the reload path, which is
+    already streaming keep-alives while the model loads.
+    """
+    client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT)
+    ctx = client.stream(
+        "POST", f"{_resolve_runner_url(body)}/chat/completions", content=body, headers=headers
+    )
+    try:
+        upstream = await ctx.__aenter__()
+    except httpx.HTTPError:
+        await client.aclose()
+        tracing.close_generation(generation, "", error="runner unavailable")
+        raise HTTPException(503, "runner unavailable") from None
+    return client, ctx, upstream
 
 
 def _is_stream_request(body: bytes) -> bool:
@@ -154,7 +175,7 @@ def _record_metrics(body: bytes, response_body: bytes) -> None:
     append_chat_metric(metrics)
 
 
-async def proxy_chat_completions(request: Request):
+async def proxy_chat_completions(request: Request):  # noqa: C901  # pre-existing
     """Proxy chat completion requests to the appropriate cluster runner."""
     body = _prepare_runner_payload(await request.body())
 
@@ -184,7 +205,9 @@ async def proxy_chat_completions(request: Request):
         generation = tracing.open_generation(body, stream=True)
         req_start = time.perf_counter()
 
-        async def stream_runner():
+        preopened = None if reload_cluster else await _preopen_stream(body, headers, generation)
+
+        async def stream_runner():  # noqa: C901  # pre-existing complexity
             # Notify the client and reload if the cluster was idle-unloaded
             if reload_cluster:
                 # role delta first, then content — matches OpenAI streaming format
@@ -243,16 +266,19 @@ async def proxy_chat_completions(request: Request):
             prompt_tokens: int | None = None
             completion_tokens: int | None = None
 
-            client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT)
-            stream_context = client.stream(
-                "POST", f"{runner_url}/chat/completions", content=body, headers=headers
-            )
-            try:
-                upstream = await stream_context.__aenter__()
-            except httpx.HTTPError:
-                await client.aclose()
-                tracing.close_generation(generation, "", error="runner unavailable")
-                return
+            if preopened is not None:
+                client, stream_context, upstream = preopened
+            else:
+                client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT)
+                stream_context = client.stream(
+                    "POST", f"{runner_url}/chat/completions", content=body, headers=headers
+                )
+                try:
+                    upstream = await stream_context.__aenter__()
+                except httpx.HTTPError:
+                    await client.aclose()
+                    tracing.close_generation(generation, "", error="runner unavailable")
+                    return
 
             if upstream.status_code != 200:
                 await upstream.aread()

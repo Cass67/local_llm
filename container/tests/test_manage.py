@@ -113,91 +113,66 @@ async def test_edit_model_updates_config(temp_state):
 
 @pytest.mark.asyncio
 async def test_edit_model_saves_structured_mtp_config(temp_state):
+    # mtp is stored flat (mtp_*); the nested {"mtp": {...}} form is legacy input only.
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.put(
             "/api/models/qwen",
             json={
-                "mtp": {
-                    "enabled": True,
-                    "draft_n_max": 3,
-                    "draft_n_min": 1,
-                    "draft_p_min": 0.5,
-                }
+                "mtp_enabled": True,
+                "mtp_draft_n_max": 3,
+                "mtp_draft_n_min": 1,
+                "mtp_draft_p_min": 0.5,
             },
         )
 
     assert response.status_code == 200
-    updated = json.loads((temp_state / "accepted" / "qwen.json").read_text())
-    assert updated["config"]["mtp"] == {
-        "enabled": True,
-        "draft_n_max": 3,
-        "draft_n_min": 1,
-        "draft_p_min": 0.5,
-    }
+    cfg = json.loads((temp_state / "accepted" / "qwen.json").read_text())["config"]
+    assert "mtp" not in cfg
+    assert cfg["mtp_enabled"] is True
+    assert cfg["mtp_draft_n_max"] == 3
+    assert cfg["mtp_draft_n_min"] == 1
+    assert cfg["mtp_draft_p_min"] == 0.5
 
 
 @pytest.mark.asyncio
 async def test_edit_model_stores_raw_flags_in_metadata_only(temp_state):
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.put(
-            "/api/models/qwen",
-            json={
-                "flags": "--spec-type draft-mtp --spec-draft-n-max 3 --spec-draft-n-min 1 --spec-draft-p-min 0.5",
-            },
-        )
-
-    assert response.status_code == 200
-    updated = json.loads((temp_state / "accepted" / "qwen.json").read_text())
-    assert updated["config"]["flags"] == (
+    raw_flags = (
         "--spec-type draft-mtp --spec-draft-n-max 3 --spec-draft-n-min 1 --spec-draft-p-min 0.5"
     )
-
-
-@pytest.mark.asyncio
-async def test_edit_model_stores_structured_mtp_in_metadata_only(temp_state):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.put(
-            "/api/models/qwen",
-            json={
-                "mtp": {
-                    "enabled": True,
-                    "draft_n_max": 4,
-                    "draft_n_min": 2,
-                    "draft_p_min": 0.25,
-                }
-            },
-        )
+        response = await client.put("/api/models/qwen", json={"flags": raw_flags})
 
     assert response.status_code == 200
     updated = json.loads((temp_state / "accepted" / "qwen.json").read_text())
-    assert updated["config"]["mtp"] == {
-        "enabled": True,
-        "draft_n_max": 4,
-        "draft_n_min": 2,
-        "draft_p_min": 0.25,
-    }
+    assert updated["config"]["flags"] == raw_flags
 
 
 @pytest.mark.asyncio
 async def test_edit_model_disabled_mtp_updates_metadata_only(temp_state):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.put(
+        seeded = await client.put(
             "/api/models/qwen",
-            json={"mtp": {"enabled": False}},
+            json={
+                "mtp_enabled": True,
+                "mtp_draft_n_max": 3,
+                "mtp_draft_n_min": 1,
+                "mtp_draft_p_min": 0.5,
+            },
         )
+        assert seeded.status_code == 200
+
+        response = await client.put("/api/models/qwen", json={"mtp_enabled": False})
 
     assert response.status_code == 200
-    updated = json.loads((temp_state / "accepted" / "qwen.json").read_text())
-    assert updated["config"]["mtp"] == {
-        "enabled": False,
-        "draft_n_max": 3,
-        "draft_n_min": 1,
-        "draft_p_min": 0.5,
-    }
+    cfg = json.loads((temp_state / "accepted" / "qwen.json").read_text())["config"]
+    # Disabling flips the flag without discarding the tuned draft values.
+    assert cfg["mtp_enabled"] is False
+    assert cfg["mtp_draft_n_max"] == 3
+    assert cfg["mtp_draft_n_min"] == 1
+    assert cfg["mtp_draft_p_min"] == 0.5
 
 
 @pytest.mark.asyncio
