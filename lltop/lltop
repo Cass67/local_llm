@@ -986,6 +986,15 @@ def _gpu_cluster_label(pci_id: str, runners: list[dict[str, Any]], upstream_pci_
     return f" [{', '.join(matches)}]" if matches else ""
 
 
+def gpu_engine_busy(pci_id: str, runners: list[dict[str, Any]]) -> float | None:
+    """Attributed engine occupancy for a card, from whichever runner owns it."""
+    for runner in runners:
+        entry = (runner.get("engines") or {}).get(pci_id)
+        if entry and entry.get("busy") is not None:
+            return float(entry["busy"])
+    return None
+
+
 def render_gpu_device(device: dict[str, Any], runners: list[dict[str, Any]]) -> list[str]:
     gpu_busy = device.get("gpu_busy_percent")
     mem_busy = device.get("mem_busy_percent")
@@ -1011,9 +1020,24 @@ def render_gpu_device(device: dict[str, Any], runners: list[dict[str, Any]]) -> 
         if fan_rpm is not None:
             fan_str += f" ({fan_rpm} RPM)"
 
+    # gpu_busy_percent is a single instantaneous read (same as rocm-smi): under a
+    # layer split it is bimodal 0/100 and a lone sample means nothing. Show the
+    # integrated fdinfo figure alongside it whenever a runner owns the card.
+    engine_busy = gpu_engine_busy(str(pci_id), runners)
+    if engine_busy is None:
+        busy_line = (
+            f"  Core {pct_text(gpu_busy):>5} {bar(gpu_busy)}"
+            f"   Mem busy {pct_text(mem_busy):>5} {bar(mem_busy)}"
+        )
+    else:
+        busy_line = (
+            f"  Core {pct_text(gpu_busy):>5} snapshot   engine {engine_busy:5.1f}%"
+            f" {bar(engine_busy)}   Mem busy {pct_text(mem_busy):>5}"
+        )
+
     return [
         f"  {label} ({pci_id}){cluster_tag}",
-        f"  Core {pct_text(gpu_busy):>5} {bar(gpu_busy)}   Mem busy {pct_text(mem_busy):>5} {bar(mem_busy)}",
+        busy_line,
         f"  VRAM {format_bytes(vram_used)} / {format_bytes(vram_total)}   {temp_str}{fan_str}",
         f"  {power_str}   SCLK {device.get('sclk') or 'n/a'}   MCLK {device.get('mclk') or 'n/a'}",
     ]
