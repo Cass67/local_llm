@@ -136,7 +136,7 @@ def _build_launch_metadata(
     #   both vendors → mixed_vulkan (AMD devices + NVIDIA runtime in one container)
     #   NVIDIA only  → nvidia_vulkan (inject via nvidia runtime, headless EGL ICD)
     #   AMD only     → plain vulkan (default kfd/dri wiring)
-    if cluster.backend in ("vulkan", "laguna"):
+    if cluster.backend == "vulkan":
         cluster_pci_ids = set(cluster.gpu_pci_ids)
         vendors = {g.vendor for g in inventory if g.pci_id in cluster_pci_ids}
         if {"amd", "nvidia"} <= vendors:

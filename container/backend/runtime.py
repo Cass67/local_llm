@@ -295,7 +295,7 @@ def build_runner_container_spec(  # noqa: C901
         if visible_devices:
             environment["CUDA_VISIBLE_DEVICES"] = visible_devices
     elif backend == "mixed_vulkan" or cfg.get("mixed_vulkan"):
-        # backend "mixed_vulkan", or a laguna cluster spanning both AMD+NVIDIA
+        # backend "mixed_vulkan", or a cluster spanning both AMD+NVIDIA
         # (flagged via cfg["mixed_vulkan"] in _build_launch_metadata).
         # AMD + NVIDIA in one container: AMD devices + NVIDIA runtime.
         # Bind-mount host NVIDIA graphics libs so libEGL_nvidia.so.0 (headless Vulkan ICD)
@@ -353,8 +353,8 @@ def build_runner_container_spec(  # noqa: C901
     else:
         devices = ["/dev/kfd", "/dev/dri"]
         group_add = [config.render_group]
-        if backend in ("vulkan", "laguna"):
-            # AMD-only Vulkan/laguna: pin the radeon ICD so only Mesa RADV enumerates.
+        if backend == "vulkan":
+            # AMD-only Vulkan: pin the radeon ICD so only Mesa RADV enumerates.
             # The image also ships the NVIDIA ICD (present but non-functional here — no
             # libs injected) and lavapipe (CPU software); either could otherwise perturb
             # GGML's Vulkan device order or add a phantom device. Set unconditionally —

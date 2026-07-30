@@ -1,4 +1,4 @@
-export type Backend = "rocm" | "rocmfp4" | "vulkan" | "cuda" | "laguna";
+export type Backend = "rocm" | "rocmfp4" | "vulkan" | "cuda";
 
 export interface ModelProfile {
 	batch: number;

@@ -115,7 +115,6 @@
 			<button class:active={selectedBackend === "rocmfp4"} onclick={() => (selectedBackend = "rocmfp4")}>ROCmFP4</button>
 			<button class:active={selectedBackend === "vulkan"} onclick={() => (selectedBackend = "vulkan")}>Vulkan</button>
 			<button class:active={selectedBackend === "cuda"} onclick={() => (selectedBackend = "cuda")}>CUDA</button>
-			<button class:active={selectedBackend === "laguna"} onclick={() => (selectedBackend = "laguna")}>Laguna</button>
 		</div>
 		<div class="toolbar-actions">
 			<button class="audit" onclick={handleAudit} disabled={auditing}>{auditing ? "Scanning…" : "Audit"}</button>

@@ -2,8 +2,8 @@
 
 > **Historical note — superseded.** This is the original implementation log for the
 > terminal-bench / swe-bench integration. The "Current Issues" (port 3100 old build,
-> UI build sync) are resolved, and the `benchmarks/backend/` cleanup is done — that
-> path no longer exists (only `benchmarks.old/backend/` remains). For current
+> UI build sync) are resolved, and the `benchmarks/backend/` cleanup is done — both
+> that path and the `benchmarks.old/` snapshot have since been deleted. For current
 > behaviour see README → *Usage → Terminal-Bench / SWE-bench*. Kept for design context.
 
 ## Goal
