@@ -2,6 +2,11 @@
 # Project-owned llama.cpp runner image. local_llm owns container lifecycle and command.
 FROM ubuntu:24.04 AS build
 
+# Tracks master. Known gfx1100 regression window: 788e07dc9 (Jul 17) ->
+# 3018a11e7 (Jul 29) cost ~21% prefill and ~12% tg at identical flags, measured
+# in docs/benchmarks/2026-07-30-parallel-cont-batching.md. If a rebuild loses
+# throughput, re-pin to the good commit to confirm before bisecting:
+#   docker build --build-arg LLAMA_CPP_REF=788e07dc91d266ad3162a1ce9037665656269689 ...
 ARG LLAMA_CPP_REF=master
 ENV DEBIAN_FRONTEND=noninteractive
 
