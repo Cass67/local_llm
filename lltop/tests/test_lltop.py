@@ -544,6 +544,28 @@ class LltopTests(unittest.TestCase):
         self.assertIn("serialized", output)
         self.assertIn("85% of card", output)
 
+    def test_gpu_panel_pairs_snapshot_core_with_attributed_engine_time(self):
+        lltop = load_lltop()
+        snapshot = self.sample_snapshot()
+        snapshot["gpu"]["gpus"][0]["pci_id"] = "0000:03:00.0"
+        snapshot["gpu"]["gpus"][0]["gpu_busy_percent"] = 0  # caught between bursts
+        snapshot["runners"][0]["engines"] = {
+            "0000:03:00.0": {"vram": 1024, "clients": 1, "busy": 41.0, "engine_busy": {}}
+        }
+
+        output = lltop.render_snapshot(snapshot, width=140, height=60)
+
+        self.assertIn("Core    0% snapshot   engine  41.0%", output)
+
+    def test_gpu_panel_keeps_core_bar_when_no_runner_owns_card(self):
+        lltop = load_lltop()
+        snapshot = self.sample_snapshot()
+
+        output = lltop.render_snapshot(snapshot, width=140, height=60)
+
+        self.assertIn("Core   37% [", output)
+        self.assertNotIn("snapshot", output)
+
     def test_read_json_dir_returns_empty_for_missing_dir(self):
         lltop = load_lltop()
 
