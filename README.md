@@ -164,6 +164,8 @@ docker compose up -d local-llm-mgmt
 
 A terminal monitor for the local_llm stack. Shows GPU utilisation, VRAM, power, runner TPS, CPU temp, fan speeds, and system memory — all in one curses view, refreshing every 2 seconds.
 
+The **Split / parallelism** panel answers what `rocm-smi`/`amd-smi` cannot: it reads DRM `fdinfo` inside each runner container (`/proc/1/fdinfo`), so per-GPU engine time and VRAM are attributed to the runner instead of the whole card. Aggregate occupancy is reported in GPU-equivalents — with `--split-mode layer` two cards each sit near 50% and the aggregate stays near `1.00 / 2.00`, i.e. a pipeline with no compute speedup, which whole-card busy% hides. `imbalance` is the spread between cards, useful for tuning `--tensor-split`.
+
 ```bash
 cd lltop && ./install.sh          # installs to ~/.local/bin/lltop
 lltop                             # run on the GPU host
