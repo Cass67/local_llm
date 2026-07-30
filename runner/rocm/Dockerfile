@@ -2,7 +2,7 @@
 # Project-owned llama.cpp runner image, ROCm/HIP backend.
 FROM rocm/dev-ubuntu-24.04:7.2 AS build
 
-ARG LLAMA_CPP_REF=9ebfc3a8cf4c1c6983258c4d603274b2b3d3dd65
+ARG LLAMA_CPP_REF=master
 ARG AMDGPU_TARGETS=gfx1100
 ARG GGML_CUDA_FORCE_MMQ=OFF
 ARG GGML_CUDA_FORCE_CUBLAS=ON
