@@ -62,3 +62,11 @@ mkdir -p "$target_dir"
 cp "$source_file" "$target_file"
 chmod 0755 "$target_file"
 printf 'installed %s\n' "$target_file"
+
+# Stale copies elsewhere on PATH silently shadow this one, which makes a fixed
+# lltop look unfixed. Say so rather than leaving it to be rediscovered.
+resolved=$(command -v lltop || true)
+if [[ -n "$resolved" && "$resolved" != "$target_file" ]]; then
+  printf 'warning: lltop on PATH resolves to %s, not the copy just installed\n' \
+    "$resolved" >&2
+fi
