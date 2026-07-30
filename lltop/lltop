@@ -349,7 +349,10 @@ class EngineTracker:
                 "engine_busy": {},
             }
             previous = self.previous.get(pdev)
-            if previous:
+            # No drm-engine-* counters at all means the driver never exported
+            # engine time (ROCm/HIP submits via KFD, which has none) — that is
+            # unknown occupancy, not zero. Summing an empty dict would claim 0%.
+            if previous and engines:
                 previous_engines, previous_time = previous
                 elapsed = sample_time - previous_time
                 if elapsed > 0:
@@ -1081,7 +1084,9 @@ def render_parallelism(runners: list[dict[str, Any]], gpus: list[dict[str, Any]]
                 f"  vram {format_bytes(vram)}{share}{queues}"
             )
 
-        if len(busy_values) >= 2:
+        if not busy_values:
+            lines.append("    engine time n/a — no drm-engine counters (ROCm/KFD); vram only")
+        elif len(busy_values) >= 2:
             aggregate = sum(busy_values) / 100.0
             count = len(busy_values)
             verdict = parallelism_verdict(busy_values, split.get("split_mode"))
