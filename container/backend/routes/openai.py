@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request
 from .. import active_runners
 from ..clusters import list_desired
 from .chat import proxy_chat_completions
+from .models import output_limit
 
 router = APIRouter(prefix="/v1", tags=["openai"])
 
@@ -48,7 +49,7 @@ def _model_entry(ctx: int | None, vision: bool = False) -> dict:
         "temperature": True,
         "tool_call": True,
         "reasoning_options": _REASONING_OPTIONS,
-        "limit": {"context": ctx or 0, "output": 0},
+        "limit": {"context": ctx or 0, "output": output_limit(ctx)},
         # Clients cannot infer this: llama-server never reports the projector,
         # so a vision model looks text-only and images get dropped client-side.
         "input": ["text", "image"] if vision else ["text"],

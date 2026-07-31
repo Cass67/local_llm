@@ -11,6 +11,17 @@ from ..models import ModelConfig, ModelInfo, ModelListResponse
 router = APIRouter(prefix="/api", tags=["models"])
 
 
+def output_limit(context: int | None) -> int:
+    """Max generation budget to advertise.
+
+    llama-server has no separate output window — prompt and generation share the
+    context — but harnesses need a number. Report 0/absent and they fall back to
+    their own small default (a few thousand tokens) and truncate long replies
+    with "reached the maximum output token limit".
+    """
+    return min((context or 131072) // 2, 49152)
+
+
 def _snapshot_files() -> set[tuple[str, str]]:
     """Return {(repo_dir_name, filename)} for all files under MODELS_CACHE_DIR snapshots."""
     result: set[tuple[str, str]] = set()
@@ -74,8 +85,14 @@ def _read_accepted_models() -> list[ModelInfo]:
         try:
             profiles = json.loads(config.PROFILES_CONFIG.read_text())
             fam_data = profiles.get("families", {}).get(str(family), {})
+            fam_profiles = fam_data.get("profiles", {})
             profile_name = str(data.get("profile", "reliable"))
-            profile_cfg = fam_data.get("profiles", {}).get(profile_name, {})
+            # The accepted JSON can name a profile the family no longer defines
+            # (e.g. renamed to "rccl"); fall back to the family default rather
+            # than reporting the stale context from the accepted JSON.
+            if profile_name not in fam_profiles:
+                profile_name = str(fam_data.get("default", profile_name))
+            profile_cfg = fam_profiles.get(profile_name, {})
             context = profile_cfg.get("context")
         except (OSError, json.JSONDecodeError, AttributeError):
             pass
