@@ -79,9 +79,13 @@
 		reverse_proxy 127.0.0.1:3002
 	}
 
-	# Langfuse — redirect to port 3004 preserving the client's hostname.
-	handle /traces* {
-		redir http://{http.request.host}:3004/ temporary
+	# Langfuse is built with NEXT_PUBLIC_BASE_PATH=/traces, so keep prefix intact.
+	handle /traces {
+		redir /traces/ temporary
+	}
+
+	handle /traces/* {
+		reverse_proxy 127.0.0.1:3004
 	}
 
 	# Fallback: Open WebUI client-side routes expect root-level routing.

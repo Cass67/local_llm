@@ -46,7 +46,7 @@ Browser
   ▼
 local-llm-caddy  ──/ui/*, /api/local-llm/*, /v1/*──▶  local-llm-mgmt    :3100
                  ──/*, /chat/*──────────────────────▶  open-webui         :3101
-                 ──/traces*─────────────────────────▶  local-llm-langfuse :3004
+                 ──/traces/*────────────────────────▶  local-llm-langfuse :3004
   │
   │  local-llm-mgmt creates/stops cluster runners via Docker socket
   ▼
@@ -582,7 +582,7 @@ and troubleshooting GPU visibility issues, see **[gpu-backends.md](gpu-backends.
 |---|---|
 | `/ui/*`, `/api/local-llm/*`, `/v1/*` | `local-llm-mgmt :3100` |
 | `/chat/*` | Inline HTML frame with back link to `/ui/` |
-| `/traces*` | Redirect to `local-llm-langfuse :3004` (preserves client hostname) |
+| `/traces/*` | `local-llm-langfuse :3004` (built with `NEXT_PUBLIC_BASE_PATH=/traces`) |
 | `/`, `/static/*`, `/api/*` | `open-webui :3101` |
 | `/_switcher` | `local-llm-mgmt :3100` |
 
