@@ -103,15 +103,14 @@ apply_card_eco() {
 
 apply_hard_eco() {
   log "apply hard eco power tune"
-  # Cable-swap experiment, 2026-07-31 23:xx. card0's and card1's PSU cables were
-  # physically swapped, so card0 now runs on what was card1's cable and vice
-  # versa. Roles are inverted to match: card0 (Sapphire Pulse) free on the known
-  # good cable, card1 (Gigabyte, dual BIOS) eco on the suspect one.
-  #   fault follows the CARD  -> card0 free dies again as it did at 22:19/22:51
-  #   fault follows the CABLE -> card0 free is now fine, and the suspect cable
-  #                              already took the host down at idle once with
-  #                              card1 free on it (PSU latched fully off).
-  apply_card_eco card0 0 free
+  # Cable swap settled it, 2026-07-31 23:12. Cables X (originally card0's) and Y
+  # (card1's) were physically swapped, roles inverted, and card0 free died in 22s
+  # on cable Y exactly as it had on cable X -- so card0 is faulty, not its cable.
+  # Cable X is suspect too though: card1 free ran 6.5min of heavy load on Y, then
+  # died at idle once moved onto X, with the PSU latching fully off.
+  # So both stay eco: card0 because the card is bad, card1 because it is sitting
+  # on cable X. card2 is untouched by any of this.
+  apply_card_eco card0 238 eco -75
   apply_card_eco card1 253 eco -75
   apply_card_eco card2 0 free
 }
