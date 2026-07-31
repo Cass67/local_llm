@@ -136,16 +136,12 @@ apply_hard_eco() {
   asrock=$(card_by_subsys "$ASROCK") || asrock=""
   log "cards: sapphire=${sapphire:-absent} gigabyte=${gigabyte:-absent} asrock=${asrock:-absent}"
 
-  # Back to the last configuration that held. All-free died on 2026-07-31 within
-  # minutes of loading a model and one trivial prompt. The Sapphire stays free
-  # because it is on the eGPU dock's own 800W supply and has been fine there;
-  # the two cards on the ageing Seasonic 850W go back under constraints.
-  # The Seasonic is now the prime suspect, not any card: the fully-constrained
-  # config died at idle in 51s that night after holding 7h41m the same day, and
-  # two failures latched the PSU fully off rather than restarting.
+  # All three free again, this time with the Sapphire physically removed from
+  # the machine. That card carried the blame all night; with it out, an unrestricted
+  # run on the two Seasonic cards tests the supply rather than any tuning.
   [[ -n "$sapphire" ]] && apply_card_eco "$sapphire" 0 free
-  [[ -n "$gigabyte" ]] && apply_card_eco "$gigabyte" 253 eco -75
-  [[ -n "$asrock" ]] && apply_card_eco "$asrock" 238 eco -75
+  [[ -n "$gigabyte" ]] && apply_card_eco "$gigabyte" 0 free
+  [[ -n "$asrock" ]] && apply_card_eco "$asrock" 0 free
 }
 
 wait_for_cards
