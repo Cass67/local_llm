@@ -23,44 +23,61 @@ apply_gpu_curve() {
   fi
 }
 
-apply_hard_eco() {
-  log "apply hard eco power tune"
-  local c
-  c=/sys/class/drm/card0/device
-  if [[ -d "$c" ]]; then
-    echo manual > "$c/power_dpm_force_performance_level" 2>/dev/null || true
-    echo 4 > "$c/pp_power_profile_mode" 2>/dev/null || true
-    echo "0 1" > "$c/pp_dpm_sclk" 2>/dev/null || true
-    echo 3 > "$c/pp_dpm_mclk" 2>/dev/null || true
-    echo "s 1 1900" > "$c/pp_od_clk_voltage" 2>/dev/null || true
-    echo "vo -75" > "$c/pp_od_clk_voltage" 2>/dev/null || true
-    echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
-    for f in "$c"/hwmon/hwmon*/power1_cap; do [[ -e "$f" ]] && echo 238000000 > "$f" || true; done
-  fi
-  c=/sys/class/drm/card1/device
-  if [[ -d "$c" ]]; then
-    echo manual > "$c/power_dpm_force_performance_level" 2>/dev/null || true
-    echo 4 > "$c/pp_power_profile_mode" 2>/dev/null || true
-    echo "0 1" > "$c/pp_dpm_sclk" 2>/dev/null || true
-    echo 3 > "$c/pp_dpm_mclk" 2>/dev/null || true
-    echo "s 1 1900" > "$c/pp_od_clk_voltage" 2>/dev/null || true
-    echo "vo -75" > "$c/pp_od_clk_voltage" 2>/dev/null || true
-    echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
-    for f in "$c"/hwmon/hwmon*/power1_cap; do [[ -e "$f" ]] && echo 253000000 > "$f" || true; done
-  fi
-  c=/sys/class/drm/card2/device
-  if [[ -d "$c" ]]; then
-    echo manual > "$c/power_dpm_force_performance_level" 2>/dev/null || true
-    echo 4 > "$c/pp_power_profile_mode" 2>/dev/null || true
-    echo "0 1" > "$c/pp_dpm_sclk" 2>/dev/null || true
-    echo 3 > "$c/pp_dpm_mclk" 2>/dev/null || true
-    echo "s 1 1900" > "$c/pp_od_clk_voltage" 2>/dev/null || true
-    echo "vo -75" > "$c/pp_od_clk_voltage" 2>/dev/null || true
-    echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
-    for f in "$c"/hwmon/hwmon*/power1_cap; do [[ -e "$f" ]] && echo 238000000 > "$f" || true; done
-  fi
+# amdgpu rejects OD writes until the card finishes bringing up powerplay, so a
+# boot-time run lands too early and every write silently no-ops.
+wait_for_cards() {
+  local deadline=$((SECONDS + 90)) c ready
+  while ((SECONDS < deadline)); do
+    ready=1
+    for c in card0 card1 card2; do
+      [[ -e "/sys/class/drm/$c/device/pp_dpm_mclk" ]] || ready=0
+    done
+    ((ready)) && { log "cards ready after ${SECONDS}s"; return 0; }
+    sleep 2
+  done
+  log "WARNING: cards not ready after 90s, applying anyway"
 }
 
+# Returns nonzero if the value did not stick, so the caller can retry and, more
+# importantly, so a rejected write shows up in the journal instead of vanishing.
+pin_mclk() {
+  local c="$1" want="$2"
+  echo "$want" > "$c/pp_dpm_mclk" 2>/dev/null || true
+  [[ "$(sed -n "$((want + 1))p" "$c/pp_dpm_mclk" 2>/dev/null)" == *"*"* ]]
+}
+
+apply_card_eco() {
+  local c="/sys/class/drm/$1/device" cap try
+  [[ -d "$c" ]] || { log "$1 absent"; return 0; }
+  echo manual > "$c/power_dpm_force_performance_level" 2>/dev/null || true
+  echo 4 > "$c/pp_power_profile_mode" 2>/dev/null || true
+  echo "0 1" > "$c/pp_dpm_sclk" 2>/dev/null || true
+  for try in $(seq 15); do
+    pin_mclk "$c" 3 && break
+    [[ $try == 15 ]] && log "ERROR: $1 mclk pin rejected after 15 tries"
+    sleep 2
+  done
+  echo "s 1 1900" > "$c/pp_od_clk_voltage" 2>/dev/null || true
+  echo "vo -75" > "$c/pp_od_clk_voltage" 2>/dev/null || true
+  echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
+  # Uncapped: run each card at whatever ceiling its own firmware allows (333W on
+  # these XTs) rather than the old hand-tuned 238/253W. Safe now that ubt26 is
+  # off the 405W UPS and on the 3kW ring.
+  for f in "$c"/hwmon/hwmon*/power1_cap; do
+    [[ -e "$f" ]] || continue
+    cap=$(cat "${f}_max" 2>/dev/null) && echo "$cap" > "$f" 2>/dev/null || true
+  done
+  log "$1 eco applied (mclk=$(grep -o '[0-9]*Mhz \*' "$c/pp_dpm_mclk" || echo unpinned) cap=$((${cap:-0} / 1000000))W)"
+}
+
+apply_hard_eco() {
+  log "apply hard eco power tune"
+  apply_card_eco card0
+  apply_card_eco card1
+  apply_card_eco card2
+}
+
+wait_for_cards
 apply_gpu_curve card0 30 70 1500 "25 25" "45 30" "60 42" "75 60" "88 90"
 apply_gpu_curve card1 30 70 1500 "25 25" "45 30" "60 42" "75 60" "88 90"
 apply_gpu_curve card2 30 70 1500 "25 25" "45 30" "60 42" "75 60" "88 90"
