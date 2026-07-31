@@ -195,6 +195,7 @@ def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
     }
     write_active(cluster.id, state)
     write_desired(cluster.id, state)
+    touch(cluster.id)
 
 
 def stop(cluster: ClusterDef) -> None:
@@ -246,6 +247,15 @@ def runner_url_for_model(model_id: str) -> str | None:
 def touch(cluster_id: str) -> None:
     """Record that cluster_id just handled a request."""
     _last_request[cluster_id] = time.monotonic()
+
+
+def reset_idle_timers() -> None:
+    """Restart the idle clock for every active cluster (called when the setting changes)."""
+    now = time.monotonic()
+    for entry in list_active():
+        cluster_id = str(entry.get("cluster_id") or "")
+        if cluster_id:
+            _last_request[cluster_id] = now
 
 
 def idle_check(timeout_s: float) -> None:

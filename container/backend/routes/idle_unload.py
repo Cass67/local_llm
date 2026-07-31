@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter
 
-from .. import config
+from .. import active_runners, config
 
 router = APIRouter(prefix="/api/idle-unload", tags=["idle-unload"])
 
@@ -40,6 +40,9 @@ async def put_config(body: dict):
         "timeout_minutes": int(body.get("timeout_minutes", _DEFAULTS["timeout_minutes"])),
     }
     _save(cfg)
+    # Without this, enabling the toggle judges models against however long they
+    # were already idle — a model untouched overnight unloads on the next tick.
+    active_runners.reset_idle_timers()
     logging.info(
         "idle_unload: %s (timeout=%dm)",
         "enabled" if cfg["enabled"] else "disabled",
