@@ -70,13 +70,18 @@ apply_gpu_curve() {
 # amdgpu rejects OD writes until the card finishes bringing up powerplay, so a
 # boot-time run lands too early and every write silently no-ops.
 wait_for_cards() {
-  local deadline=$((SECONDS + 90)) c ready
+  local deadline=$((SECONDS + 90)) c ready n
   while ((SECONDS < deadline)); do
-    ready=1
-    for c in card0 card1 card2; do
-      [[ -e "/sys/class/drm/$c/device/pp_dpm_mclk" ]] || ready=0
+    ready=1; n=0
+    # Glob, do not hardcode card0..2 -- cards get physically removed (the
+    # Sapphire's eGPU was unplugged on 2026-07-31) and a fixed list then waits
+    # the full 90s for hardware that is not there.
+    for c in /sys/class/drm/card[0-9]; do
+      [[ -e "$c/device/subsystem_vendor" ]] || continue
+      n=$((n + 1))
+      [[ -e "$c/device/pp_dpm_mclk" ]] || ready=0
     done
-    ((ready)) && { log "cards ready after ${SECONDS}s"; return 0; }
+    ((n > 0 && ready)) && { log "$n card(s) ready after ${SECONDS}s"; return 0; }
     sleep 2
   done
   log "WARNING: cards not ready after 90s, applying anyway"
@@ -153,7 +158,8 @@ apply_hard_eco
 # firmware actually spin up, which it would not do at 70C/1750rpm -- card1 sat
 # at 40% fan with its memory at 94C under load. The curve points are written
 # too, but they have never stuck on these cards (logged as a WARNING).
-apply_gpu_curve card0 20 65 3000 "25 25" "45 35" "60 50" "75 75" "85 100"
-apply_gpu_curve card1 20 65 3000 "25 25" "45 35" "60 50" "75 75" "85 100"
-apply_gpu_curve card2 20 65 3000 "25 25" "45 35" "60 50" "75 75" "85 100"
+for card in /sys/class/drm/card[0-9]; do
+  [[ -e "$card/device/subsystem_vendor" ]] || continue
+  apply_gpu_curve "$(basename "$card")" 20 65 3000 "25 25" "45 35" "60 50" "75 75" "85 100"
+done
 log "done"
