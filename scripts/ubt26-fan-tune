@@ -91,7 +91,9 @@ apply_hard_eco() {
   # fault, not a power-budget one: the box died drawing almost nothing.
   # card2 = 09:00.0 is the OCuLink eGPU on its own 800W supply.
   apply_card_eco card0 238 eco
-  apply_card_eco card1 253 eco
+  # card1 free: it ran 11 rounds of 40k-token prefill unrestricted (284W peak,
+  # 421W pair) with no reset, so the fault really is card0-specific.
+  apply_card_eco card1 0 free
   # card2 is the OCuLink eGPU (only card behind PCH root port 00:1b.0, x4 Gen3)
   # on its own 800W PSU, so nothing about it is held back.
   apply_card_eco card2 0 free
