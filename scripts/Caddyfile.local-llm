@@ -15,7 +15,7 @@
 	}
 
 	handle /ui {
-		redir /ui/ permanent
+		redir * /ui/ permanent
 	}
 
 	handle /ui/* {
@@ -85,7 +85,7 @@
 
 	# Langfuse is built with NEXT_PUBLIC_BASE_PATH=/traces, so keep prefix intact.
 	handle /traces {
-		redir /traces/ temporary
+		redir * /traces/ temporary
 	}
 
 	handle /traces/* {
