@@ -22,8 +22,11 @@ def test_runner_launch_resolves_model_path_from_hf_cache(tmp_path):
         DockerRunnerConfig(image="runner:latest"), models_dir=tmp_path, host_models_dir=host_models
     )
 
-    with patch.object(runner, "_docker_json", return_value={}) as docker:
-        runner.launch(metadata)
+    # _port_free probes the real host port; without this the test fails on any
+    # machine that happens to have something bound to 8080.
+    with patch.object(runner, "_port_free", return_value=True):
+        with patch.object(runner, "_docker_json", return_value={}) as docker:
+            runner.launch(metadata)
 
     create_call = next(
         call
@@ -40,6 +43,7 @@ def test_runner_launch_resolves_model_path_from_hf_cache(tmp_path):
     ]
     assert create_payload["Image"] == "runner:latest"
     assert create_payload["HostConfig"]["NetworkMode"] == "host"
+    assert create_payload["HostConfig"]["ShmSize"] == 1024 * 1024 * 1024
     assert create_payload["HostConfig"]["Binds"] == [f"{host_models}:/models:rw"]
 
 

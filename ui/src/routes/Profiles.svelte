@@ -27,7 +27,7 @@
 			title: "Model / GPU",
 			fields: [
 				{ key: "ngl", label: "GPU layers (-ngl)", type: "int", placeholder: "999" },
-				{ key: "split_mode", label: "Split mode", type: "select", options: ["layer", "row", "none"] },
+				{ key: "split_mode", label: "Split mode", type: "select", options: ["layer", "tensor", "row", "none"] },
 				{ key: "tensor_split", label: "Tensor split", type: "text", placeholder: "3,1" },
 				{ key: "main_gpu", label: "Main GPU", type: "int" },
 				{ key: "threads", label: "Threads (-t)", type: "int" },

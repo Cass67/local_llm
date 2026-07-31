@@ -285,6 +285,29 @@ When you start a model on a cluster in the **Architecture** tab, select a profil
 
 `tensor_split` is a comma-separated weight list — `"1,1"` distributes evenly across two GPUs. For unequal VRAM use ratios like `"2,1"`. `visible_devices` maps to `HIP_VISIBLE_DEVICES` / `CUDA_VISIBLE_DEVICES`. Use **Import from models** to seed profiles automatically from each model's current config.
 
+#### ROCm/RCCL tensor profile (measured production shape)
+
+```json
+{
+  "ngl": 999,
+  "split_mode": "tensor",
+  "tensor_split": "1,1",
+  "batch": 4096,
+  "ubatch": 512,
+  "context": 92160,
+  "cache_type_k": "f16",
+  "cache_type_v": "f16",
+  "flash_attention": true,
+  "parallel": 1
+}
+```
+
+Tensor mode needs a ROCm image built with RCCL and requires f16/bf16 KV. On the
+measured 2× RX 7900 XT host, forcing hipBLAS in the image and using this 92k/512
+shape reduced a representative request from 31.70 s (Vulkan layer) to
+18.03–18.64 s. Larger ubatches were faster but unsafe at 92k due VRAM headroom.
+See [ROCm/RCCL performance findings](docs/multi-gpu-parallelism-findings-2026-07-30.md#local-rccl-result).
+
 #### All profile fields
 
 Every field a profile can set, exactly as read by `container/backend/runtime.py` (`_config()`/`build_llama_server_args()`/`build_runner_container_spec()`). Fields not listed here are silently ignored — there are no hidden defaults, only what's shown is passed to `llama-server`.
@@ -292,7 +315,7 @@ Every field a profile can set, exactly as read by `container/backend/runtime.py`
 | Field | Maps to | Notes |
 |---|---|---|
 | `ngl` | `-ngl` | Layers offloaded to GPU. `999` = all. |
-| `split_mode` | `--split-mode` | `"layer"` or `"row"` for multi-GPU. |
+| `split_mode` | `--split-mode` | `"layer"` (sequential pipeline), `"tensor"` (tensor parallel), or deprecated `"row"`. Tensor mode requires flash attention and f16/bf16 KV; ROCm collectives require an RCCL-enabled image. |
 | `tensor_split` | `--tensor-split` | Comma-separated weights, e.g. `"1,1"`. |
 | `ctx` | `-c` | Context size. Falls back to top-level `context` if `ctx` isn't set. |
 | `batch` | `-b` | Logical batch size. |
@@ -537,8 +560,12 @@ ssh ubt26 "cd ~/git/local_llm && docker compose build local-llm-mgmt && docker c
 Each backend is its own multi-stage Docker build under `runner/<backend>/Dockerfile`:
 
 - **vulkan**: compiles llama.cpp with `-DGGML_VULKAN=ON`. Runtime stage is plain Ubuntu + Mesa Vulkan drivers. Also handles NVIDIA GPUs on the Vulkan backend (headless, via EGL ICD).
-- **rocm**: compiles llama.cpp with `-DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1100` (override `AMDGPU_TARGETS`
-  for other RDNA/CDNA chips) using the ROCm devel image. Runtime stage installs only the HIP runtime libs.
+- **rocm**: compiles llama.cpp with `-DGGML_HIP=ON -DGGML_HIP_RCCL=ON -DAMDGPU_TARGETS=gfx1100`
+  (override `AMDGPU_TARGETS` for other RDNA/CDNA chips) using the ROCm devel image. RCCL runtime libraries
+  are included. `GGML_CUDA_FORCE_CUBLAS=ON` is the default: despite its CUDA name, upstream uses it for HIP
+  too, and forced hipBLAS was 2.9× faster than auto/MMQ on pp4096 for the measured Q8 tensor workload.
+  Runner containers receive 1 GiB `/dev/shm`; Docker's 64 MiB default exhausts during larger RCCL
+  communicator setup and silently forces llama.cpp onto slower all-reduce fallbacks.
 - **cuda**: compiles llama.cpp with `-DGGML_CUDA=ON` using Nvidia's `cuda:12.6.3-devel` image. Runtime
   stage uses the matching `cuda:12.6.3-runtime` image.
 

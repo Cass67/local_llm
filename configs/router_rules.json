@@ -3,7 +3,7 @@
   "default_model": null,
   "default_cluster": "7900sv",
   "health_check_interval_s": 10,
-  "enabled": true,
+  "enabled": false,
   "rules": [
     {
       "name": "agent/system/tooling prompts",
@@ -501,5 +501,7 @@
       ]
     }
   ],
-  "cluster_remap": {}
+  "cluster_remap": {
+    "7900sv": "7900srccl"
+  }
 }

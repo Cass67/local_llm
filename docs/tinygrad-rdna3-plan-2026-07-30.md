@@ -1,5 +1,12 @@
 # tinygrad on RDNA3: evaluation plan (2026-07-30)
 
+> **Status: shelved for inference.** llama.cpp ROCm+RCCL tensor mode cleared the
+> intended utilization/performance gate without replacing the serving stack. Forced
+> hipBLAS reduced the production request from 31.70 s to 18.03–18.64 s; see
+> [the canonical benchmark](multi-gpu-parallelism-findings-2026-07-30.md#local-rccl-result). Revisit
+> tinygrad for training, driver research, or if llama.cpp regresses—not as the next
+> inference optimization.
+
 ## The question
 
 llama.cpp's layer split is pipeline parallelism with depth 1. Measured on this box
@@ -28,8 +35,8 @@ Proceed past each stage only if:
 
 | | |
 |---|---|
-| `03:00.0`, `06:00.0` | Gen4 x16 — the TP pair |
-| `07:00.0` | OCuLink **Gen3 x4**, 3.94 GB/s theoretical. **Excluded from TP** — all-reduce runs 2 collectives/layer, ~128 round-trips/token; latency, not bandwidth, is the tax |
+| `03:00.0`, `06:00.0` | Cards negotiate Gen4 x16 downstream, but both root ports are **Gen3 x8** (~7.9 GB/s each) — current RCCL TP pair |
+| `07:00.0` | OCuLink **Gen3 x4**, 3.94 GB/s theoretical. **Excluded from TP initially** — collective latency and the slowest link may erase third-card compute gain |
 
 ## Sequencing: wait for card 3
 
@@ -114,5 +121,7 @@ and Stage 4's missing serving features cost more than the extra utilization is
 worth for interactive use. That result is still worth having written down with
 numbers — it converts "tinygrad might fix this" into a decision.
 
-Production path is unaffected either way: independent lanes, one model per card
-group, `--parallel` raised for concurrent agent traffic.
+Production path now uses the two primary cards as one ROCm+RCCL tensor group.
+Planned third card remains an independent lane initially. No tinygrad inference
+work is justified unless it can beat the 18.03–18.64 s llama.cpp baseline while
+also replacing missing serving features.
