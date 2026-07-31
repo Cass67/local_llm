@@ -38,20 +38,14 @@ wait_for_cards() {
   log "WARNING: cards not ready after 90s, applying anyway"
 }
 
-# Returns nonzero if the value did not stick, so the caller can retry and, more
-# importantly, so a rejected write shows up in the journal instead of vanishing.
-pin_mclk() {
-  local c="$1" want="$2"
-  echo "$want" > "$c/pp_dpm_mclk" 2>/dev/null || true
-  [[ "$(sed -n "$((want + 1))p" "$c/pp_dpm_mclk" 2>/dev/null)" == *"*"* ]]
-}
-
-# mode "eco": DPM ceiling, mclk pin, 1900MHz OD cap, -75mV, PSU-sized power cap.
+# mode "eco": sclk DPM ceiling, 1900MHz OD cap, -75mV, PSU-sized power cap.
 # mode "free": nothing held back — stock DPM, no OD, firmware-max power cap.
 apply_card_eco() {
-  local c="/sys/class/drm/$1/device" want_cap="$2" mode="${3:-eco}" cap try
+  local c="/sys/class/drm/$1/device" want_cap="$2" mode="${3:-eco}" cap
   [[ -d "$c" ]] || { log "$1 absent"; return 0; }
-  # OD and DPM writes are only accepted while the card is in manual.
+  # auto first, so any DPM mask a previous run left behind (the old mclk pin)
+  # clears; then manual, which is the only mode that accepts OD and DPM writes.
+  echo auto > "$c/power_dpm_force_performance_level" 2>/dev/null || true
   echo manual > "$c/power_dpm_force_performance_level" 2>/dev/null || true
   if [[ "$mode" == free ]]; then
     echo r > "$c/pp_od_clk_voltage" 2>/dev/null || true
@@ -59,11 +53,9 @@ apply_card_eco() {
   else
     echo 4 > "$c/pp_power_profile_mode" 2>/dev/null || true
     echo "0 1" > "$c/pp_dpm_sclk" 2>/dev/null || true
-    for try in $(seq 15); do
-      pin_mclk "$c" 3 && break
-      [[ $try == 15 ]] && log "ERROR: $1 mclk pin rejected after 15 tries"
-      sleep 2
-    done
+    # No mclk pin: on 6.19 the governor picks and holds level 3 under load by
+    # itself, so pinning only suppressed idle downclock — ~44W per card of idle
+    # draw, on the pair that shares the 850W supply, for nothing at load.
     echo "s 1 1900" > "$c/pp_od_clk_voltage" 2>/dev/null || true
     echo "vo -75" > "$c/pp_od_clk_voltage" 2>/dev/null || true
     echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
