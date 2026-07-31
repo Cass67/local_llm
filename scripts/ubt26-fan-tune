@@ -2,25 +2,47 @@
 set -euo pipefail
 log(){ echo "[fan-tune] $*"; }
 
+# Write an OD scalar, commit it, read it back, retry. These files report their
+# current value on line 2. Every setting here was previously written blind with
+# "2>/dev/null || true", which is how the fan curve came out all zeros and the
+# acoustic threshold sat at its 1750 default while the journal said "applied".
+od_scalar() {
+  local f="$1" want="$2" got=""
+  [[ -e "$f" ]] || return 0
+  for _ in 1 2 3; do
+    echo "$want" > "$f" 2>/dev/null || true
+    echo c > "$f" 2>/dev/null || true
+    got=$(sed -n 2p "$f" 2>/dev/null)
+    [[ "$got" == "$want" ]] && return 0
+    sleep 1
+  done
+  log "ERROR: $(basename "$(dirname "$(dirname "$f")")")/$(basename "$f") = ${got:-unreadable}, wanted $want"
+  return 1
+}
+
 apply_gpu_curve() {
   local card="$1" minpwm="$2" target="$3" acoustic="$4" p0="$5" p1="$6" p2="$7" p3="$8" p4="$9"
   local base="/sys/class/drm/${card}/device/gpu_od/fan_ctrl"
   [[ -d "$base" ]] || { log "$card no fan_ctrl"; return 0; }
-  log "$card fan controls"
-  [[ -e "$base/fan_zero_rpm_enable" ]] && { echo 0 > "$base/fan_zero_rpm_enable" || true; echo c > "$base/fan_zero_rpm_enable" || true; }
-  [[ -e "$base/fan_zero_rpm_stop_temperature" ]] && { echo 25 > "$base/fan_zero_rpm_stop_temperature" || true; echo c > "$base/fan_zero_rpm_stop_temperature" || true; }
-  [[ -e "$base/fan_minimum_pwm" ]] && { echo "$minpwm" > "$base/fan_minimum_pwm" || true; echo c > "$base/fan_minimum_pwm" || true; }
-  [[ -e "$base/fan_target_temperature" ]] && { echo "$target" > "$base/fan_target_temperature" || true; echo c > "$base/fan_target_temperature" || true; }
-  [[ -e "$base/acoustic_target_rpm_threshold" ]] && { echo "$acoustic" > "$base/acoustic_target_rpm_threshold" || true; echo c > "$base/acoustic_target_rpm_threshold" || true; }
+  od_scalar "$base/fan_zero_rpm_enable" 0 || true
+  od_scalar "$base/fan_zero_rpm_stop_temperature" 25 || true
+  od_scalar "$base/fan_minimum_pwm" "$minpwm" || true
+  od_scalar "$base/fan_target_temperature" "$target" || true
+  od_scalar "$base/acoustic_target_rpm_threshold" "$acoustic" || true
   if [[ -e "$base/fan_curve" ]]; then
-    echo r > "$base/fan_curve" || true
-    echo "0 $p0" > "$base/fan_curve" || true
-    echo "1 $p1" > "$base/fan_curve" || true
-    echo "2 $p2" > "$base/fan_curve" || true
-    echo "3 $p3" > "$base/fan_curve" || true
-    echo "4 $p4" > "$base/fan_curve" || true
-    echo c > "$base/fan_curve" || true
+    echo r > "$base/fan_curve" 2>/dev/null || true
+    local i pts=("$p0" "$p1" "$p2" "$p3" "$p4")
+    for i in 0 1 2 3 4; do
+      echo "$i ${pts[$i]}" > "$base/fan_curve" 2>/dev/null || true
+    done
+    echo c > "$base/fan_curve" 2>/dev/null || true
+    # A curve that lands as all-zero points is not applied, whatever the writes
+    # returned -- the firmware then falls back to target temp + acoustic limit.
+    if grep -qE '^[0-4]: +0C +0%' "$base/fan_curve" 2>/dev/null; then
+      log "WARNING: $card fan_curve did not take (all-zero points), running on target=${target}C acoustic=${acoustic}rpm"
+    fi
   fi
+  log "$card fan: target=$(sed -n 2p "$base/fan_target_temperature" 2>/dev/null)C acoustic=$(sed -n 2p "$base/acoustic_target_rpm_threshold" 2>/dev/null)rpm minpwm=$(sed -n 2p "$base/fan_minimum_pwm" 2>/dev/null)%"
 }
 
 # amdgpu rejects OD writes until the card finishes bringing up powerplay, so a
@@ -60,11 +82,8 @@ apply_card_eco() {
     echo "vo $uv" > "$c/pp_od_clk_voltage" 2>/dev/null || true
     echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
   fi
-  # Per-card cap, sized to the PSU that actually feeds the card — not to the wall
-  # circuit. card0+card1 share the 850W Seasonic, so their combined ceiling has to
-  # leave headroom for CPU/board and for RDNA3's ~2x microsecond transients.
-  # Uncapping these two to the 333W firmware max cost a hard reset on 2026-07-31
-  # (instant power cut, nothing in the journal). card2 has its own 800W eGPU PSU.
+  # Per-card cap. card0+card1 share the 850W Seasonic; card2 = 09:00.0 is the
+  # OCuLink eGPU (the only card behind PCH root port 00:1b.0) on its own 800W.
   local floor
   for f in "$c"/hwmon/hwmon*/power1_cap; do
     [[ -e "$f" ]] || continue
@@ -84,26 +103,23 @@ apply_card_eco() {
 
 apply_hard_eco() {
   log "apply hard eco power tune"
-  # card0 = 06:00.0 MUST STAY eco. Setting it free killed the host within ~20s
-  # on 2026-07-31 22:19, at idle, with no load running -- while the identical
-  # free config on card1 survived 6.5min of sustained 40k-token prefill (pair
-  # peak 421W) and card2 has run free all evening. This is a card0-specific
-  # fault, not a power-budget one: the box died drawing almost nothing.
-  # card2 = 09:00.0 is the OCuLink eGPU on its own 800W supply.
-  # card0 runs eco at stock voltage (uv 0): the -75mV offset is off it now, so
-  # what remains holding it up is manual DPM + the 1900MHz ceiling.
-  apply_card_eco card0 238 eco 0
-  # card1 free: it ran 11 rounds of 40k-token prefill unrestricted (284W peak,
-  # 421W pair) with no reset, so the fault really is card0-specific.
+  # All three cards run unrestricted by request. Note for whoever debugs the next
+  # hard reset: card0 is the one with a history. Free (auto DPM) it died in 20s
+  # at idle on 2026-07-31 22:19, and eco-but-stock-voltage it died 5min into a
+  # heavy load at 22:42 that the same config with -75mV had survived. card1 and
+  # card2 have both run free under sustained load with no trouble.
+  apply_card_eco card0 0 free
   apply_card_eco card1 0 free
-  # card2 is the OCuLink eGPU (only card behind PCH root port 00:1b.0, x4 Gen3)
-  # on its own 800W PSU, so nothing about it is held back.
   apply_card_eco card2 0 free
 }
 
 wait_for_cards
-apply_gpu_curve card0 30 70 1500 "25 25" "45 30" "60 42" "75 60" "88 90"
-apply_gpu_curve card1 30 70 1500 "25 25" "45 30" "60 42" "75 60" "88 90"
-apply_gpu_curve card2 30 70 1500 "25 25" "45 30" "60 42" "75 60" "88 90"
+# minpwm 20 keeps idle silent; target 65C and a 3000rpm acoustic ceiling let the
+# firmware actually spin up, which it would not do at the old 70C/1750rpm --
+# card1 sat at 40% fan with its memory at 94C under load. The curve points are
+# written too, but they have never stuck on these cards (logged as a WARNING).
+apply_gpu_curve card0 20 65 3000 "25 25" "45 35" "60 50" "75 75" "85 100"
+apply_gpu_curve card1 20 65 3000 "25 25" "45 35" "60 50" "75 75" "85 100"
+apply_gpu_curve card2 20 65 3000 "25 25" "45 35" "60 50" "75 75" "85 100"
 apply_hard_eco
 log "done"
