@@ -84,14 +84,14 @@ apply_card_eco() {
 
 apply_hard_eco() {
   log "apply hard eco power tune"
-  # card0 = 06:00.0 and card1 = 03:00.0 share the 850W Seasonic. card1 now runs
-  # free, so the pair is allowed 238+333 = 571W. A free card draws far more than
-  # an eco one for the same work (card2: 358W peak vs 145W), so watch this pair
-  # if the host starts hard-resetting again -- that is the supply that died on
-  # 2026-07-31 and it has no telemetry of its own.
+  # card0 = 06:00.0 MUST STAY eco. Setting it free killed the host within ~20s
+  # on 2026-07-31 22:19, at idle, with no load running -- while the identical
+  # free config on card1 survived 6.5min of sustained 40k-token prefill (pair
+  # peak 421W) and card2 has run free all evening. This is a card0-specific
+  # fault, not a power-budget one: the box died drawing almost nothing.
   # card2 = 09:00.0 is the OCuLink eGPU on its own 800W supply.
   apply_card_eco card0 238 eco
-  apply_card_eco card1 0 free
+  apply_card_eco card1 253 eco
   # card2 is the OCuLink eGPU (only card behind PCH root port 00:1b.0, x4 Gen3)
   # on its own 800W PSU, so nothing about it is held back.
   apply_card_eco card2 0 free
