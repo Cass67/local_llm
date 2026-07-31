@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Request
 
-from .models import _read_accepted_models
+from .models import _read_accepted_models, output_limit
 
 router = APIRouter(prefix="/api/pi", tags=["pi"])
 
@@ -21,7 +21,7 @@ async def pi_models_json(request: Request):
                 "name": model.model_name,
                 "context": context,
                 "contextWindow": context,
-                "maxTokens": min(context // 2, 49152),
+                "maxTokens": output_limit(context),
                 "reasoning": model.reasoning,
                 "backend": model.backend,
             }

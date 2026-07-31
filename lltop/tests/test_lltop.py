@@ -487,6 +487,27 @@ class LltopTests(unittest.TestCase):
         self.assertAlmostEqual(measured["busy"], 40.0, places=1)
         self.assertAlmostEqual(measured["engine_busy"]["compute"], 30.0, places=1)
 
+    def test_engine_tracker_reports_unknown_when_driver_exports_no_engines(self):
+        # ROCm/HIP submits through KFD, so amdgpu fdinfo carries memory keys but
+        # no drm-engine-* at all. That is unknown occupancy, never a truthful 0%.
+        lltop = load_lltop()
+        rocm_fdinfo = (
+            "pos:\t0\n"
+            "drm-driver:\tamdgpu\n"
+            "drm-client-id:\t197\n"
+            "drm-pdev:\t0000:03:00.0\n"
+            "drm-memory-vram:\t19900696 KiB\n"
+        )
+        tracker = lltop.EngineTracker()
+        devices = lltop.parse_fdinfo(rocm_fdinfo)
+
+        self.assertEqual(devices["0000:03:00.0"]["engines"], {})
+        tracker.update(devices, now=10.0)
+        measured = tracker.update(lltop.parse_fdinfo(rocm_fdinfo), now=11.0)["0000:03:00.0"]
+
+        self.assertIsNone(measured["busy"])
+        self.assertEqual(measured["vram"], 19900696 * 1024)
+
     def test_parallelism_verdict_flags_layer_split_as_serialized(self):
         lltop = load_lltop()
 

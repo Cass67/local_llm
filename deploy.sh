@@ -13,7 +13,7 @@ set -euo pipefail
 cd ~/git/local_llm
 git pull
 cd ui && npm install --silent && npm run build
-cd ../container
+cd ..
 docker rm -f searxng 2>/dev/null || true
 docker compose build
 docker compose up -d
