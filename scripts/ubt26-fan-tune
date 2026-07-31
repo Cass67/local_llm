@@ -41,7 +41,7 @@ wait_for_cards() {
 # mode "eco": sclk DPM ceiling, 1900MHz OD cap, -75mV, PSU-sized power cap.
 # mode "free": nothing held back — stock DPM, no OD, firmware-max power cap.
 apply_card_eco() {
-  local c="/sys/class/drm/$1/device" want_cap="$2" mode="${3:-eco}" cap
+  local c="/sys/class/drm/$1/device" want_cap="$2" mode="${3:-eco}" uv="${4:--75}" cap
   [[ -d "$c" ]] || { log "$1 absent"; return 0; }
   # auto first, so any DPM mask a previous run left behind (the old mclk pin)
   # clears; then manual, which is the only mode that accepts OD and DPM writes.
@@ -57,7 +57,7 @@ apply_card_eco() {
     # itself, so pinning only suppressed idle downclock — ~44W per card of idle
     # draw, on the pair that shares the 850W supply, for nothing at load.
     echo "s 1 1900" > "$c/pp_od_clk_voltage" 2>/dev/null || true
-    echo "vo -75" > "$c/pp_od_clk_voltage" 2>/dev/null || true
+    echo "vo $uv" > "$c/pp_od_clk_voltage" 2>/dev/null || true
     echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
   fi
   # Per-card cap, sized to the PSU that actually feeds the card — not to the wall
@@ -90,7 +90,9 @@ apply_hard_eco() {
   # peak 421W) and card2 has run free all evening. This is a card0-specific
   # fault, not a power-budget one: the box died drawing almost nothing.
   # card2 = 09:00.0 is the OCuLink eGPU on its own 800W supply.
-  apply_card_eco card0 238 eco
+  # card0 runs eco at stock voltage (uv 0): the -75mV offset is off it now, so
+  # what remains holding it up is manual DPM + the 1900MHz ceiling.
+  apply_card_eco card0 238 eco 0
   # card1 free: it ran 11 rounds of 40k-token prefill unrestricted (284W peak,
   # 421W pair) with no reset, so the fault really is card0-specific.
   apply_card_eco card1 0 free
