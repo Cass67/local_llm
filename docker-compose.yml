@@ -130,7 +130,12 @@ services:
       - langfuse-postgres:/var/lib/postgresql/data
 
   local-llm-langfuse:
-    image: langfuse/langfuse:2
+    build:
+      context: https://github.com/langfuse/langfuse.git#496f8980ea5eaf63544b9ee55a201657501bed8c
+      dockerfile: web/Dockerfile
+      args:
+        NEXT_PUBLIC_BASE_PATH: /traces
+    image: local-llm-langfuse:2.95.11-traces
     container_name: local-llm-langfuse
     network_mode: host
     restart: unless-stopped
@@ -138,7 +143,7 @@ services:
       - local-llm-postgres
     environment:
       DATABASE_URL: "postgresql://langfuse:langfuse@localhost:5433/langfuse"
-      NEXTAUTH_URL: "http://192.168.2.1:3004"
+      NEXTAUTH_URL: "${LANGFUSE_PUBLIC_URL:-https://llama.hehaw.net/traces}/api/auth"
       NEXTAUTH_SECRET: "local-llm-nextauth-secret"
       SALT: "local-llm-salt"
       PORT: "3004"
