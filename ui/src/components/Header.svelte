@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 
-	let currentRoute = $state(location.hash.replace("#", "") || "/models");
+	let currentRoute = $state(location.hash.replace("#", "") || "/architecture");
 
 	onMount(() => {
 		function update() {
-			currentRoute = location.hash.replace("#", "") || "/models";
+			currentRoute = location.hash.replace("#", "") || "/architecture";
 		}
 		window.addEventListener("hashchange", update);
 		return () => window.removeEventListener("hashchange", update);

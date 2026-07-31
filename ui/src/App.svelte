@@ -10,7 +10,7 @@
   import Header from './components/Header.svelte';
 
   const routes = {
-    '/': Models,
+    '/': Architecture,
     '/models': Models,
     '/search': Search,
     '/logs': Logs,
