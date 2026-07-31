@@ -2,6 +2,28 @@
 set -euo pipefail
 log(){ echo "[fan-tune] $*"; }
 
+# Resolve a card by its PCI subsystem ID. cardN numbering does NOT follow the
+# cards: on 2026-07-31 the Sapphire moved to the eGPU dock and kept the name
+# card2, so a cardN-keyed script silently applied the Sapphire's constraints to
+# the ASRock and left the Sapphire running free -- the config that kills the box.
+card_by_subsys() {
+  local want="$1" c d
+  for c in /sys/class/drm/card[0-9]; do
+    d="$c/device"
+    [[ -e "$d/subsystem_device" ]] || continue
+    if [[ "$(cat "$d/subsystem_vendor"):$(cat "$d/subsystem_device")" == "$want" ]]; then
+      basename "$c"
+      return 0
+    fi
+  done
+  log "ERROR: no card with subsystem $want"
+  return 1
+}
+
+SAPPHIRE_PULSE=0x1da2:0x471e
+GIGABYTE_GAMING=0x1458:0x240c
+ASROCK=0x1849:0x5308
+
 # Write an OD scalar, commit it, read it back, retry. These files report their
 # current value on line 2. Every setting here was previously written blind with
 # "2>/dev/null || true", which is how the fan curve came out all zeros and the
@@ -102,17 +124,21 @@ apply_card_eco() {
 }
 
 apply_hard_eco() {
-  log "apply hard eco power tune"
-  # Cable swap settled it, 2026-07-31 23:12. Cables X (originally card0's) and Y
-  # (card1's) were physically swapped, roles inverted, and card0 free died in 22s
-  # on cable Y exactly as it had on cable X -- so card0 is faulty, not its cable.
-  # Cable X is suspect too though: card1 free ran 6.5min of heavy load on Y, then
-  # died at idle once moved onto X, with the PSU latching fully off.
-  # So both stay eco: card0 because the card is bad, card1 because it is sitting
-  # on cable X. card2 is untouched by any of this.
-  apply_card_eco card0 238 eco -75
-  apply_card_eco card1 253 eco -75
-  apply_card_eco card2 0 free
+  log "apply power tune"
+  local sapphire gigabyte asrock
+  sapphire=$(card_by_subsys "$SAPPHIRE_PULSE") || sapphire=""
+  gigabyte=$(card_by_subsys "$GIGABYTE_GAMING") || gigabyte=""
+  asrock=$(card_by_subsys "$ASROCK") || asrock=""
+  log "cards: sapphire=${sapphire:-absent} gigabyte=${gigabyte:-absent} asrock=${asrock:-absent}"
+
+  # The Sapphire Pulse is the card with the history -- five hard resets on
+  # 2026-07-31, at idle, across both Seasonic PSU cables, whenever it ran free.
+  # It stays constrained wherever it is plugged in, which is the point of keying
+  # this by subsystem ID instead of cardN.
+  [[ -n "$sapphire" ]] && apply_card_eco "$sapphire" 238 eco -75
+  # Both of these have run free under sustained load without trouble.
+  [[ -n "$gigabyte" ]] && apply_card_eco "$gigabyte" 0 free
+  [[ -n "$asrock" ]] && apply_card_eco "$asrock" 0 free
 }
 
 wait_for_cards
