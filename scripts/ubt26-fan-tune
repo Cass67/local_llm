@@ -46,20 +46,28 @@ pin_mclk() {
   [[ "$(sed -n "$((want + 1))p" "$c/pp_dpm_mclk" 2>/dev/null)" == *"*"* ]]
 }
 
+# mode "eco": DPM ceiling, mclk pin, 1900MHz OD cap, -75mV, PSU-sized power cap.
+# mode "free": nothing held back — stock DPM, no OD, firmware-max power cap.
 apply_card_eco() {
-  local c="/sys/class/drm/$1/device" want_cap="$2" cap try
+  local c="/sys/class/drm/$1/device" want_cap="$2" mode="${3:-eco}" cap try
   [[ -d "$c" ]] || { log "$1 absent"; return 0; }
+  # OD and DPM writes are only accepted while the card is in manual.
   echo manual > "$c/power_dpm_force_performance_level" 2>/dev/null || true
-  echo 4 > "$c/pp_power_profile_mode" 2>/dev/null || true
-  echo "0 1" > "$c/pp_dpm_sclk" 2>/dev/null || true
-  for try in $(seq 15); do
-    pin_mclk "$c" 3 && break
-    [[ $try == 15 ]] && log "ERROR: $1 mclk pin rejected after 15 tries"
-    sleep 2
-  done
-  echo "s 1 1900" > "$c/pp_od_clk_voltage" 2>/dev/null || true
-  echo "vo -75" > "$c/pp_od_clk_voltage" 2>/dev/null || true
-  echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
+  if [[ "$mode" == free ]]; then
+    echo r > "$c/pp_od_clk_voltage" 2>/dev/null || true
+    echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
+  else
+    echo 4 > "$c/pp_power_profile_mode" 2>/dev/null || true
+    echo "0 1" > "$c/pp_dpm_sclk" 2>/dev/null || true
+    for try in $(seq 15); do
+      pin_mclk "$c" 3 && break
+      [[ $try == 15 ]] && log "ERROR: $1 mclk pin rejected after 15 tries"
+      sleep 2
+    done
+    echo "s 1 1900" > "$c/pp_od_clk_voltage" 2>/dev/null || true
+    echo "vo -75" > "$c/pp_od_clk_voltage" 2>/dev/null || true
+    echo c > "$c/pp_od_clk_voltage" 2>/dev/null || true
+  fi
   # Per-card cap, sized to the PSU that actually feeds the card — not to the wall
   # circuit. card0+card1 share the 850W Seasonic, so their combined ceiling has to
   # leave headroom for CPU/board and for RDNA3's ~2x microsecond transients.
@@ -73,10 +81,13 @@ apply_card_eco() {
     # so clamp: card1's BIOS floors at 253W and rejects the 238W in the old doc.
     floor=$(cat "${f}_min" 2>/dev/null || echo 0)
     ((cap < floor)) && cap=$floor
+    [[ "$mode" == free ]] && cap=$(cat "${f}_max" 2>/dev/null || echo "$cap")
     echo "$cap" > "$f" 2>/dev/null || true
     cap=$(cat "$f" 2>/dev/null || echo 0)  # log what stuck, not what we asked for
   done
-  log "$1 eco applied (mclk=$(grep -o '[0-9]*Mhz \*' "$c/pp_dpm_mclk" || echo unpinned) cap=$((${cap:-0} / 1000000))W)"
+  # Hand the card back to stock DPM last: the writes above needed manual.
+  [[ "$mode" == free ]] && { echo auto > "$c/power_dpm_force_performance_level" 2>/dev/null || true; }
+  log "$1 $mode applied (mclk=$(grep -o '[0-9]*Mhz \*' "$c/pp_dpm_mclk" || echo unpinned) cap=$((${cap:-0} / 1000000))W)"
 }
 
 apply_hard_eco() {
@@ -84,9 +95,11 @@ apply_hard_eco() {
   # card0 = 06:00.0 and card1 = 03:00.0 share the 850W Seasonic; 238+253 is their
   # firmware floor and the 491W pair total the 2026-07-30 3-card run was stable
   # at. card2 = 09:00.0 is the OCuLink eGPU on its own 800W supply.
-  apply_card_eco card0 238
-  apply_card_eco card1 253
-  apply_card_eco card2 333
+  apply_card_eco card0 238 eco
+  apply_card_eco card1 253 eco
+  # card2 is the OCuLink eGPU (only card behind PCH root port 00:1b.0, x4 Gen3)
+  # on its own 800W PSU, so nothing about it is held back.
+  apply_card_eco card2 0 free
 }
 
 wait_for_cards
