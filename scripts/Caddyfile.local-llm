@@ -26,15 +26,21 @@
 		reverse_proxy 127.0.0.1:3200
 	}
 
-	# Chat shell with guaranteed back link; iframe hosts Open WebUI.
-	handle /chat* {
-		header Content-Type text/html
-		respond "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>local_llm Chat</title><style>html,body{margin:0;height:100%;background:#0b0f14;color:#e5e7eb;font-family:system-ui,sans-serif;overflow:hidden}.bar{height:40px;display:flex;align-items:center;gap:.75rem;padding:0 .75rem;background:#111827;border-bottom:1px solid #263244;box-sizing:border-box}.bar a{color:#93c5fd;text-decoration:none;font-weight:600}iframe{display:block;width:100%;height:calc(100vh - 40px - max(10px,env(safe-area-inset-bottom)));height:calc(100dvh - 40px - max(10px,env(safe-area-inset-bottom)));border:0;padding-bottom:max(10px,env(safe-area-inset-bottom));box-sizing:border-box}@media(max-width:700px){.bar{height:36px;font-size:13px}iframe{height:calc(100vh - 36px - max(14px,env(safe-area-inset-bottom)));height:calc(100dvh - 36px - max(14px,env(safe-area-inset-bottom)));padding-bottom:max(14px,env(safe-area-inset-bottom))}}</style></head><body><div class=\"bar\"><a href=\"/ui/\">← Back to local_llm</a><span>Open WebUI</span></div><iframe src=\"/\" title=\"Open WebUI\"></iframe></body></html>" 200
+	# Chat shell with guaranteed back link; iframe hosts Open WebUI. The dedicated
+	# iframe route rewrites to its root so public / can open the management UI.
+	handle /chat/app {
+		rewrite * /
+		reverse_proxy 127.0.0.1:3101
 	}
 
-	# Open WebUI app. Its built SPA expects root-level routing.
+	handle /chat* {
+		header Content-Type text/html
+		respond "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>local_llm Chat</title><style>html,body{margin:0;height:100%;background:#0b0f14;color:#e5e7eb;font-family:system-ui,sans-serif;overflow:hidden}.bar{height:40px;display:flex;align-items:center;gap:.75rem;padding:0 .75rem;background:#111827;border-bottom:1px solid #263244;box-sizing:border-box}.bar a{color:#93c5fd;text-decoration:none;font-weight:600}iframe{display:block;width:100%;height:calc(100vh - 40px - max(10px,env(safe-area-inset-bottom)));height:calc(100dvh - 40px - max(10px,env(safe-area-inset-bottom)));border:0;padding-bottom:max(10px,env(safe-area-inset-bottom));box-sizing:border-box}@media(max-width:700px){.bar{height:36px;font-size:13px}iframe{height:calc(100vh - 36px - max(14px,env(safe-area-inset-bottom)));height:calc(100dvh - 36px - max(14px,env(safe-area-inset-bottom)));padding-bottom:max(14px,env(safe-area-inset-bottom))}}</style></head><body><div class=\"bar\"><a href=\"/ui/\">← Back to local_llm</a><span>Open WebUI</span></div><iframe src=\"/chat/app\" title=\"Open WebUI\"></iframe></body></html>" 200
+	}
+
+	# Management UI is public default. Open WebUI remains available under /chat/.
 	handle / {
-		reverse_proxy 127.0.0.1:3101
+		redir * "/ui/#/architecture" temporary
 	}
 
 	handle /static/* {
