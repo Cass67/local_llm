@@ -114,12 +114,16 @@ apply_hard_eco() {
 }
 
 wait_for_cards
+apply_hard_eco
+# Fans go LAST. free mode resets the OD table ("echo r > pp_od_clk_voltage"),
+# and on these cards that wipes the fan_ctrl settings with it -- applying fans
+# first logged target=65C acoustic=3000 and then read back as the per-card
+# firmware defaults (81C/1400, 70C/1750, 80C/1400) seconds later.
 # minpwm 20 keeps idle silent; target 65C and a 3000rpm acoustic ceiling let the
-# firmware actually spin up, which it would not do at the old 70C/1750rpm --
-# card1 sat at 40% fan with its memory at 94C under load. The curve points are
-# written too, but they have never stuck on these cards (logged as a WARNING).
+# firmware actually spin up, which it would not do at 70C/1750rpm -- card1 sat
+# at 40% fan with its memory at 94C under load. The curve points are written
+# too, but they have never stuck on these cards (logged as a WARNING).
 apply_gpu_curve card0 20 65 3000 "25 25" "45 35" "60 50" "75 75" "85 100"
 apply_gpu_curve card1 20 65 3000 "25 25" "45 35" "60 50" "75 75" "85 100"
 apply_gpu_curve card2 20 65 3000 "25 25" "45 35" "60 50" "75 75" "85 100"
-apply_hard_eco
 log "done"
