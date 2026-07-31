@@ -95,3 +95,9 @@ docs/
 node_modules/
 .eslintcache
 *.tsbuildinfo
+
+# Timestamped edit-in-place backups made on the host (ubt26).
+*.bak
+*.bak-*
+*.bak.*
+.sync-staging/
