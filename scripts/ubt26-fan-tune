@@ -103,13 +103,16 @@ apply_card_eco() {
 
 apply_hard_eco() {
   log "apply hard eco power tune"
-  # card0 MUST be eco with its -75mV. Free on card0 put the host in a reboot
-  # loop on 2026-07-31: three consecutive boots died at idle after 74s, 85s and
-  # ~20s with no load on the box at all. Eco-but-stock-voltage also died, 5min
-  # into a heavy load the same config with -75mV had survived. card1 and card2
-  # run free with no trouble, so this is card0, not a power budget.
-  apply_card_eco card0 238 eco -75
-  apply_card_eco card1 0 free
+  # Cable-swap experiment, 2026-07-31 23:xx. card0's and card1's PSU cables were
+  # physically swapped, so card0 now runs on what was card1's cable and vice
+  # versa. Roles are inverted to match: card0 (Sapphire Pulse) free on the known
+  # good cable, card1 (Gigabyte, dual BIOS) eco on the suspect one.
+  #   fault follows the CARD  -> card0 free dies again as it did at 22:19/22:51
+  #   fault follows the CABLE -> card0 free is now fine, and the suspect cable
+  #                              already took the host down at idle once with
+  #                              card1 free on it (PSU latched fully off).
+  apply_card_eco card0 0 free
+  apply_card_eco card1 253 eco -75
   apply_card_eco card2 0 free
 }
 
