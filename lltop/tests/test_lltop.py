@@ -1,6 +1,7 @@
 import importlib.util
 import tempfile
 import unittest
+import unittest.mock
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -112,6 +113,21 @@ class LltopTests(unittest.TestCase):
         self.assertEqual(
             summary, "nvme0n1 r/s 8.04 w/s 9.43 read 610.05 KiB/s write 778.72 KiB/s util 0.00%"
         )
+
+    def test_collect_system_samples_iostat_twice(self):
+        # count 1 would report since-boot averages instead of the current rate
+        lltop = load_lltop()
+        calls: list[list[str]] = []
+
+        def fake_run_command(args, **_kwargs):
+            calls.append(args)
+            return ""
+
+        with unittest.mock.patch.object(lltop, "run_command", fake_run_command):
+            lltop.collect_system()
+
+        iostat_call = next(args for args in calls if args[0] == "iostat")
+        self.assertEqual(iostat_call[-2:], ["1", "2"])
 
     def test_summarize_vmstat_uses_correct_cpu_columns(self):
         lltop = load_lltop()

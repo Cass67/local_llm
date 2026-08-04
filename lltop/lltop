@@ -746,7 +746,8 @@ def collect_system() -> dict[str, str]:
     load = " ".join(f"{value:.2f}" for value in os.getloadavg())
     mem = run_command(["free", "-h"], timeout=1.0).splitlines()
     vmstat = run_command(["vmstat", "1", "2"], timeout=2.5).splitlines()
-    iostat = run_command(["iostat", "-dx", "1", "1"], timeout=2.0).splitlines()
+    # count must be 2: iostat's first report is always since-boot averages
+    iostat = run_command(["iostat", "-dx", "1", "2"], timeout=3.0).splitlines()
     return {
         "load": load,
         "mem": mem[1] if len(mem) > 1 else "n/a",
