@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 
 import httpx
+import router_anthropic
+import router_responses
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
@@ -392,6 +394,98 @@ async def _proxy_stream(payload: dict, request: Request) -> Response:
     return StreamingResponse(stream_upstream(), media_type="text/event-stream")
 
 
+async def _proxy_translated_stream(payload: dict, translator) -> Response:
+    """Stream chat completions upstream, re-emitting each chunk in another dialect."""
+    # Both dialects report token usage in their terminal event; llama.cpp only
+    # sends it on a streamed response when asked.
+    payload["stream_options"] = {"include_usage": True}
+    client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT)
+    stream_ctx = client.stream(
+        "POST",
+        f"{BACKEND_URL}/v1/chat/completions",
+        content=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        upstream = await stream_ctx.__aenter__()
+    except httpx.HTTPError:
+        await client.aclose()
+        return JSONResponse({"detail": "backend unavailable"}, status_code=503)
+
+    if upstream.status_code != 200:
+        body_bytes = await upstream.aread()
+        await stream_ctx.__aexit__(None, None, None)
+        await client.aclose()
+        return JSONResponse(
+            {"detail": body_bytes.decode("utf-8", errors="replace")},
+            status_code=upstream.status_code,
+        )
+
+    async def translate():
+        try:
+            yield translator.start()
+            async for line in upstream.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if not data or data == "[DONE]":
+                    continue
+                try:
+                    yield translator.chunk(json.loads(data))
+                except json.JSONDecodeError:
+                    continue
+            yield translator.stop()
+        finally:
+            await stream_ctx.__aexit__(None, None, None)
+            await client.aclose()
+
+    return StreamingResponse(translate(), media_type="text/event-stream")
+
+
+async def _post_chat(payload: dict) -> tuple[dict | None, Response | None]:
+    """Non-streaming chat completions call. Returns (completion, error_response)."""
+    try:
+        async with httpx.AsyncClient(timeout=_PROXY_TIMEOUT) as client:
+            upstream = await client.post(
+                f"{BACKEND_URL}/v1/chat/completions",
+                content=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+    except httpx.HTTPError:
+        return None, JSONResponse({"detail": "backend unavailable"}, status_code=503)
+    if upstream.status_code != 200:
+        return None, Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type", "application/json"),
+        )
+    try:
+        return upstream.json(), None
+    except json.JSONDecodeError:
+        return None, JSONResponse({"detail": "invalid backend response"}, status_code=502)
+
+
+async def _pick_model(requested: str, messages: list[dict], api: str) -> str | None:
+    """Route unless the caller named a model that is actually loaded.
+
+    Claude Code and Codex send their own hardcoded model names (claude-*, gpt-*),
+    so a name we do not serve means "route this", not "404".
+    """
+    await _maybe_refresh()
+    if requested and requested in _healthy_aliases:
+        chosen = requested
+    elif ENABLED:
+        chosen = _route(messages)
+    else:
+        chosen = _default_model()
+    if not chosen:
+        return None
+    last_prompt = (_extract_user_messages(messages) or [""])[0]
+    cluster = next((k for k, v in _cluster_to_model.items() if v == chosen), "?")
+    print(f"router: [{cluster}] {chosen} ({api}) ← {last_prompt[:80]!r}", flush=True)
+    return chosen
+
+
 async def _proxy_nonstream(payload: dict) -> Response:
     async with httpx.AsyncClient(timeout=_PROXY_TIMEOUT) as client:
         upstream = await client.post(
@@ -458,6 +552,68 @@ async def v1_chat_completions(request: Request):
     if _is_stream(payload):
         return await _proxy_stream(payload, request)
     return await _proxy_nonstream(payload)
+
+
+@router.post("/v1/messages")
+async def v1_messages(request: Request):
+    """Anthropic Messages API — Claude Code."""
+    try:
+        payload = json.loads(await request.body())
+    except json.JSONDecodeError:
+        return JSONResponse(router_anthropic.error("invalid JSON"), status_code=400)
+
+    chat = router_anthropic.to_chat(payload)
+    chosen = await _pick_model(payload.get("model") or "", chat["messages"], "anthropic")
+    if not chosen:
+        return JSONResponse(
+            router_anthropic.error("no healthy model available", "overloaded_error"),
+            status_code=503,
+        )
+    chat["model"] = chosen
+
+    if payload.get("stream"):
+        return await _proxy_translated_stream(chat, router_anthropic.AnthropicStream(chosen))
+
+    chat.pop("stream", None)
+    completion, err = await _post_chat(chat)
+    if err is not None:
+        return err
+    return JSONResponse(router_anthropic.from_chat(completion, chosen))
+
+
+@router.post("/v1/messages/count_tokens")
+async def v1_count_tokens(request: Request):
+    try:
+        payload = json.loads(await request.body())
+    except json.JSONDecodeError:
+        return JSONResponse(router_anthropic.error("invalid JSON"), status_code=400)
+    return JSONResponse(router_anthropic.count_tokens(payload))
+
+
+@router.post("/v1/responses")
+async def v1_responses(request: Request):
+    """OpenAI Responses API — Codex CLI."""
+    try:
+        payload = json.loads(await request.body())
+    except json.JSONDecodeError:
+        return JSONResponse(router_responses.error("invalid JSON"), status_code=400)
+
+    chat = router_responses.to_chat(payload)
+    chosen = await _pick_model(payload.get("model") or "", chat["messages"], "responses")
+    if not chosen:
+        return JSONResponse(
+            router_responses.error("no healthy model available", "server_error"), status_code=503
+        )
+    chat["model"] = chosen
+
+    if payload.get("stream"):
+        return await _proxy_translated_stream(chat, router_responses.ResponsesStream(chosen))
+
+    chat.pop("stream", None)
+    completion, err = await _post_chat(chat)
+    if err is not None:
+        return err
+    return JSONResponse(router_responses.from_chat(completion, chosen))
 
 
 @router.post("/route/preview")
