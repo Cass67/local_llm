@@ -84,6 +84,38 @@
           "ngram_mod_n_match": 24,
           "ngram_mod_n_min": 24,
           "ngram_mod_n_max": 86
+        },
+        "dflash": {
+          "batch": 4096,
+          "ngl": 999,
+          "split_mode": "tensor",
+          "tensor_split": "1,1,1",
+          "ubatch": 512,
+          "visible_devices": "0,1,2",
+          "context": 196608,
+          "reasoning": false,
+          "cache_ram": 16384,
+          "ctx_checkpoints": 8,
+          "checkpoint_min_step": 2048,
+          "timeout": 600,
+          "threads_http": 2,
+          "parallel": 1,
+          "prio": 2,
+          "flash_attention": true,
+          "jinja": true,
+          "mtp_draft_n_max": 6,
+          "temperature": 0.7,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0,
+          "repetition_penalty": 1,
+          "presence_penalty": 0,
+          "mmproj": "/models/models--DavidAU--Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF/snapshots/b73a29e861a1922ca7b508790c254c91158ec4bb/mmproj-F16.gguf",
+          "flags": "--image-min-tokens 1024 -fit off",
+          "cache_type_k": "f16",
+          "cache_type_v": "f16",
+          "spec_type": "draft-dflash",
+          "mtp_draft_model": "/models/models--Alittlehammmer--Qwen3.6-27B-DFlash-GGUF-llama.cpp/snapshots/5f2ed671305fb1fd8de023d6b335cef4d2663888/Qwen3.6-27B-DFlash-Q8_0.gguf"
         }
       }
     }
