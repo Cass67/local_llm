@@ -349,3 +349,35 @@ export interface BuildStatus {
 	results: Record<string, number>;
 	log_tail: string;
 }
+
+// --- GPU status (fdinfo) ---
+
+export interface GpuEngineSample {
+	engine_busy: number | null;
+	per_engine: Record<string, number>;
+	vram_bytes: number;
+	vram_human: string;
+	clients: number;
+}
+
+export interface GpuRunnerStatus {
+	cluster_id: string | null;
+	cluster_name: string;
+	container: string;
+	split_config: {
+		split_mode?: string;
+		tensor_split?: string;
+		ngl?: string;
+		parallel?: string;
+	};
+	gpus: Record<string, GpuEngineSample>;
+	aggregate_gpu_equiv: number | null;
+	gpu_count: number;
+	verdict: string;
+}
+
+export interface GpuStatusResponse {
+	ts: number;
+	error?: string;
+	runners: GpuRunnerStatus[];
+}

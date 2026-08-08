@@ -1,6 +1,8 @@
 """Runtime stats endpoint."""
 
+import asyncio
 import json
+import logging
 import sqlite3
 import time
 from functools import lru_cache
@@ -8,9 +10,11 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from .. import config
+from .. import active_runners, config
+from ..gpu_status import GpuStatusCollector
 
 router = APIRouter(prefix="/api", tags=["stats"])
+logger = logging.getLogger(__name__)
 
 _DB_NAME = "chat_metrics.sqlite3"
 
@@ -91,3 +95,82 @@ async def stats_history(limit: int = Query(default=50, ge=1, le=500)):
         return {"metrics": [dict(row) for row in rows]}
     except (OSError, sqlite3.Error):
         return {"metrics": []}
+
+
+# --- GPU status (fdinfo engine occupancy) ---
+
+_gpu_collector = GpuStatusCollector(docker_socket_path=str(config.DOCKER_SOCKET))
+_last_gpu_sample: dict | None = None
+_gpu_lock = asyncio.Lock()
+
+
+def _get_running_runners():
+    """Build list of running runners for sampling."""
+    runners = []
+    from ..clusters import list_clusters
+
+    clusters = list_clusters()
+    for cluster in clusters:
+        if active_runners.is_running(cluster):
+            from ..clusters import read_active
+
+            active = read_active(cluster.id)
+            if not active:
+                continue
+            container = str(active.get("container") or "")
+            if not container:
+                continue
+            runners.append(
+                {
+                    "cluster_id": cluster.id,
+                    "cluster_name": cluster.name,
+                    "container": container,
+                    "gpu_pci_ids": list(cluster.gpu_pci_ids),
+                }
+            )
+    return runners
+
+
+async def _sample_gpu_status(initial_warmup: bool = False):
+    global _last_gpu_sample
+    async with _gpu_lock:
+        try:
+            runners = await asyncio.to_thread(_get_running_runners)
+            samples = await asyncio.to_thread(
+                lambda: _gpu_collector.sample_all(runners, initial_warmup=initial_warmup)
+            )
+            _last_gpu_sample = {
+                "ts": time.time(),
+                "runners": samples,
+            }
+        except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+            # Don't crash the mgmt container on fdinfo failure
+            logger.debug("gpu-status sample failed: %s", exc)
+            _last_gpu_sample = {"ts": time.time(), "error": str(exc), "runners": []}
+
+
+@router.get("/gpu-status")
+async def gpu_status():
+    """Return latest GPU engine occupancy sample (fdinfo-based)."""
+    if _last_gpu_sample is None:
+        await _sample_gpu_status()
+    return _last_gpu_sample or {"ts": time.time(), "runners": []}
+
+
+# Background sampling loop — populates data every 2s so UI polls are cheap.
+
+
+async def _gpu_sampling_loop():
+    initial = True
+    while True:
+        try:
+            await _sample_gpu_status(initial_warmup=initial)
+            initial = False
+        except (OSError, RuntimeError):
+            pass
+        await asyncio.sleep(2)
+
+
+def start_gpu_sampling():
+    """Start the background GPU status sampling loop. Call from main.py startup."""
+    asyncio.create_task(_gpu_sampling_loop())

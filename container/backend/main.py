@@ -31,11 +31,14 @@ app = FastAPI(title="local-llm-server", version=VERSION)
 
 
 @app.on_event("startup")
-async def restore_desired_runners():
+async def startup_events():
     import asyncio
+
+    from .routes.stats import start_gpu_sampling
 
     await asyncio.to_thread(active_runners.restore_desired, _resolve_accepted_for_restore)
     asyncio.create_task(_idle_unload_loop())
+    start_gpu_sampling()
 
 
 async def _idle_unload_loop():
