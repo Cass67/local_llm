@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { fetchStatus, fetchModels, switchModel, fetchStats, fetchStatsHistory, fetchRunnerHealth, cancelDownload, auditModels, cleanupOrphanedModels } from "../lib/api";
-	import type { StatusResponse, ModelInfo, StatsResponse, ChatMetric, RunnerHealth } from "../lib/types";
+	import { fetchStatus, fetchModels, switchModel, fetchStats, fetchStatsHistory, fetchRunnerHealth, cancelDownload, auditModels, cleanupOrphanedModels, fetchGpuStatus } from "../lib/api";
+	import type { StatusResponse, ModelInfo, StatsResponse, ChatMetric, RunnerHealth, GpuStatusResponse } from "../lib/types";
 
 	const HISTORY_LIMIT = 30;
+	const GPU_POLL_MS = 2500;
 
 	let status: StatusResponse | null = $state(null);
 	let models: ModelInfo[] = $state([]);
@@ -16,23 +17,26 @@
 	let auditResult = $state<{ orphaned: Array<{ family: string; label: string | null; model_name: string }>; total: number } | null>(null);
 	let auditing = $state(false);
 	let cleaning = $state(false);
+	let gpuStatus: GpuStatusResponse | null = $state(null);
 
 	async function load() {
 		loading = true;
 		error = "";
 		try {
-			const [s, m, runtimeStats, hist, health] = await Promise.all([
+			const [s, m, runtimeStats, hist, health, gpu] = await Promise.all([
 				fetchStatus(),
 				fetchModels(),
 				fetchStats(),
 				fetchStatsHistory(HISTORY_LIMIT),
 				fetchRunnerHealth(),
+				fetchGpuStatus().catch(() => ({ ts: Date.now() / 1000, runners: [] as any[] })),
 			]);
 			status = s;
 			models = m.models;
 			stats = runtimeStats;
 			tpsHistory = [...hist.metrics].reverse();
 			runnerHealth = health;
+			gpuStatus = gpu;
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -202,6 +206,45 @@
 			{/if}
 		</div>
 
+
+			{#if gpuStatus && !gpuStatus.error && gpuStatus.runners.length > 0}
+				<h3>GPU Parallelism</h3>
+				<div class="gpu-status">
+					{#each gpuStatus.runners as runner}
+						<div class="gpu-runner-card">
+							<div class="gpu-runner-header">
+								<span class="gpu-cluster">{runner.cluster_name}</span>
+								<span class="gpu-split-mode">{runner.split_config.split_mode ?? "?"}</span>
+								{#if runner.split_config.tensor_split}
+									<span class="muted">ts={runner.split_config.tensor_split}</span>
+								{/if}
+								{#if runner.gpu_count > 1}
+									<span class="gpu-aggregate">{runner.aggregate_gpu_equiv?.toFixed(2) ?? "?"} / {runner.gpu_count}.0 GPU-equiv</span>
+								{/if}
+								{#if runner.verdict}
+									<span class:verdict-serialized={runner.verdict.startsWith("serialized")} class:verdict-concurrent={runner.verdict === "concurrent"}>{runner.verdict}</span>
+								{/if}
+							</div>
+							<div class="gpu-row">
+								{#each Object.entries(runner.gpus) as [pci, gpu]}
+									<div class="gpu-device">
+										<span class="gpu-pci">{pci}</span>
+										{#if gpu.engine_busy != null}
+											<div class="gpu-bar-track">
+												<div class:gpu-bar-serialized={runner.verdict.startsWith("serialized")} class="gpu-bar" style="--busy: {Math.min(gpu.engine_busy, 100)}%"></div>
+											</div>
+											<span class="gpu-busy">{gpu.engine_busy.toFixed(1)}%{gpu.engine_busy < 1 ? " idle" : ""}</span>
+										{:else}
+											<span class="muted">no drm-engine counters</span>
+										{/if}
+										<span class="muted gpu-vram">{gpu.vram_human}</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
 		<h3>Active Downloads</h3>
 		<table>
 			<thead><tr><th>PID</th><th>Repo</th><th></th></tr></thead>
@@ -260,4 +303,22 @@
 	.runner-info { justify-content: center; }
 	.runner-status { font-size: 1.1rem; font-weight: bold; }
 	.muted { color: var(--text-muted); font-size: 0.8rem; }
+
+.gpu-status { display: flex; flex-direction: column; gap: 0.75rem; }
+.gpu-runner-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; font-size: 0.85rem; }
+.gpu-runner-header { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.gpu-cluster { font-weight: bold; }
+.gpu-split-mode { background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 0.1rem 0.4rem; color: var(--accent); font-size: 0.75rem; }
+.gpu-aggregate { color: var(--text-muted); font-size: 0.8rem; }
+.verdict-serialized { color: #f59e0b; font-style: italic; font-size: 0.8rem; }
+.verdict-concurrent { color: #4caf50; font-size: 0.8rem; }
+.gpu-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.gpu-device { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.6rem; min-width: 180px; display: flex; flex-direction: column; gap: 0.3rem; }
+.gpu-pci { font-size: 0.75rem; color: var(--text-muted); }
+.gpu-bar-track { height: 8px; background: #000; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+.gpu-bar { height: 100%; background: var(--accent); width: var(--busy, 0%); transition: width 0.3s ease; }
+.gpu-bar-serialized { background: #f59e0b; }
+.gpu-busy { font-size: 0.8rem; color: var(--text); }
+.gpu-vram { font-size: 0.7rem; }
+
 </style>

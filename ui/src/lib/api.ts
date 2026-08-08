@@ -29,6 +29,7 @@ import type {
 	ModelProfile,
 	FamilyProfiles,
 	ProfilesData,
+	GpuStatusResponse,
 } from "./types";
 
 const BASE = "/api/local-llm";
@@ -170,6 +171,14 @@ export async function fetchStatsHistory(
 export async function fetchRunnerHealth(): Promise<RunnerHealth> {
 	const res = await fetch(`${BASE}/runner/health`);
 	if (!res.ok) return { error: `HTTP ${res.status}` };
+	return res.json();
+}
+
+// --- GPU status (fdinfo engine occupancy) ---
+
+export async function fetchGpuStatus(): Promise<GpuStatusResponse> {
+	const res = await fetch(`${BASE}/gpu-status`);
+	if (!res.ok) return { ts: Date.now() / 1000, runners: [] };
 	return res.json();
 }
 
