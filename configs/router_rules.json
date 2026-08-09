@@ -35,7 +35,7 @@
       ],
       "cluster": "7900sv",
       "fallback": [
-        "P40"
+        "7900sr"
       ]
     },
     {
@@ -158,7 +158,7 @@
       ],
       "cluster": "7900sv",
       "fallback": [
-        "P40"
+        "7900sr"
       ]
     },
     {
@@ -207,7 +207,7 @@
       ],
       "cluster": "7900sv",
       "fallback": [
-        "P40"
+        "7900sr"
       ]
     },
     {
@@ -245,7 +245,7 @@
       ],
       "cluster": "7900sv",
       "fallback": [
-        "P40"
+        "7900sr"
       ]
     },
     {
@@ -269,7 +269,7 @@
       ],
       "cluster": "7900sv",
       "fallback": [
-        "P40"
+        "7900sr"
       ]
     },
     {
@@ -301,7 +301,7 @@
       ],
       "cluster": "7900sv",
       "fallback": [
-        "P40"
+        "7900sr"
       ]
     },
     {
@@ -328,7 +328,7 @@
       ],
       "cluster": "7900sv",
       "fallback": [
-        "P40"
+        "7900sr"
       ]
     },
     {
@@ -351,7 +351,7 @@
       ],
       "cluster": "7900sv",
       "fallback": [
-        "P40"
+        "7900sr"
       ]
     },
     {
@@ -379,7 +379,7 @@
       ],
       "cluster": "7900sv",
       "fallback": [
-        "P40"
+        "7900sr"
       ]
     },
     {
@@ -405,7 +405,7 @@
         "free sample",
         "royalty free"
       ],
-      "cluster": "P40",
+      "cluster": "7900sr",
       "fallback": [
         "7900sv"
       ]
@@ -425,7 +425,7 @@
         "is_question",
         "short_prompt"
       ],
-      "cluster": "P40",
+      "cluster": "7900sr",
       "fallback": [
         "7900sv"
       ]
@@ -445,7 +445,7 @@
         "curl syntax",
         "wget syntax"
       ],
-      "cluster": "P40",
+      "cluster": "7900sr",
       "fallback": [
         "7900sv"
       ]
@@ -463,7 +463,7 @@
         "spelling",
         "proofread"
       ],
-      "cluster": "P40",
+      "cluster": "7900sr",
       "fallback": [
         "7900sv"
       ]
@@ -481,7 +481,7 @@
       "signals": [
         "has_math"
       ],
-      "cluster": "P40",
+      "cluster": "7900sr",
       "fallback": [
         "7900sv"
       ]
@@ -495,13 +495,11 @@
         "parameters for",
         "signature of"
       ],
-      "cluster": "P40",
+      "cluster": "7900sr",
       "fallback": [
         "7900sv"
       ]
     }
   ],
-  "cluster_remap": {
-    "7900sv": "7900srccl"
-  }
+  "cluster_remap": {}
 }
