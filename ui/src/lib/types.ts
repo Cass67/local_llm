@@ -354,6 +354,7 @@ export interface BuildStatus {
 
 export interface GpuEngineSample {
 	engine_busy: number | null;
+	mem_busy?: number | null;
 	per_engine: Record<string, number>;
 	vram_bytes: number;
 	vram_human: string;
@@ -376,8 +377,41 @@ export interface GpuRunnerStatus {
 	verdict: string;
 }
 
+export interface GpuDeviceMetrics {
+	pci_id: string;
+	gpu_busy_percent: number | null;
+	mem_busy_percent: number | null;
+	vram_used: number | null;
+	vram_total: number | null;
+	temp_c: number | null;
+	junction_temp_c: number | null;
+	power_w: number | null;
+	power_cap_w: number | null;
+	fan_rpm: number | null;
+	fan_pct: number | null;
+	sclk: string | null;
+	mclk: string | null;
+}
+
+export interface SystemMetrics {
+	ts?: number;
+	cpu_percent?: number | null;
+	cpu_cores?: number[];
+	cpu_count?: number | null;
+	load?: number[];
+	mem_total?: number | null;
+	mem_used?: number | null;
+	swap_total?: number | null;
+	swap_used?: number | null;
+	cpu_temp_c?: number;
+	fan_rpms?: number[];
+	psu_power_w?: number;
+}
+
 export interface GpuStatusResponse {
 	ts: number;
 	error?: string;
 	runners: GpuRunnerStatus[];
+	devices?: GpuDeviceMetrics[];
+	system?: SystemMetrics;
 }

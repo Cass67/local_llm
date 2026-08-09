@@ -11,7 +11,8 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from .. import active_runners, config
-from ..gpu_status import GpuStatusCollector
+from ..gpu_status import GpuStatusCollector, collect_amd_gpu_metrics
+from ..system_status import SystemStatusCollector
 
 router = APIRouter(prefix="/api", tags=["stats"])
 logger = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ async def stats_history(limit: int = Query(default=50, ge=1, le=500)):
 # --- GPU status (fdinfo engine occupancy) ---
 
 _gpu_collector = GpuStatusCollector(docker_socket_path=str(config.DOCKER_SOCKET))
+_system_collector = SystemStatusCollector()
 _last_gpu_sample: dict | None = None
 _gpu_lock = asyncio.Lock()
 
@@ -139,22 +141,31 @@ async def _sample_gpu_status(initial_warmup: bool = False):
             samples = await asyncio.to_thread(
                 lambda: _gpu_collector.sample_all(runners, initial_warmup=initial_warmup)
             )
+            devices = await asyncio.to_thread(collect_amd_gpu_metrics)
+            system = await asyncio.to_thread(_system_collector.sample)
             _last_gpu_sample = {
                 "ts": time.time(),
                 "runners": samples,
+                "devices": sorted(devices.values(), key=lambda d: d["pci_id"]),
+                "system": system,
             }
-        except (OSError, RuntimeError, json.JSONDecodeError) as exc:
-            # Don't crash the mgmt container on fdinfo failure
-            logger.debug("gpu-status sample failed: %s", exc)
-            _last_gpu_sample = {"ts": time.time(), "error": str(exc), "runners": []}
+        except Exception as exc:  # noqa: BLE001 - a bad sample must never kill the loop
+            logger.warning("gpu-status sample failed: %s", exc, exc_info=True)
+            _last_gpu_sample = {
+                "ts": time.time(),
+                "error": str(exc),
+                "runners": [],
+                "devices": [],
+                "system": {},
+            }
 
 
 @router.get("/gpu-status")
 async def gpu_status():
-    """Return latest GPU engine occupancy sample (fdinfo-based)."""
+    """Latest GPU sample: per-runner fdinfo occupancy, per-card sysfs, host system."""
     if _last_gpu_sample is None:
         await _sample_gpu_status()
-    return _last_gpu_sample or {"ts": time.time(), "runners": []}
+    return _last_gpu_sample or {"ts": time.time(), "runners": [], "devices": [], "system": {}}
 
 
 # Background sampling loop — populates data every 2s so UI polls are cheap.
@@ -166,8 +177,8 @@ async def _gpu_sampling_loop():
         try:
             await _sample_gpu_status(initial_warmup=initial)
             initial = False
-        except (OSError, RuntimeError):
-            pass
+        except Exception:  # noqa: BLE001 - loop must survive anything a sample throws
+            logger.warning("gpu sampling loop iteration failed", exc_info=True)
         await asyncio.sleep(2)
 
 
