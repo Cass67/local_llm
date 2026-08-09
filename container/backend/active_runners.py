@@ -177,7 +177,11 @@ def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
     )
     runner = _runner_for(cluster)
     runner.launch(meta)
-    if not _wait_ready(runner, cluster.port):
+    # Big MoE models can take minutes to load; without this the readiness wait times
+    # out, start() raises, and the active entry is never written for a runner that
+    # goes on to serve fine.
+    load_timeout = float(meta.get("config", {}).get("load_timeout_s") or 120.0)
+    if not _wait_ready(runner, cluster.port, load_timeout):
         logs = "\n".join(runner.logs(40)) or "runner did not become ready"
         raise RuntimeError(logs[-1000:])
     alias = str(accepted.get("alias") or accepted.get("family") or "unknown")
