@@ -61,6 +61,24 @@
 			.join(" ");
 	}
 
+	function formatBytes(value: number | null | undefined): string {
+		if (value == null) return "-";
+		const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+		let size = Math.abs(value);
+		let unit = units[0];
+		for (const u of units) {
+			unit = u;
+			if (size < 1024 || u === units[units.length - 1]) break;
+			size /= 1024;
+		}
+		return `${size.toFixed(1)} ${unit}`;
+	}
+
+	function pct(used: number | null | undefined, total: number | null | undefined): number | null {
+		if (used == null || !total) return null;
+		return Math.min(100, (used / total) * 100);
+	}
+
 	function statsAge(ts: number): string {
 		const secs = Math.round(Date.now() / 1000 - ts);
 		if (secs < 60) return `${secs}s ago`;
@@ -109,7 +127,18 @@
 	onMount(() => {
 		load();
 		const id = setInterval(load, 10000);
-		return () => clearInterval(id);
+		// Backend resamples GPU/system every 2s; poll that alone so meters stay live.
+		const gpuId = setInterval(async () => {
+			try {
+				gpuStatus = await fetchGpuStatus();
+			} catch {
+				/* transient; next tick retries */
+			}
+		}, GPU_POLL_MS);
+		return () => {
+			clearInterval(id);
+			clearInterval(gpuId);
+		};
 	});
 </script>
 
@@ -207,6 +236,78 @@
 		</div>
 
 
+			{#if gpuStatus?.system && gpuStatus.system.mem_total != null}
+				{@const sys = gpuStatus.system}
+				<h3>System</h3>
+				<div class="sys-row">
+					<div class="sys-tile">
+						<span class="label">CPU{#if sys.cpu_count}<span class="muted"> · {sys.cpu_count} threads</span>{/if}</span>
+						<div class="meter-track"><div class="meter" style="--fill: {sys.cpu_percent ?? 0}%"></div></div>
+						<strong>{sys.cpu_percent != null ? `${sys.cpu_percent.toFixed(1)}%` : "-"}</strong>
+						{#if sys.cpu_cores?.length}
+							<div class="cores">
+								{#each sys.cpu_cores as core}
+									<div class="core" style="--fill: {core}%" title="{core.toFixed(0)}%"></div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+					<div class="sys-tile">
+						<span class="label">Memory</span>
+						<div class="meter-track"><div class="meter" style="--fill: {pct(sys.mem_used, sys.mem_total) ?? 0}%"></div></div>
+						<strong>{formatBytes(sys.mem_used)} <span class="muted">/ {formatBytes(sys.mem_total)}</span></strong>
+						{#if sys.swap_total}
+							<span class="muted">swap {formatBytes(sys.swap_used)} / {formatBytes(sys.swap_total)}</span>
+						{/if}
+					</div>
+					<div class="sys-tile">
+						<span class="label">Load / Thermals</span>
+						<strong>{sys.load?.length ? sys.load.map(l => l.toFixed(2)).join("  ") : "-"}</strong>
+						<span class="muted">
+							{#if sys.cpu_temp_c != null}CPU {sys.cpu_temp_c.toFixed(0)}°C{/if}
+							{#if sys.psu_power_w != null} · PSU {sys.psu_power_w.toFixed(0)}W{/if}
+							{#if sys.fan_rpms?.length} · fans {sys.fan_rpms.join("/")} rpm{/if}
+						</span>
+					</div>
+				</div>
+			{/if}
+
+			{#if gpuStatus?.devices?.length}
+				<h3>GPUs</h3>
+				<div class="sys-row">
+					{#each gpuStatus.devices as dev}
+						<div class="sys-tile gpu-tile">
+							<span class="label">{dev.pci_id}</span>
+							<div class="meter-track"><div class="meter" style="--fill: {dev.gpu_busy_percent ?? 0}%"></div></div>
+							<strong>{dev.gpu_busy_percent != null ? `${dev.gpu_busy_percent}%` : "-"} <span class="muted">busy</span></strong>
+							<div class="dev-grid">
+								<span class="muted">VRAM</span>
+								<span>{formatBytes(dev.vram_used)} / {formatBytes(dev.vram_total)}</span>
+								{#if dev.mem_busy_percent != null}
+									<span class="muted">Mem bus</span><span>{dev.mem_busy_percent}%</span>
+								{/if}
+								{#if dev.temp_c != null}
+									<span class="muted">Temp</span>
+									<span>{dev.temp_c.toFixed(0)}°C{#if dev.junction_temp_c != null} <span class="muted">(junc {dev.junction_temp_c.toFixed(0)}°C)</span>{/if}</span>
+								{/if}
+								{#if dev.power_w != null}
+									<span class="muted">Power</span>
+									<span>{dev.power_w.toFixed(0)} W{#if dev.power_cap_w != null} <span class="muted">/ {dev.power_cap_w.toFixed(0)} W</span>{/if}</span>
+								{/if}
+								{#if dev.fan_rpm != null}
+									<span class="muted">Fan</span>
+									<span>{dev.fan_rpm} rpm{#if dev.fan_pct != null} <span class="muted">({dev.fan_pct}%)</span>{/if}</span>
+								{/if}
+								{#if dev.sclk || dev.mclk}
+									<span class="muted">Clocks</span>
+									<span>{dev.sclk ?? "-"} <span class="muted">core</span> · {dev.mclk ?? "-"} <span class="muted">mem</span></span>
+								{/if}
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
 			{#if gpuStatus && !gpuStatus.error && gpuStatus.runners.length > 0}
 				<h3>GPU Parallelism</h3>
 				<div class="gpu-status">
@@ -303,6 +404,15 @@
 	.runner-info { justify-content: center; }
 	.runner-status { font-size: 1.1rem; font-weight: bold; }
 	.muted { color: var(--text-muted); font-size: 0.8rem; }
+
+	.sys-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.7rem; }
+	.sys-tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.85rem; }
+	.meter-track { height: 8px; background: #000; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+	.meter { height: 100%; width: var(--fill, 0%); background: var(--accent); transition: width 0.3s ease; }
+	.cores { display: flex; gap: 2px; height: 18px; align-items: flex-end; }
+	.core { flex: 1; min-width: 2px; height: max(2px, var(--fill, 0%)); background: var(--accent); border-radius: 1px; transition: height 0.3s ease; }
+	.dev-grid { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.6rem; font-size: 0.78rem; }
+	.gpu-tile .label { font-family: monospace; }
 
 .gpu-status { display: flex; flex-direction: column; gap: 0.75rem; }
 .gpu-runner-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; font-size: 0.85rem; }
