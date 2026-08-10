@@ -7,7 +7,7 @@ ARG OPENCODE_VERSION=1.18.16
 ARG TTYD_VERSION=1.7.7
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git ca-certificates ripgrep tini curl \
+      git ca-certificates ripgrep tini curl tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # ttyd is not packaged in Debian bookworm; use the upstream static binary.

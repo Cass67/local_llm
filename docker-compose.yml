@@ -152,6 +152,14 @@ services:
       - 'theme={"background":"#09090b","foreground":"#fafafa","cursor":"#fafafa","cursorAccent":"#09090b","selectionBackground":"#3f3f46","black":"#18181b","brightBlack":"#52525b"}'
       - -t
       - fontSize=14
+      # tmux keeps pi alive across disconnects: ttyd kills its child process the
+      # moment the websocket closes (tab closed, laptop asleep, wifi drop), which
+      # otherwise loses the running session. `new -A` attaches if it exists.
+      - tmux
+      - new
+      - -A
+      - -s
+      - pi
       - pi
       - --provider
       - local-llm-router
