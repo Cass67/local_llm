@@ -82,6 +82,10 @@ services:
     restart: unless-stopped
     depends_on:
       - local-llm-mgmt
+    # env_file (not `environment:`) so the bcrypt hash's $ chars reach Caddy
+    # without compose trying to interpolate them.
+    env_file:
+      - .env
     volumes:
       - ${LOCAL_LLM_CADDYFILE:-./scripts/Caddyfile.local-llm}:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
