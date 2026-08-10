@@ -71,6 +71,17 @@
 		reverse_proxy 127.0.0.1:3100
 	}
 
+	# pi coding agent. ttyd serves its own /pi base path (-b /pi), so no rewrite.
+	# Routed here so pi works through the cloudflared tunnel: Cloudflare only
+	# proxies a fixed set of ports, so a host:3006 link hangs from outside.
+	handle /pi {
+		redir * /pi/ permanent
+	}
+
+	handle /pi/* {
+		reverse_proxy 127.0.0.1:3006
+	}
+
 	# Open WebUI Socket.IO uses /ws/socket.io; route it before generic OpenCode /ws.
 	handle /ws/socket.io* {
 		reverse_proxy 127.0.0.1:3101

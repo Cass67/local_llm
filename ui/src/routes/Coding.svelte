@@ -6,6 +6,7 @@
 		name: string;
 		description: string;
 		port: number;
+		url: string;
 		auth: string;
 	};
 
@@ -13,7 +14,12 @@
 	let workdir = $state("");
 	let error = $state("");
 
-	const urlFor = (a: Agent) => `${location.protocol}//${location.hostname}:${a.port}/`;
+	// A configured url wins: over the cloudflared tunnel a host:port link hangs,
+	// because Cloudflare proxies only a fixed set of ports. Fall back to
+	// host:port for direct LAN access.
+	const urlFor = (a: Agent) =>
+		a.url ? new URL(a.url, location.href).href : `${location.protocol}//${location.hostname}:${a.port}/`;
+	const labelFor = (a: Agent) => (a.url ? a.url : `:${a.port}`);
 
 	onMount(async () => {
 		try {
@@ -44,7 +50,7 @@
 			<a class="card" href={urlFor(agent)} target="_blank" rel="noreferrer">
 				<span class="name">{agent.name}</span>
 				<span class="desc">{agent.description}</span>
-				<span class="meta">:{agent.port} · {agent.auth}</span>
+				<span class="meta">{labelFor(agent)} · {agent.auth}</span>
 			</a>
 		{/each}
 	</div>
