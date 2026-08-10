@@ -139,9 +139,24 @@ services:
       - ${AGENTS_CONFIG_DIR:-${HOME}/.config/local_llm/agents}/pi:/home/agent/.pi
     environment:
       TERM: xterm-256color
-    command: >
-      ttyd -W -p 3006 -c pi:${AGENTS_PASSWORD:?set AGENTS_PASSWORD in .env}
-      pi --provider local-llm-router --model router
+    # Terminal theme matches the mgmt UI palette (app.css --bg / --text); ttyd's
+    # default is too washed out to read against pi's TUI colours.
+    command:
+      - ttyd
+      - -W
+      - -p
+      - "3006"
+      - -c
+      - pi:${AGENTS_PASSWORD:?set AGENTS_PASSWORD in .env}
+      - -t
+      - 'theme={"background":"#09090b","foreground":"#fafafa","cursor":"#fafafa","cursorAccent":"#09090b","selectionBackground":"#3f3f46","black":"#18181b","brightBlack":"#52525b"}'
+      - -t
+      - fontSize=14
+      - pi
+      - --provider
+      - local-llm-router
+      - --model
+      - router
 
   opencode-web:
     build:
