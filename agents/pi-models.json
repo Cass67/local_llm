@@ -1,0 +1,27 @@
+{
+  "providers": {
+    "local-llm-router": {
+      "api": "openai-completions",
+      "apiKey": "dummy-local-llm",
+      "baseUrl": "http://127.0.0.1:3200/v1",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsUsageInStreaming": false,
+        "maxTokensField": "max_tokens",
+        "thinkingFormat": "qwen-chat-template"
+      },
+      "models": [
+        {
+          "id": "router",
+          "name": "local-llm router",
+          "contextWindow": 131072,
+          "maxTokens": 4096,
+          "input": ["text"],
+          "reasoning": true,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
