@@ -13,6 +13,8 @@ _AGENTS = [
         "description": "Terminal coding agent (read/bash/edit/write) in a browser terminal.",
         "port_env": "AGENT_PI_PORT",
         "default_port": 3006,
+        "url_env": "AGENT_PI_URL",
+        "default_url": "/pi/",
         "auth": "basic (user: pi)",
     },
     {
@@ -21,6 +23,8 @@ _AGENTS = [
         "description": "Agentic coding with a native web UI and session history.",
         "port_env": "AGENT_OPENCODE_PORT",
         "default_port": 3002,
+        "url_env": "AGENT_OPENCODE_URL",
+        "default_url": "",
         "auth": "basic (user: opencode)",
     },
 ]
@@ -36,6 +40,11 @@ async def list_agents():
                 "name": a["name"],
                 "description": a["description"],
                 "port": int(os.environ.get(a["port_env"], a["default_port"])),
+                # Absolute or root-relative URL. Set this when the agent is
+                # reachable somewhere other than <this host>:<port> -- notably
+                # through the cloudflared tunnel, which does not proxy arbitrary
+                # ports, so a host:port link hangs from outside the LAN.
+                "url": os.environ.get(a["url_env"], a["default_url"]),
                 "auth": a["auth"],
             }
             for a in _AGENTS
