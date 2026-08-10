@@ -46,6 +46,10 @@ services:
       TERMINAL_BENCH_DATASET_VERSION: "0.1.1"
       # Raises HF Hub rate limits for dataset/model downloads (terminal-bench, swe-bench)
       HF_TOKEN: "${HF_TOKEN:-}"
+      # Coding agents surfaced on the UI's Coding tab
+      AGENTS_REPO_DIR: "${AGENTS_REPO_DIR:-/home/cass/git}"
+      AGENT_PI_PORT: "${AGENT_PI_PORT:-3006}"
+      AGENT_OPENCODE_PORT: "${AGENT_OPENCODE_PORT:-3002}"
 
   # ── Model Router ─────────────────────────────────────────────────────────────
   # Keyword-based request router on :3200.
@@ -111,6 +115,52 @@ services:
       WEB_SEARCH_ENGINE: "searxng"
       SEARXNG_QUERY_URL: "http://127.0.0.1:3005/search?q=<query>&format=json&language=auto"
       BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL: "True"
+
+  # ── Coding agents (optional) ─────────────────────────────────────────────────
+  # Browser-accessible agentic coding over ${AGENTS_REPO_DIR}, backed by the router.
+  #   pi       — TUI wrapped in ttyd, own port :3006
+  #   opencode — native web UI,        own port :3002
+  # Each binds its own port directly (like Langfuse :3004 / SearXNG :3005) because
+  # OpenCode's SPA assets are root-absolute and cannot be served under a subpath.
+  # Both edit real files in the mounted directory. Set AGENTS_PASSWORD in .env.
+  pi-web:
+    build:
+      context: ./agents
+    image: local-llm-agents:latest
+    container_name: local-llm-pi-web
+    network_mode: host
+    restart: unless-stopped
+    user: "${LOCAL_LLM_UID:-1000}:${LOCAL_LLM_GID:-1000}"
+    working_dir: /work
+    volumes:
+      - ${AGENTS_REPO_DIR:-/home/cass/git}:/work
+      # Bind-mounted so sessions, memory and models.json survive image rebuilds
+      # and stay editable on the host. Seeded by scripts/agents-init.sh.
+      - ${AGENTS_CONFIG_DIR:-${HOME}/.config/local_llm/agents}/pi:/home/agent/.pi
+    environment:
+      TERM: xterm-256color
+    command: >
+      ttyd -W -p 3006 -c pi:${AGENTS_PASSWORD:?set AGENTS_PASSWORD in .env}
+      pi --provider local-llm-router --model router
+
+  opencode-web:
+    build:
+      context: ./agents
+    image: local-llm-agents:latest
+    container_name: local-llm-opencode-web
+    network_mode: host
+    restart: unless-stopped
+    user: "${LOCAL_LLM_UID:-1000}:${LOCAL_LLM_GID:-1000}"
+    # OpenCode's project picker browses $HOME, so the repos are mounted inside it
+    # (a bare /work mount showed only dotfiles and no project could be created).
+    working_dir: /home/agent/git
+    volumes:
+      - ${AGENTS_REPO_DIR:-/home/cass/git}:/home/agent/git
+      - ${AGENTS_CONFIG_DIR:-${HOME}/.config/local_llm/agents}/opencode:/home/agent/.config/opencode
+      - ${AGENTS_CONFIG_DIR:-${HOME}/.config/local_llm/agents}/opencode-data:/home/agent/.local/share/opencode
+    environment:
+      OPENCODE_SERVER_PASSWORD: ${AGENTS_PASSWORD:?set AGENTS_PASSWORD in .env}
+    command: opencode web --hostname 0.0.0.0 --port 3002
 
   # ── Langfuse observability ───────────────────────────────────────────────────
   # LLM request tracing — UI at http://ubt26:3004
