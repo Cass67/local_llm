@@ -41,7 +41,9 @@ def test_caddy_routes_chat_to_open_webui_and_ui_to_management():
     assert "handle /chat*" in caddy
     assert "← Back to local_llm" in caddy
     assert 'href=\\"/ui/\\"' in caddy
-    assert 'iframe src=\\"/\\"' in caddy
+    # The iframe loads /?chat=1, not /: Open WebUI's client router 404s on a
+    # rewritten path, so the root handler branches on the query instead.
+    assert 'iframe src=\\"/?chat=1\\"' in caddy
     assert "100dvh" in caddy
     assert "safe-area-inset-bottom" in caddy
     assert "handle / {" in caddy

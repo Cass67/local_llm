@@ -88,5 +88,5 @@ async def get_router_health():
         return {"running": True, **data}
     except OSError:
         return JSONResponse({"running": False, "detail": "router not reachable"}, status_code=200)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — router being down is a status, not a 500
         return JSONResponse({"running": False, "detail": str(exc)}, status_code=200)
