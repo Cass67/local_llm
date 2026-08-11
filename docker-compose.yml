@@ -54,7 +54,7 @@ services:
       # host:port link hangs over the tunnel -- pi defaults to the /pi/ path, and
       # opencode needs its own hostname (its SPA assets are root-absolute).
       AGENT_PI_URL: "${AGENT_PI_URL:-/pi/}"
-      AGENT_OPENCODE_URL: "${AGENT_OPENCODE_URL:-}"
+      AGENT_OPENCODE_URL: "${AGENT_OPENCODE_URL:-/opencode/}"
 
   # ── Model Router ─────────────────────────────────────────────────────────────
   # Keyword-based request router on :3200.
@@ -128,7 +128,7 @@ services:
   # ── Coding agents (optional) ─────────────────────────────────────────────────
   # Browser-accessible agentic coding over ${AGENTS_REPO_DIR}, backed by the router.
   #   pi       — TUI wrapped in ttyd, own port :3006
-  #   opencode — native web UI,        own port :3002
+  #   opencode — TUI wrapped in ttyd, own port :3002
   # Each binds its own port directly (like Langfuse :3004 / SearXNG :3005) because
   # OpenCode's SPA assets are root-absolute and cannot be served under a subpath.
   # Both edit real files in the mounted directory. Set AGENTS_PASSWORD in .env.
@@ -177,24 +177,43 @@ services:
       - --model
       - router
 
-  opencode-web:
+  opencode:
     build:
       context: ./agents
     image: local-llm-agents:latest
-    container_name: local-llm-opencode-web
+    container_name: local-llm-opencode
     network_mode: host
     restart: unless-stopped
     user: "${LOCAL_LLM_UID:-1000}:${LOCAL_LLM_GID:-1000}"
-    # OpenCode's project picker browses $HOME, so the repos are mounted inside it
-    # (a bare /work mount showed only dotfiles and no project could be created).
     working_dir: /home/agent/git
     volumes:
       - ${AGENTS_REPO_DIR:-/home/cass/git}:/home/agent/git
       - ${AGENTS_CONFIG_DIR:-${HOME}/.config/local_llm/agents}/opencode:/home/agent/.config/opencode
       - ${AGENTS_CONFIG_DIR:-${HOME}/.config/local_llm/agents}/opencode-data:/home/agent/.local/share/opencode
     environment:
-      OPENCODE_SERVER_PASSWORD: ${AGENTS_PASSWORD:?set AGENTS_PASSWORD in .env}
-    command: opencode web --hostname 0.0.0.0 --port 3002
+      TERM: xterm-256color
+    # The TUI under ttyd, same shape as pi: a /opencode base path works through
+    # the cloudflared tunnel, whereas `opencode web` is a root-absolute SPA that
+    # would need its own hostname. tmux survives websocket disconnects.
+    command:
+      - ttyd
+      - -W
+      - -p
+      - "3002"
+      - -b
+      - /opencode
+      - -c
+      - opencode:${AGENTS_PASSWORD:?set AGENTS_PASSWORD in .env}
+      - -t
+      - 'theme={"background":"#09090b","foreground":"#fafafa","cursor":"#fafafa","cursorAccent":"#09090b","selectionBackground":"#3f3f46","black":"#18181b","brightBlack":"#52525b"}'
+      - -t
+      - fontSize=14
+      - tmux
+      - new
+      - -A
+      - -s
+      - opencode
+      - opencode
 
   # ── Langfuse observability ───────────────────────────────────────────────────
   # LLM request tracing — UI at http://ubt26:3004

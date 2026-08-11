@@ -82,6 +82,15 @@
 		reverse_proxy 127.0.0.1:3006
 	}
 
+	# opencode TUI, served by ttyd under its own /opencode base path.
+	handle /opencode {
+		redir * /opencode/ permanent
+	}
+
+	handle /opencode/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
 	# Open WebUI Socket.IO uses /ws/socket.io; route it before generic OpenCode /ws.
 	handle /ws/socket.io* {
 		reverse_proxy 127.0.0.1:3101
