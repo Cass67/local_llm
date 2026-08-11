@@ -23,12 +23,15 @@
 		listActiveBenchmarkJobs,
 	} from "../lib/benchmarkApi";
 	import { fetchClusters } from "../lib/api";
+	import BakeoffPanel from "../components/BakeoffPanel.svelte";
+	import LeaderboardTable from "../components/LeaderboardTable.svelte";
 	import { formatMs, formatThroughput, runDelta } from "../lib/benchmarkMetrics";
 	import type { BenchmarkEndpoint, BenchmarkPrompt, BenchmarkRun, BenchmarkSummary, BenchmarkJobProgress } from "../lib/benchmarkApi";
 	import type { ClusterInfo } from "../lib/types";
 
 	const DEFAULT_PROMPT = "Write a concise Python function that reverses a string and explain it.";
 
+	let leaderboard = $state<{ load: () => void } | null>(null);
 	let endpoints: BenchmarkEndpoint[] = $state([]);
 	let prompts: BenchmarkPrompt[] = $state([]);
 	let runs: BenchmarkRun[] = $state([]);
@@ -575,6 +578,7 @@
 					selectedRun = result;
 				}
 				await loadAll();
+				leaderboard?.load();
 				running = false;
 			} else {
 				const { job_id } = await startBenchmarkByType(benchmarkType, req);
@@ -610,7 +614,7 @@
 		<div>
 			<p class="eyebrow">Benchmarks</p>
 			<h2>LLM performance lab</h2>
-			<p>Save endpoints, run prompt presets, compare models, and track trends.</p>
+			<p>Run a prompt, bake models off against each other, and compare everything measured so far.</p>
 		</div>
 		<button onclick={loadAll} disabled={loading}>{loading ? "Refreshing..." : "Refresh"}</button>
 	</div>
@@ -624,7 +628,9 @@
 		<div class="metric"><span>Error rate</span><strong>{(((summary?.error_rate ?? 0) * 100).toFixed(1))}%</strong></div>
 	</div>
 
-	<div class="grid two">
+	<details class="setup">
+		<summary>Endpoints &amp; prompt presets</summary>
+		<div class="grid two">
 		<section class="panel">
 			<h3>Endpoints</h3>
 			<div class="form-row">
@@ -661,7 +667,8 @@
 				{/each}
 			</div>
 		</section>
-	</div>
+		</div>
+	</details>
 
 	<section class="panel runner">
 		<h3>Run benchmark</h3>
@@ -740,6 +747,8 @@
 		{/if}
 	</section>
 
+	<BakeoffPanel onfinish={() => { leaderboard?.load(); loadAll(); }} />
+
 	{#if consoleVisible}
 		<section class="panel">
 			<h3>
@@ -779,25 +788,22 @@
 		</section>
 	{/if}
 
+	<LeaderboardTable bind:this={leaderboard} />
+
 	{#if benchmarkTypes.length > 0}
 		<section class="panel">
-			<h3>Leaderboard</h3>
+			<h3>Trends</h3>
+			<p class="muted">Which benchmark the charts and the tiles above are showing.</p>
 			<div class="form-row" style="margin-bottom: 1rem;">
 				{#each benchmarkTypes as type}
-					<button 
-						class="size-btn" 
+					<button
+						class="size-btn"
 						onclick={() => { benchmarkType = type.name; loadAll(); }}
 						class:active={benchmarkType === type.name}
 					>
 						{type.name}
 					</button>
 				{/each}
-			</div>
-			<div class="cards">
-				<div class="metric"><span>Total runs</span><strong>{summary?.total_runs ?? 0}</strong></div>
-				<div class="metric"><span>Avg latency</span><strong>{formatMs(summary?.avg_latency_ms)}</strong></div>
-				<div class="metric"><span>Best throughput</span><strong>{formatThroughput(summary?.best_throughput_tps, null)}</strong></div>
-				<div class="metric"><span>Error rate</span><strong>{(((summary?.error_rate ?? 0) * 100).toFixed(1))}%</strong></div>
 			</div>
 		</section>
 
@@ -961,6 +967,8 @@
 <style>
 	.benchmarks { display: flex; flex-direction: column; gap: 1rem; }
 	.hero, .panel, .metric { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; }
+	.setup > summary { cursor: pointer; color: var(--text-muted); padding: 0.5rem 0; }
+	.setup[open] > summary { margin-bottom: 0.5rem; }
 	.hero { display: flex; justify-content: space-between; align-items: center; padding: 1rem; }
 	.eyebrow, .muted { color: var(--text-muted); margin: 0; }
 	h2, h3 { margin: 0 0 0.5rem; }

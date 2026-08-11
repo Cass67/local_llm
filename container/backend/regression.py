@@ -16,12 +16,15 @@ import logging
 import time
 from typing import Any
 
-from . import active_runners, config
-from .clusters import list_active, list_clusters, read_active
+from . import active_runners, config, measure
+from .clusters import ClusterDef, list_active, list_clusters, read_active
 
 logger = logging.getLogger(__name__)
 
 # Same prompt every time — the number is only meaningful against its own history.
+# Deliberately NOT the shared measure.DEFAULT_PROMPT: every stored baseline was
+# measured with this text, and swapping it would silently compare the next build
+# against numbers from a different workload.
 GUARD_PROMPT = (
     "Write a Python function called merge_intervals that merges a list of "
     "overlapping [start, end] intervals and returns them sorted. Include a "
@@ -66,18 +69,36 @@ def baseline_key(cluster_id: str, family: str, profile: str) -> str:
 
 def _measure_cluster(port: int, model: str) -> dict[str, Any]:
     """Median decode throughput over GUARD_REPEATS runs of the fixed prompt."""
-    from .sweep import _chat_once
+    return measure.measure(
+        port,
+        model,
+        GUARD_PROMPT,
+        max_tokens=GUARD_MAX_TOKENS,
+        repeats=GUARD_REPEATS,
+        warmup=0,
+        timeout=300.0,
+    )
 
-    runs = [
-        _chat_once(port, model, GUARD_PROMPT, "", GUARD_MAX_TOKENS, 300.0)
-        for _ in range(GUARD_REPEATS)
-    ]
 
-    def median(key: str) -> float | None:
-        values = sorted(r[key] for r in runs if r.get(key) is not None)
-        return values[len(values) // 2] if values else None
+def _record(cluster: ClusterDef, model: str, profile: str, result: dict[str, Any]) -> None:
+    """Keep a guard measurement in the benchmark history.
 
-    return {"decode_tps": median("decode_tps"), "prompt_tps": median("prompt_tps")}
+    regression_last.json only holds the newest run, so without this every build's
+    number is overwritten by the next one and there is no trend to look at.
+    """
+    try:
+        measure.record(
+            measure.default_store(),
+            result,
+            cluster=cluster,
+            model=model,
+            profile=profile,
+            prompt=GUARD_PROMPT,
+            prompt_name="regression guard",
+            benchmark_type="guard",
+        )
+    except Exception as exc:  # noqa: BLE001 — the guard verdict matters more than the log
+        logger.warning("could not record guard run for %s: %s", cluster.id, exc)
 
 
 def _verdict(current: float | None, baseline: float | None) -> tuple[str, float | None]:
@@ -126,7 +147,12 @@ def run_guard(commit: str = "", *, restart: bool = True) -> dict[str, Any]:
                 active_runners.start(cluster, accepted)
                 refreshed = read_active(cluster_id) or {}
                 entry["warnings"] = refreshed.get("warnings") or []
-            entry.update(_measure_cluster(cluster.port, model))
+            result = _measure_cluster(cluster.port, model)
+            # Only the two numbers belong in the report; the rest (sample text,
+            # power) goes to the store, which is built to hold it.
+            entry["decode_tps"] = result.get("decode_tps")
+            entry["prompt_tps"] = result.get("prompt_tps")
+            _record(cluster, model, profile, result)
         except Exception as exc:  # noqa: BLE001 — one dead cluster must not hide the others
             entry.update(decode_tps=None, prompt_tps=None, error=str(exc)[:500])
             logger.warning("regression guard failed on %s: %s", cluster_id, exc)

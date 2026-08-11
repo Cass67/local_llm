@@ -16,9 +16,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from . import active_runners, config
+from . import active_runners, config, measure
 from .clusters import ClusterDef, get_cluster
-from .power import PowerSampler, tokens_per_watt
 from .profile_lint import lint_profile
 
 logger = logging.getLogger(__name__)
@@ -88,47 +87,10 @@ def _resolve_accepted(family: str) -> dict[str, Any]:
     return data
 
 
-def _chat_once(
-    port: int, model: str, prompt: str, system_prompt: str, max_tokens: int, timeout: float
-) -> dict[str, Any]:
-    """One non-streaming completion. Prefers llama-server's own timings block."""
-    import httpx
-
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
-    body = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": 0,
-        "seed": 1234,
-    }
-    started = time.perf_counter()
-    with httpx.Client(timeout=timeout) as client:
-        response = client.post(f"http://127.0.0.1:{port}/v1/chat/completions", json=body)
-        response.raise_for_status()
-        payload = response.json()
-    elapsed = max(time.perf_counter() - started, 0.001)
-
-    usage = payload.get("usage") or {}
-    completion_tokens = usage.get("completion_tokens")
-    timings = payload.get("timings") or {}
-    # llama-server measures decode without HTTP overhead; trust it when present.
-    decode_tps = timings.get("predicted_per_second")
-    if not isinstance(decode_tps, (int, float)):
-        decode_tps = completion_tokens / elapsed if isinstance(completion_tokens, int) else None
-    prompt_tps = timings.get("prompt_per_second")
-    choices = payload.get("choices") or [{}]
-    text = (choices[0].get("message") or {}).get("content") or ""
-    return {
-        "decode_tps": round(float(decode_tps), 2) if decode_tps else None,
-        "prompt_tps": round(float(prompt_tps), 2) if isinstance(prompt_tps, (int, float)) else None,
-        "completion_tokens": completion_tokens,
-        "wall_s": round(elapsed, 3),
-        "text": text,
-    }
+def combo_label(base_profile: str, combo: dict[str, Any]) -> str:
+    """Profile name a swept combination is recorded under in the benchmark store."""
+    knobs = ",".join(f"{k}={v}" for k, v in sorted(combo.items()))
+    return f"{base_profile}[{knobs}]"[:200]
 
 
 class SweepJob:
@@ -230,52 +192,43 @@ class SweepJob:
     # --- measurement ---
 
     def _measure(self, cluster: ClusterDef, model: str) -> dict[str, Any]:
-        for _ in range(self.warmup):
-            if self._cancel.is_set():
-                break
-            _chat_once(
-                cluster.port,
-                model,
-                self.prompt_text,
-                self.system_prompt,
-                self.max_tokens,
-                self.request_timeout,
+        return measure.measure(
+            cluster.port,
+            model,
+            self.prompt_text,
+            system_prompt=self.system_prompt,
+            max_tokens=self.max_tokens,
+            repeats=self.repeats,
+            warmup=self.warmup,
+            timeout=self.request_timeout,
+            should_stop=self._cancel.is_set,
+        )
+
+    # A sweep produces the most measurements of anything here, and until now they
+    # only ever landed in the sweep's own JSON. File them where the history and
+    # the leaderboard can see them — under the combination, not the scratch
+    # profile, so a row says which knobs produced the number. Bookkeeping must
+    # never sink a combination that measured fine, hence the broad except.
+
+    def _record(self, cluster: ClusterDef, model: str, label: str, result: dict[str, Any]) -> None:
+        try:
+            measure.record(
+                measure.default_store(),
+                result,
+                cluster=cluster,
+                model=model,
+                profile=label,
+                prompt=self.prompt_text,
+                prompt_name=f"sweep {self.id}",
+                benchmark_type="sweep",
             )
-        runs: list[dict[str, Any]] = []
-        sampler = PowerSampler()
-        with sampler:
-            for _ in range(self.repeats):
-                if self._cancel.is_set():
-                    break
-                runs.append(
-                    _chat_once(
-                        cluster.port,
-                        model,
-                        self.prompt_text,
-                        self.system_prompt,
-                        self.max_tokens,
-                        self.request_timeout,
-                    )
-                )
-        power = sampler.result()
-        if not runs:
-            raise RuntimeError("cancelled before any measured run")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("sweep %s could not record run: %s", self.id, exc)
 
-        def median(key: str) -> float | None:
-            values = sorted(r[key] for r in runs if r.get(key) is not None)
-            return values[len(values) // 2] if values else None
-
-        decode_tps = median("decode_tps")
-        return {
-            "decode_tps": decode_tps,
-            "prompt_tps": median("prompt_tps"),
-            "wall_s": median("wall_s"),
-            "completion_tokens": runs[-1].get("completion_tokens"),
-            "runs": len(runs),
-            **power,
-            "tps_per_watt": tokens_per_watt(decode_tps, power.get("psu_avg_w")),
-            "sample_text": runs[-1].get("text", "")[:2000],
-        }
+    # Gate results deliberately do NOT go to quality_runs: the leaderboard builds
+    # a row for every model+profile it finds there, so 64 combos would become 64
+    # phantom rows with nothing but a quality score. The sweep snapshot already
+    # shows them; promote a winner and score that profile to get a real row.
 
     # --- main loop ---
 
@@ -343,7 +296,10 @@ class SweepJob:
                 reload_started = time.perf_counter()
                 active_runners.start(cluster, launch)
                 entry["reload_s"] = round(time.perf_counter() - reload_started, 1)
-                entry.update(self._measure(cluster, model_alias))
+                result = self._measure(cluster, model_alias)
+                entry.update(result)
+                label = combo_label(self.base_profile, combo)
+                self._record(cluster, model_alias, label, result)
                 if self.quality_gate:
                     from .quality import run_quality
 

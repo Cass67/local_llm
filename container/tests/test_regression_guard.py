@@ -4,6 +4,7 @@ import json
 
 import pytest
 from backend import regression
+from backend.benchmark_store import BenchmarkStore
 from backend.clusters import ClusterDef
 
 
@@ -37,7 +38,7 @@ def env(tmp_path, monkeypatch):
 
 
 def _measure(tps):
-    return lambda port, model: {"decode_tps": tps, "prompt_tps": 900.0}
+    return lambda _port, _model: {"decode_tps": tps, "prompt_tps": 900.0}
 
 
 @pytest.mark.usefixtures("env")
@@ -87,7 +88,7 @@ def test_improvement_moves_the_baseline_up(monkeypatch):
 
 @pytest.mark.usefixtures("env")
 def test_measurement_failure_does_not_crash_the_guard(monkeypatch):
-    def boom(port, model):
+    def boom(_port, _model):
         raise RuntimeError("runner never came up")
 
     monkeypatch.setattr(regression, "_measure_cluster", boom)
@@ -113,3 +114,28 @@ def test_baselines_are_keyed_per_cluster_model_and_profile():
     assert regression.baseline_key("c1", "fam", "balanced") != regression.baseline_key(
         "c1", "fam", "rccl"
     )
+
+
+def test_guard_measurements_become_history(env, monkeypatch):
+    """regression_last.json keeps only the newest run; the store keeps the trend."""
+    monkeypatch.setattr(
+        regression.measure,
+        "chat_once",
+        lambda *_a, **_k: {
+            "decode_tps": 42.0,
+            "prompt_tps": 900.0,
+            "completion_tokens": 64,
+            "wall_s": 1.5,
+            "text": "ok",
+        },
+    )
+    report = regression.run_guard("abc123")
+    assert report["clusters"][0]["decode_tps"] == 42.0
+    # The bulky fields stay out of the report.
+    assert "sample_text" not in report["clusters"][0]
+
+    store = BenchmarkStore(env / "runs" / "benchmarks.sqlite3")
+    rows = store.list_runs({"benchmark_type": "guard"})["runs"]
+    assert len(rows) == 1
+    assert rows[0]["throughput_tps"] == 42.0
+    assert rows[0]["prompt_name"] == "regression guard"

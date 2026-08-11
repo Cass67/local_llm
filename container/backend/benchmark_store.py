@@ -30,6 +30,11 @@ def _empty_leaderboard_row(model: str, profile: str | None) -> dict[str, Any]:
     }
 
 
+# Throughput measurements, as opposed to agentic harness results. Anything not in
+# this set is assumed to carry a "resolved N/M" score in its response text.
+PERF_TYPES = ("standard", "sweep", "guard")
+
+
 def _note_last(row: dict[str, Any], at: str | None) -> None:
     if at and (row["last_run"] is None or at > row["last_run"]):
         row["last_run"] = at
@@ -314,13 +319,15 @@ class BenchmarkStore:
                 group by model, profile
                 """
             ).fetchall()
+            placeholders = ", ".join("?" for _ in PERF_TYPES)
             agentic = conn.execute(
-                """
+                f"""
                 select model, profile, benchmark_type, response_text, created_at
                 from benchmark_runs
-                where status = 'ok' and benchmark_type != 'standard'
+                where status = 'ok' and benchmark_type not in ({placeholders})
                 order by created_at asc
-                """
+                """,  # noqa: S608 # nosec B608 -- placeholders from a code constant
+                PERF_TYPES,
             ).fetchall()
             quality = conn.execute("select * from quality_runs order by created_at asc").fetchall()
 
