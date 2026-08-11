@@ -20,11 +20,11 @@ _AGENTS = [
     {
         "id": "opencode",
         "name": "OpenCode",
-        "description": "Agentic coding with a native web UI and session history.",
+        "description": "Agentic coding TUI with session history and sub-agents.",
         "port_env": "AGENT_OPENCODE_PORT",
         "default_port": 3002,
         "url_env": "AGENT_OPENCODE_URL",
-        "default_url": "",
+        "default_url": "/opencode/",
         "auth": "basic (user: opencode)",
     },
 ]

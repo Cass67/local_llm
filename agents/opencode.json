@@ -1,12 +1,22 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "local-llm-router/router",
   "provider": {
     "local-llm-router": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "local-llm router",
-      "options": { "baseURL": "http://127.0.0.1:3200/v1", "apiKey": "dummy-local-llm" },
+      "options": {
+        "baseURL": "http://127.0.0.1:3200/v1",
+        "apiKey": "dummy-local-llm"
+      },
       "models": {
-        "router": { "name": "local-llm router", "limit": { "context": 131072, "output": 4096 } }
+        "router": {
+          "name": "local-llm router",
+          "limit": {
+            "context": 131072,
+            "output": 4096
+          }
+        }
       }
     }
   }
