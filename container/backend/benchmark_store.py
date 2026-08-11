@@ -2,9 +2,52 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
+
+# terminal-bench and swe-bench record their score in the response text as
+# "3/10 tasks resolved" — there is no numeric column for it.
+RESOLVED_RE = re.compile(r"(\d+)\s*/\s*(\d+)")
+
+
+def _empty_leaderboard_row(model: str, profile: str | None) -> dict[str, Any]:
+    return {
+        "model": model,
+        "profile": profile or None,
+        "runs": 0,
+        "best_tps": None,
+        "avg_tps": None,
+        "avg_latency_ms": None,
+        "best_tps_per_watt": None,
+        "avg_psu_w": None,
+        "quality_pass_rate": None,  # nosec B105 -- a pass rate, not a password
+        "quality_judge_mean": None,
+        "quality_at": None,
+        "agentic": {},
+        "last_run": None,
+    }
+
+
+def _note_last(row: dict[str, Any], at: str | None) -> None:
+    if at and (row["last_run"] is None or at > row["last_run"]):
+        row["last_run"] = at
+
+
+def _agentic_score(response_text: str | None, created_at: str) -> dict[str, Any] | None:
+    match = RESOLVED_RE.search(response_text or "")
+    if not match:
+        return None
+    resolved, total = int(match.group(1)), int(match.group(2))
+    if total <= 0:
+        return None
+    return {
+        "resolved": resolved,
+        "total": total,
+        "rate": round(resolved / total, 3),
+        "at": created_at,
+    }
 
 
 class BenchmarkStore:
@@ -61,6 +104,17 @@ class BenchmarkStore:
                     status text not null,
                     error text,
                     benchmark_type text not null default 'standard',
+                    created_at text not null default current_timestamp
+                );
+                create table if not exists quality_runs (
+                    id integer primary key autoincrement,
+                    model text not null,
+                    profile text,
+                    cluster_id text,
+                    passed integer not null,
+                    total integer not null,
+                    pass_rate real not null,
+                    judge_mean real,
                     created_at text not null default current_timestamp
                 );
                 """
@@ -218,6 +272,91 @@ class BenchmarkStore:
                 [*params, limit, offset],
             ).fetchall()
         return {"total": total, "runs": [self._row(row) for row in rows]}
+
+    def create_quality_run(self, **values: Any) -> dict[str, Any]:
+        columns = ", ".join(values.keys())
+        placeholders = ", ".join("?" for _ in values)
+        with self._connect() as conn:
+            cur = conn.execute(
+                f"insert into quality_runs ({columns}) values ({placeholders})",  # noqa: S608 # nosec B608 -- columns from code
+                tuple(values.values()),
+            )
+            row = conn.execute(
+                "select * from quality_runs where id = ?", (cur.lastrowid,)
+            ).fetchone()
+        return self._row(row)
+
+    def leaderboard(self) -> dict[str, Any]:
+        """One row per model+profile, joining speed, power, quality and agentic scores.
+
+        Speed columns aggregate every standard run; quality and agentic scores are
+        the latest one of each kind, since they are pass/fail snapshots rather than
+        samples worth averaging.
+        """
+        rows: dict[tuple[str, str], dict[str, Any]] = {}
+
+        def entry(model: str, profile: str | None) -> dict[str, Any]:
+            return rows.setdefault((model, profile or ""), _empty_leaderboard_row(model, profile))
+
+        with self._connect() as conn:
+            speed = conn.execute(
+                """
+                select model, profile,
+                       count(*) as runs,
+                       max(throughput_tps) as best_tps,
+                       avg(throughput_tps) as avg_tps,
+                       avg(latency_ms) as avg_latency_ms,
+                       max(tps_per_watt) as best_tps_per_watt,
+                       avg(psu_avg_w) as avg_psu_w,
+                       max(created_at) as last_run
+                from benchmark_runs
+                where status = 'ok' and benchmark_type = 'standard'
+                group by model, profile
+                """
+            ).fetchall()
+            agentic = conn.execute(
+                """
+                select model, profile, benchmark_type, response_text, created_at
+                from benchmark_runs
+                where status = 'ok' and benchmark_type != 'standard'
+                order by created_at asc
+                """
+            ).fetchall()
+            quality = conn.execute("select * from quality_runs order by created_at asc").fetchall()
+
+        for row in speed:
+            target = entry(row["model"], row["profile"])
+            for key in (
+                "runs",
+                "best_tps",
+                "avg_tps",
+                "avg_latency_ms",
+                "best_tps_per_watt",
+                "avg_psu_w",
+            ):
+                target[key] = row[key]
+            _note_last(target, row["last_run"])
+
+        for row in agentic:
+            score = _agentic_score(row["response_text"], row["created_at"])
+            if score is None:
+                continue
+            target = entry(row["model"], row["profile"])
+            target["agentic"][row["benchmark_type"]] = score
+            _note_last(target, row["created_at"])
+
+        for row in quality:
+            target = entry(row["model"], row["profile"])
+            target["quality_pass_rate"] = row["pass_rate"]
+            target["quality_judge_mean"] = row["judge_mean"]
+            target["quality_at"] = row["created_at"]
+            _note_last(target, row["created_at"])
+
+        ordered = sorted(
+            rows.values(),
+            key=lambda r: (r["best_tps"] is None, -(r["best_tps"] or 0)),
+        )
+        return {"rows": ordered}
 
     def summary(self, benchmark_type: str | None = None) -> dict[str, Any]:
         conditions = []
