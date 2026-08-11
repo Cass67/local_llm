@@ -1,5 +1,7 @@
 """llama.cpp upstream update check + runner image rebuild via Docker socket."""
 
+import asyncio
+import logging
 import os
 import re
 import subprocess  # nosec B404  # noqa: S404
@@ -11,7 +13,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .. import config
+from .. import config, regression
 
 router = APIRouter(prefix="/api/update", tags=["update"])
 
@@ -156,6 +158,19 @@ def _run_builds(targets: list[tuple[str, str]], ref: str) -> None:
     _build["current"] = None
     _build["running"] = False
 
+    # A rebuild is the moment upstream performance changes; measure it now, while
+    # we know which commit caused it, rather than noticing weeks later.
+    if _build["results"] and all(code == 0 for code in _build["results"].values()):
+        _build["current"] = "regression guard"
+        _build["running"] = True
+        try:
+            _build["regression"] = regression.run_guard(ref)
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("regression guard failed after build: %s", exc)
+        finally:
+            _build["current"] = None
+            _build["running"] = False
+
 
 class BuildRequest(BaseModel):
     backends: list[str]
@@ -212,4 +227,25 @@ async def build_status():
         "started": _build["started"],
         "results": _build["results"],
         "log_tail": log_tail,
+        "regression": _build.get("regression"),
     }
+
+
+@router.get("/regression")
+async def regression_report():
+    """Most recent post-rebuild throughput comparison, plus the known-good baselines."""
+    return {"report": regression.last_report(), "baselines": regression.load_baselines()}
+
+
+@router.post("/regression/run")
+async def run_regression_guard(commit: str = ""):
+    """Measure every running cluster against its baseline without rebuilding."""
+    if _build["running"]:
+        raise HTTPException(409, "a build is already running")
+    return await asyncio.to_thread(regression.run_guard, commit)
+
+
+@router.post("/regression/accept")
+async def accept_regression_baseline():
+    """Bless the latest measurement as the new known-good."""
+    return regression.accept_current_as_baseline()

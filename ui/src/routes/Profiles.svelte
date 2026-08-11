@@ -9,7 +9,9 @@
 		deleteProfile,
 		cloneProfile,
 		setDefaultProfile,
+		lintProfile,
 	} from "../lib/api";
+	import type { LintFinding, VramEstimate } from "../lib/types";
 
 	type Field = {
 		key: string;
@@ -127,6 +129,9 @@
 	let newName = $state("");
 	let isNew = $state(false);
 	let error = $state("");
+	let lint = $state<LintFinding[]>([]);
+	let vram = $state<VramEstimate | null>(null);
+	let vramAvailable = $state<number | null>(null);
 	let saved = $state(false);
 	let importing = $state(false);
 	let cloning = $state(false);
@@ -159,6 +164,7 @@
 			const def = famData?.default || names[0] || "";
 			selectedProfile = def;
 			loadInto(def ? famData?.profiles[def] : {});
+			refreshLint();
 		}
 	});
 
@@ -166,6 +172,7 @@
 		isNew = false;
 		selectedProfile = name;
 		loadInto(name ? currentFam.profiles[name] : {});
+		refreshLint();
 	}
 
 	function onFamilyChange(fam: string) {
@@ -175,6 +182,7 @@
 		const def = allProfiles[fam]?.default || names[0] || "";
 		selectedProfile = def;
 		loadInto(def ? allProfiles[fam]?.profiles[def] : {});
+		refreshLint();
 	}
 
 	// Sync when toggling editor mode so both views agree.
@@ -283,6 +291,27 @@
 		allProfiles = (await fetchAllProfiles()).families;
 	}
 
+	async function refreshLint() {
+		if (!selectedFamily || !selectedProfile || isNew) {
+			lint = [];
+			vram = null;
+			vramAvailable = null;
+			return;
+		}
+		try {
+			const res = await lintProfile(selectedFamily, selectedProfile);
+			lint = res.lint;
+			vram = res.vram_estimate;
+			vramAvailable = res.vram_available_mb;
+		} catch {
+			lint = [];
+			vram = null;
+			vramAvailable = null;
+		}
+	}
+
+	const gb = (mb: number) => (mb / 1024).toFixed(1);
+
 	async function handleSave() {
 		error = "";
 		const name = isNew ? newName.trim() : selectedProfile;
@@ -302,7 +331,8 @@
 			parsed = coerce(form);
 		}
 		try {
-			await upsertProfile(selectedFamily, name, parsed);
+			const result = await upsertProfile(selectedFamily, name, parsed);
+			lint = result.lint ?? [];
 			await reload();
 			isNew = false;
 			newName = "";
@@ -310,6 +340,7 @@
 			loadInto(allProfiles[selectedFamily]?.profiles[name] ?? parsed);
 			saved = true;
 			setTimeout(() => (saved = false), 1500);
+			refreshLint();
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -406,6 +437,29 @@
 	</div>
 
 	{#if error}<p class="error">{error}</p>{/if}
+
+	{#if lint.length > 0 || vram}
+		<div class="lint-panel">
+			{#each lint as finding}
+				<div class="lint-row {finding.level}">
+					<span class="lint-badge">{finding.level === "error" ? "dead" : "warn"}</span>
+					<code>{finding.field}</code>
+					<span>{finding.message}</span>
+				</div>
+			{/each}
+			{#if vram}
+				<div class="lint-row vram">
+					<span class="lint-badge vram-badge">vram</span>
+					<span>
+						~{gb(vram.total_mb)} GB estimated
+						(weights {gb(vram.weights_mb)} + KV {gb(vram.kv_mb)} @ {vram.ctx.toLocaleString()} ctx
+						over {vram.n_layers} layers)
+						{#if vramAvailable}of {gb(vramAvailable)} GB available{/if}
+					</span>
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	{#if selectedFamily}
 		{#if !isNew && profileNames.length === 0}
@@ -589,6 +643,32 @@
 	}
 	textarea:focus { outline: none; border-color: var(--accent, #6c8ebf); }
 	.error { color: #e57373; margin: 0; }
+	.lint-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		margin: 0.5rem 0 0.75rem;
+	}
+	.lint-row {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		font-size: 0.85rem;
+		padding: 0.4rem 0.6rem;
+		border-radius: 4px;
+		border-left: 3px solid transparent;
+	}
+	.lint-row.error { background: #2b1a1a; border-left-color: #e57373; color: #f0c9c9; }
+	.lint-row.warn { background: #2b2517; border-left-color: #e0b155; color: #efe0c2; }
+	.lint-row.vram { background: #16222b; border-left-color: #5fa8d3; color: #cfe4f0; }
+	.lint-badge {
+		flex: 0 0 auto;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		opacity: 0.85;
+	}
+	.lint-row code { flex: 0 0 auto; opacity: 0.95; }
 	.muted { color: var(--text-muted); }
 
 	.confirm-overlay {

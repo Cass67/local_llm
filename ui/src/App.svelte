@@ -8,6 +8,7 @@
   import Architecture from './routes/Architecture.svelte';
   import Profiles from './routes/Profiles.svelte';
   import Coding from './routes/Coding.svelte';
+  import Tuning from './routes/Tuning.svelte';
   import Header from './components/Header.svelte';
 
   const routes = {
@@ -20,6 +21,7 @@
     '/architecture': Architecture,
     '/profiles': Profiles,
     '/coding': Coding,
+    '/tuning': Tuning,
   };
 </script>
 

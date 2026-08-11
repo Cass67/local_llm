@@ -22,7 +22,8 @@ from pydantic import BaseModel, Field, HttpUrl
 from backend.benchmarks import SwebenchRunner, TerminalBenchRunner
 
 from .. import config
-from ..clusters import list_clusters
+from ..clusters import list_active, list_clusters
+from ..power import PowerSampler, tokens_per_watt
 
 BenchmarkStore = import_module("backend.benchmark_store").BenchmarkStore
 
@@ -135,6 +136,14 @@ def _usage(payload: Any) -> dict[str, int | None]:
     }
 
 
+def _active_profile_for(cluster_name: str) -> str | None:
+    """Which profile served this run — without it, tok/s/W rows cannot be compared."""
+    for entry in list_active():
+        if entry.get("cluster_name") == cluster_name:
+            return entry.get("profile")
+    return None
+
+
 def _word_count(text: str) -> int:
     return len([part for part in text.split() if part])
 
@@ -242,6 +251,8 @@ async def run_benchmark(req: BenchmarkRunRequest, benchmark_type: str = "standar
     payload: dict[str, Any] | None = None
     status = "ok"
     error: str | None = None
+    sampler = PowerSampler()
+    sampler.__enter__()
     try:
         messages: list[dict[str, str]] = []
         if req.system_prompt:
@@ -272,7 +283,10 @@ async def run_benchmark(req: BenchmarkRunRequest, benchmark_type: str = "standar
     except httpx.HTTPError as exc:
         status = "error"
         error = str(exc)
+    finally:
+        sampler.__exit__()
 
+    power = sampler.result()
     duration_ms = (time.perf_counter() - started) * 1000
     text = _response_text(payload) if payload is not None else ""
     usage = _usage(payload)
@@ -304,6 +318,11 @@ async def run_benchmark(req: BenchmarkRunRequest, benchmark_type: str = "standar
         throughput_cps=throughput_cps,
         status=status,
         error=error,
+        psu_avg_w=power.get("psu_avg_w"),
+        psu_peak_w=power.get("psu_peak_w"),
+        gpu_avg_w=power.get("gpu_avg_w"),
+        tps_per_watt=tokens_per_watt(throughput_tps, power.get("psu_avg_w")),
+        profile=_active_profile_for(cluster_name),
     )
     status_str = f"{duration_ms:.0f}ms tps={throughput_tps:.0f}" if status == "ok" else status
     print(f"bench: [{cluster_name}] {req.model} → {status_str}", flush=True)
@@ -317,6 +336,7 @@ async def list_runs(
     prompt_id: int | None = None,
     status: str | None = None,
     benchmark_type: str | None = None,
+    profile: str | None = None,
     from_date: str | None = None,
     to_date: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
@@ -329,6 +349,7 @@ async def list_runs(
             "prompt_id": prompt_id,
             "status": status,
             "benchmark_type": benchmark_type,
+            "profile": profile,
             "from_date": from_date,
             "to_date": to_date,
             "limit": limit,

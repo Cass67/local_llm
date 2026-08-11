@@ -73,6 +73,18 @@ class BenchmarkStore:
                 )
             if "run_id" not in columns:
                 conn.execute("alter table benchmark_runs add column run_id text")
+            # Wall power during the run, so throughput can be read per watt.
+            for column, coltype in (
+                ("psu_avg_w", "real"),
+                ("psu_peak_w", "real"),
+                ("gpu_avg_w", "real"),
+                ("tps_per_watt", "real"),
+                ("profile", "text"),
+            ):
+                if column not in columns:
+                    conn.execute(
+                        f"alter table benchmark_runs add column {column} {coltype}"  # noqa: S608 # nosec B608 -- names from code
+                    )
 
     @staticmethod
     def _row(row: sqlite3.Row) -> dict[str, Any]:
@@ -182,6 +194,7 @@ class BenchmarkStore:
             ("prompt_id", "prompt_id"),
             ("status", "status"),
             ("benchmark_type", "benchmark_type"),
+            ("profile", "profile"),
         ):
             value = filters.get(key)
             if value not in (None, ""):

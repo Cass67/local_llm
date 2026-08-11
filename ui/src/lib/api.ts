@@ -30,6 +30,15 @@ import type {
 	FamilyProfiles,
 	ProfilesData,
 	GpuStatusResponse,
+	ProfileLintResponse,
+	SaveProfileResponse,
+	SweepSnapshot,
+	SweepListEntry,
+	QualityReport,
+	QualityCaseResult,
+	RegressionResponse,
+	RegressionReport,
+	RouteLogResponse,
 } from "./types";
 
 const BASE = "/api/local-llm";
@@ -498,7 +507,7 @@ export async function upsertProfile(
 	family: string,
 	name: string,
 	profile: ModelProfile,
-): Promise<void> {
+): Promise<SaveProfileResponse> {
 	const res = await fetch(
 		`${BASE}/profiles/${encodeURIComponent(family)}/${encodeURIComponent(name)}`,
 		{
@@ -508,6 +517,20 @@ export async function upsertProfile(
 		},
 	);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function lintProfile(
+	family: string,
+	name: string,
+	clusterId = "",
+): Promise<ProfileLintResponse> {
+	const qs = clusterId ? `?cluster_id=${encodeURIComponent(clusterId)}` : "";
+	const res = await fetch(
+		`${BASE}/profiles/${encodeURIComponent(family)}/${encodeURIComponent(name)}/lint${qs}`,
+	);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
 }
 
 export async function deleteProfile(family: string, name: string): Promise<void> {
@@ -580,6 +603,141 @@ export async function startRunnerBuild(backends: string[]): Promise<{ status: st
 
 export async function fetchBuildStatus(): Promise<BuildStatus> {
 	const res = await fetch(`${BASE}/update/build/status`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+// --- Sweep (profile autotuner) ---
+
+export interface SweepRequest {
+	family: string;
+	cluster_id: string;
+	base_profile: string;
+	grid: Record<string, unknown[]>;
+	prompt_text: string;
+	system_prompt?: string;
+	max_tokens?: number;
+	repeats?: number;
+	warmup?: number;
+	objective?: string;
+	quality_gate?: boolean;
+	min_pass_rate?: number;
+	judge_url?: string;
+	judge_model?: string;
+}
+
+export async function startSweep(
+	req: SweepRequest,
+): Promise<{ id: string; total: number; status: string }> {
+	const res = await fetch(`${BASE}/sweep`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function fetchSweeps(): Promise<{ sweeps: SweepListEntry[] }> {
+	const res = await fetch(`${BASE}/sweep`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchSweep(id: string): Promise<SweepSnapshot> {
+	const res = await fetch(`${BASE}/sweep/${encodeURIComponent(id)}`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function cancelSweep(id: string): Promise<void> {
+	const res = await fetch(`${BASE}/sweep/${encodeURIComponent(id)}/cancel`, {
+		method: "POST",
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+export async function promoteSweepResult(
+	id: string,
+	newProfile: string,
+	index?: number,
+): Promise<{ profile: string; config: Record<string, unknown> }> {
+	const res = await fetch(`${BASE}/sweep/${encodeURIComponent(id)}/promote`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ new_profile: newProfile, index }),
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+// --- Quality (golden prompt set) ---
+
+export async function fetchQualityCases(): Promise<{
+	cases: QualityCaseResult[];
+	is_default: boolean;
+}> {
+	const res = await fetch(`${BASE}/quality/cases`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function runQualitySet(
+	clusterId: string,
+	judgeUrl = "",
+	judgeModel = "",
+): Promise<QualityReport> {
+	const res = await fetch(`${BASE}/quality/run`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			cluster_id: clusterId,
+			judge_url: judgeUrl,
+			judge_model: judgeModel,
+		}),
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+// --- Regression guard ---
+
+export async function fetchRegression(): Promise<RegressionResponse> {
+	const res = await fetch(`${BASE}/update/regression`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function runRegressionGuard(): Promise<RegressionReport> {
+	const res = await fetch(`${BASE}/update/regression/run`, { method: "POST" });
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function acceptRegressionBaseline(): Promise<{ updated: number }> {
+	const res = await fetch(`${BASE}/update/regression/accept`, { method: "POST" });
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+// --- Router decision log ---
+
+export async function fetchRouteLog(differingOnly = false): Promise<RouteLogResponse> {
+	const res = await fetch(
+		`${BASE}/router/log?limit=50&differing_only=${differingOnly}`,
+	);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.json();
 }

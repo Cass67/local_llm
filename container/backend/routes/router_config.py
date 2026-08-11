@@ -60,6 +60,23 @@ async def put_router_config(body: dict):
     return {"status": "saved"}
 
 
+@router.get("/log")
+async def get_router_log(limit: int = 50, differing_only: bool = False):
+    """Recent routing decisions from the router process — the shadow-mode feedback loop."""
+    query = f"/route/log?limit={int(limit)}&differing_only={str(bool(differing_only)).lower()}"
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", config.ROUTER_PORT, timeout=3)
+        conn.request("GET", query)
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        return data
+    except (OSError, json.JSONDecodeError) as exc:
+        return JSONResponse(
+            {"entries": [], "detail": f"router not reachable: {exc}"}, status_code=200
+        )
+
+
 @router.get("/health")
 async def get_router_health():
     try:

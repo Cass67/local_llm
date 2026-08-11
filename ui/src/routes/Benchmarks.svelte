@@ -839,7 +839,7 @@
 			<button onclick={applyFilters}>Filter</button>
 		</div>
 		<table>
-			<thead><tr><th>Time</th><th>Endpoint</th><th>Model</th><th>Prompt</th><th>Latency</th><th>Throughput</th><th>Output</th><th>Status</th><th>Type</th><th>Score</th><th>Report</th></tr></thead>
+			<thead><tr><th>Time</th><th>Endpoint</th><th>Model</th><th>Prompt</th><th>Latency</th><th>Throughput</th><th>tok/s/W</th><th>Output</th><th>Status</th><th>Type</th><th>Score</th><th>Report</th></tr></thead>
 			<tbody>
 				{#each runs as run}
 					<tr onclick={() => (selectedRun = run)} class:active={selectedRun?.id === run.id}>
@@ -849,6 +849,9 @@
 						<td>{run.prompt_name || run.prompt_text.slice(0, 32)}</td>
 						<td>{formatMs(run.latency_ms)}</td>
 						<td>{formatThroughput(run.throughput_tps, run.throughput_cps)}</td>
+						<td title={run.psu_avg_w ? `${run.psu_avg_w.toFixed(0)} W wall draw` : "no PSU sensor"}>
+							{run.tps_per_watt ? run.tps_per_watt.toFixed(3) : "—"}
+						</td>
 						<td>{run.output_chars.toLocaleString()} chars</td>
 						<td>{run.status}</td>
 						<td style="font-size: 0.75rem; color: var(--text-muted);">{run.benchmark_type}</td>
