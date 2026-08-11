@@ -397,6 +397,7 @@
 					<tr>
 						<th>GPU</th>
 						<th>VRAM</th>
+						<th>Board</th>
 						<th>ROCm</th>
 						<th>CUDA</th>
 						<th>Vulkan</th>
@@ -408,6 +409,7 @@
 						<tr>
 							<td>{g.model_name}</td>
 							<td>{vramLabel(g.vram_mb)}</td>
+							<td>{g.board || "—"}</td>
 							<td>{g.rocm_index ?? "—"}</td>
 							<td>{g.cuda_index ?? "—"}</td>
 							<td>{g.vulkan_index ?? "—"}</td>
@@ -439,7 +441,7 @@
 								checked={selectedPcis.has(g.pci_id)}
 								onchange={() => togglePci(g.pci_id)}
 							/>
-							{g.model_name} ({vramLabel(g.vram_mb)})
+							{g.model_name}{g.board ? ` [${g.board}]` : ""} ({vramLabel(g.vram_mb)})
 							{#if backendIndex(g, newBackend) != null}
 								<span class="idx">idx {backendIndex(g, newBackend)}</span>
 							{/if}

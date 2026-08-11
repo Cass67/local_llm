@@ -14,6 +14,7 @@ class GpuInfo:
     vendor: str  # "amd" | "nvidia" | "intel" | "unknown"
     model_name: str
     vram_mb: int | None
+    board: str = ""  # add-in-board vendor, e.g. "ASRock" -- identical chips, different coolers
     rocm_index: int | None = None
     cuda_index: int | None = None
     vulkan_index: int | None = None
@@ -126,6 +127,35 @@ def _lspci_name(pci_id: str) -> str | None:
         r"(?:\]|controller):\s*(.+?)(?:\s*\[[0-9a-fA-F]{4}:[0-9a-fA-F]{4}\])?(?:\s*\(rev|$)", out
     )
     return match.group(1).strip() if match else None
+
+
+# Corporate boilerplate in lspci Subsystem strings. Stripping it turns
+# "ASRock Incorporation Device 5308" into "ASRock", which is what tells two
+# otherwise identical cards apart when only one of them is overheating.
+# Longest-first: "Incorporation" must win over "Inc", "Corporation" over "Corp".
+# The trailing dot sits outside the word boundary -- "Co\.\b" never matches
+# "Co., Ltd" because there is no word boundary after the period.
+_BOARD_NOISE = re.compile(
+    r"\b(?:Incorporation|Technolog(?:y|ies)|Computer|Systems?|Compan(?:y|ies)|"
+    r"Corporation|Corp|Limited|Ltd|Inc|Co|International|"
+    r"Device\s+[0-9a-fA-F]{4})\b\.?",
+    re.IGNORECASE,
+)
+
+
+def _lspci_board(pci_id: str) -> str:
+    """Add-in-board vendor from the lspci Subsystem line, "" when it names no board."""
+    out = _run(["lspci", "-s", pci_id, "-v"])
+    match = re.search(r"^\s*Subsystem:\s*(.+)$", out, re.MULTILINE)
+    if not match:
+        return ""
+    text = _BOARD_NOISE.sub("", match.group(1).strip())
+    text = re.sub(r"[\s,]+", " ", text).strip(" ,-")
+    # Reference boards report the chip vendor as their subsystem, which names no
+    # board -- better to show nothing than to label every card the same.
+    if not text or re.match(r"^Advanced Micro Devices|^NVIDIA", text, re.IGNORECASE):
+        return ""
+    return text
 
 
 def _nvidia_smi_indices() -> dict[str, tuple[int, str, int | None]]:
@@ -300,6 +330,7 @@ def detect_gpus() -> list[GpuInfo]:  # noqa: C901
                 vendor=vendor,
                 model_name=name,
                 vram_mb=vram_mb,
+                board=_lspci_board(pci),
                 rocm_index=rocm_idx,
                 cuda_index=cuda_idx,
                 vulkan_index=vk_idx,

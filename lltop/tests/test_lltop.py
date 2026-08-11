@@ -624,6 +624,31 @@ class LltopTests(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual({r["x"] for r in result}, {1, 2})
 
+    def test_board_name_strips_corporate_boilerplate(self):
+        # Real lspci Subsystem strings from ubt26's three otherwise-identical 7900 XTs.
+        lltop = load_lltop()
+        self.assertEqual(lltop._board_name("ASRock Incorporation Device 5308"), "ASRock")
+        self.assertEqual(lltop._board_name("Gigabyte Technology Co., Ltd Device 240c"), "Gigabyte")
+        self.assertEqual(
+            lltop._board_name("Sapphire Technology Limited PULSE RX 7900 XTX"),
+            "Sapphire PULSE RX 7900 XTX",
+        )
+
+    def test_board_name_drops_reference_boards(self):
+        # A reference board names the chip vendor, not a board -- labelling every
+        # card "Advanced Micro Devices" would defeat the point of the column.
+        lltop = load_lltop()
+        self.assertEqual(
+            lltop._board_name("Advanced Micro Devices, Inc. [AMD/ATI] Device 0e3b"), ""
+        )
+        self.assertEqual(lltop._board_name(""), "")
+
+    def test_render_gpu_device_shows_board(self):
+        lltop = load_lltop()
+        device = dict(self.sample_snapshot()["gpu"]["gpus"][0], board="ASRock")
+        lines = lltop.render_gpu_device(device, [])
+        self.assertIn("[ASRock]", lines[0])
+
 
 if __name__ == "__main__":
     unittest.main()
