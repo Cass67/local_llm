@@ -9,7 +9,7 @@ import time
 from copy import deepcopy
 from typing import Any
 
-from . import config
+from . import config, startup_progress
 from .clusters import (
     ClusterDef,
     list_active,
@@ -45,11 +45,25 @@ def _runner_for(cluster: ClusterDef) -> DockerRunner:
     )
 
 
-def _wait_ready(runner: DockerRunner, port: int, timeout: float = 120.0) -> bool:
+def _last_log_line(runner: DockerRunner) -> str:
+    """Newest non-empty runner log line — llama.cpp reports load progress there."""
+    try:
+        lines = [line.strip() for line in runner.logs(5) if line.strip()]
+    except Exception:  # noqa: BLE001
+        return ""
+    return lines[-1][:200] if lines else ""
+
+
+def _wait_ready(runner: DockerRunner, port: int, timeout: float = 120.0, on_poll=None) -> bool:
     deadline = time.monotonic() + timeout
+    polls = 0
     while time.monotonic() < deadline:
         if not runner.is_running():
             return False
+        # Every other poll, so a slow load does not hit the docker socket every second.
+        if on_poll is not None and polls % 2 == 0:
+            on_poll(_last_log_line(runner))
+        polls += 1
         conn: http.client.HTTPConnection | None = None
         try:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
@@ -163,6 +177,11 @@ def _build_launch_metadata(
 
 def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
     """Launch accepted model on cluster, stopping any prior instance on that cluster."""
+    startup_progress.begin(
+        cluster.id,
+        str(accepted.get("alias") or accepted.get("family") or "?"),
+        str(accepted.get("profile", "")),
+    )
     stop(cluster)
     inventory = detect_gpus()
     meta = _build_launch_metadata(accepted, cluster, inventory)
@@ -177,13 +196,22 @@ def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
         visible,
     )
     runner = _runner_for(cluster)
+    startup_progress.set_stage(cluster.id, "creating")
     runner.launch(meta)
     # Big MoE models can take minutes to load; without this the readiness wait times
     # out, start() raises, and the active entry is never written for a runner that
     # goes on to serve fine.
     load_timeout = float(meta.get("config", {}).get("load_timeout_s") or 120.0)
-    if not _wait_ready(runner, cluster.port, load_timeout):
+    startup_progress.set_stage(cluster.id, "loading")
+    ready = _wait_ready(
+        runner,
+        cluster.port,
+        load_timeout,
+        on_poll=lambda line: startup_progress.set_stage(cluster.id, "loading", line),
+    )
+    if not ready:
         logs = "\n".join(runner.logs(40)) or "runner did not become ready"
+        startup_progress.finish(cluster.id, error=logs[-300:])
         raise RuntimeError(logs[-1000:])
     # The boot log is the only place llama-server reports knobs it declined to
     # honour, and it scrolls away — capture the verdict now, at load time.
@@ -212,6 +240,7 @@ def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
     write_active(cluster.id, state)
     write_desired(cluster.id, state)
     touch(cluster.id)
+    startup_progress.finish(cluster.id)
 
 
 def stop(cluster: ClusterDef) -> None:

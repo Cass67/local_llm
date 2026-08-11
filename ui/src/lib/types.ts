@@ -283,6 +283,16 @@ export interface ClusterInfo {
 	container_name: string;
 	active: ClusterActive | null;
 	desired: { family: string; profile: string } | null;
+	startup: ClusterStartup | null;
+}
+
+export interface ClusterStartup {
+	stage: "stopping" | "creating" | "loading" | "ready" | "failed";
+	detail: string;
+	model: string;
+	profile: string;
+	elapsed_s: number;
+	error: string | null;
 }
 
 export interface RouterRule {

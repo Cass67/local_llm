@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from . import active_runners
 from .config import VERSION
 from .routes.agents import router as agents_router
+from .routes.bakeoff import router as bakeoff_router
 from .routes.benchmark import router as benchmark_router
 from .routes.chat import router as chat_router
 from .routes.clusters import router as clusters_router
@@ -90,6 +91,7 @@ app.include_router(update_router)
 app.include_router(agents_router)
 app.include_router(sweep_router)
 app.include_router(quality_router)
+app.include_router(bakeoff_router)
 
 
 @app.get("/api/health")
