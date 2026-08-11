@@ -203,6 +203,11 @@ export interface BenchmarkRun {
 	total_tokens: number | null;
 	throughput_tps: number | null;
 	throughput_cps: number | null;
+	psu_avg_w?: number | null;
+	psu_peak_w?: number | null;
+	gpu_avg_w?: number | null;
+	tps_per_watt?: number | null;
+	profile?: string | null;
 	status: string;
 	error: string | null;
 	created_at: string;
@@ -266,6 +271,7 @@ export interface ClusterActive {
 	label: string | null;
 	profile: string | null;
 	running: boolean;
+	warnings?: StartupWarning[];
 }
 
 export interface ClusterInfo {
@@ -292,6 +298,8 @@ export interface RouterConfig {
 	default_model: string | null;
 	health_check_interval_s: number;
 	enabled: boolean;
+	prefer_idle?: boolean;
+	shadow?: boolean;
 	cluster_remap?: Record<string, string>;
 	rules: RouterRule[];
 }
@@ -414,4 +422,165 @@ export interface GpuStatusResponse {
 	runners: GpuRunnerStatus[];
 	devices?: GpuDeviceMetrics[];
 	system?: SystemMetrics;
+}
+
+// --- Profile lint ---
+
+export interface LintFinding {
+	level: "error" | "warn";
+	field: string;
+	message: string;
+}
+
+export interface VramEstimate {
+	weights_mb: number;
+	kv_mb: number;
+	compute_mb: number;
+	total_mb: number;
+	n_layers: number;
+	ctx: number;
+}
+
+export interface ProfileLintResponse {
+	lint: LintFinding[];
+	vram_estimate: VramEstimate | null;
+	vram_available_mb: number | null;
+}
+
+export interface SaveProfileResponse {
+	status: string;
+	restarted_clusters: string[];
+	lint: LintFinding[];
+}
+
+// --- Startup warnings ---
+
+export interface StartupWarning {
+	id: string;
+	message: string;
+	line: string;
+}
+
+// --- Sweep ---
+
+export interface SweepResult {
+	index: number;
+	combo: Record<string, unknown>;
+	status: "ok" | "error" | "skipped";
+	error?: string;
+	lint?: LintFinding[];
+	reload_s?: number;
+	decode_tps?: number | null;
+	prompt_tps?: number | null;
+	wall_s?: number | null;
+	completion_tokens?: number | null;
+	psu_avg_w?: number | null;
+	psu_peak_w?: number | null;
+	gpu_avg_w?: number | null;
+	tps_per_watt?: number | null;
+	quality?: QualityReport;
+	quality_gate?: string;
+	sample_text?: string;
+}
+
+export interface SweepSnapshot {
+	id: string;
+	status: "pending" | "running" | "done" | "error" | "cancelled";
+	error: string | null;
+	family: string;
+	cluster_id: string;
+	base_profile: string;
+	objective: string;
+	grid: Record<string, unknown[]>;
+	total: number;
+	completed: number;
+	started_at: number;
+	finished_at: number | null;
+	results: SweepResult[];
+	best: SweepResult | null;
+}
+
+export interface SweepListEntry {
+	id: string;
+	status: string;
+	family: string;
+	completed: number;
+	total: number;
+	started_at: number;
+}
+
+// --- Quality ---
+
+export interface QualityCaseResult {
+	id: string;
+	passed: boolean;
+	failures: string[];
+	words: number;
+	repetition_ratio: number;
+	sample?: string;
+	judge_score?: number | null;
+}
+
+export interface QualityReport {
+	cases: QualityCaseResult[];
+	passed: number;
+	total: number;
+	pass_rate: number;
+	judge_mean: number | null;
+	model?: string;
+	profile?: string;
+}
+
+// --- Regression guard ---
+
+export interface RegressionEntry {
+	cluster_id: string;
+	cluster_name: string;
+	family: string;
+	profile: string;
+	baseline_tps: number | null;
+	baseline_commit: string | null;
+	decode_tps?: number | null;
+	prompt_tps?: number | null;
+	verdict: "baseline" | "ok" | "improved" | "regressed" | "unmeasured";
+	delta_pct: number | null;
+	error?: string;
+	warnings?: StartupWarning[];
+}
+
+export interface RegressionReport {
+	ts: number;
+	commit: string;
+	threshold_pct: number;
+	clusters: RegressionEntry[];
+	regressions: RegressionEntry[];
+}
+
+export interface RegressionResponse {
+	report: RegressionReport | null;
+	baselines: Record<string, { decode_tps: number; commit: string; ts: number }>;
+}
+
+// --- Router decision log ---
+
+export interface RouteDecision {
+	ts: number;
+	prompt: string;
+	dispatched: string;
+	reason?: string;
+	rule?: string;
+	matched_keyword?: string;
+	shadow?: boolean;
+	would_route_to?: string;
+	would_differ?: boolean;
+	busy_primary?: string;
+}
+
+export interface RouteLogResponse {
+	entries: RouteDecision[];
+	total: number;
+	shadow: boolean;
+	shadow_would_differ: number;
+	shadow_total: number;
+	detail?: string;
 }

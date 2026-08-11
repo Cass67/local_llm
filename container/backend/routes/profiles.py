@@ -6,6 +6,10 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from .. import active_runners, config
+from ..clusters import get_cluster, list_active, list_clusters
+from ..gpu_inventory import detect_gpus
+from ..profile_lint import estimate_vram_mb, lint_profile
+from ..runtime import _model_path
 
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 
@@ -49,6 +53,46 @@ def _resolve_name(fam: dict, name: str) -> str:
     return name.strip().lower()
 
 
+def _model_path_for(family: str) -> str | None:
+    path = config.ACCEPTED_DIR / f"{family}.json"
+    if not path.exists() or path.is_symlink():
+        return None
+    try:
+        accepted = json.loads(path.read_text())
+        return _model_path(accepted, config.MODELS_CACHE_DIR)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+
+
+def _vram_mb_for(cluster_id: str | None, family: str) -> int | None:
+    """Total VRAM of the target cluster: the requested one, else wherever family runs."""
+    cluster = None
+    if cluster_id:
+        cluster = get_cluster(cluster_id)
+    else:
+        running = {str(e.get("cluster_id")): e for e in list_active() if e.get("family") == family}
+        for candidate in list_clusters():
+            if candidate.id in running:
+                cluster = candidate
+                break
+    if cluster is None:
+        return None
+    pci_ids = set(cluster.gpu_pci_ids)
+    total = sum(g.vram_mb or 0 for g in detect_gpus() if g.pci_id in pci_ids)
+    return total or None
+
+
+def _lint(family: str, profile: dict, cluster_id: str | None = None) -> list[dict]:
+    try:
+        return lint_profile(
+            profile,
+            model_path=_model_path_for(family),
+            vram_mb=_vram_mb_for(cluster_id, family),
+        )
+    except Exception:  # noqa: BLE001 — linting must never block a save
+        return []
+
+
 @router.put("/{family}/{name}")
 async def upsert_profile(family: str, name: str, body: dict):
     data = _load()
@@ -59,10 +103,30 @@ async def upsert_profile(family: str, name: str, body: dict):
         name = _resolve_name(data["families"][family], name)
     data["families"][family]["profiles"][name] = body
     _save(data)
+    findings = await asyncio.to_thread(_lint, family, body)
     # Blocking: relaunch + _wait_ready sleep-loops up to 120s per cluster.
     # Run off the event loop so other requests (Architecture tab) aren't frozen.
     restarted = await asyncio.to_thread(active_runners.restart_running_for_profile, family, name)
-    return {"status": "saved", "restarted_clusters": restarted}
+    return {"status": "saved", "restarted_clusters": restarted, "lint": findings}
+
+
+@router.get("/{family}/{name}/lint")
+async def lint_saved_profile(family: str, name: str, cluster_id: str = ""):
+    """Preflight a saved profile — unknown fields, dead knobs, predicted VRAM."""
+    fam = _load().get("families", {}).get(family)
+    if fam:
+        name = _resolve_name(fam, name)
+    if not fam or name not in fam.get("profiles", {}):
+        raise HTTPException(status_code=404, detail="profile not found")
+    profile = fam["profiles"][name]
+    findings = await asyncio.to_thread(_lint, family, profile, cluster_id or None)
+    model_path = _model_path_for(family)
+    estimate = estimate_vram_mb(profile, model_path) if model_path else None
+    return {
+        "lint": findings,
+        "vram_estimate": estimate,
+        "vram_available_mb": _vram_mb_for(cluster_id or None, family),
+    }
 
 
 @router.delete("/{family}/{name}")

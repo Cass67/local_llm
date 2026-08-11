@@ -147,7 +147,8 @@ def test_anthropic_stream_opens_and_closes_each_block():
     # text block opened, closed before the tool block opens, tool block closed at stop
     assert names.count("content_block_start") == 2
     assert names.count("content_block_stop") == 2
-    assert names.index("content_block_stop") < names.index("content_block_start", 2)
+    starts = [i for i, n in enumerate(names) if n == "content_block_start"]
+    assert names.index("content_block_stop") < starts[1]
 
     events = dict(enumerate(_events(blob)))
     tool_args = "".join(
@@ -305,3 +306,9 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print(f"ok {name}")
+
+
+def test_anthropic_stream_pings_before_the_first_token():
+    """A cold cluster's TTFT can exceed an idle-connection timeout; ping fills it."""
+    names = [name for name, _ in _events(ant.AnthropicStream("local-model").start())]
+    assert names == ["message_start", "ping"]

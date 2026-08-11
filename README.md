@@ -435,6 +435,42 @@ Routing rules are stored in `configs/router_rules.json` in the git repo and bind
 
 Open WebUI defaults to the `router` model so all conversations are automatically dispatched to the appropriate cluster without manual model selection.
 
+#### Occupancy-aware routing
+
+Set `"prefer_idle": true` in the router config to consider load, not just rules. When a rule's primary cluster is mid-request, the router checks the rule's declared `fallback` clusters — which are tier-equivalent by definition — and dispatches to the least busy one instead of queueing. Load is measured two ways: in-flight requests this proxy is holding open (exact, instant) and per-cluster GPU-equivalents from mgmt's fdinfo sampler (2 s average, used only to break ties between clusters with nothing in flight). Decisions made this way are logged with `reason: idle-fallback`.
+
+With `prefer_idle` off (the default), a busy primary still gets the request — behaviour is unchanged.
+
+#### Shadow mode
+
+Set `"shadow": true` to score the rules against real traffic without acting on them. Every request that is *not* being routed (because `enabled` is false, or the client named a model) still runs through rule matching, and the decision is recorded — including whether it differs from what actually served the request:
+
+```bash
+curl -s localhost:3001/api/local-llm/router/log?differing_only=true | jq
+```
+
+The response carries `shadow_total` and `shadow_would_differ`, which is the number to watch while tuning keyword lists before flipping `enabled` on.
+
+### Anthropic and OpenAI-Responses APIs
+
+The router serves three request dialects on the same port, all routed by the same rules:
+
+| Endpoint | Dialect | Client |
+|---|---|---|
+| `/v1/chat/completions` | OpenAI chat completions | Open WebUI, most tools |
+| `/v1/messages` | Anthropic Messages | Claude Code, Anthropic SDK |
+| `/v1/responses` | OpenAI Responses | Codex CLI |
+
+Tool calls, streaming, images, and `count_tokens` are translated in both directions, so agentic clients work unmodified. Point Claude Code at the box with:
+
+```bash
+export ANTHROPIC_BASE_URL=http://<host>:3001
+export ANTHROPIC_API_KEY=unused   # required by the client, ignored by the router
+claude
+```
+
+The model name the client sends (`claude-*`, `gpt-*`) is not one this stack serves, which the router treats as "route this prompt" rather than a 404 — so the rules pick the cluster. Naming a loaded alias explicitly bypasses routing and pins that cluster.
+
 ### Idle unload
 
 In the **Architecture** tab, toggle **Auto-unload idle models** to automatically stop cluster runners after a period of inactivity. A dropdown lets you choose the timeout (5 min, 10 min, 15 min, 30 min, 1 hr, 2 hr). When a request arrives for an unloaded cluster, the model reloads automatically before the request is served. Desired state is preserved across unloads so the model comes back with the same configuration.

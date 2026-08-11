@@ -67,6 +67,7 @@ def _cluster_with_status(cluster: ClusterDef) -> dict:
             "label": active.get("label"),
             "profile": active.get("profile"),
             "running": running,
+            "warnings": active.get("warnings") or [],
         }
         if active
         else None,

@@ -26,6 +26,7 @@ from .clusters import (
 )
 from .gpu_inventory import GpuInfo, detect_gpus
 from .runtime import DockerRunner, DockerRunnerConfig
+from .startup_lint import scan_startup_log
 
 # cluster_id → monotonic timestamp of last chat request
 _last_request: dict[str, float] = {}
@@ -184,8 +185,19 @@ def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
     if not _wait_ready(runner, cluster.port, load_timeout):
         logs = "\n".join(runner.logs(40)) or "runner did not become ready"
         raise RuntimeError(logs[-1000:])
+    # The boot log is the only place llama-server reports knobs it declined to
+    # honour, and it scrolls away — capture the verdict now, at load time.
+    try:
+        warnings = scan_startup_log(runner.logs(400))
+    except Exception as exc:  # noqa: BLE001
+        logging.debug("startup log scan failed for %s: %s", cluster.id, exc)
+        warnings = []
+    for warning in warnings:
+        logging.warning("cluster=%s startup: %s", cluster.name, warning["message"])
+
     alias = str(accepted.get("alias") or accepted.get("family") or "unknown")
     state = {
+        "warnings": warnings,
         "cluster_id": cluster.id,
         "cluster_name": cluster.name,
         "model": alias,

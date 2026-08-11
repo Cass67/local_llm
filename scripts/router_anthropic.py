@@ -202,6 +202,9 @@ class AnthropicStream:
         self.usage = {"input_tokens": 0, "output_tokens": 0}
 
     def start(self) -> bytes:
+        # A cold cluster can take 30s+ to produce its first token, and an SSE
+        # connection that sends nothing in that window gets closed by
+        # intermediaries. The ping is bytes on the wire while the model loads.
         return _sse(
             "message_start",
             {
@@ -217,7 +220,7 @@ class AnthropicStream:
                     "usage": {"input_tokens": 0, "output_tokens": 0},
                 },
             },
-        )
+        ) + _sse("ping", {"type": "ping"})
 
     def _close_open(self) -> bytes:
         if self.open_kind is None:

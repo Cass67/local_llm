@@ -38,6 +38,12 @@ HEALTH_INTERVAL: int = 10
 RULES: list[dict] = []
 ENABLED: bool = True
 CLUSTER_REMAP: dict[str, str] = {}
+# Send a request to an idle tier-eligible cluster instead of queueing it behind
+# work on the primary. Off by default — it changes which GPU serves a prompt.
+PREFER_IDLE: bool = False
+# Log the decision the rules would make without acting on it, so rules can be
+# tuned against real traffic before ENABLED is flipped on.
+SHADOW: bool = False
 
 
 def _reload_config() -> None:
@@ -49,6 +55,8 @@ def _reload_config() -> None:
         RULES, \
         ENABLED, \
         CLUSTER_REMAP, \
+        PREFER_IDLE, \
+        SHADOW, \
         _config_mtime, \
         _CONFIG_PATH
     path = _STATE_CONFIG if _STATE_CONFIG.exists() else _REPO_CONFIG
@@ -66,6 +74,8 @@ def _reload_config() -> None:
         HEALTH_INTERVAL = cfg.get("health_check_interval_s", 10)
         RULES = cfg.get("rules", [])
         ENABLED = cfg.get("enabled", True)
+        PREFER_IDLE = bool(cfg.get("prefer_idle", False))
+        SHADOW = bool(cfg.get("shadow", False))
         remap = cfg.get("cluster_remap", {})
         CLUSTER_REMAP = remap if isinstance(remap, dict) else {}
         _CONFIG_PATH = path
@@ -82,6 +92,61 @@ _healthy_aliases: set[str] = set()
 _cluster_to_model: dict[str, str] = {}  # cluster name → current model alias
 _vision_aliases: set[str] = set()  # aliases whose *running* profile loaded an mmproj
 _last_health_check: float = 0.0
+# alias → requests this proxy currently has open against it. Exact and instant,
+# unlike the fdinfo occupancy below, which is a 2s-sampled average.
+_inflight: dict[str, int] = {}
+# cluster name → GPU-equivalents busy, from the mgmt /api/gpu-status sampler
+_cluster_occupancy: dict[str, float] = {}
+# rolling record of routing decisions, newest last — read via /route/log
+_decision_log: list[dict] = []
+_DECISION_LOG_MAX = 200
+
+
+def _log_decision(entry: dict) -> None:
+    _decision_log.append({"ts": time.time(), **entry})
+    if len(_decision_log) > _DECISION_LOG_MAX:
+        del _decision_log[: len(_decision_log) - _DECISION_LOG_MAX]
+
+
+def _acquire_inflight(alias: str):
+    """Mark alias busy; returns the release callable.
+
+    Streaming responses return as soon as headers arrive but keep generating for
+    a long time afterwards, so the release has to travel with the generator
+    rather than sit in a `with` block around the handler.
+    """
+    if not alias:
+        return lambda: None
+    _inflight[alias] = _inflight.get(alias, 0) + 1
+    released = False
+
+    def release() -> None:
+        nonlocal released
+        if released:
+            return
+        released = True
+        remaining = _inflight.get(alias, 1) - 1
+        if remaining > 0:
+            _inflight[alias] = remaining
+        else:
+            _inflight.pop(alias, None)
+
+    return release
+
+
+def _busy_score(alias: str) -> float:
+    """How loaded this alias is. In-flight requests dominate; occupancy breaks ties."""
+    cluster = next((k for k, v in _cluster_to_model.items() if v == alias), None)
+    occupancy = _cluster_occupancy.get(cluster, 0.0) if cluster else 0.0
+    return _inflight.get(alias, 0) * 100.0 + occupancy
+
+
+def _pick_least_busy(aliases: list[str]) -> str | None:
+    """Least-loaded alias, preserving the caller's order as the tie-break."""
+    healthy = [a for a in aliases if a in _healthy_aliases]
+    if not healthy:
+        return None
+    return min(healthy, key=lambda a: (_busy_score(a), healthy.index(a)))
 
 
 async def _refresh_health() -> None:
@@ -127,9 +192,29 @@ async def _refresh_health() -> None:
                 for name, model in sorted(_cluster_to_model.items()):
                     if old_map.get(name) != model:
                         print(f"router: active [{name}] {model}", flush=True)
+
+            if PREFER_IDLE:
+                await _refresh_occupancy(c)
     except Exception as exc:
         print(f"router: health refresh failed: {exc}")
     _last_health_check = time.monotonic()
+
+
+async def _refresh_occupancy(client: httpx.AsyncClient) -> None:
+    """Per-cluster GPU-equivalents busy, from mgmt's fdinfo sampler."""
+    global _cluster_occupancy
+    try:
+        resp = await client.get(f"{BACKEND_URL}/api/gpu-status")
+        if resp.status_code != 200:
+            return
+        runners = resp.json().get("runners", [])
+    except Exception:  # noqa: BLE001 — occupancy is an optimisation, never a hard dependency
+        return
+    _cluster_occupancy = {
+        str(r.get("cluster_name")): float(r.get("aggregate_gpu_equiv") or 0.0)
+        for r in runners
+        if r.get("cluster_name")
+    }
 
 
 async def _maybe_refresh() -> None:
@@ -284,6 +369,28 @@ def _match_rule(prompt: str) -> tuple[int, dict] | None:
         raw_cluster = rule.get("cluster")
         remapped_cluster = _remap_cluster(raw_cluster) if raw_cluster else None
         chosen = _resolve_model(rule.get("model"), raw_cluster)
+
+        if PREFER_IDLE and chosen and _busy_score(chosen) > 0:
+            # Primary is mid-request. Every fallback on this rule is declared
+            # tier-equivalent, so serving now on an idle one beats queueing.
+            candidates = [chosen]
+            for fb in rule.get("fallback", []):
+                alias = _cluster_to_model.get(_remap_cluster(fb), fb)
+                if alias not in candidates:
+                    candidates.append(alias)
+            idle = _pick_least_busy(candidates)
+            if idle and idle != chosen:
+                return idx, {
+                    "model": idle,
+                    "reason": "idle-fallback",
+                    "rule": rule.get("name"),
+                    "matched_keyword": matched,
+                    "cluster": raw_cluster,
+                    "remapped_cluster": remapped_cluster,
+                    "busy_primary": chosen,
+                    "busy_score": _busy_score(chosen),
+                }
+
         if chosen:
             return idx, {
                 "model": chosen,
@@ -357,7 +464,8 @@ def _is_stream(payload: dict) -> bool:
     return bool(payload.get("stream"))
 
 
-async def _proxy_stream(payload: dict, request: Request) -> Response:
+async def _proxy_stream(payload: dict, request: Request, release=None) -> Response:
+    release = release or (lambda: None)
     client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT)
     stream_ctx = client.stream(
         "POST",
@@ -369,12 +477,14 @@ async def _proxy_stream(payload: dict, request: Request) -> Response:
         upstream = await stream_ctx.__aenter__()
     except httpx.HTTPError:
         await client.aclose()
+        release()
         return JSONResponse({"detail": "backend unavailable"}, status_code=503)
 
     if upstream.status_code != 200:
         body_bytes = await upstream.aread()
         await stream_ctx.__aexit__(None, None, None)
         await client.aclose()
+        release()
         try:
             detail = json.loads(body_bytes).get(
                 "error", body_bytes.decode("utf-8", errors="replace")
@@ -390,12 +500,14 @@ async def _proxy_stream(payload: dict, request: Request) -> Response:
         finally:
             await stream_ctx.__aexit__(None, None, None)
             await client.aclose()
+            release()
 
     return StreamingResponse(stream_upstream(), media_type="text/event-stream")
 
 
-async def _proxy_translated_stream(payload: dict, translator) -> Response:
+async def _proxy_translated_stream(payload: dict, translator, release=None) -> Response:
     """Stream chat completions upstream, re-emitting each chunk in another dialect."""
+    release = release or (lambda: None)
     # Both dialects report token usage in their terminal event; llama.cpp only
     # sends it on a streamed response when asked.
     payload["stream_options"] = {"include_usage": True}
@@ -410,12 +522,14 @@ async def _proxy_translated_stream(payload: dict, translator) -> Response:
         upstream = await stream_ctx.__aenter__()
     except httpx.HTTPError:
         await client.aclose()
+        release()
         return JSONResponse({"detail": "backend unavailable"}, status_code=503)
 
     if upstream.status_code != 200:
         body_bytes = await upstream.aread()
         await stream_ctx.__aexit__(None, None, None)
         await client.aclose()
+        release()
         return JSONResponse(
             {"detail": body_bytes.decode("utf-8", errors="replace")},
             status_code=upstream.status_code,
@@ -438,6 +552,7 @@ async def _proxy_translated_stream(payload: dict, translator) -> Response:
         finally:
             await stream_ctx.__aexit__(None, None, None)
             await client.aclose()
+            release()
 
     return StreamingResponse(translate(), media_type="text/event-stream")
 
@@ -538,20 +653,49 @@ async def v1_chat_completions(request: Request):
     messages = payload.get("messages", [])
     last_prompt = (_extract_user_messages(messages) or [""])[0]
     if ENABLED and not explicit_model:
-        chosen = _route(messages)
+        detail = _route_detail(messages)
+        chosen = str(detail.get("model") or "")
         if not chosen:
             return JSONResponse({"detail": "no healthy model available"}, status_code=503)
         payload["model"] = chosen
         cluster = next((k for k, v in _cluster_to_model.items() if v == chosen), "?")
         print(f"router: [{cluster}] {chosen} ← {last_prompt[:80]!r}", flush=True)
+        _log_decision({"prompt": last_prompt[:200], "dispatched": chosen, **detail})
     else:
         model = payload.get("model", "")
         cluster = next((k for k, v in _cluster_to_model.items() if v == model), "client-specified")
         print(f"router: [{cluster}] {model} ← {last_prompt[:80]!r}", flush=True)
+        if SHADOW:
+            # Score the rules against real traffic without acting on them.
+            shadow = _route_detail(messages)
+            _log_decision(
+                {
+                    "prompt": last_prompt[:200],
+                    "dispatched": model,
+                    "shadow": True,
+                    "would_route_to": shadow.get("model"),
+                    "would_differ": shadow.get("model") != model,
+                    **{k: v for k, v in shadow.items() if k != "model"},
+                }
+            )
+            if shadow.get("model") != model:
+                print(
+                    f"router: [shadow] would have routed to {shadow.get('model')} "
+                    f"({shadow.get('reason')}: {shadow.get('rule')})",
+                    flush=True,
+                )
 
-    if _is_stream(payload):
-        return await _proxy_stream(payload, request)
-    return await _proxy_nonstream(payload)
+    release = _acquire_inflight(str(payload.get("model") or ""))
+    try:
+        if _is_stream(payload):
+            return await _proxy_stream(payload, request, release)
+        response = await _proxy_nonstream(payload)
+    except BaseException:
+        release()
+        raise
+    else:
+        release()
+        return response
 
 
 @router.post("/v1/messages")
@@ -571,11 +715,17 @@ async def v1_messages(request: Request):
         )
     chat["model"] = chosen
 
+    release = _acquire_inflight(chosen)
     if payload.get("stream"):
-        return await _proxy_translated_stream(chat, router_anthropic.AnthropicStream(chosen))
+        return await _proxy_translated_stream(
+            chat, router_anthropic.AnthropicStream(chosen), release
+        )
 
     chat.pop("stream", None)
-    completion, err = await _post_chat(chat)
+    try:
+        completion, err = await _post_chat(chat)
+    finally:
+        release()
     if err is not None:
         return err
     return JSONResponse(router_anthropic.from_chat(completion, chosen))
@@ -606,11 +756,17 @@ async def v1_responses(request: Request):
         )
     chat["model"] = chosen
 
+    release = _acquire_inflight(chosen)
     if payload.get("stream"):
-        return await _proxy_translated_stream(chat, router_responses.ResponsesStream(chosen))
+        return await _proxy_translated_stream(
+            chat, router_responses.ResponsesStream(chosen), release
+        )
 
     chat.pop("stream", None)
-    completion, err = await _post_chat(chat)
+    try:
+        completion, err = await _post_chat(chat)
+    finally:
+        release()
     if err is not None:
         return err
     return JSONResponse(router_responses.from_chat(completion, chosen))
@@ -631,6 +787,23 @@ async def route_preview(request: Request):
     return _route_detail(messages)
 
 
+@router.get("/route/log")
+async def route_log(limit: int = 50, differing_only: bool = False):
+    """Recent routing decisions. In shadow mode this is the rule-tuning feedback loop."""
+    entries = _decision_log
+    if differing_only:
+        entries = [e for e in entries if e.get("would_differ")]
+    recent = entries[-max(1, min(limit, _DECISION_LOG_MAX)) :]
+    shadowed = [e for e in _decision_log if e.get("shadow")]
+    return {
+        "entries": list(reversed(recent)),
+        "total": len(_decision_log),
+        "shadow": SHADOW,
+        "shadow_would_differ": sum(1 for e in shadowed if e.get("would_differ")),
+        "shadow_total": len(shadowed),
+    }
+
+
 @router.get("/health")
 async def health():
     await _maybe_refresh()
@@ -641,6 +814,10 @@ async def health():
         "healthy_models": sorted(_healthy_aliases),
         "cluster_map": _cluster_to_model,
         "default_model": DEFAULT_MODEL or f"(first available: {_default_model() or 'none'})",
+        "prefer_idle": PREFER_IDLE,
+        "shadow": SHADOW,
+        "inflight": dict(_inflight),
+        "occupancy": _cluster_occupancy,
     }
 
 

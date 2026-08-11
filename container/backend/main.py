@@ -19,10 +19,12 @@ from .routes.models import router as models_router
 from .routes.openai import router as openai_router
 from .routes.pi import router as pi_router
 from .routes.profiles import router as profiles_router
+from .routes.quality import router as quality_router
 from .routes.router_config import router as router_config_router
 from .routes.runner import router as runner_router
 from .routes.search import router as search_router
 from .routes.stats import router as stats_router
+from .routes.sweep import router as sweep_router
 from .routes.switch import router as switch_router
 from .routes.update import router as update_router
 
@@ -86,6 +88,8 @@ app.include_router(benchmark_router)
 app.include_router(profiles_router)
 app.include_router(update_router)
 app.include_router(agents_router)
+app.include_router(sweep_router)
+app.include_router(quality_router)
 
 
 @app.get("/api/health")

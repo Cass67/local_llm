@@ -34,6 +34,11 @@ export interface BenchmarkRun {
 	total_tokens: number | null;
 	throughput_tps: number | null;
 	throughput_cps: number | null;
+	psu_avg_w?: number | null;
+	psu_peak_w?: number | null;
+	gpu_avg_w?: number | null;
+	tps_per_watt?: number | null;
+	profile?: string | null;
 	status: string;
 	error: string | null;
 	benchmark_type: string;

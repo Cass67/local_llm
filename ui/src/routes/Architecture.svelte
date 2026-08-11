@@ -15,8 +15,9 @@
 		fetchIdleUnload,
 		saveIdleUnload,
 		fetchAllProfiles,
+		fetchRouteLog,
 	} from "../lib/api";
-	import type { RouterConfig, RouterRule } from "../lib/types";
+	import type { RouterConfig, RouterRule, RouteLogResponse } from "../lib/types";
 
 	let gpus = $state<GpuInfo[]>([]);
 	let clusters = $state<ClusterInfo[]>([]);
@@ -80,6 +81,36 @@
 		if (!routerCfg) return;
 		routerCfg = { ...routerCfg, enabled: !routerCfg.enabled };
 		saveRouter();
+	}
+
+	function togglePreferIdle() {
+		if (!routerCfg) return;
+		routerCfg = { ...routerCfg, prefer_idle: !routerCfg.prefer_idle };
+		saveRouter();
+	}
+
+	function toggleShadow() {
+		if (!routerCfg) return;
+		routerCfg = { ...routerCfg, shadow: !routerCfg.shadow };
+		saveRouter();
+		loadRouteLog();
+	}
+
+	let routeLog = $state<RouteLogResponse | null>(null);
+	let showRouteLog = $state(false);
+	let differingOnly = $state(true);
+
+	async function loadRouteLog() {
+		try {
+			routeLog = await fetchRouteLog(differingOnly);
+		} catch {
+			routeLog = null;
+		}
+	}
+
+	function toggleRouteLog() {
+		showRouteLog = !showRouteLog;
+		if (showRouteLog) loadRouteLog();
 	}
 
 	let remapFrom = $state("");
@@ -425,6 +456,15 @@
 					<input type="checkbox" checked={routerCfg.enabled} onchange={toggleRouter} />
 					Routing enabled
 				</label>
+				<label class="toggle-label" title="Send a request to an idle tier-equivalent fallback instead of queueing behind a busy primary.">
+					<input type="checkbox" checked={routerCfg.prefer_idle ?? false} onchange={togglePreferIdle} />
+					Prefer idle cluster
+				</label>
+				<label class="toggle-label" title="Score the rules against real traffic without acting on them.">
+					<input type="checkbox" checked={routerCfg.shadow ?? false} onchange={toggleShadow} />
+					Shadow mode
+				</label>
+				<button onclick={toggleRouteLog}>{showRouteLog ? "Hide" : "Show"} decisions</button>
 				<span class="muted">backend: {routerCfg.backend_url}</span>
 				{#if routerHealth?.cluster_map && Object.keys(routerHealth.cluster_map).length > 0}
 					<span class="muted">
@@ -542,6 +582,48 @@
 		{:else}
 			<p class="muted">Loading router config…</p>
 		{/if}
+
+		{#if showRouteLog}
+			<div class="route-log">
+				<div class="route-log-head">
+					<label class="toggle-label">
+						<input type="checkbox" bind:checked={differingOnly} onchange={loadRouteLog} />
+						Only decisions that would differ
+					</label>
+					<button onclick={loadRouteLog}>Refresh</button>
+					{#if routeLog}
+						<span class="muted">
+							{routeLog.shadow_total} shadowed · {routeLog.shadow_would_differ} would differ
+						</span>
+					{/if}
+				</div>
+				{#if routeLog?.detail}
+					<p class="muted">{routeLog.detail}</p>
+				{:else if (routeLog?.entries.length ?? 0) === 0}
+					<p class="muted">No routing decisions recorded yet.</p>
+				{:else}
+					<table class="route-table">
+						<thead>
+							<tr><th>Prompt</th><th>Served by</th><th>Rule</th><th>Would route to</th></tr>
+						</thead>
+						<tbody>
+							{#each routeLog?.entries ?? [] as d}
+								<tr class:differs={d.would_differ}>
+									<td class="prompt-cell" title={d.prompt}>{d.prompt}</td>
+									<td>{d.dispatched}</td>
+									<td>
+										<span class="muted">{d.reason ?? ""}</span>
+										{d.rule ?? ""}
+										{#if d.busy_primary}<span class="muted">(past busy {d.busy_primary})</span>{/if}
+									</td>
+									<td>{d.would_route_to ?? "—"}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				{/if}
+			</div>
+		{/if}
 	</section>
 
 	<!-- Idle Unload -->
@@ -599,6 +681,17 @@
 							<span class="gpu-tag">{g ? g.model_name : pci}</span>
 						{/each}
 					</div>
+
+					{#if c.active?.running && (c.active.warnings?.length ?? 0) > 0}
+						<div class="cluster-warnings">
+							{#each c.active.warnings ?? [] as w}
+								<div class="cluster-warning" title={w.line}>
+									<span class="warn-badge">ignored</span>
+									<span>{w.message}</span>
+								</div>
+							{/each}
+						</div>
+					{/if}
 
 					{#if c.active?.running}
 						<div class="cluster-active">
@@ -763,6 +856,61 @@
 		border-radius: 3px;
 		padding: 0.15rem 0.4rem;
 		font-size: 0.8rem;
+	}
+	.cluster-warnings {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		margin: 0.4rem 0;
+	}
+	.cluster-warning {
+		display: flex;
+		gap: 0.5rem;
+		align-items: baseline;
+		font-size: 0.8rem;
+		background: #2b2517;
+		border-left: 3px solid #e0b155;
+		color: #efe0c2;
+		padding: 0.35rem 0.55rem;
+		border-radius: 4px;
+	}
+	.warn-badge {
+		flex: 0 0 auto;
+		font-size: 0.68rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		opacity: 0.85;
+	}
+	.route-log {
+		margin-top: 0.75rem;
+		border-top: 1px solid #263244;
+		padding-top: 0.75rem;
+	}
+	.route-log-head {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		margin-bottom: 0.5rem;
+	}
+	.route-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.8rem;
+	}
+	.route-table th,
+	.route-table td {
+		text-align: left;
+		padding: 0.3rem 0.5rem;
+		border-bottom: 1px solid #1d2735;
+		vertical-align: top;
+	}
+	.route-table tr.differs { background: #2b2517; }
+	.prompt-cell {
+		max-width: 28rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.cluster-active,
 	.cluster-start {
