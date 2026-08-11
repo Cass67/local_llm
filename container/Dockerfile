@@ -23,11 +23,17 @@ RUN set -eux; \
     chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 
 WORKDIR /app
-COPY container/backend/ ./backend/
+# Deps first, against a stub package: backend code changes every deploy and
+# terminal-bench/swebench/datasets take ~85s to reinstall, so copying the real
+# backend before this layer made every one-line edit pay that cost. The stub is
+# uninstalled again so it cannot shadow the real /app/backend, which entrypoint.sh
+# imports via PYTHONPATH rather than from site-packages.
 COPY container/pyproject.toml .
-RUN pip install --break-system-packages --no-cache-dir .
-ARG CACHEBUST=1
-RUN rm -rf ./ui-dist/assets/index-*.js ./ui-dist/assets/index-*.css ./ui-dist/index.html
+RUN mkdir -p backend && touch backend/__init__.py \
+    && pip install --break-system-packages --no-cache-dir . \
+    && pip uninstall --break-system-packages -y local-llm-server \
+    && rm -rf backend
+COPY container/backend/ ./backend/
 COPY --link container/ui-dist/ ./ui-dist/
 COPY scripts/ /scripts/
 COPY runner/ ./runner/
