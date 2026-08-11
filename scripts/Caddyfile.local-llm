@@ -123,14 +123,3 @@
 		reverse_proxy 127.0.0.1:3101
 	}
 }
-
-# Preview host for apps the coding agents build. Agents bind their dev server to
-# 0.0.0.0:5173; this is the only way in from outside the LAN (the cloudflared
-# tunnel serves preview.hehaw.net here). Basic auth because a dev server ships
-# source maps and an open hot-reload socket.
-:3008 {
-	basic_auth {
-		preview {env.PREVIEW_PASSWORD_HASH}
-	}
-	reverse_proxy 127.0.0.1:5173
-}

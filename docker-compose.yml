@@ -87,10 +87,6 @@ services:
     restart: unless-stopped
     depends_on:
       - local-llm-mgmt
-    # env_file (not `environment:`) so the bcrypt hash's $ chars reach Caddy
-    # without compose trying to interpolate them.
-    env_file:
-      - .env
     volumes:
       - ${LOCAL_LLM_CADDYFILE:-./scripts/Caddyfile.local-llm}:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -131,7 +127,12 @@ services:
   #   opencode — TUI wrapped in ttyd, own port :3002
   # Each binds its own port directly (like Langfuse :3004 / SearXNG :3005) because
   # OpenCode's SPA assets are root-absolute and cannot be served under a subpath.
-  # Both edit real files in the mounted directory. Set AGENTS_PASSWORD in .env.
+  # Both edit real files in the mounted directory.
+  #
+  # No basic auth: over the tunnel Cloudflare Access already gates the hostname,
+  # and a second prompt is just friction. They bind loopback only (`-i lo`) so
+  # dropping the password does not expose a shell on the LAN -- reach them via
+  # Caddy at /pi/ and /opencode/, not host:port.
   pi-web:
     build:
       context: ./agents
@@ -155,10 +156,10 @@ services:
       - -W
       - -p
       - "3006"
+      - -i
+      - lo
       - -b
       - /pi
-      - -c
-      - pi:${AGENTS_PASSWORD:?set AGENTS_PASSWORD in .env}
       - -t
       - 'theme={"background":"#09090b","foreground":"#fafafa","cursor":"#fafafa","cursorAccent":"#09090b","selectionBackground":"#3f3f46","black":"#18181b","brightBlack":"#52525b"}'
       - -t
@@ -200,10 +201,10 @@ services:
       - -W
       - -p
       - "3002"
+      - -i
+      - lo
       - -b
       - /opencode
-      - -c
-      - opencode:${AGENTS_PASSWORD:?set AGENTS_PASSWORD in .env}
       - -t
       - 'theme={"background":"#09090b","foreground":"#fafafa","cursor":"#fafafa","cursorAccent":"#09090b","selectionBackground":"#3f3f46","black":"#18181b","brightBlack":"#52525b"}'
       - -t
