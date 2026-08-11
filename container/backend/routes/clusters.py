@@ -7,7 +7,7 @@ from dataclasses import asdict
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .. import active_runners, config
+from .. import active_runners, config, startup_progress
 from ..clusters import (
     ClusterDef,
     create_cluster,
@@ -77,6 +77,9 @@ def _cluster_with_status(cluster: ClusterDef) -> dict:
         }
         if desired
         else None,
+        # Cold-start stage, so the UI polling this endpoint sees progress while the
+        # start request it fired is still open.
+        "startup": startup_progress.get(cluster.id),
     }
 
 
@@ -166,4 +169,7 @@ async def stop_cluster(cluster_id: str):
     if not cluster:
         raise HTTPException(status_code=404, detail="cluster not found")
     await asyncio.to_thread(active_runners.stop, cluster)
+    # Drop the finished-launch entry so a stopped cluster does not keep reporting
+    # the "ready" of a runner that no longer exists.
+    startup_progress.clear(cluster_id)
     return {"status": "stopped", "cluster_id": cluster_id}

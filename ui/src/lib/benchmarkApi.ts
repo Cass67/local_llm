@@ -69,6 +69,30 @@ export interface LeaderboardRow {
 	last_run: string | null;
 }
 
+export interface BakeoffResult {
+	model: string;
+	family: string;
+	profile: string;
+	load_s: number | null;
+	runs: number;
+	best_tps: number | null;
+	quality: number | null;
+	error: string | null;
+}
+
+export interface BakeoffJob {
+	id: string;
+	cluster_id: string;
+	status: "running" | "done" | "cancelled" | "error";
+	current: string;
+	done: number;
+	total: number;
+	log: string[];
+	results: BakeoffResult[];
+	error: string | null;
+	elapsed_s: number;
+}
+
 export interface BenchmarkType {
 	name: string;
 	description: string;
@@ -260,6 +284,46 @@ export async function fetchBenchmarkSummary(benchmark_type?: string): Promise<Be
 
 export async function fetchLeaderboard(): Promise<{ rows: LeaderboardRow[] }> {
 	const res = await fetch(`${BASE}/leaderboard`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+const BAKEOFF = "/api/local-llm/bakeoff";
+
+export async function startBakeoff(req: {
+	cluster_id: string;
+	entries: Array<{ family: string; profile: string }>;
+	prompt_text?: string;
+	max_tokens?: number;
+	repeats?: number;
+	quality?: boolean;
+}): Promise<{ job_id: string }> {
+	const res = await fetch(`${BAKEOFF}/start`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function fetchBakeoffJob(jobId: string): Promise<BakeoffJob> {
+	const res = await fetch(`${BAKEOFF}/jobs/${jobId}`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchBakeoffJobs(): Promise<{ jobs: BakeoffJob[] }> {
+	const res = await fetch(`${BAKEOFF}/jobs`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function cancelBakeoff(jobId: string): Promise<{ status: string }> {
+	const res = await fetch(`${BAKEOFF}/jobs/${jobId}/cancel`, { method: "POST" });
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.json();
 }

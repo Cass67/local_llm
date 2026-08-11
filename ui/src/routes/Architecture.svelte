@@ -313,21 +313,41 @@
 		}
 	}
 
+	// The start request does not return until the runner answers /v1/models, which
+	// is minutes for a big MoE. Poll the cluster list meanwhile — it carries the
+	// launch stage — so the button reports progress instead of a bare spinner.
 	async function handleStart(id: string) {
 		const family = startFamily[id];
 		if (!family) return;
 		clusterError = "";
 		busy = { ...busy, [id]: true };
+		const poll = setInterval(loadClusters, 1500);
 		try {
 			await startOnCluster(id, family, startProfile[id] || "reliable");
 			await loadClusters();
 		} catch (e: any) {
 			clusterError = e.message;
 		} finally {
+			clearInterval(poll);
+			await loadClusters();
 			const b = { ...busy };
 			delete b[id];
 			busy = b;
 		}
+	}
+
+	const STAGE_LABEL: Record<string, string> = {
+		stopping: "Stopping old runner",
+		creating: "Creating container",
+		loading: "Loading model",
+		ready: "Ready",
+		failed: "Failed",
+	};
+
+	function startupLabel(c: ClusterInfo): string {
+		const s = c.startup;
+		if (!s || !busy[c.id]) return busy[c.id] ? "Starting…" : "Start";
+		return `${STAGE_LABEL[s.stage] ?? s.stage}… ${Math.round(s.elapsed_s)}s`;
 	}
 
 	async function handleStop(id: string) {
@@ -725,7 +745,7 @@
 								onclick={() => handleStart(c.id)}
 								disabled={!startFamily[c.id] || busy[c.id]}
 							>
-								{busy[c.id] ? "Starting…" : "Start"}
+								{startupLabel(c)}
 							</button>
 							<button
 								class="btn-del"
@@ -735,6 +755,12 @@
 								Delete
 							</button>
 						</div>
+						{#if busy[c.id] && c.startup?.detail}
+							<p class="startup-detail" title="newest runner log line">{c.startup.detail}</p>
+						{/if}
+						{#if c.startup?.stage === "failed" && c.startup.error}
+							<p class="startup-error">{c.startup.error}</p>
+						{/if}
 					{/if}
 				</div>
 			{/each}
@@ -918,6 +944,20 @@
 		align-items: center;
 		gap: 0.5rem;
 		flex-wrap: wrap;
+	}
+	.startup-detail,
+	.startup-error {
+		margin: 0.4rem 0 0;
+		font-family: ui-monospace, monospace;
+		font-size: 0.72rem;
+		overflow-wrap: anywhere;
+	}
+	.startup-detail {
+		color: var(--text-muted);
+	}
+	.startup-error {
+		color: var(--red);
+		white-space: pre-wrap;
 	}
 	.cluster-start select {
 		padding: 0.25rem 0.4rem;
