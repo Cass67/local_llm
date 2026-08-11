@@ -46,6 +46,29 @@ export interface BenchmarkRun {
 	created_at: string;
 }
 
+export interface AgenticScore {
+	resolved: number;
+	total: number;
+	rate: number;
+	at: string;
+}
+
+export interface LeaderboardRow {
+	model: string;
+	profile: string | null;
+	runs: number;
+	best_tps: number | null;
+	avg_tps: number | null;
+	avg_latency_ms: number | null;
+	best_tps_per_watt: number | null;
+	avg_psu_w: number | null;
+	quality_pass_rate: number | null;
+	quality_judge_mean: number | null;
+	quality_at: string | null;
+	agentic: Record<string, AgenticScore>;
+	last_run: string | null;
+}
+
 export interface BenchmarkType {
 	name: string;
 	description: string;
@@ -231,6 +254,12 @@ export async function listBenchmarkRuns(
 export async function fetchBenchmarkSummary(benchmark_type?: string): Promise<BenchmarkSummary> {
 	const params = benchmark_type ? `?benchmark_type=${encodeURIComponent(benchmark_type)}` : "";
 	const res = await fetch(`${BASE}/summary${params}`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchLeaderboard(): Promise<{ rows: LeaderboardRow[] }> {
+	const res = await fetch(`${BASE}/leaderboard`);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.json();
 }

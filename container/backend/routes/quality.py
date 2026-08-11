@@ -10,9 +10,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import config, quality
+from ..benchmark_store import BenchmarkStore
 from ..clusters import get_cluster, read_active
 
 router = APIRouter(prefix="/api/quality", tags=["quality"])
+
+
+def _store() -> BenchmarkStore:
+    return BenchmarkStore(config.RUNS_DIR / "benchmarks.sqlite3")
 
 
 class QualityRunRequest(BaseModel):
@@ -65,9 +70,19 @@ async def run_quality_set(req: QualityRunRequest):
         judge_url=req.judge_url,
         judge_model=req.judge_model,
     )
+    profile = active.get("profile")
+    _store().create_quality_run(
+        model=model,
+        profile=profile,
+        cluster_id=req.cluster_id,
+        passed=report["passed"],
+        total=report["total"],
+        pass_rate=report["pass_rate"],
+        judge_mean=report["judge_mean"],
+    )
     return {
         "cluster_id": req.cluster_id,
         "model": model,
-        "profile": active.get("profile"),
+        "profile": profile,
         **report,
     }

@@ -364,6 +364,12 @@ async def summary(benchmark_type: str | None = None):
     return _store().summary(benchmark_type=benchmark_type)
 
 
+@router.get("/leaderboard")
+async def leaderboard():
+    """Cross-model comparison — speed, power, quality and agentic scores in one table."""
+    return _store().leaderboard()
+
+
 @router.get("/types")
 async def list_benchmark_types():
     """List available benchmark types."""

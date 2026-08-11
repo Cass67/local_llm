@@ -21,6 +21,7 @@
 		<a href="#/search" class:active={currentRoute === "/search"}>Search</a>
 		<a href="#/status" class:active={currentRoute === "/status"}>Status</a>
 		<a href="#/benchmarks" class:active={currentRoute === "/benchmarks"}>Benchmarks</a>
+		<a href="#/leaderboard" class:active={currentRoute === "/leaderboard"}>Leaderboard</a>
 		<a href="#/tuning" class:active={currentRoute === "/tuning"}>Tuning</a>
 		<a href="#/coding" class:active={currentRoute === "/coding"}>Coding</a>
 		<a href="/chat/">Chat</a>
