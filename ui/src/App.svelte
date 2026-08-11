@@ -18,6 +18,9 @@
     '/logs': Logs,
     '/status': Status,
     '/benchmarks': Benchmarks,
+    // The leaderboard moved onto the Benchmarks page; keep the old URL working
+    // for bookmarks and tabs left open from before the merge.
+    '/leaderboard': Benchmarks,
     '/architecture': Architecture,
     '/profiles': Profiles,
     '/coding': Coding,

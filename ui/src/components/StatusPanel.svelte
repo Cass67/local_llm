@@ -200,11 +200,22 @@
 			<thead><tr><th>Run</th><th>Family</th><th>Alias</th><th>Profile</th><th>Backend</th><th>Ctx</th><th>Action</th></tr></thead>
 			<tbody>
 				{#each models as model}
-					<tr class:active={(status.running_clusters ?? []).some(rc => rc.family === model.family)}>
-						<td>{(status.running_clusters ?? []).some(rc => rc.family === model.family) ? "▶" : ""}</td>
+					{@const running = (status.running_clusters ?? []).find(rc => rc.family === model.family)}
+					<tr class:active={!!running}>
+						<td>{running ? "▶" : ""}</td>
 						<td>{model.label ?? model.model_name ?? model.family}</td>
 						<td>{model.alias}</td>
-						<td>{model.profile}</td>
+						<!-- On a running row this must be the live profile, not the launch
+						     default: the two differ in ways (KV type, split mode) that turn a
+						     misread here into a hunt for a bug that is not there. -->
+						<td>
+							{running?.profile ?? model.profile}
+							{#if running && running.profile !== model.profile}
+								<small class="muted" title="Launch would start this family on {model.profile}">
+									(default {model.profile})
+								</small>
+							{/if}
+						</td>
 						<td>{model.backend}</td>
 						<td>{model.context ? model.context.toLocaleString() : "-"}</td>
 						<td><button onclick={() => restart(model)} disabled={restarting === model.family}>{restarting === model.family ? "Launching..." : "Launch"}</button></td>
