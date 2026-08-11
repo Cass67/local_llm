@@ -36,6 +36,7 @@ async def gpus():
                 "pci_id": g.pci_id,
                 "vendor": g.vendor,
                 "model_name": g.model_name,
+                "board": g.board,
                 "vram_mb": g.vram_mb,
                 "rocm_index": g.rocm_index,
                 "cuda_index": g.cuda_index,

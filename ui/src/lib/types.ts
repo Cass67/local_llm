@@ -259,6 +259,7 @@ export interface GpuInfo {
 	pci_id: string;
 	vendor: string;
 	model_name: string;
+	board: string;
 	vram_mb: number | null;
 	rocm_index: number | null;
 	cuda_index: number | null;

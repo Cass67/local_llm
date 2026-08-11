@@ -113,8 +113,43 @@ def first_glob(root: Path, pattern: str) -> Path | None:
 
 # ── GPU collection ────────────────────────────────────────────────────────────
 
+# Corporate boilerplate in lspci Subsystem strings. Stripping it turns
+# "ASRock Incorporation Device 5308" into "ASRock", which is what tells two
+# otherwise identical cards apart when only one of them is overheating.
+# Longest-first: "Incorporation" must beat "Inc", "Corporation" beat "Corp". The
+# trailing dot sits outside the word boundary -- "Co\.\b" never matches "Co., Ltd"
+# because there is no word boundary after the period.
+_BOARD_NOISE = re.compile(
+    r"\b(?:Incorporation|Technolog(?:y|ies)|Computer|Systems?|Compan(?:y|ies)|"
+    r"Corporation|Corp|Limited|Ltd|Inc|Co|International|"
+    r"Device\s+[0-9a-fA-F]{4})\b\.?",
+    re.IGNORECASE,
+)
+
+
+def _board_name(subsystem: str) -> str:
+    """Reduce an lspci Subsystem line to the add-in-board vendor (and model, if named)."""
+    text = _BOARD_NOISE.sub("", subsystem)
+    text = re.sub(r"[\s,]+", " ", text).strip(" ,-")
+    # Reference boards carry the chip vendor as their subsystem, which names no
+    # board -- better to show nothing than to label every card the same.
+    if not text or re.match(r"^Advanced Micro Devices|^NVIDIA", text, re.IGNORECASE):
+        return ""
+    return text
+
+
+def _lspci_info(pci_id: str) -> tuple[str, str]:
+    """Return (marketing name, board vendor) from a single lspci call."""
+    out = run_command(["lspci", "-s", pci_id, "-v"], timeout=2.0)
+    sub = re.search(r"^\s*Subsystem:\s*(.+)$", out, re.MULTILINE)
+    return _lspci_name_from(out), _board_name(sub.group(1).strip()) if sub else ""
+
+
 def _lspci_name(pci_id: str) -> str:
-    out = run_command(["lspci", "-s", pci_id], timeout=2.0)
+    return _lspci_name_from(run_command(["lspci", "-s", pci_id], timeout=2.0))
+
+
+def _lspci_name_from(out: str) -> str:
     m = re.search(r"(?:VGA|Display|3D)[^:]*:\s*(.+?)(?:\s*\(rev|\s*$)", out)
     if not m:
         return ""
@@ -154,11 +189,12 @@ def collect_amd_gpus(drm_root: Path = DEFAULT_DRM_ROOT) -> list[dict[str, Any]]:
             pci_id = device.parts[-2]  # cardN
             upstream_pci_id = ""
 
-        name = _lspci_name(pci_id) or "Radeon"
+        name, board = _lspci_info(pci_id)
 
         gpus.append({
             "vendor": "AMD",
-            "name": name,
+            "name": name or "Radeon",
+            "board": board,
             "path": str(device),
             "pci_id": pci_id,
             "upstream_pci_id": upstream_pci_id,
@@ -1010,6 +1046,8 @@ def render_gpu_device(device: dict[str, Any], runners: list[dict[str, Any]]) -> 
     fan = device.get("fan_pct")
     fan_rpm = device.get("fan_rpm")
     label = f"{device.get('vendor', 'GPU')} {device.get('name', '')}"
+    if device.get("board"):
+        label += f" [{device['board']}]"
     pci_id = device.get("pci_id") or device.get("path") or f"index {device.get('index', '?')}"
     upstream = device.get("upstream_pci_id") or ""
     cluster_tag = _gpu_cluster_label(pci_id, runners, upstream)
