@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from "svelte";
-	import { fetchUpdateStatus, startRunnerBuild, fetchBuildStatus } from "../lib/api";
-	import type { UpdateStatus, BuildStatus } from "../lib/types";
+	import { fetchUpdateStatus, startRunnerBuild, fetchBuildStatus, fetchCommitDetail } from "../lib/api";
+	import type { UpdateStatus, BuildStatus, CommitDetail } from "../lib/types";
 
 	let status: UpdateStatus | null = $state(null);
 	let build: BuildStatus | null = $state(null);
@@ -10,6 +10,9 @@
 	let error = $state("");
 	let selected: Record<string, boolean> = $state({});
 	let showCommits = $state(false);
+	let detailSha: string | null = $state(null);
+	let detail: CommitDetail | null = $state(null);
+	let detailError = $state("");
 	let pollId: ReturnType<typeof setInterval> | null = null;
 
 	async function check() {
@@ -63,6 +66,24 @@
 		return new Date(iso).toLocaleString();
 	}
 
+	async function openCommit(sha: string) {
+		detailSha = sha;
+		detail = null;
+		detailError = "";
+		try {
+			const d = await fetchCommitDetail(sha);
+			if (detailSha === sha) detail = d;
+		} catch (e: unknown) {
+			if (detailSha === sha) detailError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	function closeCommit() {
+		detailSha = null;
+		detail = null;
+		detailError = "";
+	}
+
 	onMount(async () => {
 		await pollBuild();
 		if (build?.running) startPolling();
@@ -84,7 +105,8 @@
 
 	{#if status}
 		<div class="latest">
-			Upstream master: <code>{status.latest.sha.slice(0, 12)}</code>
+			Upstream master:
+			<button class="sha" onclick={() => status && openCommit(status.latest.sha)}>{status.latest.sha.slice(0, 12)}</button>
 			· {status.latest.message}
 			· <span class="muted">{fmtDate(status.latest.date)}</span>
 		</div>
@@ -97,7 +119,10 @@
 						<td><input type="checkbox" bind:checked={selected[b.backend]} disabled={build?.running} /></td>
 						<td>{b.backend}</td>
 						<td><code>{b.image}</code>{#if !b.present}<span class="missing"> (not built)</span>{/if}</td>
-						<td>{b.commit ?? "unknown"}</td>
+						<td>
+							{#if b.commit}<button class="sha" onclick={() => openCommit(b.commit!)}>{b.commit}</button>
+							{:else}unknown{/if}
+						</td>
 						<td>
 							{#if b.behind === 0}<span class="uptodate">up to date</span>
 							{:else if b.behind != null}<span class="behind">{b.behind} commits</span>
@@ -115,11 +140,11 @@
 			{#if showCommits}
 				<div class="commits">
 					{#each status.commits as c}
-						<div class="commit">
+						<button class="commit" onclick={() => openCommit(c.sha)} title="Show details">
 							<code>{c.sha.slice(0, 8)}</code>
 							<span class="msg">{c.message}</span>
 							<span class="muted">{c.author} · {fmtDate(c.date)}</span>
-						</div>
+						</button>
 					{/each}
 				</div>
 			{/if}
@@ -152,6 +177,78 @@
 	{/if}
 </div>
 
+<svelte:window onkeydown={(e) => e.key === "Escape" && closeCommit()} />
+
+{#if detailSha}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<div class="overlay" role="presentation" onclick={closeCommit}>
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<div class="modal" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+			<div class="modal-head">
+				<code>{detailSha.slice(0, 12)}</code>
+				<button class="link" onclick={closeCommit}>✕</button>
+			</div>
+			{#if detailError}
+				<div class="error">{detailError}</div>
+			{:else if !detail}
+				<div class="muted">Loading…</div>
+			{:else}
+				<h4>{detail.subject}</h4>
+				<div class="muted">
+					{detail.author} · {fmtDate(detail.date)}
+					· <a href={detail.url} target="_blank" rel="noreferrer">view on GitHub</a>
+					{#if detail.stats.additions != null}
+						· <span class="uptodate">+{detail.stats.additions}</span>
+						<span class="behind">−{detail.stats.deletions}</span>
+					{/if}
+				</div>
+				{#if detail.body}<pre class="msgbody">{detail.body}</pre>{/if}
+
+				{#if detail.pull}
+					<div class="pr">
+						<div>
+							<strong>PR #{detail.pull.number}</strong> {detail.pull.title}
+							<span class="muted">
+								· {detail.pull.user}
+								· {detail.pull.merged_at ? "merged" : detail.pull.state}
+								· <a href={detail.pull.url} target="_blank" rel="noreferrer">open</a>
+							</span>
+						</div>
+						{#if detail.pull.body}<pre class="msgbody">{detail.pull.body}</pre>{/if}
+						{#each detail.pull.comments as c}
+							<div class="comment">
+								<div class="muted">
+									{c.user} · {fmtDate(c.date)}{#if c.path} · <code>{c.path}</code>{/if}
+								</div>
+								<pre class="msgbody">{c.body}</pre>
+							</div>
+						{/each}
+						{#if detail.pull.comments.length === 0}
+							<div class="muted">No discussion on the PR.</div>
+						{/if}
+					</div>
+				{:else}
+					<div class="muted">No pull request found for this commit (pushed directly).</div>
+				{/if}
+
+				{#if detail.files.length > 0}
+					<div class="files">
+						<div class="muted">{detail.files.length} files changed</div>
+						{#each detail.files as f}
+							<div class="file">
+								<code class="msg">{f.filename}</code>
+								<span class="muted">{f.status}</span>
+								<span class="uptodate">+{f.additions}</span>
+								<span class="behind">−{f.deletions}</span>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			{/if}
+		</div>
+	</div>
+{/if}
+
 <style>
 	.update-panel { display: flex; flex-direction: column; gap: 0.75rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
 	.header { display: flex; justify-content: space-between; align-items: center; }
@@ -172,8 +269,19 @@
 	.behind { color: #f59e0b; }
 	.error { background: var(--red); color: white; padding: 0.5rem; border-radius: 4px; }
 	.commits { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; }
-	.commit { display: flex; gap: 0.5rem; align-items: baseline; }
+	.commit { display: flex; gap: 0.5rem; align-items: baseline; border: none; background: none; padding: 0.1rem 0.2rem; text-align: left; font: inherit; color: inherit; border-radius: 4px; }
+	.commit:hover { background: var(--bg-hover, #ffffff14); }
 	.commit .msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.sha { border: none; background: none; padding: 0; font-family: monospace; font-size: 0.8rem; color: var(--accent); text-decoration: underline; }
+	.overlay { position: fixed; inset: 0; background: #000000aa; display: flex; align-items: center; justify-content: center; z-index: 50; padding: 2rem; }
+	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; width: min(820px, 100%); max-height: 80vh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.6rem; font-size: 0.85rem; text-align: left; }
+	.modal h4 { margin: 0; }
+	.modal-head { display: flex; justify-content: space-between; align-items: center; }
+	.msgbody { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; font-size: 0.78rem; margin: 0; }
+	.pr, .files { display: flex; flex-direction: column; gap: 0.4rem; border-top: 1px solid var(--border); padding-top: 0.6rem; }
+	.comment { display: flex; flex-direction: column; gap: 0.2rem; }
+	.file { display: flex; gap: 0.5rem; align-items: baseline; font-size: 0.78rem; }
+	.file .msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.actions { display: flex; align-items: center; gap: 0.75rem; }
 	.build-status { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.85rem; }
 	pre { background: #000; border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; max-height: 240px; overflow: auto; font-size: 0.7rem; margin: 0; }

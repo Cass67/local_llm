@@ -25,6 +25,7 @@ import type {
 	RouterHealth,
 	IdleUnloadConfig,
 	UpdateStatus,
+	CommitDetail,
 	BuildStatus,
 	ModelProfile,
 	FamilyProfiles,
@@ -581,6 +582,15 @@ export async function initTarget(target: string): Promise<any> {
 
 export async function fetchUpdateStatus(): Promise<UpdateStatus> {
 	const res = await fetch(`${BASE}/update/status`);
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function fetchCommitDetail(sha: string): Promise<CommitDetail> {
+	const res = await fetch(`${BASE}/update/commit/${sha}`);
 	if (!res.ok) {
 		const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
 		throw new Error(err.detail || `HTTP ${res.status}`);

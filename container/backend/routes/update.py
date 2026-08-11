@@ -130,6 +130,74 @@ async def update_status():
     }
 
 
+@router.get("/commit/{sha}")
+async def commit_detail(sha: str):
+    """Full commit, touched files, and the PR it came from (body + discussion)."""
+    if not re.fullmatch(r"[0-9a-fA-F]{7,40}", sha):
+        raise HTTPException(400, "not a commit sha")
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+
+        async def get(url: str, **kw):
+            resp = await client.get(url, **kw)
+            resp.raise_for_status()
+            return resp.json()
+
+        try:
+            commit = await get(f"{GITHUB_API}/commits/{sha}")
+            pulls = await get(f"{GITHUB_API}/commits/{sha}/pulls")
+            pull = None
+            if pulls:
+                pr = pulls[0]
+                comments = await get(
+                    f"{GITHUB_API}/issues/{pr['number']}/comments", params={"per_page": 30}
+                )
+                reviews = await get(
+                    f"{GITHUB_API}/pulls/{pr['number']}/comments", params={"per_page": 30}
+                )
+                pull = {
+                    "number": pr["number"],
+                    "title": pr["title"],
+                    "body": pr.get("body") or "",
+                    "url": pr["html_url"],
+                    "state": pr["state"],
+                    "merged_at": pr.get("merged_at"),
+                    "user": (pr.get("user") or {}).get("login", ""),
+                    "comments": [
+                        {
+                            "user": (c.get("user") or {}).get("login", ""),
+                            "body": c.get("body") or "",
+                            "date": c["created_at"],
+                            "path": c.get("path"),
+                        }
+                        for c in sorted(comments + reviews, key=lambda c: c["created_at"])
+                    ],
+                }
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"GitHub unreachable: {e}") from e
+
+    message = commit["commit"]["message"]
+    return {
+        "sha": commit["sha"],
+        "url": commit["html_url"],
+        "subject": message.splitlines()[0],
+        "body": "\n".join(message.splitlines()[1:]).strip(),
+        "author": (commit["commit"]["author"] or {}).get("name", ""),
+        "date": commit["commit"]["committer"]["date"],
+        "stats": commit.get("stats", {}),
+        "files": [
+            {
+                "filename": f["filename"],
+                "status": f["status"],
+                "additions": f["additions"],
+                "deletions": f["deletions"],
+            }
+            for f in commit.get("files", [])[:100]
+        ],
+        "pull": pull,
+    }
+
+
 def _run_builds(targets: list[tuple[str, str]], ref: str) -> None:
     with open(BUILD_LOG, "w") as log:
         for backend, image in targets:

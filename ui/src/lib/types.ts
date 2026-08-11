@@ -349,6 +349,27 @@ export interface UpdateStatus {
 	commits: UpdateCommit[];
 }
 
+export interface CommitDetail {
+	sha: string;
+	url: string;
+	subject: string;
+	body: string;
+	author: string;
+	date: string;
+	stats: { additions?: number; deletions?: number; total?: number };
+	files: { filename: string; status: string; additions: number; deletions: number }[];
+	pull: {
+		number: number;
+		title: string;
+		body: string;
+		url: string;
+		state: string;
+		merged_at: string | null;
+		user: string;
+		comments: { user: string; body: string; date: string; path: string | null }[];
+	} | null;
+}
+
 export interface BuildStatus {
 	running: boolean;
 	backends: string[];
