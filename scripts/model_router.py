@@ -86,6 +86,9 @@ def _reload_config() -> None:
 
 _reload_config()
 
+# "auto" (and empty) are sentinels meaning "let the router decide"
+_ROUTE_SENTINELS = {"auto", "router", "local-auto", ""}
+
 # --- health cache ---
 
 _healthy_aliases: set[str] = set()
@@ -195,7 +198,7 @@ async def _refresh_health() -> None:
 
             if PREFER_IDLE:
                 await _refresh_occupancy(c)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a probe failure must not stop routing
         print(f"router: health refresh failed: {exc}")
     _last_health_check = time.monotonic()
 
@@ -632,7 +635,7 @@ async def v1_models():
             status_code=resp.status_code,
             media_type=resp.headers.get("content-type", "application/json"),
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — surface upstream failures as 502
         return JSONResponse({"detail": str(exc)}, status_code=502)
 
 
@@ -644,8 +647,6 @@ async def v1_chat_completions(request: Request):
     except json.JSONDecodeError:
         return JSONResponse({"detail": "invalid JSON"}, status_code=400)
 
-    # "auto" (and empty) are sentinels meaning "let the router decide"
-    _ROUTE_SENTINELS = {"auto", "router", "local-auto", ""}
     model_val = payload.get("model") or ""
     explicit_model = bool(model_val) and model_val not in _ROUTE_SENTINELS
 
@@ -829,4 +830,4 @@ if __name__ == "__main__":
     import uvicorn
 
     asyncio.run(_refresh_health())
-    uvicorn.run(app, host="0.0.0.0", port=PORT)  # nosec B104
+    uvicorn.run(app, host="0.0.0.0", port=PORT)  # noqa: S104 # nosec B104
