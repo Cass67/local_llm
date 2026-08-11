@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from backend.gpu_inventory import (
     GpuInfo,
+    _board_from_sysfs,
+    _lspci_board,
     _lspci_name,
     _match_vulkan,
     _nvidia_smi_indices,
@@ -194,3 +196,29 @@ def test_detect_gpus_combines_sources():
     assert gpus[1].vulkan_index == 1
     assert gpus[0].cuda_index is None
     assert gpus[0].vram_mb == 20480
+
+
+def test_board_from_sysfs_maps_real_subsystem_vendors(tmp_path):
+    # Real subsystem vendor ids from ubt26's three otherwise-identical 7900 XTs.
+    for pci, raw, expected in [
+        ("0000:03:00.0", "0x1849", "ASRock"),
+        ("0000:06:00.0", "0x1458", "Gigabyte"),
+        ("0000:09:00.0", "0x1da2", "Sapphire"),
+        ("0000:0a:00.0", "0x1002", ""),  # AMD reference board names no board
+        ("0000:0b:00.0", "0xdead", "0xdead"),  # unmapped still distinguishes cards
+    ]:
+        dev = tmp_path / pci
+        dev.mkdir()
+        (dev / "subsystem_vendor").write_text(raw + "\n")
+        with patch("backend.gpu_inventory.Path", lambda _p: tmp_path):
+            assert _board_from_sysfs(pci) == expected
+
+
+def test_board_falls_back_to_sysfs_without_lspci():
+    # The mgmt container has no lspci; the board must still resolve.
+    with (
+        patch("backend.gpu_inventory._run", return_value=""),
+        patch("backend.gpu_inventory._board_from_sysfs", return_value="ASRock") as fallback,
+    ):
+        assert _lspci_board("0000:03:00.0") == "ASRock"
+    fallback.assert_called_once()

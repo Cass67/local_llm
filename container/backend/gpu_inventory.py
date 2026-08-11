@@ -143,19 +143,54 @@ _BOARD_NOISE = re.compile(
 )
 
 
+# PCI subsystem vendor ids for the add-in-board makers. The mgmt container has no
+# lspci and no pci.ids, but sysfs always exposes the raw id, so this is what makes
+# the board visible from inside the container without adding a package to the image.
+_BOARD_VENDOR_IDS = {
+    0x1002: "",  # AMD reference board -- names no add-in-board
+    0x10DE: "",  # NVIDIA reference board
+    0x1043: "ASUS",
+    0x106B: "Apple",
+    0x1458: "Gigabyte",
+    0x1462: "MSI",
+    0x148C: "PowerColor",
+    0x1569: "Palit",
+    0x1682: "XFX",
+    0x1787: "HIS",
+    0x1849: "ASRock",
+    0x196E: "PNY",
+    0x19DA: "Zotac",
+    0x1B4C: "Galax",
+    0x1DA2: "Sapphire",
+    0x3842: "EVGA",
+}
+
+
+def _board_from_sysfs(pci_id: str) -> str:
+    """Board vendor from the PCI subsystem vendor id, for hosts without lspci."""
+    try:
+        raw = (Path("/sys/bus/pci/devices") / pci_id / "subsystem_vendor").read_text().strip()
+        vendor_id = int(raw, 16)
+    except (OSError, ValueError):
+        return ""
+    # An unmapped id still distinguishes one card from another, which is the whole
+    # point, so show the raw value rather than nothing.
+    return _BOARD_VENDOR_IDS.get(vendor_id, f"0x{vendor_id:04x}")
+
+
 def _lspci_board(pci_id: str) -> str:
-    """Add-in-board vendor from the lspci Subsystem line, "" when it names no board."""
+    """Add-in-board vendor, "" when the card reports no board of its own."""
     out = _run(["lspci", "-s", pci_id, "-v"])
     match = re.search(r"^\s*Subsystem:\s*(.+)$", out, re.MULTILINE)
     if not match:
-        return ""
+        return _board_from_sysfs(pci_id)
     text = _BOARD_NOISE.sub("", match.group(1).strip())
     text = re.sub(r"[\s,]+", " ", text).strip(" ,-")
     # Reference boards report the chip vendor as their subsystem, which names no
     # board -- better to show nothing than to label every card the same.
-    if not text or re.match(r"^Advanced Micro Devices|^NVIDIA", text, re.IGNORECASE):
+    if re.match(r"^Advanced Micro Devices|^NVIDIA", text, re.IGNORECASE):
         return ""
-    return text
+    return text or _board_from_sysfs(pci_id)
 
 
 def _nvidia_smi_indices() -> dict[str, tuple[int, str, int | None]]:
