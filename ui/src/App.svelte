@@ -5,7 +5,6 @@
   import Search from './routes/Search.svelte';
   import Status from './routes/Status.svelte';
   import Benchmarks from './routes/Benchmarks.svelte';
-  import Leaderboard from './routes/Leaderboard.svelte';
   import Architecture from './routes/Architecture.svelte';
   import Profiles from './routes/Profiles.svelte';
   import Coding from './routes/Coding.svelte';
@@ -19,7 +18,6 @@
     '/logs': Logs,
     '/status': Status,
     '/benchmarks': Benchmarks,
-    '/leaderboard': Leaderboard,
     '/architecture': Architecture,
     '/profiles': Profiles,
     '/coding': Coding,

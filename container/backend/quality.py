@@ -168,13 +168,13 @@ def run_quality(
     timeout: float = 300.0,
 ) -> dict[str, Any]:
     """Run the golden set against a cluster and return a pass rate."""
-    from .sweep import _chat_once
+    from .measure import chat_once
 
     cases = cases or load_cases()
     results: list[dict[str, Any]] = []
     for case in cases:
         try:
-            completion = _chat_once(port, model, case["prompt"], "", max_tokens, timeout)
+            completion = chat_once(port, model, case["prompt"], "", max_tokens, timeout)
             text = completion.get("text") or ""
         except Exception as exc:  # noqa: BLE001
             results.append(

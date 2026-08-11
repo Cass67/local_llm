@@ -4,6 +4,7 @@ import json
 
 import pytest
 from backend import sweep
+from backend.benchmark_store import BenchmarkStore
 from backend.clusters import ClusterDef
 
 
@@ -89,7 +90,7 @@ def test_sweep_measures_every_combo_and_ranks_best(monkeypatch):
             "text": "hello",
         }
 
-    monkeypatch.setattr(sweep, "_chat_once", fake_chat)
+    monkeypatch.setattr(sweep.measure, "chat_once", fake_chat)
 
     job = sweep.SweepJob(
         family="fam",
@@ -117,8 +118,8 @@ def test_sweep_measures_every_combo_and_ranks_best(monkeypatch):
 def test_sweep_skips_combos_the_linter_calls_dead(monkeypatch):
     monkeypatch.setattr(sweep.active_runners, "start", lambda _c, _meta: None)
     monkeypatch.setattr(
-        sweep,
-        "_chat_once",
+        sweep.measure,
+        "chat_once",
         lambda *_a, **_k: {"decode_tps": 10.0, "completion_tokens": 8, "wall_s": 1.0, "text": ""},
     )
     job = sweep.SweepJob(
@@ -151,7 +152,7 @@ def test_failed_combo_does_not_abort_the_sweep(monkeypatch):
             raise RuntimeError("runner OOM")
         return {"decode_tps": 12.0, "completion_tokens": 8, "wall_s": 1.0, "text": ""}
 
-    monkeypatch.setattr(sweep, "_chat_once", flaky)
+    monkeypatch.setattr(sweep.measure, "chat_once", flaky)
     job = sweep.SweepJob(
         family="fam",
         cluster_id="c1",
@@ -173,8 +174,8 @@ def test_failed_combo_does_not_abort_the_sweep(monkeypatch):
 def test_results_persist_to_disk(monkeypatch):
     monkeypatch.setattr(sweep.active_runners, "start", lambda _c, _meta: None)
     monkeypatch.setattr(
-        sweep,
-        "_chat_once",
+        sweep.measure,
+        "chat_once",
         lambda *_a, **_k: {"decode_tps": 30.0, "completion_tokens": 8, "wall_s": 1.0, "text": ""},
     )
     job = sweep.SweepJob(
@@ -214,8 +215,8 @@ def test_missing_cluster_errors_cleanly(monkeypatch):
 def test_tps_per_watt_objective_ranks_on_efficiency(monkeypatch):
     monkeypatch.setattr(sweep.active_runners, "start", lambda _c, _meta: None)
     monkeypatch.setattr(
-        sweep,
-        "_chat_once",
+        sweep.measure,
+        "chat_once",
         lambda *_a, **_k: {"decode_tps": 20.0, "completion_tokens": 8, "wall_s": 1.0, "text": ""},
     )
     # 256 draws half the power for the same throughput → wins on efficiency.
@@ -232,7 +233,7 @@ def test_tps_per_watt_objective_ranks_on_efficiency(monkeypatch):
             cfg = sweep.base_profile_config("fam", "balanced-sweep") or {}
             return {"psu_avg_w": watts[cfg.get("ubatch", 256)], "psu_peak_w": None, "samples": 4}
 
-    monkeypatch.setattr(sweep, "PowerSampler", FakeSampler)
+    monkeypatch.setattr(sweep.measure, "PowerSampler", FakeSampler)
     job = sweep.SweepJob(
         family="fam",
         cluster_id="c1",
@@ -247,3 +248,38 @@ def test_tps_per_watt_objective_ranks_on_efficiency(monkeypatch):
     _run_to_completion(job)
     assert job.best()["combo"] == {"ubatch": 256}
     assert job.best()["tps_per_watt"] == 0.1
+
+
+@pytest.mark.usefixtures("fake_cluster")
+def test_measured_combos_land_in_the_benchmark_store(env, monkeypatch):
+    """Every combo becomes a history row labelled with the knobs that produced it."""
+    monkeypatch.setattr(sweep.active_runners, "start", lambda _c, _meta: None)
+    monkeypatch.setattr(
+        sweep.measure,
+        "chat_once",
+        lambda *_a, **_k: {
+            "decode_tps": 30.0,
+            "prompt_tps": 800.0,
+            "completion_tokens": 64,
+            "wall_s": 2.0,
+            "text": "ok",
+        },
+    )
+    job = sweep.SweepJob(
+        family="fam",
+        cluster_id="c1",
+        base_profile="balanced",
+        grid={"ubatch": [256, 512]},
+        prompt_text="hi",
+        repeats=1,
+        warmup=0,
+    )
+    job.start()
+    _run_to_completion(job)
+
+    store = BenchmarkStore(env / "runs" / "benchmarks.sqlite3")
+    rows = store.list_runs({"benchmark_type": "sweep"})["runs"]
+    assert {r["profile"] for r in rows} == {"balanced[ubatch=256]", "balanced[ubatch=512]"}
+    assert all(r["throughput_tps"] == 30.0 for r in rows)
+    # Sweep rows must not reach the leaderboard, which only ranks standard runs.
+    assert store.leaderboard()["rows"] == []

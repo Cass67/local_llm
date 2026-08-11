@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "container"))
 
 import pytest  # noqa: E402
-from backend import bakeoff  # noqa: E402
+from backend import bakeoff, measure  # noqa: E402
 from backend.benchmark_store import BenchmarkStore  # noqa: E402
 from backend.clusters import ClusterDef  # noqa: E402
 
@@ -34,20 +34,20 @@ def env(tmp_path, monkeypatch):
         lambda cluster, meta: started.append(f"{meta['family']}/{meta.get('profile', '')}"),
     )
     monkeypatch.setattr(
-        bakeoff,
-        "_chat_once",
-        lambda port, model, _prompt, _sys_prompt, _max_tokens, _timeout: {
+        measure,
+        "chat_once",
+        lambda _port, _model, _prompt, _sys_prompt, _max_tokens, _timeout: {
             "decode_tps": 40.0,
             "completion_tokens": 100,
             "wall_s": 2.5,
             "text": "def lru(): pass",
         },
     )
-    monkeypatch.setattr(bakeoff, "PowerSampler", _FakeSampler)
+    monkeypatch.setattr(measure, "PowerSampler", _FakeSampler)
     monkeypatch.setattr(
         bakeoff.quality,
         "run_quality",
-        lambda port, model, **_kw: {
+        lambda _port, _model, **_kw: {
             "cases": [],
             "passed": 4,
             "total": 5,

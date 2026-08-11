@@ -17,18 +17,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import active_runners, config, quality
+from . import active_runners, config, measure, quality
 from .benchmark_store import BenchmarkStore
 from .clusters import ClusterDef
-from .power import PowerSampler, tokens_per_watt
-from .sweep import _chat_once
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROMPT = (
-    "Write a Python class `LRUCache` with get and put in O(1), using a dict and a "
-    "doubly linked list. Include a short docstring and three assertions."
-)
+DEFAULT_PROMPT = measure.DEFAULT_PROMPT
 
 
 @dataclass
@@ -87,58 +82,21 @@ def load_accepted(family: str) -> dict[str, Any]:
     return data
 
 
-def _measure_one(
-    port: int,
-    alias: str,
-    prompt: str,
-    max_tokens: int,
-    timeout: float,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """One timed completion with wall power sampled across it."""
-    sampler = PowerSampler()
-    sampler.__enter__()
-    try:
-        completion = _chat_once(port, alias, prompt, "", max_tokens, timeout)
-    finally:
-        sampler.__exit__()
-    return completion, sampler.result()
+def _measure_one(port: int, alias: str, prompt: str, max_tokens: int, timeout: float) -> dict:
+    """One timed completion with wall power sampled across it.
 
-
-def _record(
-    store: BenchmarkStore,
-    cluster: ClusterDef,
-    alias: str,
-    profile: str,
-    prompt: str,
-    completion: dict[str, Any],
-    power: dict[str, Any],
-) -> dict[str, Any]:
-    text = completion.get("text") or ""
-    tps = completion.get("decode_tps")
-    wall_s = float(completion.get("wall_s") or 0.001)
-    return store.create_run(
-        benchmark_type="standard",
-        endpoint_id=None,
-        endpoint_name=f"Cluster: {cluster.name}",
-        endpoint_base_url=f"http://127.0.0.1:{cluster.port}/v1",
-        model=alias,
-        prompt_name="bake-off",
-        prompt_text=prompt,
-        response_text=text,
-        latency_ms=wall_s * 1000,
-        duration_ms=wall_s * 1000,
-        output_chars=len(text),
-        output_words=len([w for w in text.split() if w]),
-        completion_tokens=completion.get("completion_tokens"),
-        throughput_tps=tps,
-        throughput_cps=len(text) / wall_s if text else None,
-        status="ok",
-        error=None,
-        psu_avg_w=power.get("psu_avg_w"),
-        psu_peak_w=power.get("psu_peak_w"),
-        gpu_avg_w=power.get("gpu_avg_w"),
-        tps_per_watt=tokens_per_watt(tps, power.get("psu_avg_w")),
-        profile=profile,
+    Each repeat is its own row in the store, so the leaderboard can average and
+    the history shows run-to-run spread — hence repeats=1 here rather than
+    letting measure() aggregate.
+    """
+    return measure.measure(
+        port,
+        alias,
+        prompt,
+        max_tokens=max_tokens,
+        repeats=1,
+        warmup=0,
+        timeout=timeout,
     )
 
 
@@ -184,21 +142,19 @@ def run_bakeoff(
             for i in range(max(repeats, 1)):
                 if job.cancelled:
                     break
-                completion, power = _measure_one(cluster.port, alias, prompt, max_tokens, timeout)
+                result = _measure_one(cluster.port, alias, prompt, max_tokens, timeout)
                 runs.append(
-                    _record(
+                    measure.record(
                         store,
-                        cluster,
-                        alias,
-                        str(accepted.get("profile", "")),
-                        prompt,
-                        completion,
-                        power,
+                        result,
+                        cluster=cluster,
+                        model=alias,
+                        profile=str(accepted.get("profile", "")),
+                        prompt=prompt,
+                        prompt_name="bake-off",
                     )
                 )
-                job.say(
-                    f"{label} run {i + 1}/{repeats}: {completion.get('decode_tps') or 0:.1f} tok/s"
-                )
+                job.say(f"{label} run {i + 1}/{repeats}: {result.get('decode_tps') or 0:.1f} tok/s")
 
             scores = [r["throughput_tps"] for r in runs if r.get("throughput_tps")]
             result: dict[str, Any] = {

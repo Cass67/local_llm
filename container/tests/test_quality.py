@@ -1,7 +1,7 @@
 """Golden-prompt checks — degenerate output must fail, good output must pass."""
 
 import pytest
-from backend import quality, sweep
+from backend import measure, quality, sweep
 
 
 def _case(**kw):
@@ -63,7 +63,7 @@ def stub_chat(monkeypatch):
     def fake(_port, _model, prompt, _system, _max_tokens, _timeout):
         return {"text": replies.get(prompt, ""), "decode_tps": 10.0}
 
-    monkeypatch.setattr(sweep, "_chat_once", fake)
+    monkeypatch.setattr(measure, "chat_once", fake)
     return replies
 
 
@@ -84,7 +84,7 @@ def test_request_failure_counts_as_a_failed_case(monkeypatch):
     def boom(*_a, **_k):
         raise RuntimeError("connection refused")
 
-    monkeypatch.setattr(sweep, "_chat_once", boom)
+    monkeypatch.setattr(measure, "chat_once", boom)
     report = quality.run_quality(8081, "m", cases=[_case(min_words=1)])
     assert report["pass_rate"] == 0.0
     assert "connection refused" in report["cases"][0]["failures"][0]
@@ -166,7 +166,7 @@ def test_quality_gate_excludes_fast_but_broken_config(tmp_path, monkeypatch):
             "text": "short." if fast else " ".join(["word"] * 400),
         }
 
-    monkeypatch.setattr(sweep, "_chat_once", fake_chat)
+    monkeypatch.setattr(measure, "chat_once", fake_chat)
 
     job = sweep.SweepJob(
         family="fam",
