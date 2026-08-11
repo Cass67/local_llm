@@ -15,7 +15,7 @@ _AGENTS = [
         "default_port": 3006,
         "url_env": "AGENT_PI_URL",
         "default_url": "/pi/",
-        "auth": "basic (user: pi)",
+        "auth": "via Cloudflare Access",
     },
     {
         "id": "opencode",
@@ -25,7 +25,7 @@ _AGENTS = [
         "default_port": 3002,
         "url_env": "AGENT_OPENCODE_URL",
         "default_url": "/opencode/",
-        "auth": "basic (user: opencode)",
+        "auth": "via Cloudflare Access",
     },
 ]
 
