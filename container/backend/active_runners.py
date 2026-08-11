@@ -175,6 +175,28 @@ def _build_launch_metadata(
     return meta
 
 
+def _stop_gpu_conflicts(cluster: ClusterDef) -> None:
+    """Stop running clusters that hold GPUs this one needs.
+
+    Cluster definitions may overlap on PCI ids — a 3-card cluster and a 2-card subset
+    of it are both valid — and nothing stops both being started. The second runner
+    then dies at tensor-alloc time with a bare "unable to allocate ROCm0 buffer",
+    which reads like the model is too big rather than like the card being occupied.
+    """
+    mine = set(cluster.gpu_pci_ids)
+    for other in list_clusters():
+        shared = mine.intersection(other.gpu_pci_ids)
+        if other.id == cluster.id or not shared or not is_running(other):
+            continue
+        logging.info(
+            "start: stopping cluster %s, it holds %s",
+            other.name,
+            ",".join(sorted(shared)),
+        )
+        stop(other)
+        startup_progress.clear(other.id)
+
+
 def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
     """Launch accepted model on cluster, stopping any prior instance on that cluster."""
     startup_progress.begin(
@@ -183,6 +205,7 @@ def start(cluster: ClusterDef, accepted: dict[str, Any]) -> None:
         str(accepted.get("profile", "")),
     )
     stop(cluster)
+    _stop_gpu_conflicts(cluster)
     inventory = detect_gpus()
     meta = _build_launch_metadata(accepted, cluster, inventory)
     visible = meta.get("config", {}).get("visible_devices", "")
