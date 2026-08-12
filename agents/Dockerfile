@@ -31,5 +31,16 @@ RUN mkdir -p /home/agent/.local/share /home/agent/.local/state \
              /home/agent/.config /home/agent/.cache \
     && chmod -R 0777 /home/agent
 
+# Scrollback: the agents run inside tmux, which repaints the pane in place, so
+# the browser terminal's own scrollback stays empty and the wheel does nothing.
+# `mouse on` hands the wheel to tmux (copy-mode for pi, which paints on the main
+# screen; passed through to any TUI that requests mouse tracking). Shift+drag
+# still gives a native browser selection.
+RUN printf '%s\n' \
+      'set -g mouse on' \
+      'set -g history-limit 50000' \
+      > /home/agent/.tmux.conf \
+    && chmod 0644 /home/agent/.tmux.conf
+
 WORKDIR /work
 ENTRYPOINT ["/usr/bin/tini", "--"]
