@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 # lib.sh - shared utilities for oc-local tooling.
 # Sourced by: oc-local, model-manager, model-discovery, update-manager, hardware-analyzer.
+#
+# This is a sourced library: most vars below are consumed by the scripts that
+# source it, so shellcheck cannot see their uses.
+# shellcheck disable=SC2034
 
 set -euo pipefail
 
 # Determine install layout:
 # - SCRIPT_DIR: directory where lib.sh lives
+# - STATE_DIR: ~/.local/share/local_llm (mounted as /state in the containers)
 # - CONFIG_DIR: ~/.local/share/local_llm/config
 # - RUNS_DIR: ~/.local/share/local_llm/runs
 SCRIPT_DIR="${LIB_SH_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-CONFIG_DIR="${LOCAL_LLM_CONFIG_DIR:-$HOME/.local/share/local_llm/config}"
-RUNS_DIR="${LOCAL_LLM_RUNS_DIR:-$HOME/.local/share/local_llm/runs}"
-PROFILES_JSON="${CONFIG_DIR}/profiles.json"
+STATE_DIR="${LOCAL_LLM_STATE_DIR:-$HOME/.local/share/local_llm}"
+CONFIG_DIR="${LOCAL_LLM_CONFIG_DIR:-$STATE_DIR/config}"
+RUNS_DIR="${LOCAL_LLM_RUNS_DIR:-$STATE_DIR/runs}"
+# Single source of truth for profiles: the state dir the backend writes to
+# (container/backend/config.py PROFILES_CONFIG). There is no repo-side seed.
+PROFILES_JSON="${LOCAL_LLM_PROFILES_JSON:-$STATE_DIR/profiles.json}"
 
 # Runtime
 LLAMA_CPP_DIR="${LLAMA_CPP_DIR:-$HOME/local_llm/llama.cpp}"
@@ -160,7 +168,7 @@ build_llama_cmd() {
 # Usage: ssh_run "uname -a"
 ssh_run() {
   [[ -n "$REMOTE_HOST" ]] || die "REMOTE_HOST not set; cannot ssh_run"
-  local cmd="$*"
+  local remote_cmd="$*"
   local base_ssh_cmd=(
     ssh
     "${REMOTE_SSH_OPTS:-}"
@@ -173,7 +181,7 @@ ssh_run() {
     [[ -n "$part" ]] && clean_ssh_cmd+=("$part")
   done
 
-  "${clean_ssh_cmd[@]}" "$cmd"
+  "${clean_ssh_cmd[@]}" "$remote_cmd"
 }
 
 # Wait for llama-server to respond (HTTP GET /)
@@ -198,7 +206,8 @@ write_run_metadata() {
   local phase="$2" # start | stop | error
   local ts
   ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  local run_file="$RUNS_DIR/${profile_key//:/_}_$(date -u +"%Y%m%dT%H%M%S").json"
+  local run_file
+  run_file="$RUNS_DIR/${profile_key//:/_}_$(date -u +"%Y%m%dT%H%M%S").json"
 
   local meta
   meta=$(jq -n \

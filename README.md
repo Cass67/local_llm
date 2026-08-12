@@ -367,7 +367,7 @@ Every field a profile can set, exactly as read by `container/backend/runtime.py`
 | `nvidia_vulkan` | — | Boolean; routes an NVIDIA GPU through the Vulkan backend via the nvidia container runtime. |
 | `flags` | raw CLI args | Free-text extra flags appended verbatim. Any flag already covered by a promoted field above (`-fa`, `-md`, `--spec-*`, `--parallel`, `--cache-ram`, etc.) is stripped from here automatically so it isn't passed twice. |
 
-**MTP/speculative-decoding note:** the only fields `runtime.py` actually reads are the flat `mtp_*` keys above. A nested `"mtp": {"enabled": true, ...}` object or raw-flag-named keys like `"draft-mtp"`/`"spec-draft-n-max"` are **not recognized** and are silently ignored — some profiles in `configs/profiles.json` currently have this stale shape and have no working MTP despite looking configured. Use the flat `mtp_*` keys for anything that needs to actually take effect.
+**MTP/speculative-decoding note:** the only fields `runtime.py` actually reads are the flat `mtp_*` keys above. A nested `"mtp": {"enabled": true, ...}` object or raw-flag-named keys like `"draft-mtp"`/`"spec-draft-n-max"` are **not recognized** and are silently ignored — some profiles currently have this stale shape and have no working MTP despite looking configured. Use the flat `mtp_*` keys for anything that needs to actually take effect.
 
 **Choosing a `spec_type`.** The two mechanisms accelerate different things and compose:
 
