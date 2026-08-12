@@ -123,6 +123,27 @@ def _apply_profile_config(meta: dict[str, Any]) -> None:
             cfg[key] = value
 
 
+def _assert_cluster_gpus_present(cluster: ClusterDef, inventory: list[GpuInfo]) -> None:
+    """Reject a cluster naming GPUs that are not in the inventory.
+
+    Bus addresses renumber whenever cards are added, moved, or reseated, so a cluster
+    definition goes stale silently. Without this, visible_devices_for() returns "",
+    cfg["visible_devices"] keeps whatever the profile happened to say, and the runner
+    launches against the wrong devices — that is how a 2-GPU box ran with
+    HIP_VISIBLE_DEVICES=0,1,2. Checked by PCI id rather than resolved index: a Vulkan
+    cluster legitimately resolves to an empty index list when the inventory has no
+    vulkan_index for its cards.
+    """
+    known_pci = {g.pci_id for g in inventory}
+    missing_pci = [pci for pci in cluster.gpu_pci_ids if pci not in known_pci]
+    if missing_pci:
+        raise RuntimeError(
+            f"cluster {cluster.name!r} references GPUs not present in the inventory: "
+            f"{', '.join(missing_pci)}. Present: {', '.join(sorted(known_pci)) or 'none'}. "
+            "Update the cluster definition to the current PCI addresses."
+        )
+
+
 def _build_launch_metadata(
     accepted: dict[str, Any], cluster: ClusterDef, inventory: list[GpuInfo]
 ) -> dict[str, Any]:
@@ -158,6 +179,8 @@ def _build_launch_metadata(
             cfg["mixed_vulkan"] = True
         elif "nvidia" in vendors:
             cfg["nvidia_vulkan"] = True
+
+    _assert_cluster_gpus_present(cluster, inventory)
 
     vd = visible_devices_for(cluster, inventory)
     if vd:

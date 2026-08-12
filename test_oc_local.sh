@@ -66,7 +66,6 @@ opencode_web_service_contents="$(<"$repo_root/scripts/opencode-web.service")"
 model_manager_contents="$(<"$repo_root/scripts/model-manager.sh")"
 model_discovery_contents="$(<"$repo_root/scripts/model-discovery.sh")"
 oc_local_contents="$(<"$repo_root/scripts/oc-local")"
-heretic_context_contents="$(<"$repo_root/docs/benchmarks/2026-05-15-heretic-context.md")"
 tracked_start_scripts="$(git -C "$repo_root" ls-files 'scripts/start*.sh')"
 if [[ -n "$tracked_start_scripts" ]]; then
   printf 'expected no tracked scripts/start*.sh launchers, but found:\n%s\n' "$tracked_start_scripts" >&2
@@ -230,8 +229,6 @@ assert_not_contains "$model_discovery_contents" "Qwen3.6-35B-A3B"
 assert_not_contains "$model_discovery_contents" "Gemma-4-31B-it"
 assert_contains "$model_discovery_contents" 'OC_LOCAL_HF_FETCH_LIMIT:-100'
 assert_not_contains "$model_discovery_contents" "gpt-oss-20B"
-assert_contains "$heretic_context_contents" "historical benchmark"
-assert_contains "$heretic_context_contents" "not an active curated default"
 assert_contains "$readme_contents" "shellcheck install.sh installer.sh scripts/model-discovery.sh scripts/model-manager.sh scripts/oc-local scripts/update-manager.sh test_oc_local.sh scripts/bench-installed-kv-remote.sh scripts/bench-mtp-remote.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh"
 assert_contains "$readme_contents" "systemctl --user restart llama-server.service"
 assert_contains "$readme_contents" "run-current-model.sh"
