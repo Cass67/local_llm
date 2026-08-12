@@ -37,6 +37,8 @@ COPY container/backend/ ./backend/
 COPY --link container/ui-dist/ ./ui-dist/
 COPY scripts/ /scripts/
 COPY runner/ ./runner/
+# Build context for the Status tab's coding-agent rebuild (pi/opencode).
+COPY agents/ ./agents/
 COPY container/entrypoint.sh .
 
 EXPOSE 3100

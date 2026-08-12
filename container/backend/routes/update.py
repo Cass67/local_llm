@@ -1,6 +1,7 @@
 """llama.cpp upstream update check + runner image rebuild via Docker socket."""
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -13,7 +14,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .. import config, regression
+from .. import config, regression, runtime
 
 router = APIRouter(prefix="/api/update", tags=["update"])
 
@@ -23,6 +24,17 @@ RUNNER_SRC_DIR = Path(os.environ.get("RUNNER_SRC_DIR", "/app/runner"))
 BUILD_LOG = config.STATE_DIR / "runner-build.log"
 
 _BACKENDS = ("vulkan", "rocm", "cuda")
+
+# The coding-agent image (pi + opencode) is version-pinned by build arg, so a
+# plain `docker compose build` is a cache hit and never picks up new releases.
+AGENTS_SRC_DIR = Path(os.environ.get("AGENTS_SRC_DIR", "/app/agents"))
+AGENTS_IMAGE = os.environ.get("AGENTS_IMAGE", "local-llm-agents:latest")
+# id -> (npm package, Dockerfile build arg, container using it)
+AGENT_PACKAGES = {
+    "pi": ("@earendil-works/pi-coding-agent", "PI_VERSION", "local-llm-pi-web"),
+    "opencode": ("opencode-ai", "OPENCODE_VERSION", "local-llm-opencode"),
+}
+NPM_REGISTRY = "https://registry.npmjs.org"
 
 # image id -> short sha, so we only `docker run --version` once per image build
 _version_cache: dict[str, str] = {}
@@ -196,6 +208,175 @@ async def commit_detail(sha: str):
         ],
         "pull": pull,
     }
+
+
+def _parse_npm_versions(payload: str) -> dict[str, str]:
+    """package -> version, from `npm ls -g --depth=0 --json`."""
+    try:
+        deps = json.loads(payload).get("dependencies") or {}
+    except (json.JSONDecodeError, AttributeError):
+        return {}
+    return {
+        name: info["version"]
+        for name, info in deps.items()
+        if isinstance(info, dict) and info.get("version")
+    }
+
+
+# image id -> installed npm versions, so we shell into the image once per build
+_agent_version_cache: dict[str, dict[str, str]] = {}
+
+
+def _installed_agent_versions() -> tuple[bool, dict[str, str]]:
+    try:
+        result = _docker("image", "inspect", "-f", "{{.Id}}", AGENTS_IMAGE)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, {}
+    if result.returncode != 0:
+        return False, {}
+    image_id = result.stdout.strip()
+    if image_id not in _agent_version_cache:
+        try:
+            listing = _docker(
+                "run", "--rm", AGENTS_IMAGE, "npm", "ls", "-g", "--depth=0", "--json", timeout=120
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return True, {}
+        _agent_version_cache[image_id] = _parse_npm_versions(listing.stdout)
+    return True, _agent_version_cache[image_id]
+
+
+async def _npm_latest(client: httpx.AsyncClient, package: str) -> str | None:
+    resp = await client.get(f"{NPM_REGISTRY}/{package}/latest")
+    if resp.status_code != 200:
+        return None
+    return resp.json().get("version")
+
+
+@router.get("/agents")
+async def agents_status():
+    """Installed vs latest pi/opencode in the coding-agent image."""
+    present, installed = _installed_agent_versions()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            latest = {
+                agent_id: await _npm_latest(client, package)
+                for agent_id, (package, _, _) in AGENT_PACKAGES.items()
+            }
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"npm registry unreachable: {e}") from e
+
+    return {
+        "image": AGENTS_IMAGE,
+        "present": present,
+        "packages": [
+            {
+                "id": agent_id,
+                "package": package,
+                "container": container,
+                "current": installed.get(package),
+                "latest": latest[agent_id],
+                "outdated": bool(
+                    latest[agent_id]
+                    and installed.get(package)
+                    and latest[agent_id] != installed[package]
+                ),
+            }
+            for agent_id, (package, _, container) in AGENT_PACKAGES.items()
+        ],
+    }
+
+
+def _recreate_container(name: str) -> None:
+    """Re-create a container from its own config so it picks up the rebuilt image."""
+
+    def api(method: str, path: str, body: str | None = None) -> dict:
+        return runtime.docker_api(method, path, body, config.DOCKER_SOCKET)
+
+    info = api("GET", f"/containers/{name}/json")
+    if not info:
+        return  # agent container is not deployed on this host
+    cfg = info["Config"]
+    payload = {
+        key: cfg[key]
+        for key in ("Image", "Cmd", "Entrypoint", "Env", "User", "WorkingDir", "Labels", "Tty")
+        if key in cfg
+    }
+    payload["HostConfig"] = info["HostConfig"]
+    api("POST", f"/containers/{name}/stop?t=10")
+    api("DELETE", f"/containers/{name}?force=true")
+    api("POST", f"/containers/create?name={name}", json.dumps(payload))
+    api("POST", f"/containers/{name}/start")
+
+
+def _run_agents_build(versions: dict[str, str]) -> None:
+    build_args = []
+    for agent_id, version in versions.items():
+        build_args += ["--build-arg", f"{AGENT_PACKAGES[agent_id][1]}={version}"]
+    with open(BUILD_LOG, "w") as log:
+        _build["current"] = "agents"
+        pinned = ", ".join(f"{a} {v}" for a, v in versions.items())
+        log.write(f"\n=== Building {AGENTS_IMAGE} ({pinned}) ===\n")
+        log.flush()
+        proc = subprocess.Popen(  # nosec B603 B607  # noqa: S603
+            [  # noqa: S607
+                "docker",
+                "build",
+                "--network",
+                "host",
+                "--pull",
+                *build_args,
+                "-t",
+                AGENTS_IMAGE,
+                str(AGENTS_SRC_DIR),
+            ],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+        code = proc.wait()
+        _build["results"]["agents"] = code
+        _agent_version_cache.clear()
+        # The image tag is unchanged, so the running containers keep the old one
+        # until they are re-created -- unlike runners, nothing else relaunches them.
+        if code == 0:
+            for agent_id in versions:
+                name = AGENT_PACKAGES[agent_id][2]
+                try:
+                    _recreate_container(name)
+                    log.write(f"recreated {name}\n")
+                except (RuntimeError, OSError) as exc:
+                    log.write(f"failed to recreate {name}: {exc}\n")
+                    _build["results"]["agents"] = 1
+                log.flush()
+    _build["current"] = None
+    _build["running"] = False
+
+
+@router.post("/agents/build")
+async def start_agents_build():
+    """Rebuild the coding-agent image at the latest pi/opencode releases and restart both."""
+    if not (AGENTS_SRC_DIR / "Dockerfile").exists():
+        raise HTTPException(500, f"agent sources not found in image at {AGENTS_SRC_DIR}")
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            versions = {}
+            for agent_id, (package, _, _) in AGENT_PACKAGES.items():
+                version = await _npm_latest(client, package)
+                if not version:
+                    raise HTTPException(502, f"no published version for {package}")
+                versions[agent_id] = version
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"npm registry unreachable: {e}") from e
+
+    with _build_lock:
+        if _build["running"]:
+            raise HTTPException(409, "a build is already running")
+        _build.update(
+            running=True, backends=["agents"], current=None, started=time.time(), results={}
+        )
+    threading.Thread(target=_run_agents_build, args=(versions,), daemon=True).start()
+    return {"status": "started", "versions": versions}
 
 
 def _run_builds(targets: list[tuple[str, str]], ref: str) -> None:
