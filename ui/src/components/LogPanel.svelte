@@ -47,8 +47,11 @@
   onMount(async () => {
     try {
       const data = await fetchClusters();
-      clusters = data.clusters.filter((c) => c.active?.running);
-      if (clusters.length === 1) selectedClusterId = clusters[0].id;
+      // Stopped clusters stay listed: a crashed runner's container is still around
+      // and its logs are the only record of why the launch failed.
+      clusters = data.clusters;
+      selectedClusterId =
+        (clusters.find((c) => c.active?.running) ?? clusters[0])?.id ?? '';
     } catch { /* non-fatal */ }
     connect();
   });
@@ -69,7 +72,7 @@
     {#if source === 'runner' && clusters.length > 1}
       <select bind:value={selectedClusterId} onchange={connect}>
         {#each clusters as c}
-          <option value={c.id}>{c.name}</option>
+          <option value={c.id}>{c.name}{c.active?.running ? '' : ' (stopped)'}</option>
         {/each}
       </select>
     {/if}
