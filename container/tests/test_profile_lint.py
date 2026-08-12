@@ -82,6 +82,11 @@ def test_tensor_split_width_must_match_visible_devices():
     assert _levels(findings, "tensor_split") == ["error"]
 
 
+def test_tensor_split_zero_weight_flagged():
+    assert _levels(lint_profile({"tensor_split": "0,1"}), "tensor_split") == ["error"]
+    assert _levels(lint_profile({"tensor_split": "1,1"}), "tensor_split") == []
+
+
 def test_ubatch_larger_than_batch_flagged():
     findings = lint_profile({"batch": 512, "ubatch": 4096})
     assert _levels(findings, "ubatch") == ["error"]

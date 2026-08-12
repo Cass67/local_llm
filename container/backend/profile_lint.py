@@ -261,6 +261,20 @@ def _lint_shapes(profile: dict[str, Any]) -> list[dict[str, str]]:
                 )
             )
 
+    # A zero weight excludes that GPU entirely, so the whole model lands on the
+    # others. "0,1" reads like a device list but means "nothing on card 0" —
+    # the runner then OOMs on the last card and blames the model size.
+    weights = [w.strip() for w in tensor_split.split(",") if w.strip()]
+    if len(weights) > 1 and any(w in ("0", "0.0") for w in weights):
+        out.append(
+            _finding(
+                "error",
+                "tensor_split",
+                f"tensor_split '{tensor_split}' gives a GPU zero weight, loading the whole "
+                "model onto the rest. These are proportions, not device indices — use '1,1'.",
+            )
+        )
+
     batch = profile.get("batch")
     ubatch = profile.get("ubatch")
     if batch is not None and ubatch is not None and int(ubatch) > int(batch):
