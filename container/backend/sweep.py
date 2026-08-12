@@ -306,6 +306,9 @@ class SweepJob:
                     quality = run_quality(
                         cluster.port,
                         model_alias,
+                        # The sweep's own budget: a reasoning model on 512 tokens
+                        # never reaches its answer, and the gate fails everything.
+                        max_tokens=self.max_tokens,
                         judge_url=self.judge_url,
                         judge_model=self.judge_model,
                         timeout=self.request_timeout,

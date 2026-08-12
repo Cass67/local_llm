@@ -63,8 +63,12 @@ def chat_once(
         decode_tps = completion_tokens / elapsed if isinstance(completion_tokens, int) else None
     prompt_tps = timings.get("prompt_per_second")
     choices = payload.get("choices") or [{}]
-    text = (choices[0].get("message") or {}).get("content") or ""
+    message = choices[0].get("message") or {}
+    text = message.get("content") or ""
     return {
+        "finish_reason": choices[0].get("finish_reason"),
+        # Reasoning models spend the token budget here and can leave content empty.
+        "reasoning_chars": len(message.get("reasoning_content") or ""),
         "decode_tps": round(float(decode_tps), 2) if decode_tps else None,
         "prompt_tps": round(float(prompt_tps), 2) if isinstance(prompt_tps, (int, float)) else None,
         "completion_tokens": completion_tokens,
