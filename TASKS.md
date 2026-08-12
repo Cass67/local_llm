@@ -19,7 +19,29 @@ Eliminated the dual-profile setup. `/state/profiles.json` is now the only profil
 - `scripts/lib.sh` gained `STATE_DIR`; `PROFILES_JSON` now resolves to `$STATE_DIR/profiles.json` in lib.sh, model-manager.sh, and update-manager.sh
 - `LOCAL_LLM_PROFILES_JSON` still overrides everywhere (used by tests)
 
+### Fail loudly on a stale cluster definition
+`visible_devices_for()` returns `""` when a cluster's `gpu_pci_ids` match nothing in
+the inventory, and the caller's `if vd:` then skipped the assignment, leaving
+`cfg["visible_devices"]` at whatever the profile carried. That is how the 2-GPU box
+ran with `HIP_VISIBLE_DEVICES=0,1,2`. `_assert_cluster_gpus_present()` now raises
+instead, checking PCI-id membership rather than resolved index so a Vulkan cluster
+with no `vulkan_index` is still allowed. Regression tests in `tests/test_clusters.py`.
+
 ## Pending
+
+### test_oc_local.sh: 123 stale README assertions
+The suite aborted at line 69 on a doc `faf3dc2` deleted in June; that read and its two
+assertions are now gone, which unmasked the real problem. `b3e11ed` rewrote the README
+for the container architecture, but ~123 `assert_contains "$readme_contents" ...` still
+guard the old systemd + OpenCode-web + Caddy docs — including an `assert_not_contains`
+for `docker compose up -d`, now the primary install path. Suite cannot pass until these
+go. 767 asserts total, 208 are doc guards; the Caddyfile/service-file guards (14) look
+current, so this is a targeted deletion of the README block, not all doc guards.
+
+**Why:** the suite has been unrunnable since June, so nothing in it is protecting anything.
+**Approach:** delete the obsolete README assertions; consider whether doc-guarding prose
+at this granularity earns its keep at all, or whether only the command examples should be
+asserted.
 
 ### Warn on unknown profile fields
 Log warning when saving profile with unrecognized fields that `runtime.py` will silently ignore (e.g., typo'd `mtp_enabled` → `mtp_enable`). Prevent silent no-ops.

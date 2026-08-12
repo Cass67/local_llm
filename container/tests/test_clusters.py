@@ -1,6 +1,7 @@
 """Tests for cluster CRUD and GPU-index derivation."""
 
 import pytest
+from backend.active_runners import _assert_cluster_gpus_present
 from backend.clusters import (
     create_cluster,
     delete_cluster,
@@ -137,3 +138,30 @@ def test_active_crud(temp_state):
     remove_active("abc123")
     assert read_active("abc123") is None
     assert list_active() == []
+
+
+def test_stale_cluster_pci_ids_raise(temp_state):
+    """A cluster whose GPUs vanished (renumbered bus, pulled card) must fail loudly.
+
+    Regression: visible_devices_for() returned "" for an unresolvable cluster, the
+    caller's `if vd:` skipped the assignment, and the launch silently fell through to
+    whatever visible_devices the profile carried.
+    """
+    _ = temp_state
+    c = create_cluster("stale", ["0000:03:00.0", "0000:04:00.0"], "rocm", INVENTORY)
+    renumbered = [_gpu("0000:08:00.0", "amd", rocm=0), _gpu("0000:09:00.0", "amd", rocm=1)]
+
+    assert visible_devices_for(c, renumbered) == ""
+
+    with pytest.raises(RuntimeError, match="not present in the inventory"):
+        _assert_cluster_gpus_present(c, renumbered)
+
+
+def test_vulkan_without_vulkan_index_does_not_raise(temp_state):
+    """Empty index list is legitimate when the cards are present but have no vk index."""
+    _ = temp_state
+    inventory = [_gpu("0000:03:00.0", "amd", rocm=0), _gpu("0000:04:00.0", "amd", rocm=1)]
+    c = create_cluster("vk", ["0000:03:00.0", "0000:04:00.0"], "vulkan", inventory)
+
+    assert visible_devices_for(c, inventory) == ""
+    _assert_cluster_gpus_present(c, inventory)
