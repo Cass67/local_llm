@@ -11,13 +11,15 @@ Integrate lltop's DRM fdinfo engine-ns sampling and GPU-equivalents occupancy in
 - Added `/api/gpu-status` to stats route + 2s background sampling loop
 - Wired into main.py startup; faults isolated so fdinfo failure doesn't crash mgmt
 
-## Pending
-
 ### Pick one source of truth for profile configs
-Eliminate the confusing dual-profile setup. Either make repo `configs/profiles.json` authoritative and mount read-only into mgmt, or delete seed concept entirely and manage all profiles through UI API (`/state/profiles.json` only).
+Eliminated the dual-profile setup. `/state/profiles.json` is now the only profile store.
 
-**Why:** users edit wrong file silently. README documents it but footgun remains.
-**Approach:** likely delete seed — live state is already `/state/profiles.json`, repo file is just noise. update docs to match.
+- Deleted `configs/profiles.json` (the seed) — it held 2 families against the live file's ~60
+- `installer.sh` no longer copies a seed over the live file on every install; it migrates the legacy `config/profiles.json` location once, then bootstraps an empty file only when none exists
+- `scripts/lib.sh` gained `STATE_DIR`; `PROFILES_JSON` now resolves to `$STATE_DIR/profiles.json` in lib.sh, model-manager.sh, and update-manager.sh
+- `LOCAL_LLM_PROFILES_JSON` still overrides everywhere (used by tests)
+
+## Pending
 
 ### Warn on unknown profile fields
 Log warning when saving profile with unrecognized fields that `runtime.py` will silently ignore (e.g., typo'd `mtp_enabled` → `mtp_enable`). Prevent silent no-ops.

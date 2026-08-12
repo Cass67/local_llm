@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$SCRIPT_DIR/.." && pwd)"
 export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
+# Single source of truth for profiles: the state dir the backend writes to.
+PROFILES_JSON="${LOCAL_LLM_PROFILES_JSON:-${LOCAL_LLM_STATE_DIR:-$HOME/.local/share/local_llm}/profiles.json}"
 MODEL_DISCOVERY_SCRIPT="$SCRIPT_DIR/model-discovery.sh"
 if [[ ! -f "$MODEL_DISCOVERY_SCRIPT" ]]; then
   MODEL_DISCOVERY_SCRIPT="$SCRIPT_DIR/model-discovery"
@@ -309,7 +311,7 @@ PY
 }
 
 print_profile_inventory() {
-  local profiles_json="$repo_root/configs/profiles.json"
+  local profiles_json="$PROFILES_JSON"
 
   printf 'Profiles\n\n'
   if [[ ! -f "$profiles_json" ]]; then
@@ -2625,10 +2627,7 @@ cmd_delete_profile() {
   local target="$2"
   local dry_run="$3"
   local yes="$4"
-  local profiles_json="${LOCAL_LLM_PROFILES_JSON:-$repo_root/configs/profiles.json}"
-  if [[ ! -f "$profiles_json" && -f "$HOME/.local/share/local_llm/config/profiles.json" ]]; then
-    profiles_json="$HOME/.local/share/local_llm/config/profiles.json"
-  fi
+  local profiles_json="$PROFILES_JSON"
 
   [[ "$profile_pattern" == *:* ]] || {
     printf '%s\n' '--profile requires family:profile or family:*' >&2

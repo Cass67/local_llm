@@ -152,8 +152,14 @@ install -m 0644 "$REPO_ROOT/scripts/opencode-web.service" "$SHARE_DIR/scripts/op
 
 # Copy configs (overwrite existing)
 echo "Installing configuration..."
-if [[ -f "$REPO_ROOT/configs/profiles.json" ]]; then
-  cp -f "$REPO_ROOT/configs/profiles.json" "$CONFIG_DIR/profiles.json"
+# Profiles are the single source of truth and live in the state dir; the repo has no
+# seed copy and the installer must never overwrite them. Migrate the legacy config-dir
+# location once, then bootstrap an empty file for a fresh install.
+if [[ ! -f "$SHARE_DIR/profiles.json" && -f "$CONFIG_DIR/profiles.json" ]]; then
+  mv "$CONFIG_DIR/profiles.json" "$SHARE_DIR/profiles.json"
+fi
+if [[ ! -f "$SHARE_DIR/profiles.json" ]]; then
+  printf '{\n  "families": {},\n  "profiles": {}\n}\n' >"$SHARE_DIR/profiles.json"
 fi
 if [[ -f "$REPO_ROOT/configs/candidates.json" ]]; then
   cp -f "$REPO_ROOT/configs/candidates.json" "$CONFIG_DIR/candidates.json"
