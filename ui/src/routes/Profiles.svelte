@@ -65,6 +65,7 @@
 				{ key: "no_cont_batching", label: "No cont batching", type: "bool" },
 				{ key: "prio", label: "Priority", type: "int", placeholder: "2" },
 				{ key: "no_warmup", label: "No warmup", type: "bool" },
+				{ key: "backend_sampling", label: "Backend sampling", type: "bool" },
 			],
 		},
 		{

@@ -72,6 +72,7 @@ KNOWN_FIELDS: set[str] = {
     "no_cont_batching",
     "prio",
     "no_warmup",
+    "backend_sampling",
     "load_timeout_s",
     # misc
     "flash_attention",
