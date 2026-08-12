@@ -70,12 +70,14 @@ Simplified workflow:
 Full commands:
   bootstrap Bootstrap first-run model-manager state (legacy)
   list      Show installed and cached models
+  accept    Accept a benchmark result and record model metadata
   update    Show cached model update suggestions
   replace   Replace a cached remote GGUF basename safely
   delete    Delete a repo from local metadata and remote GGUF cache
-  export           Export local model-manager state as JSON
-  restore          Restore local model-manager state from JSON
-  status           Show model-manager status
+  export    Export local model-manager state as JSON
+  restore   Restore local model-manager state from JSON
+  status    Show model-manager status
+  tui       Launch the terminal UI
 
 Options:
   -h, --help  Show this help
@@ -214,7 +216,7 @@ print_bootstrap_plan() {
   printf 'target=%s\n' "$target"
   printf 'runs_dir=%s\n' "$runs_dir"
   printf 'config=%s\n' "$runs_dir/bootstrap/config.json"
-  printf 'next=model-manager discover --target %s\n' "$target"
+  printf 'next=model-manager search --target %s\n' "$target"
 }
 
 cmd_bootstrap() {
@@ -2854,7 +2856,7 @@ main() {
     status)
       # Delegates to Python backend (reads both new and legacy state)
       if [[ -d "$MODEL_MANAGER_PY" ]]; then
-        python3 -m scripts.model_manager status
+        python3 -m scripts.model_manager status "${@:2}"
       else
         cmd_status
       fi
@@ -2862,7 +2864,7 @@ main() {
     list)
       # Delegates to Python backend (reads both new and legacy state)
       if [[ -d "$MODEL_MANAGER_PY" ]]; then
-        python3 -m scripts.model_manager list
+        python3 -m scripts.model_manager list "${@:2}"
       else
         cmd_list "${@:2}"
       fi

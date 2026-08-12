@@ -56,8 +56,8 @@ check_updates() {
   echo "Model lifecycle (via model-manager):"
   echo "  model-manager update --dry-run"
   echo "  model-manager status"
-  echo "  model-manager discover <family>"
-  echo "  model-manager benchmark <selection>"
+  echo "  model-manager search <query>"
+  echo "  model-manager install <index>"
   bash "$MODEL_MANAGER" status
 }
 

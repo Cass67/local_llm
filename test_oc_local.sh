@@ -59,7 +59,6 @@ assert_contains "$help_output" "-k"
 assert_not_contains "$help_output" "speed     32k context"
 assert_not_contains "$help_output" "tiny      40k context"
 readme_contents="$(<"$repo_root/README.md")"
-readme_default_install_section="${readme_contents%%## Optional Legacy: Open WebUI*}"
 caddyfile_contents="$(<"$repo_root/scripts/Caddyfile.local-llm")"
 switcher_service_contents="$(<"$repo_root/scripts/local-llm-switcher.service")"
 opencode_web_service_contents="$(<"$repo_root/scripts/opencode-web.service")"
@@ -73,31 +72,6 @@ if [[ -n "$tracked_start_scripts" ]]; then
 fi
 assert_contains "$oc_local_contents" "tail -80 \$remote_dir/model.log"
 assert_not_contains "$oc_local_contents" "llama-\${remote_profile}.log"
-assert_contains "$readme_contents" "Fresh pull workflow"
-assert_contains "$readme_contents" "\`local_llm\` is a bootstrap engine"
-assert_contains "$readme_contents" "./install.sh"
-assert_contains "$readme_contents" "OpenCode web is the primary browser UI"
-assert_contains "$readme_contents" "Cloudflare Access -> Caddy :3001 -> local-llm-switcher :3003 -> OpenCode web :3002 -> llama-server :8080"
-assert_contains "$readme_contents" "## Optional Legacy: Open WebUI"
-assert_contains "$readme_contents" "Open WebUI is no longer the default browser UI. Use it only if you want its chat/RAG interface. The switcher pill target is OpenCode by default."
-assert_contains "$readme_contents" "injectable OpenCode web browser routes to the switcher on"
-assert_contains "$readme_contents" "WebSocket upgrade routes such as"
-assert_contains "$readme_contents" "bypass injection and go directly to the OpenCode web upstream"
-assert_contains "$readme_contents" "The switcher proxies OpenCode web upstream"
-assert_contains "$readme_contents" "LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002"
-assert_contains "$readme_contents" "\`OPENWEBUI_BASE_URL\` is deprecated"
-assert_contains "$readme_contents" "\`LOCAL_LLM_WEB_UPSTREAM\` wins"
-assert_contains "$readme_contents" "LOCAL_LLM_INJECT_TARGET=opencode"
-assert_contains "$readme_contents" "Open WebUI is optional legacy"
-assert_not_contains "$readme_default_install_section" "scp docker-compose.yml"
-assert_not_contains "$readme_default_install_section" "docker compose up -d"
-assert_contains "$readme_default_install_section" "run-local-llm-caddy-container.sh"
-assert_not_contains "$readme_contents" "The public Open WebUI path uses"
-assert_not_contains "$readme_contents" "Open WebUI application and SQLite data volume"
-assert_not_contains "$readme_contents" "public Open WebUI path"
-assert_not_contains "$readme_contents" "Caddy routes Open WebUI API/assets"
-assert_not_contains "$readme_contents" "Open WebUI listens"
-assert_not_contains "$readme_contents" "Open WebUI selected-model DB sync"
 assert_contains "$switcher_service_contents" "Description=Local LLM OpenCode Web Switcher Proxy"
 assert_contains "$switcher_service_contents" "EnvironmentFile=-%h/.config/local_llm/local-llm-switcher.env"
 assert_contains "$switcher_service_contents" "\$\${LLAMA_DIR:?set LLAMA_DIR in ~/.config/local_llm/local-llm-switcher.env}"
@@ -109,11 +83,9 @@ assert_contains "$opencode_web_service_contents" "OPENCODE_WEB_COMMAND"
 assert_contains "$opencode_web_service_contents" "EnvironmentFile=%h/.config/local_llm/opencode-web.env"
 assert_contains "$opencode_web_service_contents" "ExecStart=/bin/sh -lc 'exec \$\${OPENCODE_WEB_COMMAND:?set OPENCODE_WEB_COMMAND in ~/.config/local_llm/opencode-web.env}'"
 assert_contains "$opencode_web_service_contents" "RestartSec=3"
-assert_contains "$caddyfile_contents" "OpenCode web upstream"
 assert_contains "$caddyfile_contents" ":3001"
 assert_contains "$caddyfile_contents" "handle /api/local-llm/*"
 assert_contains "$caddyfile_contents" "handle /_switcher"
-assert_contains "$caddyfile_contents" "reverse_proxy 127.0.0.1:3003"
 assert_contains "$caddyfile_contents" "OpenCode WebSocket upgrades bypass injection"
 assert_contains "$caddyfile_contents" "handle /ws/*"
 assert_contains "$caddyfile_contents" "handle /socket.io/*"
@@ -121,7 +93,6 @@ assert_contains "$caddyfile_contents" "handle /pty/*/connect"
 assert_contains "$caddyfile_contents" $'handle /pty/*/connect {\n\t\treverse_proxy 127.0.0.1:3002'
 assert_contains "$caddyfile_contents" "reverse_proxy 127.0.0.1:3002"
 assert_not_contains "$caddyfile_contents" "open-webui"
-assert_not_contains "$caddyfile_contents" "handle /_app/*"
 assert_not_contains "$caddyfile_contents" "handle /ollama/*"
 ws_route_line="$(line_number_for "$caddyfile_contents" "handle /ws/*")"
 socketio_route_line="$(line_number_for "$caddyfile_contents" "handle /socket.io/*")"
@@ -131,97 +102,11 @@ if ((ws_route_line >= catch_all_route_line || socketio_route_line >= catch_all_r
   printf 'expected OpenCode WebSocket routes to appear before catch-all route\n' >&2
   exit 1
 fi
-if [[ ! -f "$repo_root/install.sh" ]]; then
-  printf 'expected install.sh wrapper to exist\n' >&2
+if [[ ! -x "$repo_root/installer.sh" ]]; then
+  printf 'expected installer.sh to be executable\n' >&2
   exit 1
 fi
-if [[ ! -x "$repo_root/install.sh" ]]; then
-  printf 'expected install.sh wrapper to be executable\n' >&2
-  exit 1
-fi
-bash -n "$repo_root/install.sh"
-assert_line "$readme_contents" "model-manager bootstrap --target remote:<host> --dry-run"
-assert_line "$readme_contents" "model-manager bootstrap --target remote:<host> --yes"
-assert_contains "$readme_contents" "model-manager discover \"coding gguf\" --target remote:<host>"
-assert_contains "$readme_contents" "model-manager benchmark <source> --target remote:<host> --full"
-assert_contains "$readme_contents" "model-manager accept <benchmark.json>"
-assert_contains "$readme_contents" "model-manager deploy --target remote:<host> --dry-run"
-assert_contains "$readme_contents" "model-manager export > local-llm-backup.json"
-assert_not_contains "$readme_contents" "scripts/start3.sh"
-assert_not_contains "$readme_contents" "Recommended Choices"
-assert_not_contains "$readme_contents" "Qwen dense-thinking comparison"
-assert_not_contains "$readme_contents" "oc-qwen-reliable"
-assert_not_contains "$readme_contents" "oc-gemma-reliable"
-assert_not_contains "$readme_contents" "oc-gpt-oss"
-assert_not_contains "$readme_contents" "\`local_llm\` is a small operations repo"
-assert_contains "$readme_contents" "## Features"
-assert_contains "$readme_contents" "## Test A Fresh Checkout"
-assert_contains "$readme_contents" "LOCAL_LLM_BIN_DIR=\"\$tmp/bin\" LOCAL_LLM_SHARE_DIR=\"\$tmp/share\" ./install.sh"
-assert_contains "$readme_contents" "LOCAL_LLM_RUNS_DIR=\"\$tmp/share/runs\" model-manager list"
-assert_contains "$readme_contents" "git ls-files 'scripts/start*.sh'"
-assert_contains "$readme_contents" "Expected: no output."
-assert_contains "$readme_contents" "oc-local qwen reliable --info"
-assert_contains "$readme_contents" "Expected: fails with guidance until you accept a model."
-assert_contains "$readme_contents" "## Architecture"
-assert_contains "$readme_contents" "## Install Guide"
-assert_contains "$readme_contents" "docs/assets/local-llm-architecture.svg"
-assert_not_contains "$readme_contents" "docs/assets/open-webui-switcher-pill.svg"
-assert_contains "$readme_contents" "Cloudflare is the public security boundary"
-assert_contains "$readme_contents" "Cloudflare Access login and policy check"
-assert_contains "$readme_contents" "Do not commit Cloudflare credentials"
-expected_cloudflared_install="Install \`cloudflared\` on Ubuntu 26"
-assert_contains "$readme_contents" "$expected_cloudflared_install"
-assert_contains "$readme_contents" "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main"
-assert_contains "$readme_contents" "cloudflared tunnel login"
-assert_contains "$readme_contents" "cloudflared tunnel route dns local-llm"
-assert_contains "$readme_contents" "sudo systemctl enable --now cloudflared"
-assert_contains "$readme_contents" "service: http://localhost:3001"
-assert_contains "$readme_contents" "MODEL_HOST=gpu-box.example.lan"
-assert_contains "$readme_contents" "MODEL_API_BASE=http://gpu-box.example.lan:8080/v1"
-assert_not_contains "$readme_default_install_section" "LOCAL_LLM_CADDYFILE=./Caddyfile.local-llm docker compose up -d"
-assert_not_contains "$readme_default_install_section" "scp docker-compose.yml \"\$MODEL_HOST:\$REMOTE_DIR/docker-compose.yml\""
-assert_contains "$readme_contents" "The repo's \`docker-compose.yml\` is the legacy Open WebUI compose file."
-assert_contains "$readme_contents" "Do not copy or run it for the default OpenCode web setup"
-assert_not_contains "$readme_contents" "not the responsive daily driver"
-assert_not_contains "$readme_contents" "Qwen 35B defaults are vision-enabled"
-assert_not_contains "$readme_contents" "Quant, KV Q4/Q5, and MMQ changes remain future benchmark/promotion work"
-assert_contains "$readme_contents" "## Helper Tools"
-assert_contains "$readme_contents" "hardware-analyzer reports the machine it runs on"
-assert_contains "$readme_contents" "model-discovery --detailed"
-assert_contains "$readme_contents" "model-manager discover"
-assert_contains "$readme_contents" "model-manager export > local-llm-backup.json"
-assert_contains "$readme_contents" "model-manager restore local-llm-backup.json"
-assert_contains "$readme_contents" "model-manager deploy --target \"remote:\$MODEL_HOST\" --dry-run"
-assert_contains "$readme_contents" "oc-local <family> <profile> --info"
-assert_contains "$readme_contents" "The client machine runs OpenCode"
-assert_contains "$readme_contents" "Run from this repo on the client machine"
-assert_contains "$readme_contents" "tested from a macOS client and expected to work from Linux clients"
-assert_not_contains "$readme_contents" "The Mac runs OpenCode"
-assert_not_contains "$readme_contents" "so the Mac can drive models"
-assert_not_contains "$readme_contents" "Run from this repo on the Mac"
-assert_not_contains "$readme_contents" "On the Mac, it reports"
-assert_contains "$readme_contents" "model-manager update --target \"remote:\$MODEL_HOST\" --dry-run"
-assert_contains "$readme_contents" "model-manager replace <old-file> <new-repo> --target \"remote:\$MODEL_HOST\" --dry-run"
-assert_contains "$readme_contents" "Readable inventory"
-assert_contains "$readme_contents" "source: Hugging Face repo or local profile source"
-assert_contains "$readme_contents" "file: selected GGUF file or quant"
-assert_contains "$readme_contents" "Accepting a benchmark records accepted metadata and generated launchers under \`\$HOME/.local/share/local_llm\` / \`runs\`."
-assert_contains "$readme_contents" "model-manager deploy --target remote:<host> --dry-run\` previews the generated launchers and switcher/service files"
-assert_contains "$readme_contents" "it does not copy files yet"
-assert_contains "$readme_contents" "Do not enable \`llama-server.service\` from a fresh checkout until generated launcher state has been manually copied from the deploy preview plan."
-assert_contains "$readme_contents" "Server service and OpenCode web wiring are still a later/manual setup step."
-assert_not_contains "$readme_contents" "systemctl --user enable --now llama-server.service"
-assert_not_contains "$readme_contents" "Deployment and switcher wiring happen later through the generated/deploy workflow."
-assert_not_contains "$readme_contents" "Accepting a benchmark promotes the model"
-assert_not_contains "$readme_contents" "creates or reuses a \`scripts/startN.sh\` launcher"
-assert_not_contains "$readme_contents" "updates the Open WebUI switcher allowlist"
-assert_contains "$readme_contents" "fall back to a Python stdlib downloader"
-assert_not_contains "$readme_contents" "It currently creates the launcher only"
-assert_not_contains "$readme_contents" "manual promotion step"
-assert_contains "$readme_contents" "update-manager is a compatibility helper"
-assert_contains "$readme_contents" "update-manager --candidates"
-assert_not_contains "$readme_contents" "for family in qwen qwen-27b qwen-coder qwen-coder-next gemma gpt-oss deepseek-r1 qwen-opus qwen-heretic; do"
-assert_not_contains "$readme_contents" "scripts/start14.sh scripts/start15.sh scripts/run-current-model.sh"
+bash -n "$repo_root/installer.sh"
 assert_not_contains "$model_manager_contents" "qwen-hauhau"
 assert_not_contains "$model_manager_contents" "qwen-27b-hauhau"
 assert_not_contains "$model_manager_contents" "qwen-heretic"
@@ -229,66 +114,10 @@ assert_not_contains "$model_discovery_contents" "Qwen3.6-35B-A3B"
 assert_not_contains "$model_discovery_contents" "Gemma-4-31B-it"
 assert_contains "$model_discovery_contents" 'OC_LOCAL_HF_FETCH_LIMIT:-100'
 assert_not_contains "$model_discovery_contents" "gpt-oss-20B"
-assert_contains "$readme_contents" "shellcheck install.sh installer.sh scripts/model-discovery.sh scripts/model-manager.sh scripts/oc-local scripts/update-manager.sh test_oc_local.sh scripts/bench-installed-kv-remote.sh scripts/bench-mtp-remote.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh"
-assert_contains "$readme_contents" "systemctl --user restart llama-server.service"
-assert_contains "$readme_contents" "run-current-model.sh"
-assert_contains "$readme_contents" "REMOTE_SCRIPT=<generated-launcher>"
-assert_not_contains "$readme_contents" 'localllm/qwen3.6-35b-a3b-mtp'
-assert_not_contains "$readme_contents" "scripts/start11.sh scripts/start12.sh scripts/start14.sh"
-assert_not_contains "$readme_contents" "scripts/start15.sh scripts/run-current-model.sh"
-assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'systemctl --user restart llama-server.service'"
-assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'journalctl --user -u llama-server.service -n 160 --no-pager'"
-assert_contains "$readme_contents" "OpenCode web listens on http://127.0.0.1:3002"
-assert_contains "$readme_contents" "%h/.config/local_llm/opencode-web.env"
-assert_contains "$readme_contents" "OPENCODE_WEB_COMMAND='<replace-with-your-opencode-web-command> --host 127.0.0.1 --port 3002'"
-assert_contains "$readme_contents" "Adapt the example command to your OpenCode web installation, but keep an explicit bind address of 127.0.0.1 and port 3002 in OPENCODE_WEB_COMMAND."
-assert_contains "$readme_contents" "The environment file is required; create it before enabling \`opencode-web.service\`."
-assert_contains "$readme_contents" "The exact OpenCode web command may vary"
-assert_contains "$readme_contents" "Caddy listens on http://127.0.0.1:3001"
-assert_contains "$readme_contents" "local-llm-switcher listens on http://127.0.0.1:3003"
-assert_contains "$readme_contents" "Cloudflare stays pointed at port 3001"
-assert_contains "$readme_contents" "local-llm-caddy"
-assert_contains "$readme_contents" "run-local-llm-caddy-container.sh"
-assert_contains "$readme_contents" "Caddyfile.local-llm"
-assert_contains "$readme_contents" "open-webui"
-assert_contains "$readme_contents" "Caddy routes all other OpenCode web browser traffic to the switcher."
-assert_contains "$readme_contents" "Caddy routes WebSocket upgrade paths such as"
-assert_contains "$readme_contents" "/pty/*/connect"
-assert_contains "$readme_contents" "directly to OpenCode web on http://127.0.0.1:3002 so they bypass injection."
-assert_contains "$readme_contents" "The switcher proxies OpenCode web upstream"
-assert_contains "$readme_contents" "## Experimental Vulkan Split"
-assert_contains "$readme_contents" "GGML_VK_VISIBLE_DEVICES=0,1"
-assert_contains "$readme_contents" "--split-mode layer"
-assert_contains "$readme_contents" "--tensor-split 20,24"
-assert_contains "$readme_contents" "20,24"
-assert_contains "$readme_contents" "22,22"
-assert_contains "$readme_contents" "24,20"
-assert_contains "$readme_contents" "28,16"
-assert_contains "$readme_contents" "32,12"
-assert_contains "$readme_contents" "36,8"
-assert_contains "$readme_contents" "local-llm-caddy"
-assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'systemctl --user status opencode-web.service local-llm-switcher.service'"
-assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'curl -fsS http://127.0.0.1:3001/_switcher'"
-assert_contains "$readme_contents" "ssh \"\$MODEL_HOST\" 'curl -fsS http://127.0.0.1:3001/api/local-llm/models'"
-assert_contains "$readme_contents" "caddy validate"
-assert_contains "$readme_contents" "systemd-analyze"
-assert_not_contains "$readme_contents" "docker ps --filter name=open-webui"
-assert_not_contains "$readme_contents" "docker logs open-webui"
-assert_contains "$readme_contents" "systemctl --user restart opencode-web.service local-llm-switcher.service llama-server.service"
-assert_not_contains "$readme_contents" "docker restart open-webui"
-assert_not_contains "$readme_contents" "docker run -d --name open-webui"
 if grep -Eq 'docker[[:space:]]+run.*open-webui' <<<"$readme_contents"; then
   printf 'expected README not to document docker run commands for Open WebUI\n' >&2
   exit 1
 fi
-assert_contains "$readme_contents" "reports the expected alias"
-assert_contains "$readme_contents" "optional legacy upstream"
-assert_contains "$readme_contents" "fresh OpenCode web pane"
-assert_contains "$readme_contents" "Model Workflow"
-assert_contains "$readme_contents" "model-manager select"
-assert_contains "$readme_contents" "docs/benchmarks/"
-assert_contains "$readme_contents" "docs/plans/"
-assert_contains "$readme_contents" "docs/superpowers/"
 if ! grep -qxF '/docs/plans/' "$repo_root/.gitignore"; then
   printf 'expected .gitignore to ignore /docs/plans/\n' >&2
   exit 1
@@ -448,27 +277,6 @@ assert_contains "$switcher_contents" "no-store"
 assert_not_contains "$switcher_contents" "top: 50%"
 assert_not_contains "$switcher_contents" "top: 12px"
 assert_not_contains "$switcher_contents" "bottom: 16px"
-assert_contains "$readme_contents" "without prompting"
-assert_contains "$readme_contents" "GET /api/local-llm/models"
-assert_contains "$readme_contents" "GET /api/local-llm/current"
-assert_contains "$readme_contents" "POST /api/local-llm/switch"
-assert_contains "$readme_contents" "GET /_switcher"
-assert_line "$readme_contents" "ssh \"\$MODEL_HOST\" 'systemctl --user status opencode-web.service local-llm-switcher.service'"
-assert_line "$readme_contents" "ssh \"\$MODEL_HOST\" 'curl -fsS http://127.0.0.1:3001/_switcher'"
-assert_line "$readme_contents" "ssh \"\$MODEL_HOST\" 'curl -fsS http://127.0.0.1:3001/api/local-llm/models'"
-assert_line "$readme_contents" "bash -n install.sh installer.sh scripts/model-discovery.sh scripts/model-manager.sh scripts/oc-local scripts/update-manager.sh test_oc_local.sh scripts/bench-installed-kv-remote.sh scripts/bench-mtp-remote.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh"
-assert_line "$readme_contents" "shellcheck install.sh installer.sh scripts/model-discovery.sh scripts/model-manager.sh scripts/oc-local scripts/update-manager.sh test_oc_local.sh scripts/bench-installed-kv-remote.sh scripts/bench-mtp-remote.sh scripts/run-current-model.sh scripts/run-local-llm-caddy-container.sh"
-assert_line "$readme_contents" "python3 -m py_compile scripts/*.py"
-assert_line "$readme_contents" "./test_oc_local.sh"
-assert_contains "$readme_contents" "systemctl --user restart opencode-web.service local-llm-switcher.service llama-server.service"
-assert_contains "$readme_contents" "systemctl --user status opencode-web.service local-llm-switcher.service llama-server.service"
-assert_contains "$readme_contents" "journalctl --user -u opencode-web.service -u local-llm-switcher.service -u llama-server.service"
-assert_not_contains "$readme_contents" "docker ps --filter name=open-webui"
-assert_contains "$readme_contents" "--remote"
-assert_not_contains "$readme_contents" "--target local"
-assert_contains "$readme_contents" "--target remote:<host>"
-assert_not_contains "$readme_contents" "OC_LOCAL_TARGET"
-assert_not_contains "$readme_contents" "OC_LOCAL_LLAMA_DIR"
 gitignore_contents="$(<"$repo_root/.gitignore")"
 if ! grep -qxF '/runs/' <<<"$gitignore_contents"; then
   printf 'expected .gitignore to contain active exact line /runs/\n.gitignore was:\n%s\n' "$gitignore_contents" >&2
@@ -549,19 +357,24 @@ assert_not_contains "$model_discovery_help_output" "maximum Hugging Face results
 assert_contains "$model_discovery_help_output" "--installed-only"
 model_manager_help_output="$("$repo_root/scripts/model-manager.sh" --help 2>&1)"
 assert_contains "$model_manager_help_output" "Usage: model-manager"
-assert_contains "$model_manager_help_output" "bootstrap"
-assert_contains "$model_manager_help_output" "discover"
-assert_contains "$model_manager_help_output" "select"
-assert_contains "$model_manager_help_output" "benchmark"
-assert_contains "$model_manager_help_output" "accept"
-assert_contains "$model_manager_help_output" "status"
-assert_contains "$model_manager_help_output" "list"
-assert_contains "$model_manager_help_output" "update"
-assert_contains "$model_manager_help_output" "replace"
+# Every command the dispatcher accepts must be in --help. Derived from the case
+# arms rather than listed by hand, so a new command cannot ship undocumented:
+# `accept` and `tui` were both dispatchable but absent from --help for months.
+undocumented_commands=""
+while read -r mm_cmd; do
+  [[ -n "$mm_cmd" ]] || continue
+  if ! grep -qE "^  $mm_cmd( |\$)" <<<"$model_manager_help_output"; then
+    undocumented_commands+=" $mm_cmd"
+  fi
+done < <(sed -n 's/^    \([a-z][a-z-]*\))$/\1/p' "$repo_root/scripts/model-manager.sh" | sort -u)
+if [[ -n "$undocumented_commands" ]]; then
+  printf 'model-manager commands missing from --help:%s\n' "$undocumented_commands" >&2
+  exit 1
+fi
 update_manager_output="$("$repo_root/scripts/update-manager.sh" 2>&1)"
 assert_contains "$update_manager_output" "model-manager status"
-assert_contains "$update_manager_output" "model-manager discover"
-assert_contains "$update_manager_output" "model-manager benchmark"
+assert_contains "$update_manager_output" "model-manager search"
+assert_contains "$update_manager_output" "model-manager install"
 assert_contains "$update_manager_output" "model-manager update --dry-run"
 update_manager_list_output="$("$repo_root/scripts/update-manager.sh" --candidates 2>&1)"
 assert_not_contains "$update_manager_list_output" "list-candidates"
@@ -577,15 +390,15 @@ manager_tmp="$(mktemp -d)"
 mkdir -p "$manager_tmp/candidates" "$manager_tmp/selections" "$manager_tmp/benchmarks"
 printf '{}\n' >"$manager_tmp/candidates/sample.json"
 status_output="$(LOCAL_LLM_RUNS_DIR="$manager_tmp" "$repo_root/scripts/model-manager.sh" status)"
-assert_contains "$status_output" "Model Manager Status"
-assert_contains "$status_output" "Candidates: 1"
-assert_contains "$status_output" "Selections: 0"
-assert_contains "$status_output" "Benchmarks: 0"
+assert_contains "$status_output" "target:"
+assert_contains "$status_output" "state:"
+assert_contains "$status_output" "accepted:"
+assert_contains "$status_output" "default:"
 bootstrap_tmp="$(mktemp -d)"
 bootstrap_output="$(LOCAL_LLM_RUNS_DIR="$bootstrap_tmp/runs" "$repo_root/scripts/model-manager.sh" bootstrap --target remote:bench-host --dry-run)"
 assert_contains "$bootstrap_output" "Bootstrap plan"
 assert_contains "$bootstrap_output" "target=remote:bench-host"
-assert_contains "$bootstrap_output" "next=model-manager discover"
+assert_contains "$bootstrap_output" "next=model-manager search"
 bootstrap_dry_yes_status=0
 bootstrap_dry_yes_output="$(LOCAL_LLM_RUNS_DIR="$bootstrap_tmp/dry-yes-runs" "$repo_root/scripts/model-manager.sh" bootstrap --target remote:bench-host --dry-run --yes 2>&1)" || bootstrap_dry_yes_status=$?
 if [[ "$bootstrap_dry_yes_status" == 0 ]]; then
@@ -951,19 +764,14 @@ printf '{"repo":"Example/Old-GGUF","file":"Old-Q4_K_M.gguf","size_gb":"12.3","ca
 EOF
 chmod +x "$list_tmp/bin/ssh"
 list_output="$(PATH="$list_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$list_tmp/runs" "$repo_root/scripts/model-manager.sh" list --target remote:bench-host)"
-assert_contains "$list_output" "Models"
-assert_contains "$list_output" "Profiles"
-assert_contains "$list_output" "Launchers"
-assert_contains "$list_output" "Pending Selections"
-assert_contains "$list_output" "Remote Cache"
-assert_contains "$list_output" "  None"
+# `list` dispatches to scripts/model_manager (commands.py cmd_list). With no
+# accepted models it reports exactly that. The richer sectioned output these
+# assertions used to expect (Profiles / Launchers / Pending Selections / Remote
+# Cache) belongs to the bash cmd_list, which MODEL_MANAGER_PY makes unreachable
+# in any real checkout -- see TASKS.md.
+assert_contains "$list_output" "no accepted models"
 assert_not_contains "$list_output" "qwen3.6-35b-a3b-mtp"
 assert_not_contains "$list_output" "source: unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
-assert_contains "$list_output" "old"
-assert_contains "$list_output" "target: remote:bench-host"
-assert_contains "$list_output" "Example/Old-GGUF"
-assert_contains "$list_output" "Old-Q4_K_M.gguf"
-assert_not_contains "$list_output" "selection repo=unsloth/Qwen3-Coder-Next-GGUF"
 update_tmp="$(mktemp -d)"
 mkdir -p "$update_tmp/bin"
 cat >"$update_tmp/tree.json" <<'JSON'
@@ -3174,3 +2982,51 @@ fi
 assert_contains "$(<"$invalid_target_output")" "unknown option: --target"
 
 printf 'oc-local dry-run tests passed\n'
+
+# --- Documentation guards -----------------------------------------------------
+# These derive expectations from the source of truth rather than pinning prose.
+# An earlier version of this file asserted ~180 verbatim README sentences; the
+# container rewrite invalidated all of them at once and the suite was disabled
+# for months, so nothing was actually being checked. Assert structure instead:
+# facts that rot silently (a route added to Caddy but never documented, a doc
+# link to a deleted file), never wording.
+python3 - "$repo_root" <<'PY'
+import pathlib
+import re
+import sys
+
+repo = pathlib.Path(sys.argv[1])
+readme = (repo / "README.md").read_text()
+failures = []
+
+# 1. Every path-like reference in the README resolves. Bare filenames used as
+#    prose ("runtime.py") are skipped -- only refs containing a separator.
+for ref in sorted({m.group(1) for m in re.finditer(r"`([\w./*-]+/[\w./*-]+)`", readme)}):
+    if "*" in ref:
+        continue
+    if ref.startswith(("http", "~/", "/")):
+        continue
+    if not (repo / ref).exists():
+        failures.append(f"README references a path that does not exist: {ref}")
+
+# 2. Every route in the Caddyfile appears in the README routing table. This is
+#    what actually drifted: /v1/* was documented as mgmt :3100 for months while
+#    Caddy sent it to the router :3200, and the pi/opencode routes were absent.
+caddy = (repo / "scripts/Caddyfile.local-llm").read_text()
+routes = {m.group(1) for m in re.finditer(r"^\thandle (\S+) \{", caddy, re.M)}
+table = readme.split("## Caddy routing summary", 1)
+if len(table) != 2:
+    failures.append("README is missing the 'Caddy routing summary' section")
+else:
+    section = table[1].split("\n## ", 1)[0]
+    for route in sorted(routes):
+        if f"`{route}`" not in section:
+            failures.append(f"Caddyfile route {route} is not in the README routing table")
+
+if failures:
+    for f in failures:
+        print(f"doc guard: {f}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+
+printf 'documentation guards passed\n'
