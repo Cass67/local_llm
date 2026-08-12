@@ -29,12 +29,16 @@ _BACKENDS = ("vulkan", "rocm", "cuda")
 # plain `docker compose build` is a cache hit and never picks up new releases.
 AGENTS_SRC_DIR = Path(os.environ.get("AGENTS_SRC_DIR", "/app/agents"))
 AGENTS_IMAGE = os.environ.get("AGENTS_IMAGE", "local-llm-agents:latest")
-# id -> (npm package, Dockerfile build arg, container using it)
+# id -> (npm package, Dockerfile build arg, container using it, platform package)
+# opencode ships its binary in per-platform packages that are published a few
+# minutes after the release itself, so `latest` is briefly uninstallable.
 AGENT_PACKAGES = {
-    "pi": ("@earendil-works/pi-coding-agent", "PI_VERSION", "local-llm-pi-web"),
-    "opencode": ("opencode-ai", "OPENCODE_VERSION", "local-llm-opencode"),
+    "pi": ("@earendil-works/pi-coding-agent", "PI_VERSION", "local-llm-pi-web", None),
+    "opencode": ("opencode-ai", "OPENCODE_VERSION", "local-llm-opencode", "opencode-linux-x64"),
 }
 NPM_REGISTRY = "https://registry.npmjs.org"
+# Abbreviated packument: the full one for opencode is megabytes of changelog.
+NPM_ABBREVIATED = {"Accept": "application/vnd.npm.install-v1+json"}
 
 # image id -> short sha, so we only `docker run --version` once per image build
 _version_cache: dict[str, str] = {}
@@ -253,6 +257,34 @@ async def _npm_latest(client: httpx.AsyncClient, package: str) -> str | None:
     return resp.json().get("version")
 
 
+async def _installable_version(
+    client: httpx.AsyncClient, package: str, platform_package: str | None
+) -> str | None:
+    """Newest release whose platform package is also published — see AGENT_PACKAGES."""
+    latest = await _npm_latest(client, package)
+    if not latest or not platform_package:
+        return latest
+
+    async def published(version: str) -> bool:
+        resp = await client.get(f"{NPM_REGISTRY}/{platform_package}/{version}")
+        return resp.status_code == 200
+
+    if await published(latest):
+        return latest
+    doc = await client.get(f"{NPM_REGISTRY}/{package}", headers=NPM_ABBREVIATED)
+    if doc.status_code != 200:
+        return None
+    # Registry order is publication order. Prereleases (0.0.0-dev-*) are published
+    # continuously and never carry platform packages, so they are not candidates.
+    # Walk back a few stable releases, no further: a longer gap means something
+    # other than a publish race is wrong.
+    stable = [v for v in doc.json().get("versions", {}) if "-" not in v and v != latest]
+    for version in stable[-5:][::-1]:
+        if await published(version):
+            return version
+    return None
+
+
 @router.get("/agents")
 async def agents_status():
     """Installed vs latest pi/opencode in the coding-agent image."""
@@ -260,8 +292,8 @@ async def agents_status():
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:
             latest = {
-                agent_id: await _npm_latest(client, package)
-                for agent_id, (package, _, _) in AGENT_PACKAGES.items()
+                agent_id: await _installable_version(client, package, platform)
+                for agent_id, (package, _, _, platform) in AGENT_PACKAGES.items()
             }
         except httpx.HTTPError as e:
             raise HTTPException(502, f"npm registry unreachable: {e}") from e
@@ -282,7 +314,7 @@ async def agents_status():
                     and latest[agent_id] != installed[package]
                 ),
             }
-            for agent_id, (package, _, container) in AGENT_PACKAGES.items()
+            for agent_id, (package, _, container, _p) in AGENT_PACKAGES.items()
         ],
     }
 
@@ -361,10 +393,10 @@ async def start_agents_build():
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:
             versions = {}
-            for agent_id, (package, _, _) in AGENT_PACKAGES.items():
-                version = await _npm_latest(client, package)
+            for agent_id, (package, _, _, platform) in AGENT_PACKAGES.items():
+                version = await _installable_version(client, package, platform)
                 if not version:
-                    raise HTTPException(502, f"no published version for {package}")
+                    raise HTTPException(502, f"no installable version for {package}")
                 versions[agent_id] = version
         except httpx.HTTPError as e:
             raise HTTPException(502, f"npm registry unreachable: {e}") from e
