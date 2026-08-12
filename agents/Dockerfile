@@ -1,7 +1,11 @@
 # Web-accessible coding agents: pi (TUI, via ttyd) and opencode (native web UI).
 FROM node:22-slim
 
+# Defaults are the reproducible pin for `docker compose build`; the Status tab's
+# "Update coding agents" passes the current npm releases as build args instead.
+# renovate: datasource=npm depName=@earendil-works/pi-coding-agent
 ARG PI_VERSION=0.84.1
+# renovate: datasource=npm depName=opencode-ai
 ARG OPENCODE_VERSION=1.18.16
 
 ARG TTYD_VERSION=1.7.7

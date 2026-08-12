@@ -27,6 +27,7 @@ import type {
 	UpdateStatus,
 	CommitDetail,
 	BuildStatus,
+	AgentsUpdateStatus,
 	ModelProfile,
 	FamilyProfiles,
 	ProfilesData,
@@ -614,6 +615,24 @@ export async function startRunnerBuild(backends: string[]): Promise<{ status: st
 export async function fetchBuildStatus(): Promise<BuildStatus> {
 	const res = await fetch(`${BASE}/update/build/status`);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchAgentsUpdateStatus(): Promise<AgentsUpdateStatus> {
+	const res = await fetch(`${BASE}/update/agents`);
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function startAgentsBuild(): Promise<{ status: string; versions: Record<string, string> }> {
+	const res = await fetch(`${BASE}/update/agents/build`, { method: "POST" });
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
 	return res.json();
 }
 

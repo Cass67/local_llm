@@ -381,6 +381,19 @@ export interface CommitDetail {
 	} | null;
 }
 
+export interface AgentsUpdateStatus {
+	image: string;
+	present: boolean;
+	packages: {
+		id: string;
+		package: string;
+		container: string;
+		current: string | null;
+		latest: string | null;
+		outdated: boolean;
+	}[];
+}
+
 export interface BuildStatus {
 	running: boolean;
 	backends: string[];

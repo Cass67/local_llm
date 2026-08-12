@@ -390,6 +390,29 @@ class _UnixHTTPConnection(http.client.HTTPConnection):
         self.sock.connect(str(self.socket_path))
 
 
+def docker_api(
+    method: str,
+    path: str,
+    body: str | None = None,
+    socket_path: Path = Path("/var/run/docker.sock"),
+) -> dict[str, Any]:
+    conn = _UnixHTTPConnection(socket_path)
+    headers = {"Content-Type": "application/json"} if body is not None else {}
+    try:
+        conn.request(method, path, body=body, headers=headers)
+        response = conn.getresponse()
+        data = response.read()
+        if response.status == 404:
+            return {}
+        if response.status >= 400:
+            raise RuntimeError(f"docker {method} {path} failed: HTTP {response.status}")
+        if not data:
+            return {}
+        return json.loads(data.decode("utf-8"))
+    finally:
+        conn.close()
+
+
 class DockerRunner:
     def __init__(
         self, config: DockerRunnerConfig, models_dir: Path, host_models_dir: Path | None = None
@@ -399,21 +422,7 @@ class DockerRunner:
         self.host_models_dir = host_models_dir or models_dir
 
     def _docker_json(self, method: str, path: str, body: str | None = None) -> dict[str, Any]:
-        conn = _UnixHTTPConnection(self.config.socket_path)
-        headers = {"Content-Type": "application/json"} if body is not None else {}
-        try:
-            conn.request(method, path, body=body, headers=headers)
-            response = conn.getresponse()
-            data = response.read()
-            if response.status == 404:
-                return {}
-            if response.status >= 400:
-                raise RuntimeError(f"docker {method} {path} failed: HTTP {response.status}")
-            if not data:
-                return {}
-            return json.loads(data.decode("utf-8"))
-        finally:
-            conn.close()
+        return docker_api(method, path, body, self.config.socket_path)
 
     def stop(self) -> None:
         self._docker_json("POST", f"/containers/{self.config.name}/stop?t=30")

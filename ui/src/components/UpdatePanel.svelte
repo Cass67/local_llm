@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount, onDestroy } from "svelte";
-	import { fetchUpdateStatus, startRunnerBuild, fetchBuildStatus, fetchCommitDetail } from "../lib/api";
-	import type { UpdateStatus, BuildStatus, CommitDetail } from "../lib/types";
+	import {
+		fetchUpdateStatus,
+		startRunnerBuild,
+		fetchBuildStatus,
+		fetchCommitDetail,
+		fetchAgentsUpdateStatus,
+		startAgentsBuild,
+	} from "../lib/api";
+	import type { UpdateStatus, BuildStatus, CommitDetail, AgentsUpdateStatus } from "../lib/types";
 
 	let status: UpdateStatus | null = $state(null);
 	let build: BuildStatus | null = $state(null);
@@ -14,6 +21,10 @@
 	let detail: CommitDetail | null = $state(null);
 	let detailError = $state("");
 	let pollId: ReturnType<typeof setInterval> | null = null;
+
+	let agents: AgentsUpdateStatus | null = $state(null);
+	let agentsError = $state("");
+	let agentsStarting = $state(false);
 
 	async function check() {
 		checking = true;
@@ -28,14 +39,40 @@
 		} finally {
 			checking = false;
 		}
+		await checkAgents();
+	}
+
+	async function checkAgents() {
+		agentsError = "";
+		try {
+			agents = await fetchAgentsUpdateStatus();
+		} catch (e: unknown) {
+			agentsError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function rebuildAgents() {
+		agentsStarting = true;
+		agentsError = "";
+		try {
+			await startAgentsBuild();
+			await pollBuild();
+			startPolling();
+		} catch (e: unknown) {
+			agentsError = e instanceof Error ? e.message : String(e);
+		} finally {
+			agentsStarting = false;
+		}
 	}
 
 	async function pollBuild() {
 		try {
+			const wasAgents = build?.backends.includes("agents") ?? false;
 			build = await fetchBuildStatus();
 			if (!build.running && pollId) {
 				clearInterval(pollId);
 				pollId = null;
+				if (wasAgents) await checkAgents();
 			}
 		} catch {
 			// backend briefly unreachable; keep polling
@@ -155,6 +192,43 @@
 				{build?.running ? "Build running…" : starting ? "Starting…" : "Update & rebuild selected"}
 			</button>
 			<span class="muted">Running models keep the old image until relaunched.</span>
+		</div>
+	{/if}
+
+	{#if agentsError}
+		<div class="error">{agentsError}</div>
+	{/if}
+
+	{#if agents}
+		<div class="agents">
+			<h3>Coding agents</h3>
+			<div class="muted">
+				<code>{agents.image}</code>{#if !agents.present}<span class="missing"> (not built)</span>{/if}
+			</div>
+			<table>
+				<thead><tr><th>Agent</th><th>Package</th><th>Installed</th><th>Latest</th><th></th></tr></thead>
+				<tbody>
+					{#each agents.packages as p}
+						<tr>
+							<td>{p.id}</td>
+							<td><code>{p.package}</code></td>
+							<td>{p.current ?? "unknown"}</td>
+							<td>{p.latest ?? "?"}</td>
+							<td>
+								{#if p.outdated}<span class="behind">update available</span>
+								{:else if p.current && p.latest}<span class="uptodate">up to date</span>
+								{:else}-{/if}
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+			<div class="actions">
+				<button class="rebuild" onclick={rebuildAgents} disabled={agentsStarting || build?.running}>
+					{build?.running ? "Build running…" : agentsStarting ? "Starting…" : "Update & rebuild agents"}
+				</button>
+				<span class="muted">Rebuilds at the latest npm releases, then restarts pi and opencode (running sessions are lost).</span>
+			</div>
 		</div>
 	{/if}
 
@@ -283,6 +357,8 @@
 	.file { display: flex; gap: 0.5rem; align-items: baseline; font-size: 0.78rem; }
 	.file .msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.actions { display: flex; align-items: center; gap: 0.75rem; }
+	.agents { display: flex; flex-direction: column; gap: 0.5rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+	.agents h3 { margin: 0; }
 	.build-status { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.85rem; }
 	pre { background: #000; border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; max-height: 240px; overflow: auto; font-size: 0.7rem; margin: 0; }
 </style>
