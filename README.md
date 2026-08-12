@@ -4,24 +4,30 @@ A self-hosted LLM management system for AMD and Nvidia GPU workstations. Models 
 
 ## Screenshots
 
+Tabs in nav order.
+
 | Tab | Description |
 |---|---|
-| [![Models](screenshot-models.png)](screenshot-models.png) | **Models** — browse installed models, view details, edit config, audit orphaned registrations |
-| [![Search](screenshot-search.png)](screenshot-search.png) | **Search** — discover and install GGUF models from HuggingFace |
-| [![Architecture](screenshot-architecture.png)](screenshot-architecture.png) | **Architecture** — system diagram, cluster management, profile selection when loading a model |
-| **Profiles** | **Profiles** — named load configs per model family: edit raw JSON, clone, set default, import from models |
-| [![Status](screenshot-status.png)](screenshot-status.png) | **Status** — live TPS sparkline, runner health, active model, system stats, audit orphaned registrations |
-| [![Benchmarks](screenshot-benchmarks.png)](screenshot-benchmarks.png) | **Benchmarks** — run configurable benchmarks, bake several models off against each other, and read the leaderboard: one row per model+profile with best/avg tok/s, tok/s/W, wall draw, golden-set quality and agentic scores, sortable |
-| [![Logs](screenshot-logs.png)](screenshot-logs.png) | **Logs** — real-time Docker container log streaming (runner, mgmt, router) |
-| [![Chat](screenshot-chat.png)](screenshot-chat.png) | **Chat** — Open WebUI full chat interface with model selection and conversation history |
-| [![Traces](screenshot-traces.png)](screenshot-traces.png) | **Traces** — Langfuse LLM request tracing: TTFT, token throughput, per-request timelines |
+| [![Architecture](screenshot-architecture.png)](screenshot-architecture.png) | **Architecture** — GPU inventory with backend indices and PCI ids, cluster creation, the routing-rules editor (keywords → cluster, with fallback), and idle-unload settings |
+| [![Models](screenshot-models.png)](screenshot-models.png) | **Models** — installed models per backend (ROCm / ROCmFP4 / Vulkan / CUDA), each card showing family, alias, context and quant, with launch-on-cluster, edit, copy-to-backend, and audit of orphaned registrations |
+| [![Profiles](screenshot-profiles.png)](screenshot-profiles.png) | **Profiles** — named load configs per model family, edited as a form or raw JSON, with a live VRAM estimate (weights + KV at the chosen context) and lint that flags configs that cannot work |
+| [![Search](screenshot-search.png)](screenshot-search.png) | **Search** — HuggingFace GGUF search ranked by a fit score against the target cluster's VRAM, with the best quant chosen per repo and one-click install |
+| [![Status](screenshot-status.png)](screenshot-status.png) | **Status** — running model and profile, tok/s, prompt tok/s, draft acceptance, every accepted model with a launch button, TPS sparkline and runner health |
+| [![Benchmarks](screenshot-benchmarks.png)](screenshot-benchmarks.png) | **Benchmarks** — run a prompt with configurable sampling, bake several models off against each other on one cluster, and read the leaderboard: one row per model+profile with best/avg tok/s, tok/s/W, golden-set quality and agentic scores, sortable |
+| [![Tuning](screenshot-tuning.png)](screenshot-tuning.png) | **Tuning** — grid-search llama-server knobs (ubatch, batch, split mode, KV cache type, spec decoding, ngram n_max, MTP depth), rank by objective, and promote the winner. A quality gate scores a golden set so a config that got faster by getting worse cannot win |
+| [![Coding](screenshot-coding.png)](screenshot-coding.png) | **Coding** — browser-based agentic coding backed by the router: `pi` and OpenCode, both editing real files on the host |
+| [![Chat](screenshot-chat.png)](screenshot-chat.png) | **Chat** — Open WebUI at `/chat/`, defaulting to the `router` model so prompts are dispatched to the right cluster automatically |
+| **Traces** | **Traces** — Langfuse at `/traces/`: TTFT, token throughput, prompt/completion tokens, per-request timelines. No screenshot here — Langfuse is behind its own login, so a capture would only show a sign-in form |
+| [![Logs](screenshot-logs.png)](screenshot-logs.png) | **Logs** — live container log streaming with a source selector (runner, mgmt, router), auto-scroll and per-request timing lines |
 
 ### Feature summary
 
 - **Search and install** GGUF models from HuggingFace, downloading directly into the local HF cache.
 - **Switch models** on demand — the management container creates and replaces the runner container via the Docker socket.
 - **Edit model configs** — context size, batch, ngl, tensor split, flash attention, Jinja templates, MTP speculative decoding — without touching JSON by hand.
-- **Profiles** — named load configurations per model family, stored in `profiles.json`. Select a profile when starting a model on a cluster. Edit as raw JSON, clone, set a default, or auto-seed from existing model configs. Profile fields (tensor split, context, flash attention, etc.) are merged into the launch metadata at start time.
+- **Profiles** — named load configurations per model family, stored in `profiles.json`. Select a profile when starting a model on a cluster. Edit as a form or as raw JSON, clone, set a default, or auto-seed from existing model configs. A live VRAM estimate breaks out weights and KV at the chosen context, and lint rejects configs that cannot work (for example a `tensor_split` whose weight count does not match the GPUs). Profile fields (tensor split, context, flash attention, etc.) are merged into the launch metadata at start time.
+- **Tuning** — grid-search llama-server knobs on a real cluster instead of guessing: ubatch, batch, split mode, KV cache types, speculative decoding strategy, ngram `n_max`, MTP draft depth and parallel slots. Results rank by a chosen objective (decode tok/s, prompt tok/s) and the winner can be promoted into the profile. A quality gate scores a golden set on each candidate, so a config that got faster by degrading output is rejected rather than promoted.
+- **Coding** — agentic coding in the browser, backed by the router: `pi` (terminal agent in a web terminal) and OpenCode (TUI with session history and sub-agents). Both edit real files on the host.
 - **Audit** — scan registered models against the HF cache; remove stale registrations whose GGUF files have been deleted from disk. Available on the Models and Status tabs.
 - **Benchmark** models with configurable llama.cpp parameters (temperature, seed, top-p, top-k, repeat penalty, system prompt) and track latency/throughput trends across runs.
 - **Bake-off** — fill the leaderboard in one job instead of by hand: pick a cluster and any number of model+profile pairs, and it loads each in turn, warms up, times N completions of the same prompt, scores the same golden set, and moves on. Live log, cancellable, and a model that will not load is recorded as a failed row rather than ending the run. On the Benchmarks tab, above the leaderboard it fills.
