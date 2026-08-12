@@ -22,7 +22,7 @@ def _store() -> BenchmarkStore:
 
 class QualityRunRequest(BaseModel):
     cluster_id: str = Field(min_length=1, max_length=100)
-    max_tokens: int = Field(default=512, ge=16, le=8192)
+    max_tokens: int = Field(default=512, ge=16, le=32768)
     judge_url: str = Field(default="", max_length=500)
     judge_model: str = Field(default="", max_length=200)
 

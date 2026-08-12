@@ -9,6 +9,8 @@
 		cancelSweep,
 		promoteSweepResult,
 		runQualitySet,
+		fetchQualityCases,
+		saveQualityCases,
 		fetchRegression,
 		runRegressionGuard,
 		acceptRegressionBaseline,
@@ -19,6 +21,7 @@
 		SweepSnapshot,
 		SweepListEntry,
 		QualityReport,
+		QualityCase,
 		RegressionResponse,
 	} from "../lib/types";
 
@@ -60,6 +63,7 @@
 	let current = $state<SweepSnapshot | null>(null);
 	let starting = $state(false);
 	let promoteName = $state("");
+	let openQuality = $state<number | null>(null);
 	let poll: ReturnType<typeof setInterval> | null = null;
 
 	const activeCluster = $derived(clusters.find((c) => c.id === clusterId) ?? null);
@@ -187,6 +191,45 @@
 	// --- quality ---
 	let quality = $state<QualityReport | null>(null);
 	let qualityRunning = $state(false);
+	let cases = $state<QualityCase[]>([]);
+	let casesAreDefault = $state(true);
+	let editingCases = $state(false);
+	let casesSaving = $state(false);
+
+	async function loadCases() {
+		try {
+			const data = await fetchQualityCases();
+			cases = data.cases;
+			casesAreDefault = data.is_default;
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
+	// The API stores patterns as a list; edit them as one-per-line text.
+	const linesOf = (v: string[] | undefined) => (v ?? []).join("\n");
+	const toLines = (raw: string) =>
+		raw.split("\n").map((s) => s.trim()).filter(Boolean);
+
+	async function saveCases(reset = false) {
+		casesSaving = true;
+		error = "";
+		try {
+			const res = await saveQualityCases(reset ? [] : cases);
+			await loadCases();
+			editingCases = false;
+			error = `quality set ${res.status} — ${res.count} cases`;
+		} catch (e: any) {
+			error = e.message;
+		} finally {
+			casesSaving = false;
+		}
+	}
+
+	function addCase() {
+		cases = [...cases, { id: `case-${cases.length + 1}`, prompt: "", min_words: 1 }];
+		editingCases = true;
+	}
 
 	async function handleQuality() {
 		if (!clusterId) return;
@@ -246,6 +289,7 @@
 
 	onMount(() => {
 		loadBase();
+		loadCases();
 		loadRegression();
 		// A sweep runs for minutes per combination; poll while one is live.
 		poll = setInterval(async () => {
@@ -298,7 +342,7 @@
 			</label>
 			<label>Repeats <input type="number" min="1" max="10" bind:value={repeats} /></label>
 			<label>Warmup <input type="number" min="0" max="3" bind:value={warmup} /></label>
-			<label>Max tokens <input type="number" min="16" max="8192" bind:value={maxTokens} /></label>
+			<label>Max tokens <input type="number" min="16" max="32768" bind:value={maxTokens} /></label>
 			<label class="toggle-label" title="Refuse to crown a config that fails the golden prompt set — a faster config that halved its output should not win.">
 				<input type="checkbox" bind:checked={qualityGate} />
 				Quality gate
@@ -397,9 +441,14 @@
 							<td>{fmt(r.tps_per_watt, 3)}</td>
 							<td>
 								{#if r.quality}
-									<span class:bad={r.quality_gate === "failed"}>
+									<button
+										class="link"
+										class:bad={r.quality_gate === "failed"}
+										onclick={() => (openQuality = openQuality === r.index ? null : r.index)}
+									>
 										{r.quality.passed}/{r.quality.total}
-									</span>
+										{openQuality === r.index ? "▾" : "▸"}
+									</button>
 								{:else}—{/if}
 							</td>
 							<td>{r.reload_s ? `${r.reload_s}s` : "—"}</td>
@@ -415,6 +464,28 @@
 								{/if}
 							</td>
 						</tr>
+						{#if openQuality === r.index && r.quality}
+							<tr class="detail">
+								<td colspan="8">
+									{#each r.quality.cases as c}
+										<div class="case">
+											<span class="case-id" class:bad={!c.passed} class:good={c.passed}>
+												{c.passed ? "pass" : "fail"} · {c.id}
+											</span>
+											<span class="muted">
+												{c.words} words
+												{#if c.finish_reason && c.finish_reason !== "stop"}
+													· finish: {c.finish_reason}
+												{/if}
+												{#if c.judge_score != null}· judge {c.judge_score}/5{/if}
+											</span>
+											{#each c.failures as f}<div class="bad">{f}</div>{/each}
+											{#if c.sample}<pre class="sample">{c.sample}</pre>{/if}
+										</div>
+									{/each}
+								</td>
+							</tr>
+						{/if}
 					{/each}
 				</tbody>
 			</table>
@@ -446,7 +517,76 @@
 			<button onclick={handleQuality} disabled={qualityRunning || !clusterId}>
 				{qualityRunning ? "Running…" : "Run on cluster"}
 			</button>
+			<span class="muted">{casesAreDefault ? "built-in defaults" : "customised"}</span>
+			<button onclick={() => (editingCases = !editingCases)}>
+				{editingCases ? "Done editing" : "Edit criteria"}
+			</button>
 		</div>
+
+		<!-- The pass criteria, not just the verdict: a gate you cannot read is a
+		     gate you cannot trust when it fails a config. -->
+		{#if editingCases}
+			<div class="cases">
+				{#each cases as c, i}
+					<div class="case-edit">
+						<div class="case-edit-head">
+							<input class="case-name" bind:value={c.id} placeholder="case id" />
+							<button
+								class="drop"
+								onclick={() => (cases = cases.filter((_, j) => j !== i))}
+								title="remove case">✕</button
+							>
+						</div>
+						<textarea rows="3" bind:value={c.prompt} placeholder="prompt"></textarea>
+						<div class="case-edit-row">
+							<label>
+								min words
+								<input type="number" min="0" bind:value={c.min_words} />
+							</label>
+							<label>
+								must match (one regex per line)
+								<textarea
+									rows="2"
+									value={linesOf(c.must_match)}
+									oninput={(e) => (c.must_match = toLines(e.currentTarget.value))}
+								></textarea>
+							</label>
+							<label>
+								must not match
+								<textarea
+									rows="2"
+									value={linesOf(c.must_not_match)}
+									oninput={(e) => (c.must_not_match = toLines(e.currentTarget.value))}
+								></textarea>
+							</label>
+						</div>
+					</div>
+				{/each}
+				<div class="case-actions">
+					<button onclick={addCase}>Add case</button>
+					<button class="btn-primary" onclick={() => saveCases()} disabled={casesSaving}>
+						{casesSaving ? "Saving…" : "Save criteria"}
+					</button>
+					<button onclick={() => saveCases(true)} disabled={casesSaving || casesAreDefault}>
+						Restore defaults
+					</button>
+				</div>
+			</div>
+		{:else}
+			<table>
+				<thead><tr><th>Case</th><th>min words</th><th>must match</th><th>Prompt</th></tr></thead>
+				<tbody>
+					{#each cases as c}
+						<tr>
+							<td><code>{c.id}</code></td>
+							<td>{c.min_words ?? "—"}</td>
+							<td><code class="muted">{linesOf(c.must_match) || "—"}</code></td>
+							<td class="prompt-cell muted">{c.prompt}</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		{/if}
 
 		{#if quality}
 			<p>
@@ -597,6 +737,66 @@
 		cursor: pointer;
 	}
 	.chip.on { background: #1d4ed8; border-color: #3b82f6; color: #fff; }
+
+	.link {
+		background: none;
+		border: none;
+		color: inherit;
+		padding: 0;
+		font: inherit;
+		cursor: pointer;
+	}
+	.detail td { background: #0b0f14; }
+
+	.prompt-cell {
+		max-width: 34rem;
+		white-space: pre-wrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-height: 3.4rem;
+		display: block;
+	}
+	.cases { display: flex; flex-direction: column; gap: 0.6rem; }
+	.case-edit {
+		border: 1px solid #1d2735;
+		border-radius: 4px;
+		padding: 0.5rem 0.6rem;
+	}
+	.case-edit-head { display: flex; gap: 0.5rem; margin-bottom: 0.35rem; }
+	.case-name { flex: 1; font-family: ui-monospace, monospace; }
+	.case-edit textarea { width: 100%; font-size: 0.8rem; }
+	.case-edit-row {
+		display: grid;
+		grid-template-columns: 7rem 1fr 1fr;
+		gap: 0.5rem;
+		margin-top: 0.4rem;
+	}
+	.case-edit-row label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		font-size: 0.78rem;
+		color: #b9c6d6;
+	}
+	.drop { background: none; border: none; color: #e57373; cursor: pointer; }
+	.case-actions { display: flex; gap: 0.5rem; }
+	.case {
+		border-left: 2px solid #263244;
+		padding: 0.25rem 0 0.35rem 0.6rem;
+		margin-bottom: 0.4rem;
+		font-size: 0.8rem;
+	}
+	.case-id { font-weight: 600; margin-right: 0.5rem; }
+	.sample {
+		margin: 0.3rem 0 0;
+		padding: 0.4rem 0.5rem;
+		background: #111827;
+		border-radius: 4px;
+		max-height: 12rem;
+		overflow: auto;
+		white-space: pre-wrap;
+		color: #b9c6d6;
+	}
 
 	.run-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 	.btn-primary {

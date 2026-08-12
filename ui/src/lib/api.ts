@@ -36,7 +36,7 @@ import type {
 	SweepSnapshot,
 	SweepListEntry,
 	QualityReport,
-	QualityCaseResult,
+	QualityCase,
 	RegressionResponse,
 	RegressionReport,
 	RouteLogResponse,
@@ -690,11 +690,27 @@ export async function promoteSweepResult(
 // --- Quality (golden prompt set) ---
 
 export async function fetchQualityCases(): Promise<{
-	cases: QualityCaseResult[];
+	cases: QualityCase[];
 	is_default: boolean;
 }> {
 	const res = await fetch(`${BASE}/quality/cases`);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+/** Replace the golden set. An empty list restores the built-in defaults. */
+export async function saveQualityCases(
+	cases: QualityCase[],
+): Promise<{ status: string; count: number }> {
+	const res = await fetch(`${BASE}/quality/cases`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ cases }),
+	});
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
 	return res.json();
 }
 

@@ -549,8 +549,18 @@ export interface QualityCaseResult {
 	failures: string[];
 	words: number;
 	repetition_ratio: number;
+	finish_reason?: string | null;
 	sample?: string;
 	judge_score?: number | null;
+}
+
+// The pass criteria themselves, as stored in /state/quality_set.json.
+export interface QualityCase {
+	id: string;
+	prompt: string;
+	min_words?: number;
+	must_match?: string[];
+	must_not_match?: string[];
 }
 
 export interface QualityReport {

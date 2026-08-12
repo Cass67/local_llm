@@ -100,14 +100,26 @@ def repetition_ratio(text: str) -> float:
     return max(counts.values()) / len(lines)
 
 
-def check_response(case: dict[str, Any], text: str) -> dict[str, Any]:
+def check_response(
+    case: dict[str, Any],
+    text: str,
+    finish_reason: str | None = None,
+    reasoning_chars: int = 0,
+) -> dict[str, Any]:
     """Deterministic scoring for one case. No second model involved."""
     failures: list[str] = []
     words = len([w for w in text.split() if w])
 
     min_words = int(case.get("min_words") or 0)
     if words < min_words:
-        failures.append(f"output is {words} words, expected at least {min_words}")
+        # A short answer because the budget ran out is a different fault from a
+        # config that collapsed the output — say which, or the gate is unreadable.
+        why = ""
+        if finish_reason == "length":
+            why = " — truncated at max_tokens"
+            if reasoning_chars and not text.strip():
+                why += f", the whole budget went to {reasoning_chars} chars of reasoning"
+        failures.append(f"output is {words} words, expected at least {min_words}{why}")
 
     for pattern in case.get("must_match") or []:
         if not re.search(pattern, text, re.I):
@@ -187,7 +199,13 @@ def run_quality(
                 }
             )
             continue
-        result = check_response(case, text)
+        result = check_response(
+            case,
+            text,
+            completion.get("finish_reason"),
+            int(completion.get("reasoning_chars") or 0),
+        )
+        result["finish_reason"] = completion.get("finish_reason")
         result["sample"] = text[:500]
         if judge_url and judge_model:
             result["judge_score"] = judge_response(judge_url, judge_model, case["prompt"], text)

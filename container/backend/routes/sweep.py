@@ -19,7 +19,7 @@ class SweepRequest(BaseModel):
     grid: dict[str, list[Any]]
     prompt_text: str = Field(min_length=1, max_length=20000)
     system_prompt: str = Field(default="", max_length=20000)
-    max_tokens: int = Field(default=256, ge=16, le=8192)
+    max_tokens: int = Field(default=256, ge=16, le=32768)
     repeats: int = Field(default=2, ge=1, le=10)
     warmup: int = Field(default=1, ge=0, le=3)
     objective: str = Field(default="decode_tps")

@@ -22,6 +22,13 @@ def test_short_output_fails():
     assert "expected at least 150" in result["failures"][0]
 
 
+def test_short_output_says_when_it_was_truncated():
+    result = quality.check_response(_case(min_words=150), "", "length", reasoning_chars=2356)
+    assert not result["passed"]
+    assert "truncated at max_tokens" in result["failures"][0]
+    assert "2356 chars of reasoning" in result["failures"][0]
+
+
 def test_missing_pattern_fails():
     result = quality.check_response(_case(must_match=[r"ZEPHYR-4417"]), "I don't recall the token.")
     assert not result["passed"]
