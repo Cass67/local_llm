@@ -22,7 +22,11 @@ def _get_client() -> Any:
             _client = Langfuse(
                 public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
                 secret_key=os.environ["LANGFUSE_SECRET_KEY"],
-                host=os.environ.get("LANGFUSE_HOST", "http://localhost:3004"),
+                # Langfuse is served under /traces (NEXT_PUBLIC_BASE_PATH), so its
+                # ingestion API lives at /traces/api/public/ingestion. The SDK appends
+                # /api/public/ingestion to this host, so the base path must be included
+                # or every POST 404s and traces are silently dropped.
+                host=os.environ.get("LANGFUSE_HOST", "http://localhost:3004/traces"),
             )
         except Exception:  # noqa: BLE001 — tracing must never break client init
             return None

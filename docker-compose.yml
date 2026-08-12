@@ -38,7 +38,10 @@ services:
       LOCAL_LLM_DISABLE_THINKING_BY_DEFAULT: "${LOCAL_LLM_DISABLE_THINKING_BY_DEFAULT:-false}"
       LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY:-}"
       LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-}"
-      LANGFUSE_HOST: "${LANGFUSE_HOST:-http://localhost:3004}"
+      # Must include the /traces base path: the SDK posts to {host}/api/public/ingestion,
+      # and Langfuse serves that API under /traces (NEXT_PUBLIC_BASE_PATH). Without it
+      # every trace POST 404s -- ingestion silently stopped when ba60156 added the path.
+      LANGFUSE_HOST: "${LANGFUSE_HOST:-http://localhost:3004/traces}"
       # Terminal-Bench needs Docker access
       DOCKER_HOST: unix:///var/run/docker.sock
       DOCKER_BUILDKIT: "1"
