@@ -5,6 +5,7 @@ import asyncio
 from fastapi import APIRouter, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
+from ..clusters import get_cluster
 from ..clusters import list_active as list_active_clusters
 from ..log_stream import _docker_logs_tail, stream_log_tail
 
@@ -14,7 +15,17 @@ _MGMT_CONTAINER = "local-llm-mgmt"
 
 
 def _runner_container(cluster_id: str | None) -> str:
-    """Resolve the container name for the runner source."""
+    """Resolve the container name for the runner source.
+
+    Prefer the cluster definition: a runner that segfaulted or failed readiness
+    leaves an exited container whose logs hold the reason, but it is gone from
+    the active list, so resolving through active only would hide exactly the
+    logs someone opens this tab to read.
+    """
+    if cluster_id:
+        cluster = get_cluster(cluster_id)
+        if cluster:
+            return cluster.container_name
     try:
         active = list_active_clusters()
     except OSError:
@@ -50,6 +61,34 @@ async def get_logs(
     return {"lines": raw[-lines:] if len(raw) > lines else raw}
 
 
+async def _watch_disconnect(request: Request, disconnect: asyncio.Event) -> None:
+    while not await request.is_disconnected():
+        await asyncio.sleep(1)
+    disconnect.set()
+
+
+async def _log_events(request: Request, container: str, no_history: bool, passes):
+    if not no_history:
+        for line in _docker_logs_tail(50, container):
+            if passes(line):
+                yield {"event": "log", "data": line}
+
+    disconnect = asyncio.Event()
+    task = asyncio.create_task(_watch_disconnect(request, disconnect))
+    try:
+        async for sse_chunk in stream_log_tail(disconnect, container=container, skip_existing=True):
+            data = sse_chunk.removeprefix("data: ").removesuffix("\n\n")
+            if passes(data):
+                yield {"event": "log", "data": data}
+        # Docker's follow ends immediately for an exited container. Returning here
+        # would make the browser reconnect every 3s and re-dump the same history,
+        # so hold the stream open until the client goes away instead.
+        await disconnect.wait()
+    finally:
+        disconnect.set()
+        task.cancel()
+
+
 @router.get("/stream")
 async def stream_logs(
     request: Request,
@@ -66,32 +105,4 @@ async def stream_logs(
             return True
         return f"[{cluster}]" in line
 
-    async def event_generator():
-        if not no_history:
-            for line in _docker_logs_tail(50, container):
-                if _passes(line):
-                    yield {"event": "log", "data": line}
-
-        disconnect = asyncio.Event()
-
-        async def check_disconnect():
-            while True:
-                if await request.is_disconnected():
-                    disconnect.set()
-                    break
-                await asyncio.sleep(1)
-
-        task = asyncio.create_task(check_disconnect())
-
-        try:
-            async for sse_chunk in stream_log_tail(
-                disconnect, container=container, skip_existing=True
-            ):
-                data = sse_chunk.removeprefix("data: ").removesuffix("\n\n")
-                if _passes(data):
-                    yield {"event": "log", "data": data}
-        finally:
-            disconnect.set()
-            task.cancel()
-
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(_log_events(request, container, no_history, _passes))
