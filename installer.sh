@@ -135,7 +135,6 @@ mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$RUNS_DIR" "$SHARE_DIR/scripts"
 # Copy core scripts (overwrite existing)
 echo "Installing core scripts..."
 install -m 0755 "$REPO_ROOT/scripts/oc-local" "$BIN_DIR/oc-local"
-install -m 0755 "$REPO_ROOT/scripts/lib.sh" "$BIN_DIR/lib.sh"
 install -m 0755 "$REPO_ROOT/scripts/model-manager.sh" "$BIN_DIR/model-manager"
 install -m 0755 "$REPO_ROOT/scripts/model-discovery.sh" "$BIN_DIR/model-discovery"
 install -m 0755 "$REPO_ROOT/scripts/model-fit.py" "$BIN_DIR/model-fit.py"
