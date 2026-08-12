@@ -78,8 +78,10 @@ services:
 
   # ── Caddy reverse proxy ──────────────────────────────────────────────────────
   # Single public entrypoint on :3001.
-  # Routes /ui/, /api/local-llm/, /v1/ → local-llm-mgmt :3100
+  # Routes /ui/, /api/local-llm/ → local-llm-mgmt :3100
+  # Routes /v1/ → local-llm-router :3200 (which then proxies to mgmt)
   # Routes / (root) → open-webui :3101
+  # Full table: see "Caddy routing summary" in README.md
   local-llm-caddy:
     image: caddy:2
     container_name: local-llm-caddy

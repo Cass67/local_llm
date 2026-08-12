@@ -64,14 +64,14 @@ is_profile_name() {
 fail_no_accepted_model() {
 	local lookup_family="$1"
 	printf 'no accepted model for family: %s\n' "$lookup_family" >&2
-	printf 'Run model-manager discover, model-manager benchmark, and model-manager accept to generate accepted metadata.\n' >&2
+	printf 'Run model-manager search, model-manager install, and model-manager accept to generate accepted metadata.\n' >&2
 	exit 1
 }
 
 fail_no_accepted_default_model() {
 	printf 'no accepted default model\n' >&2
 	printf 'Pass an explicit family, or create runs/accepted/default.json after accepting a benchmark.\n' >&2
-	printf 'Run model-manager discover, model-manager benchmark, and model-manager accept to generate accepted metadata.\n' >&2
+	printf 'Run model-manager search, model-manager install, and model-manager accept to generate accepted metadata.\n' >&2
 	exit 1
 }
 
@@ -582,17 +582,10 @@ api_key="${OC_LOCAL_API_KEY:-dummy-local-llm}"
 model="${OC_LOCAL_MODEL:-ubt26-llamacpp/$model_name}"
 wait_seconds="${OC_LOCAL_WAIT_SECONDS:-180}"
 
-plugin_json=''
 plugin_mode=normal
 if [[ "$lean" == true ]]; then
-	plugin_json='"plugin":[],'
 	plugin_mode=lean
 fi
-reasoning_json=''
-if [[ "${reasoning_enabled:-false}" == true ]]; then
-	reasoning_json='"reasoning":true,'
-fi
-
 server_bin="./build/bin/llama-server"
 if [[ "$backend" == vulkan ]]; then
 	server_bin="./build-vulkan/bin/llama-server"

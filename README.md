@@ -617,13 +617,24 @@ and troubleshooting GPU visibility issues, see **[gpu-backends.md](gpu-backends.
 
 `scripts/Caddyfile.local-llm` on port `3001`:
 
+Routes are matched in the order below; the first matching `handle` wins.
+
 | Path | Upstream |
 |---|---|
-| `/ui/*`, `/api/local-llm/*`, `/v1/*` | `local-llm-mgmt :3100` |
-| `/chat/*` | Inline HTML frame with back link to `/ui/` |
-| `/traces/*` | `local-llm-langfuse :3004` (built with `NEXT_PUBLIC_BASE_PATH=/traces`) |
-| `/`, `/static/*`, `/api/*` | `open-webui :3101` |
+| `/api/local-llm/logs/stream*` | `local-llm-mgmt :3100` (`flush_interval -1`, SSE must not buffer) |
+| `/api/local-llm/*` | `local-llm-mgmt :3100` |
+| `/ui`, `/ui/*` | `local-llm-mgmt :3100` (`/ui` redirects to `/ui/`) |
+| `/v1/*` | `local-llm-router :3200` — **not** mgmt; the router applies routing rules then proxies to mgmt |
+| `/chat*` | Inline HTML frame with back link to `/ui/`; the iframe loads `/?chat=1` |
+| `/` | `open-webui :3101` when `?chat=1`, otherwise redirects to `/ui/#/architecture` |
+| `/static/*`, `/_app/*`, `/manifest.json`, `/favicon*`, `/api/*`, `/_socket/*` | `open-webui :3101` |
 | `/_switcher` | `local-llm-mgmt :3100` |
+| `/pi`, `/pi/*` | pi coding agent `:3006` (ttyd serves its own `/pi` base path, so no rewrite) |
+| `/opencode`, `/opencode/*` | opencode TUI `:3002` (ttyd, own base path) |
+| `/ws/socket.io*` | `open-webui :3101` — must precede the generic `/ws/*` arm |
+| `/ws/*`, `/socket.io/*`, `/pty/*/connect` | opencode `:3002`; WebSocket upgrades bypass injection |
+| `/traces`, `/traces/*` | `local-llm-langfuse :3004` (built with `NEXT_PUBLIC_BASE_PATH=/traces`) |
+| everything else | `open-webui :3101` (its client-side routes expect root-level routing) |
 
 ---
 

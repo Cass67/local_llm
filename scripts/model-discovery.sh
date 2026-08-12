@@ -430,7 +430,7 @@ detailed_discovery() {
 Detailed Model Information:
 ---------------------------
 No curated installed-profile recommendations are shipped from a fresh checkout.
-Use model-manager list to inspect accepted local state, or model-manager discover
+Use model-manager list to inspect accepted local state, or model-manager search
 to rank candidates for the current target hardware.
 EOF
 }

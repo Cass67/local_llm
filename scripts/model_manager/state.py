@@ -28,7 +28,11 @@ from .config import (
 
 SAFE_FAMILY = re.compile(r"^[A-Za-z0-9_.-]+$")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
-TARGET_RE = re.compile(r"^local$|^remote:[A-Za-z0-9_.:-]+$")
+# The host must not begin with "-": every remote path splits this on ":" and passes
+# the tail straight into an ssh argv, so a leading dash is read by ssh as an option.
+# "remote:-oProxyCommand" matched the old pattern and made ssh consume the following
+# argv element -- the remote command string -- as the ProxyCommand to execute.
+TARGET_RE = re.compile(r"^local$|^remote:[A-Za-z0-9_.][A-Za-z0-9_.:-]*$")
 
 
 def ensure_dirs() -> None:
@@ -67,10 +71,14 @@ def read_config() -> dict[str, Any] | None:
 
 def get_target() -> str | None:
     """Get current target from config, env, or None."""
-    # Env override
+    # Env override. Validated like any other target: it reaches the same ssh argv,
+    # so an unvalidated env var would reopen the hole TARGET_RE closes.
     env_host = os.environ.get("OC_LOCAL_REMOTE_HOST")
     if env_host:
-        return f"remote:{env_host}"
+        target = f"remote:{env_host}"
+        if not TARGET_RE.match(target):
+            sys.exit(f"invalid OC_LOCAL_REMOTE_HOST: {env_host}")
+        return target
 
     cfg = read_config()
     if cfg:

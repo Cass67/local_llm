@@ -27,21 +27,35 @@ ran with `HIP_VISIBLE_DEVICES=0,1,2`. `_assert_cluster_gpus_present()` now raise
 instead, checking PCI-id membership rather than resolved index so a Vulkan cluster
 with no `vulkan_index` is still allowed. Regression tests in `tests/test_clusters.py`.
 
+### Documentation guards rebuilt
+`test_oc_local.sh` pinned ~180 verbatim README sentences. The container rewrite
+(`b3e11ed`) invalidated 123 of them at once, and because the suite had aborted at
+line 69 since June on a doc `faf3dc2` deleted, nothing noticed. Replaced prose
+pinning with structural guards derived from source: every path-like README ref must
+resolve, every Caddyfile `handle` must appear in the routing table, and every
+model-manager case arm must appear in `--help`.
+
 ## Pending
 
-### test_oc_local.sh: 123 stale README assertions
-The suite aborted at line 69 on a doc `faf3dc2` deleted in June; that read and its two
-assertions are now gone, which unmasked the real problem. `b3e11ed` rewrote the README
-for the container architecture, but ~123 `assert_contains "$readme_contents" ...` still
-guard the old systemd + OpenCode-web + Caddy docs — including an `assert_not_contains`
-for `docker compose up -d`, now the primary install path. Suite cannot pass until these
-go. 767 asserts total, 208 are doc guards; the Caddyfile/service-file guards (14) look
-current, so this is a targeted deletion of the README block, not all doc guards.
+### test_oc_local.sh still tests a removed CLI generation
+The doc-guard problem is fixed, but the suite is not green. It still invokes three
+subcommands that no longer exist — `benchmark` (22 call sites), `select` (9),
+`discover` (5) — replaced by the `search` → `install` → `accept` workflow. Every
+assertion hanging off them is dead.
 
-**Why:** the suite has been unrunnable since June, so nothing in it is protecting anything.
-**Approach:** delete the obsolete README assertions; consider whether doc-guarding prose
-at this granularity earns its keep at all, or whether only the command examples should be
-asserted.
+**This is a product decision, not cleanup, which is why it is not done:** deleting
+those blocks bakes in "benchmarking is UI-only". The alternative is restoring CLI
+parity. Pick one before touching them.
+
+Related regressions found while unblocking the suite, all from the bash→Python port:
+- `cmd_list` in `scripts/model_manager/commands.py` prints only accepted models. The
+  bash `cmd_list` also printed Profiles / Launchers / Pending Selections / Remote
+  Cache, including a remote cache inventory over ssh. Pending selections are now
+  invisible from the CLI.
+- `MODEL_MANAGER_PY` is hardcoded (`scripts/model-manager.sh:22`), so the bash
+  `cmd_list`/`cmd_status` fallbacks are unreachable in any real checkout — dead code
+  carrying the only implementation of the features above.
+
 
 ### Warn on unknown profile fields
 Log warning when saving profile with unrecognized fields that `runtime.py` will silently ignore (e.g., typo'd `mtp_enabled` → `mtp_enable`). Prevent silent no-ops.
