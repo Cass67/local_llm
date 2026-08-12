@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC1091
 # hardware-analyzer.sh - detect system capabilities for model selection.
-# Uses lib.sh for shared utilities and logging.
 
 set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_SH_SCRIPT_DIR="$SCRIPT_DIR" source "$SCRIPT_DIR/lib.sh"
 
 get_gpu_memory() {
   if command -v rocminfo &>/dev/null; then

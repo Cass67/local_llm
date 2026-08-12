@@ -30,15 +30,6 @@ assert_not_contains() {
   fi
 }
 
-assert_line() {
-  local haystack="$1"
-  local expected_line="$2"
-  if ! grep -qxF -- "$expected_line" <<<"$haystack"; then
-    printf 'expected output to contain exact line %q\noutput was:\n%s\n' "$expected_line" "$haystack" >&2
-    return 1
-  fi
-}
-
 line_number_for() {
   local haystack="$1"
   local marker="$2"
