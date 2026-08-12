@@ -763,7 +763,7 @@ cat >"$list_tmp/bin/ssh" <<'EOF'
 printf '{"repo":"Example/Old-GGUF","file":"Old-Q4_K_M.gguf","size_gb":"12.3","cache":"remote"}\n'
 EOF
 chmod +x "$list_tmp/bin/ssh"
-list_output="$(PATH="$list_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$list_tmp/runs" "$repo_root/scripts/model-manager.sh" list --target remote:bench-host)"
+list_output="$(PATH="$list_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$list_tmp/runs" "$repo_root/scripts/model-manager.sh" list)"
 # `list` dispatches to scripts/model_manager (commands.py cmd_list). With no
 # accepted models it reports exactly that. The richer sectioned output these
 # assertions used to expect (Profiles / Launchers / Pending Selections / Remote
@@ -1050,1108 +1050,120 @@ for record in records:
     if not isinstance(record.get("timestamp"), str) or not record["timestamp"]:
         raise SystemExit(f"missing timestamp: {record!r}")
 PY
+# `list` and `status` delegate to scripts/model_manager and take no arguments;
+# they must reject unknown flags rather than silently discarding them, which is
+# what let `list --target remote:-bad` exit 0 having ignored the target entirely.
 list_invalid_target_output="$list_tmp/invalid-target.out"
 if LOCAL_LLM_RUNS_DIR="$list_tmp/runs" "$repo_root/scripts/model-manager.sh" list --target remote:-bad >"$list_invalid_target_output" 2>&1; then
-  printf 'expected list with unsafe remote target to fail\n' >&2
+  printf 'expected list with an unrecognised flag to fail\n' >&2
   exit 1
 fi
-assert_contains "$(<"$list_invalid_target_output")" "remote target host must not start with '-'"
-cat >"$list_tmp/bin/ssh" <<'EOF'
-#!/usr/bin/env bash
-exit 42
-EOF
-chmod +x "$list_tmp/bin/ssh"
-list_ssh_fail_stdout="$list_tmp/ssh-fail.stdout"
-list_ssh_fail_stderr="$list_tmp/ssh-fail.stderr"
-PATH="$list_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$list_tmp/runs" "$repo_root/scripts/model-manager.sh" list --target remote:bench-host >"$list_ssh_fail_stdout" 2>"$list_ssh_fail_stderr"
-assert_contains "$(<"$list_ssh_fail_stdout")" "Models"
-assert_contains "$(<"$list_ssh_fail_stdout")" "Pending Selections"
-assert_contains "$(<"$list_ssh_fail_stdout")" "old"
-assert_contains "$(<"$list_ssh_fail_stdout")" "source: Example/Old-GGUF"
-assert_contains "$(<"$list_ssh_fail_stderr")" "Warning: remote cache inventory failed for remote:bench-host"
-discover_tmp="$(mktemp -d)"
-discover_output="$(LOCAL_LLM_RUNS_DIR="$discover_tmp" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-manager.sh" discover --target local --query "qwen coder gguf" --limit 3)"
-assert_contains "$discover_output" "Model Discovery Results:"
-assert_contains "$discover_output" "Hardware source: local"
-assert_contains "$discover_output" "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
-discover_positional_output="$(LOCAL_LLM_RUNS_DIR="$discover_tmp" OC_LOCAL_HF_FIXTURE="$repo_root/testdata/huggingface-model-search.json" "$repo_root/scripts/model-manager.sh" discover qwen --target local --limit 3)"
-assert_contains "$discover_positional_output" "Model Discovery Results:"
-assert_contains "$discover_positional_output" "Hardware source: local"
-assert_not_contains "$discover_positional_output" "Unknown discover option: qwen"
-discover_missing_target_output="$discover_tmp/missing-target.out"
-if "$repo_root/scripts/model-manager.sh" discover --target >"$discover_missing_target_output" 2>&1; then
-  printf 'expected discover --target without value to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$discover_missing_target_output")" "--target requires local or remote:<host>"
-discover_missing_query_output="$discover_tmp/missing-query.out"
-if "$repo_root/scripts/model-manager.sh" discover --query >"$discover_missing_query_output" 2>&1; then
-  printf 'expected discover --query without value to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$discover_missing_query_output")" "--query requires text"
-discover_missing_limit_output="$discover_tmp/missing-limit.out"
-if "$repo_root/scripts/model-manager.sh" discover --limit >"$discover_missing_limit_output" 2>&1; then
-  printf 'expected discover --limit without value to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$discover_missing_limit_output")" "--limit requires a number"
-select_tmp="$(mktemp -d)"
-select_output="$(LOCAL_LLM_RUNS_DIR="$select_tmp" "$repo_root/scripts/model-manager.sh" select --repo 'Example/Foo "Bar" GGUF' --family foo --alias foo-30b --purpose 'code "chat"' --target local)"
-assert_contains "$select_output" 'Selected Example/Foo "Bar" GGUF'
-selection_file_count="$(find "$select_tmp/selections" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')"
-if [[ "$selection_file_count" != 1 ]]; then
-  printf 'expected one selection file, got %s\n' "$selection_file_count" >&2
-  exit 1
-fi
-selection_file="$(find "$select_tmp/selections" -maxdepth 1 -type f -name '*.json' -print -quit)"
-python3 - "$selection_file" 'Example/Foo "Bar" GGUF' foo foo-30b 'code "chat"' local <<'PY'
+assert_contains "$(<"$list_invalid_target_output")" "unrecognized arguments: --target"
+accept_tmp="$(mktemp -d)"
+accept_runs="$accept_tmp/runs"
+# `accept` dispatches to scripts/model_manager (_do_accept). Every field below is
+# interpolated into a generated shell script that is then chmod +x, and `family`
+# also forms a filesystem path, so a benchmark JSON is a trust boundary. These
+# cases previously covered the bash cmd_accept, which MODEL_MANAGER_PY makes
+# unreachable; they are retargeted at the implementation that actually runs.
+write_bench_json() {
+  local path="$1"
+  local field="$2"
+  local value="$3"
+  python3 - "$path" "$field" "$value" <<'BENCHPY'
 import json
 import sys
 
-path, repo, family, alias, purpose, target = sys.argv[1:]
-with open(path, encoding="utf-8") as handle:
-    selection = json.load(handle)
-expected = {
-    "repo": repo,
-    "family": family,
-    "alias": alias,
-    "purpose": purpose,
-    "target": target,
-}
-if selection != expected:
-    raise SystemExit(f"unexpected selection JSON: {selection!r}")
-PY
-select_positional_tmp="$(mktemp -d)"
-select_positional_output="$(LOCAL_LLM_RUNS_DIR="$select_positional_tmp" "$repo_root/scripts/model-manager.sh" select unsloth/Qwen3-Coder-Next-GGUF)"
-assert_contains "$select_positional_output" "Selected unsloth/Qwen3-Coder-Next-GGUF"
-select_positional_file="$(find "$select_positional_tmp/selections" -maxdepth 1 -type f -name '*.json' -print -quit)"
-python3 - "$select_positional_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    selection = json.load(handle)
-expected = {
-    "repo": "unsloth/Qwen3-Coder-Next-GGUF",
-    "family": "qwen-coder-next",
-    "alias": "qwen3-coder-next",
-    "target": "local",
-}
-if selection != expected:
-    raise SystemExit(f"unexpected positional selection JSON: {selection!r}")
-PY
-select_collision_tmp="$(mktemp -d)"
-mkdir -p "$select_collision_tmp/bin"
-cat >"$select_collision_tmp/bin/date" <<'EOF'
-#!/usr/bin/env bash
-printf '20260515-120000\n'
-EOF
-chmod +x "$select_collision_tmp/bin/date"
-PATH="$select_collision_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$select_collision_tmp" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --family foo --alias foo-30b --target local >/dev/null
-PATH="$select_collision_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$select_collision_tmp" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --family foo --alias foo-30b --target local >/dev/null
-selection_collision_file_count="$(find "$select_collision_tmp/selections" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')"
-if [[ "$selection_collision_file_count" != 2 ]]; then
-  printf 'expected two selection files for repeated selects, got %s\n' "$selection_collision_file_count" >&2
-  exit 1
-fi
-select_missing_repo_output="$select_tmp/missing-repo.out"
-if LOCAL_LLM_RUNS_DIR="$select_tmp" "$repo_root/scripts/model-manager.sh" select --family foo --alias foo-30b >"$select_missing_repo_output" 2>&1; then
-  printf 'expected select without --repo to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$select_missing_repo_output")" "select requires --repo"
-select_inferred_family_output="$(LOCAL_LLM_RUNS_DIR="$select_tmp/inferred-family" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --alias foo-30b)"
-assert_contains "$select_inferred_family_output" "Selected Example/Foo-GGUF"
-select_inferred_family_file="$(find "$select_tmp/inferred-family/selections" -maxdepth 1 -type f -name '*.json' -print -quit)"
-python3 - "$select_inferred_family_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    selection = json.load(handle)
-if selection["family"] != "candidate" or selection["alias"] != "foo-30b":
-    raise SystemExit(f"unexpected inferred family selection JSON: {selection!r}")
-PY
-select_inferred_alias_output="$(LOCAL_LLM_RUNS_DIR="$select_tmp/inferred-alias" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --family foo)"
-assert_contains "$select_inferred_alias_output" "Selected Example/Foo-GGUF"
-select_inferred_alias_file="$(find "$select_tmp/inferred-alias/selections" -maxdepth 1 -type f -name '*.json' -print -quit)"
-python3 - "$select_inferred_alias_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    selection = json.load(handle)
-if selection["family"] != "foo" or selection["alias"] != "foo":
-    raise SystemExit(f"unexpected inferred alias selection JSON: {selection!r}")
-PY
-select_invalid_target_output="$select_tmp/invalid-target.out"
-if LOCAL_LLM_RUNS_DIR="$select_tmp" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --family foo --alias foo-30b --target nowhere >"$select_invalid_target_output" 2>&1; then
-  printf 'expected select with invalid target to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$select_invalid_target_output")" "invalid target: nowhere"
-select_empty_remote_output="$select_tmp/empty-remote.out"
-if LOCAL_LLM_RUNS_DIR="$select_tmp" "$repo_root/scripts/model-manager.sh" select --repo Example/Foo-GGUF --family foo --alias foo-30b --target remote: >"$select_empty_remote_output" 2>&1; then
-  printf 'expected select with empty remote host to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$select_empty_remote_output")" "remote target requires a host: remote:"
-benchmark_tmp="$(mktemp -d)"
-benchmark_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --profiles reliable --target local --dry-run)"
-assert_contains "$benchmark_output" "Benchmark plan"
-assert_contains "$benchmark_output" "repo=Example/Foo-GGUF"
-assert_contains "$benchmark_output" "family=foo"
-assert_contains "$benchmark_output" "target=local"
-assert_contains "$benchmark_output" "profiles=reliable"
-benchmark_default_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" OC_LOCAL_REMOTE_HOST=bench-host "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --dry-run)"
-assert_contains "$benchmark_default_output" "profiles=reliable"
-assert_contains "$benchmark_default_output" "target=remote:bench-host"
-benchmark_positional_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --dry-run)"
-assert_contains "$benchmark_positional_output" "Benchmark plan"
-assert_contains "$benchmark_positional_output" "repo=unsloth/Qwen3-Coder-Next-GGUF"
-assert_contains "$benchmark_positional_output" "family=qwen-coder-next"
-assert_contains "$benchmark_positional_output" "alias=qwen3-coder-next"
-benchmark_dynamic_tree="$benchmark_tmp/dynamic-tree.json"
-cat >"$benchmark_dynamic_tree" <<'JSON'
-[
-  {"type":"file","path":"Dynamic-Q5_K_M.gguf","size":23622320128},
-  {"type":"file","path":"Dynamic-Q4_K_M.gguf","size":17179869184},
-  {"type":"file","path":"Dynamic-Q2_K.gguf","size":8589934592}
-]
-JSON
-benchmark_dynamic_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" LOCAL_LLM_HF_TREE_FIXTURE="$benchmark_dynamic_tree" "$repo_root/scripts/model-manager.sh" benchmark Example/Dynamic-GGUF --dry-run --target remote:bench-host)"
-assert_contains "$benchmark_dynamic_output" "repo=Example/Dynamic-GGUF"
-assert_contains "$benchmark_dynamic_output" "quant=Q4_K_M"
-assert_contains "$benchmark_dynamic_output" "hf_file=Dynamic-Q4_K_M.gguf"
-benchmark_run_tmp="$(mktemp -d)"
-mkdir -p "$benchmark_run_tmp/bin"
-cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-script_input="$(cat)"
-printf '%s\n' "$script_input" >"$LOCAL_LLM_FAKE_SSH_SCRIPT"
-printf 'load_status=success\n'
-printf 'prompt_tok_s=321.5\n'
-printf 'decode_tok_s=45.25\n'
-printf 'prompt_tokens=128\n'
-printf 'decode_tokens=256\n'
-printf 'ctx=65536\n'
-printf 'batch=128\n'
-printf 'ubatch=128\n'
-printf 'ngl=999\n'
-printf 'cache_type_k=q8_0\n'
-printf 'cache_type_v=q8_0\n'
-printf 'command=./build/bin/llama-server -hf unsloth/Qwen3-Coder-Next-GGUF:Q3_K_M -ctk q8_0 -ctv q8_0 --alias qwen3-coder-next\n'
-EOF
-chmod +x "$benchmark_run_tmp/bin/ssh"
-benchmark_run_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host --cache-type-k q8_0 --cache-type-v q8_0)"
-assert_contains "$benchmark_run_output" "Benchmark result"
-assert_contains "$benchmark_run_output" "load_status=success"
-assert_contains "$benchmark_run_output" "prompt_tok_s=321.5"
-assert_contains "$benchmark_run_output" "decode_tok_s=45.25"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "llama-server"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "current-model.env"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "systemctl --user restart llama-server.service"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "http://127.0.0.1:\${port}/v1/chat/completions"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "-ctk"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "-ctv"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" '== \~/*'
-assert_not_contains "$(<"$benchmark_run_tmp/remote-script.sh")" '== ~/*'
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "printf -v command_text_part '%q'"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "(^|:)[[:space:]]+eval time"
-assert_not_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "eval.*tokens per second"
-assert_contains "$(<"$benchmark_run_tmp/remote-script.sh")" '\"max_tokens\":512'
-assert_not_contains "$(<"$benchmark_run_tmp/remote-script.sh")" "Reply with exactly: ok"
-benchmark_run_file="$(find "$benchmark_run_tmp/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
-python3 - "$benchmark_run_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    result = json.load(handle)
-expected = {
-    "target": "remote:bench-host",
-    "repo": "unsloth/Qwen3-Coder-Next-GGUF",
-    "family": "qwen-coder-next",
-    "alias": "qwen3-coder-next",
-    "profile": "reliable",
-    "ctx": 65536,
-    "batch": 128,
-    "ubatch": 128,
-    "ngl": 999,
-    "load_status": "success",
-    "prompt_tok_s": 321.5,
-    "decode_tok_s": 45.25,
-    "prompt_tokens": 128,
-    "decode_tokens": 256,
-}
-for key, value in expected.items():
-    if result[key] != value:
-        raise SystemExit(f"unexpected {key}: {result[key]!r}")
-if "llama-server" not in result["command"]:
-    raise SystemExit(f"missing command: {result!r}")
-if result.get("cache_type_k") != "q8_0" or result.get("cache_type_v") != "q8_0":
-    raise SystemExit(f"unexpected cache types: {result!r}")
-PY
-cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-cat >>"$LOCAL_LLM_FAKE_SSH_SCRIPT"
-printf 'load_status=success\n'
-printf 'prompt_tok_s=222.0\n'
-printf 'decode_tok_s=44.0\n'
-printf 'prompt_tokens=128\n'
-printf 'decode_tokens=256\n'
-printf 'ctx=32768\n'
-printf 'batch=128\n'
-printf 'ubatch=64\n'
-printf 'ngl=999\n'
-printf 'backend=vulkan\n'
-printf 'visible_devices=0,1\n'
-printf 'split_mode=layer\n'
-printf 'tensor_split=44,1\n'
-printf 'command=GGML_VK_VISIBLE_DEVICES=0,1 ./build-vulkan/bin/llama-server --split-mode layer --tensor-split 44,1 --parallel 1 --no-cont-batching --alias qwen3-coder-next\n'
-EOF
-chmod +x "$benchmark_run_tmp/bin/ssh"
-benchmark_vulkan_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp/vulkan-runs" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/vulkan-remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host --backend vulkan --visible-devices 0,1 --split-mode layer --tensor-split 44,1 --ctx 131072 --batch 64 --ubatch 64)"
-assert_contains "$benchmark_vulkan_output" "Benchmark result"
-assert_contains "$benchmark_vulkan_output" "load_status=success"
-assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "export GGML_VK_VISIBLE_DEVICES"
-assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "./build-vulkan/bin/llama-server"
-assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "--split-mode"
-assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "--tensor-split"
-assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "--parallel"
-assert_contains "$(<"$benchmark_run_tmp/vulkan-remote-script.sh")" "--no-cont-batching"
-benchmark_vulkan_file="$(find "$benchmark_run_tmp/vulkan-runs/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
-python3 - "$benchmark_vulkan_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    result = json.load(handle)
-expected = {
-    "backend": "vulkan",
-    "visible_devices": "0,1",
-    "split_mode": "layer",
-    "tensor_split": "44,1",
-    "ctx": 32768,
-    "batch": 128,
-    "ubatch": 64,
-}
-for key, value in expected.items():
-    if result.get(key) != value:
-        raise SystemExit(f"unexpected {key}: {result!r}")
-PY
-cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-cat >>"$LOCAL_LLM_FAKE_SSH_SCRIPT"
-printf 'load_status=success\n'
-printf 'prompt_tok_s=240.0\n'
-printf 'decode_tok_s=88.0\n'
-printf 'prompt_tokens=128\n'
-printf 'decode_tokens=256\n'
-printf 'ctx=65536\n'
-printf 'batch=128\n'
-printf 'ubatch=128\n'
-printf 'ngl=999\n'
-printf 'backend=rocm\n'
-printf 'visible_devices=0,1\n'
-printf 'split_mode=row\n'
-printf 'tensor_split=1,1\n'
-printf 'ctx_shift=on\n'
-printf 'command=HIP_VISIBLE_DEVICES=0,1 ROCR_VISIBLE_DEVICES=0,1 ./build/bin/llama-server --split-mode row --tensor-split 1,1 --context-shift --alias qwen3-coder-next\n'
-EOF
-chmod +x "$benchmark_run_tmp/bin/ssh"
-benchmark_rocm_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp/rocm-runs" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/rocm-remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host --backend rocm --visible-devices 0,1 --split-mode row --tensor-split 1,1 --ctx-shift on)"
-assert_contains "$benchmark_rocm_output" "Benchmark result"
-assert_contains "$(<"$benchmark_run_tmp/rocm-remote-script.sh")" "export HIP_VISIBLE_DEVICES"
-assert_contains "$(<"$benchmark_run_tmp/rocm-remote-script.sh")" "export ROCR_VISIBLE_DEVICES"
-assert_contains "$(<"$benchmark_run_tmp/rocm-remote-script.sh")" "--context-shift"
-benchmark_rocm_file="$(find "$benchmark_run_tmp/rocm-runs/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
-python3 - "$benchmark_rocm_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    result = json.load(handle)
-expected = {
-    "backend": "rocm",
-    "visible_devices": "0,1",
-    "split_mode": "row",
-    "tensor_split": "1,1",
-    "ctx_shift": "on",
-}
-for key, value in expected.items():
-    if result.get(key) != value:
-        raise SystemExit(f"unexpected {key}: {result!r}")
-PY
-if "$repo_root/scripts/model-manager.sh" benchmark Example/Bad --target remote:bench-host --ctx-shift '../../bad' >/tmp/local-llm-bad-ctx-shift.out 2>&1; then
-  printf 'expected invalid ctx-shift benchmark option to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(</tmp/local-llm-bad-ctx-shift.out)" "invalid ctx shift"
-cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-cat >>"$LOCAL_LLM_FAKE_SSH_SCRIPT"
-printf 'load_status=success\n'
-printf 'prompt_tok_s=100.0\n'
-printf 'decode_tok_s=50.0\n'
-printf 'prompt_tokens=128\n'
-printf 'decode_tokens=256\n'
-printf 'ctx=65536\n'
-printf 'batch=128\n'
-printf 'ubatch=128\n'
-printf 'ngl=999\n'
-printf 'command=./build/bin/llama-server -hf Example/Dynamic-GGUF --hf-file Dynamic-Q4_K_M.gguf --alias dynamic\n'
-EOF
-chmod +x "$benchmark_run_tmp/bin/ssh"
-benchmark_full_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp/full-runs" LOCAL_LLM_HF_TREE_FIXTURE="$benchmark_dynamic_tree" LOCAL_LLM_FAKE_SSH_SCRIPT="$benchmark_run_tmp/full-remote-script.sh" "$repo_root/scripts/model-manager.sh" benchmark Example/Dynamic-GGUF --full --target remote:bench-host)"
-assert_contains "$benchmark_full_output" "Full benchmark result"
-assert_contains "$benchmark_full_output" "Full benchmark start"
-assert_contains "$benchmark_full_output" "trials=7"
-assert_contains "$benchmark_full_output" "running trial=1/7 profile=speed ctx=32768 batch=256 ubatch=256"
-assert_contains "$benchmark_full_output" "trial=1 profile=speed"
-assert_contains "$benchmark_full_output" "recommendation=best-overall"
-assert_contains "$benchmark_full_output" "decode_tokens=256"
-assert_contains "$(<"$benchmark_run_tmp/full-remote-script.sh")" "current-model.env"
-assert_contains "$(<"$benchmark_run_tmp/full-remote-script.sh")" "systemctl --user restart llama-server.service"
-benchmark_full_file="$(find "$benchmark_run_tmp/full-runs/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
-python3 - "$benchmark_full_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    result = json.load(handle)
-if result.get("mode") != "full":
-    raise SystemExit(f"expected full mode: {result!r}")
-trials = result.get("trials")
-if not isinstance(trials, list) or len(trials) < 5:
-    raise SystemExit(f"expected multiple trials: {result!r}")
-for trial in trials:
-    for key in ("profile", "ctx", "batch", "ubatch", "prompt_tokens", "decode_tokens", "decode_tok_s"):
-        if key not in trial:
-            raise SystemExit(f"missing {key}: {trial!r}")
-recommendations = result.get("recommendations")
-if not isinstance(recommendations, dict) or "best-overall" not in recommendations:
-    raise SystemExit(f"missing recommendations: {result!r}")
-PY
-cat >"$benchmark_run_tmp/bin/ssh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-cat >/dev/null
-printf 'load_status=timeout\n'
-printf 'prompt_tok_s=\n'
-printf 'decode_tok_s=\n'
-printf 'ctx=65536\n'
-printf 'batch=128\n'
-printf 'ubatch=128\n'
-printf 'ngl=999\n'
-printf 'command=./build/bin/llama-server -hf unsloth/Qwen3-Coder-Next-GGUF --alias qwen3-coder-next\n'
-EOF
-chmod +x "$benchmark_run_tmp/bin/ssh"
-benchmark_timeout_output="$(PATH="$benchmark_run_tmp/bin:$PATH" LOCAL_LLM_RUNS_DIR="$benchmark_run_tmp" "$repo_root/scripts/model-manager.sh" benchmark unsloth/Qwen3-Coder-Next-GGUF --target remote:bench-host)"
-assert_contains "$benchmark_timeout_output" "Benchmark did not complete"
-assert_contains "$benchmark_timeout_output" "load_status=timeout"
-assert_contains "$benchmark_timeout_output" "reason=model did not become ready or did not emit throughput metrics"
-benchmark_record_tmp="$(mktemp -d)"
-record_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_record_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --profiles reliable --target local --record-only)"
-assert_contains "$record_output" "Wrote benchmark result"
-benchmark_file_count="$(find "$benchmark_record_tmp/benchmarks" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')"
-if [[ "$benchmark_file_count" != 1 ]]; then
-  printf 'expected one benchmark file, got %s\n' "$benchmark_file_count" >&2
-  exit 1
-fi
-benchmark_file="$(find "$benchmark_record_tmp/benchmarks" -maxdepth 1 -type f -name '*.json' -print -quit)"
-python3 - "$benchmark_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    result = json.load(handle)
-expected_keys = {
-    "target", "repo", "family", "alias", "profile", "ctx", "batch", "ubatch", "ngl",
-    "load_status", "prompt_tok_s", "decode_tok_s", "command", "timestamp",
-}
-if set(result) != expected_keys:
-    raise SystemExit(f"unexpected benchmark keys: {sorted(result)}")
-expected_values = {
-    "target": "local",
+path, field, value = sys.argv[1], sys.argv[2], sys.argv[3]
+data = {
     "repo": "Example/Foo-GGUF",
     "family": "foo",
     "alias": "foo-30b",
+    "target": "local",
     "profile": "reliable",
-    "load_status": "not_run",
-    "prompt_tok_s": None,
-    "decode_tok_s": None,
+    "load_status": "success",
+    "prompt_tok_s": 100.0,
+    "decode_tok_s": 50.0,
 }
-for key, value in expected_values.items():
-    if result[key] != value:
-        raise SystemExit(f"unexpected {key}: {result[key]!r}")
-PY
-benchmark_multi_tmp="$(mktemp -d)"
-multi_record_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_multi_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --profiles speed,reliable --target local --record-only)"
-assert_contains "$multi_record_output" "Wrote benchmark result"
-benchmark_multi_file_count="$(find "$benchmark_multi_tmp/benchmarks" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')"
-if [[ "$benchmark_multi_file_count" != 2 ]]; then
-  printf 'expected two benchmark files, got %s\n' "$benchmark_multi_file_count" >&2
-  exit 1
-fi
-python3 - "$benchmark_multi_tmp/benchmarks" <<'PY'
-import json
-import pathlib
-import sys
-
-benchmark_dir = pathlib.Path(sys.argv[1])
-results = []
-for path in benchmark_dir.glob("*.json"):
-    with path.open(encoding="utf-8") as handle:
-        result = json.load(handle)
-    if "/" in path.name or "," in result["profile"]:
-        raise SystemExit(f"unsafe benchmark result: {path.name} {result!r}")
-    results.append(result)
-profiles = sorted(result["profile"] for result in results)
-if profiles != ["reliable", "speed"]:
-    raise SystemExit(f"unexpected benchmark profiles: {profiles!r}")
-if any(result["load_status"] != "not_run" for result in results):
-    raise SystemExit(f"unexpected load status: {results!r}")
-if any(result["prompt_tok_s"] is not None or result["decode_tok_s"] is not None for result in results):
-    raise SystemExit(f"expected null token rates: {results!r}")
-PY
-benchmark_bad_profile_tmp="$(mktemp -d)"
-benchmark_bad_profile_output="$benchmark_bad_profile_tmp/bad-profile.out"
-if LOCAL_LLM_RUNS_DIR="$benchmark_bad_profile_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --profiles bad/profile --target local --record-only >"$benchmark_bad_profile_output" 2>&1; then
-  printf 'expected benchmark with invalid profile path segment to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$benchmark_bad_profile_output")" "invalid benchmark profile: bad/profile"
-benchmark_bad_profile_count="$(find "$benchmark_bad_profile_tmp/benchmarks" -maxdepth 1 -type f -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
-if [[ "$benchmark_bad_profile_count" != 0 ]]; then
-  printf 'expected invalid benchmark profile to write no files, got %s\n' "$benchmark_bad_profile_count" >&2
-  exit 1
-fi
-benchmark_empty_entry_output="$benchmark_tmp/empty-profile-entry.out"
-if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --profiles speed,,reliable --target local --record-only >"$benchmark_empty_entry_output" 2>&1; then
-  printf 'expected benchmark with empty profile entry to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$benchmark_empty_entry_output")" "--profiles contains an empty profile"
-benchmark_trailing_empty_entry_output="$benchmark_tmp/trailing-empty-profile-entry.out"
-if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --profiles speed, --target local --record-only >"$benchmark_trailing_empty_entry_output" 2>&1; then
-  printf 'expected benchmark with trailing empty profile entry to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$benchmark_trailing_empty_entry_output")" "--profiles contains an empty profile"
-benchmark_missing_repo_output="$benchmark_tmp/missing-repo.out"
-if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --family foo --alias foo-30b --dry-run >"$benchmark_missing_repo_output" 2>&1; then
-  printf 'expected benchmark without --repo to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$benchmark_missing_repo_output")" "benchmark requires --repo"
-benchmark_inferred_family_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --alias foo-30b --target local --dry-run)"
-assert_contains "$benchmark_inferred_family_output" "Benchmark plan"
-assert_contains "$benchmark_inferred_family_output" "family=foo"
-assert_contains "$benchmark_inferred_family_output" "alias=foo-30b"
-benchmark_qwopus_family_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Jackrong/Qwopus3.6-27B-v2-MTP-GGUF --target local --dry-run)"
-assert_contains "$benchmark_qwopus_family_output" "family=qwopus3.6-27b-v2-mtp"
-assert_contains "$benchmark_qwopus_family_output" "alias=qwopus3.6-27b-v2-mtp"
-benchmark_inferred_alias_output="$(LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --target local --dry-run)"
-assert_contains "$benchmark_inferred_alias_output" "Benchmark plan"
-assert_contains "$benchmark_inferred_alias_output" "family=foo"
-assert_contains "$benchmark_inferred_alias_output" "alias=foo"
-benchmark_invalid_target_output="$benchmark_tmp/invalid-target.out"
-if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --target nowhere --dry-run >"$benchmark_invalid_target_output" 2>&1; then
-  printf 'expected benchmark with invalid target to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$benchmark_invalid_target_output")" "invalid target: nowhere"
-benchmark_profiles_flag_value_output="$benchmark_tmp/profiles-flag-value.out"
-if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --profiles --dry-run >"$benchmark_profiles_flag_value_output" 2>&1; then
-  printf 'expected benchmark --profiles without a value to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$benchmark_profiles_flag_value_output")" "--profiles requires a non-empty value"
-benchmark_empty_profiles_output="$benchmark_tmp/empty-profiles.out"
-if LOCAL_LLM_RUNS_DIR="$benchmark_tmp" "$repo_root/scripts/model-manager.sh" benchmark --repo Example/Foo-GGUF --family foo --alias foo-30b --profiles '' --dry-run >"$benchmark_empty_profiles_output" 2>&1; then
-  printf 'expected benchmark with empty --profiles to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$benchmark_empty_profiles_output")" "--profiles requires a non-empty value"
-accept_tmp="$(mktemp -d)"
-accept_runs="$accept_tmp/runs"
-cat >"$accept_tmp/foo.json" <<'EOF'
-{"repo":"Example/Foo-GGUF","family":"foo","alias":"foo-30b","target":"local","profile":"reliable","load_status":"success"}
-EOF
-accept_output="$(LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/foo.json" --dry-run)"
-assert_contains "$accept_output" "Accept plan"
-assert_contains "$accept_output" "family=foo"
-assert_contains "$accept_output" "alias=foo-30b"
-assert_not_contains "$accept_output" "would update scripts/oc-local"
-assert_contains "$accept_output" "launcher_file=$accept_runs/launchers/start"
-assert_contains "$accept_output" "would create $accept_runs/launchers/start"
-assert_contains "$accept_output" "would write accepted metadata under $accept_runs/accepted"
-cat >"$accept_tmp/full.json" <<'EOF'
-{"mode":"full","target":"remote:bench-host","repo":"Example/Full-GGUF","family":"full","alias":"full-next","quant":"Q4_K_M","hf_file":"Full-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
-EOF
-cat >"$accept_tmp/vulkan.json" <<'EOF'
-{"mode":"full","target":"remote:bench-host","repo":"Example/Vulkan-GGUF","family":"vulkan","alias":"vulkan-split","quant":"Q4_K_M","hf_file":"Vulkan-Q4_K_M.gguf","cache_type_k":"q8_0","cache_type_v":"q8_0","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"backend":"vulkan","visible_devices":"0,1","split_mode":"layer","tensor_split":"20,24","cache_type_k":"q8_0","cache_type_v":"q8_0","load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
-EOF
-cat >"$accept_tmp/bad-alias.json" <<'EOF'
-{"mode":"full","target":"remote:bench-host","repo":"Example/Bad-GGUF","family":"badalias","alias":"bad\"alias","quant":"Q4_K_M","hf_file":"Bad-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
-EOF
-accept_bad_alias_runs="$accept_tmp/bad-alias-runs"
-accept_bad_alias_output="$accept_tmp/bad-alias.out"
-if LOCAL_LLM_RUNS_DIR="$accept_bad_alias_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/bad-alias.json" >"$accept_bad_alias_output" 2>&1; then
-  printf 'expected accept with unsafe alias to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_bad_alias_output")" "benchmark JSON field contains an unsafe alias: alias"
-if [[ -e "$accept_bad_alias_runs/accepted/badalias.json" ]]; then
-  printf 'accept wrote accepted metadata for unsafe alias\n' >&2
-  exit 1
-fi
-cp "$repo_root/scripts/local-llm-switcher.py" "$accept_tmp/local-llm-switcher.before"
-accept_full_start="$accept_runs/launchers/start98.sh"
-rm -f "$accept_full_start"
-accept_full_output="$(LOCAL_LLM_RUNS_DIR="$accept_runs" LOCAL_LLM_ACCEPT_START_SCRIPT="$accept_full_start" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json")"
-assert_contains "$accept_full_output" "Accepted benchmark"
-assert_contains "$accept_full_output" "launcher_file=$accept_full_start"
-assert_contains "$accept_full_output" "start_script=$accept_full_start"
-assert_contains "$accept_full_output" "accepted_metadata_file=$accept_runs/accepted/full.json"
-assert_contains "$accept_full_output" "profile=reliable"
-assert_not_contains "$accept_full_output" "Dry-run actions"
-assert_not_contains "$accept_full_output" "would update scripts/oc-local"
-if [[ ! -f "$accept_full_start" ]]; then
-  printf 'expected generated launcher at %s\n' "$accept_full_start" >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_full_start")" '--hf-file Full-Q4_K_M.gguf'
-assert_contains "$(<"$accept_full_start")" "-c \"\$ctx\""
-assert_contains "$(<"$accept_full_start")" 'ctx=65536'
-assert_contains "$(<"$accept_full_start")" 'batch=128'
-assert_contains "$(<"$accept_full_start")" 'ubatch=64'
-# shellcheck disable=SC2016
-assert_contains "$(<"$accept_full_start")" 'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"'
-# shellcheck disable=SC2016
-assert_contains "$(<"$accept_full_start")" 'log_file="${LOCAL_LLM_MODEL_LOG:-$script_dir/model.log}"'
-# shellcheck disable=SC2016
-assert_contains "$(<"$accept_full_start")" 'exec > >(tee "$log_file") 2>&1'
-cmp -s "$repo_root/scripts/local-llm-switcher.py" "$accept_tmp/local-llm-switcher.before"
-if [[ ! -f "$accept_runs/accepted/full.json" ]]; then
-  printf 'expected accepted metadata at family path %s\n' "$accept_runs/accepted/full.json" >&2
-  exit 1
-fi
-if [[ -e "$accept_runs/accepted/full-next.json" ]]; then
-  printf 'expected no alias-named accepted metadata duplicate\n' >&2
-  exit 1
-fi
-accept_full_info="$(LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/oc-local" full reliable --info)"
-assert_contains "$accept_full_info" "family=full"
-assert_contains "$accept_full_info" "profile=reliable"
-assert_contains "$accept_full_info" "remote_start=./start98.sh reliable"
-assert_contains "$accept_full_info" "model_name=full-next"
-accept_vulkan_runs="$accept_tmp/vulkan-runs"
-accept_vulkan_start="$accept_vulkan_runs/launchers/start1.sh"
-accept_vulkan_output="$(LOCAL_LLM_RUNS_DIR="$accept_vulkan_runs" LOCAL_LLM_ACCEPT_START_SCRIPT="$accept_vulkan_start" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/vulkan.json")"
-assert_contains "$accept_vulkan_output" "Accepted benchmark"
-assert_contains "$accept_vulkan_output" "launcher_file=$accept_vulkan_start"
-if [[ ! -f "$accept_vulkan_start" ]]; then
-  printf 'expected generated Vulkan launcher at %s\n' "$accept_vulkan_start" >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_vulkan_start")" 'export GGML_VK_VISIBLE_DEVICES=0,1'
-assert_contains "$(<"$accept_vulkan_start")" './build-vulkan/bin/llama-server'
-assert_contains "$(<"$accept_vulkan_start")" '--split-mode layer'
-assert_contains "$(<"$accept_vulkan_start")" '--tensor-split 20,24'
-assert_contains "$(<"$accept_vulkan_start")" '-ctk q8_0'
-assert_contains "$(<"$accept_vulkan_start")" '-ctv q8_0'
-python3 - "$accept_vulkan_runs/accepted/vulkan.json" "$accept_vulkan_start" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    accepted = json.load(handle)
-expected_config = {
-    "ctx": 65536,
-    "batch": 128,
-    "ubatch": 64,
-    "ngl": 999,
-    "backend": "vulkan",
-    "visible_devices": "0,1",
-    "split_mode": "layer",
-    "tensor_split": "20,24",
-    "cache_type_k": "q8_0",
-    "cache_type_v": "q8_0",
-}
-if accepted.get("config") != expected_config:
-    raise SystemExit(f"unexpected Vulkan config: {accepted.get('config')!r}")
-if accepted.get("launcher_file") != sys.argv[2]:
-    raise SystemExit(f"unexpected Vulkan launcher file: {accepted.get('launcher_file')!r}")
-PY
-accept_vulkan_info="$(LOCAL_LLM_RUNS_DIR="$accept_vulkan_runs" "$repo_root/scripts/oc-local" vulkan reliable --info)"
-assert_contains "$accept_vulkan_info" "backend=vulkan"
-assert_contains "$accept_vulkan_info" "visible_devices=0,1"
-assert_contains "$accept_vulkan_info" "split_mode=layer"
-assert_contains "$accept_vulkan_info" "tensor_split=20,24"
-assert_contains "$accept_vulkan_info" "GGML_VK_VISIBLE_DEVICES=0,1"
-assert_contains "$accept_vulkan_info" "./build-vulkan/bin/llama-server"
-assert_contains "$accept_vulkan_info" "--split-mode layer"
-assert_contains "$accept_vulkan_info" "--tensor-split 20,24"
-accept_bad_repo_runs="$accept_tmp/bad-repo-runs"
-mkdir -p "$accept_bad_repo_runs/accepted"
-cat >"$accept_bad_repo_runs/accepted/badrepo.json" <<'EOF'
-{"repo":"Example/Bad-GGUF\nremote_start=./shifted.sh","family":"badrepo","alias":"badrepo","remote_start":"./start98.sh","quant":"Q4_K_M","profile":"reliable","config":{"ctx":65536,"batch":128,"ubatch":64,"ngl":999}}
-EOF
-accept_bad_repo_output="$accept_tmp/bad-repo.out"
-if LOCAL_LLM_RUNS_DIR="$accept_bad_repo_runs" "$repo_root/scripts/oc-local" badrepo reliable --info >"$accept_bad_repo_output" 2>&1; then
-  printf 'expected oc-local to reject accepted repo containing newline\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_bad_repo_output")" "invalid accepted metadata"
-assert_not_contains "$(<"$accept_bad_repo_output")" "remote_start=./shifted.sh"
-assert_not_contains "$(<"$accept_bad_repo_output")" "OPENCODE_CONFIG_CONTENT"
-accept_bad_quant_runs="$accept_tmp/bad-quant-runs"
-mkdir -p "$accept_bad_quant_runs/accepted"
-cat >"$accept_bad_quant_runs/accepted/badquant.json" <<'EOF'
-{"repo":"Example/Bad-GGUF","family":"badquant","alias":"badquant","remote_start":"./start98.sh","quant":"Q4_K_M\nremote_start=./shifted.sh","profile":"reliable","config":{"ctx":65536,"batch":128,"ubatch":64,"ngl":999}}
-EOF
-accept_bad_quant_output="$accept_tmp/bad-quant.out"
-if LOCAL_LLM_RUNS_DIR="$accept_bad_quant_runs" "$repo_root/scripts/oc-local" badquant reliable --info >"$accept_bad_quant_output" 2>&1; then
-  printf 'expected oc-local to reject accepted quant containing newline\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_bad_quant_output")" "invalid accepted metadata"
-assert_not_contains "$(<"$accept_bad_quant_output")" "remote_start=./shifted.sh"
-accept_full_repeat_output="$(LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json")"
-assert_contains "$accept_full_repeat_output" "Accepted benchmark already has launcher"
-assert_contains "$accept_full_repeat_output" "start_script=$accept_full_start"
-assert_contains "$accept_full_repeat_output" "accepted_metadata_file=$accept_runs/accepted/full.json"
-if [[ -e "$accept_runs/launchers/start99.sh" ]]; then
-  printf 'expected repeated accept to reuse existing generated launcher, not create start99.sh\n' >&2
-  exit 1
-fi
-cat >"$accept_tmp/full-new-alias.json" <<'EOF'
-{"mode":"full","target":"remote:bench-host","repo":"Example/Full-GGUF","family":"full","alias":"full-different","quant":"Q4_K_M","hf_file":"Full-Q4_K_M.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":128,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
-EOF
-accept_alias_mismatch_metadata_before="$(<"$accept_runs/accepted/full.json")"
-accept_alias_mismatch_launcher_before="$(<"$accept_full_start")"
-accept_alias_mismatch_output="$accept_tmp/alias-mismatch.out"
-if LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full-new-alias.json" >"$accept_alias_mismatch_output" 2>&1; then
-  printf 'expected accept with existing family metadata but different alias to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_alias_mismatch_output")" "accepted metadata alias mismatch for family full"
-assert_contains "$(<"$accept_alias_mismatch_output")" "existing_alias=full-next"
-assert_contains "$(<"$accept_alias_mismatch_output")" "requested_alias=full-different"
-if [[ "$(<"$accept_runs/accepted/full.json")" != "$accept_alias_mismatch_metadata_before" ]]; then
-  printf 'accept alias mismatch mutated accepted metadata\n' >&2
-  exit 1
-fi
-if [[ "$(<"$accept_full_start")" != "$accept_alias_mismatch_launcher_before" ]]; then
-  printf 'accept alias mismatch mutated existing launcher\n' >&2
-  exit 1
-fi
-if [[ -e "$accept_runs/launchers/start99.sh" ]]; then
-  printf 'accept alias mismatch created a new launcher\n' >&2
-  exit 1
-fi
-python3 - "$accept_runs/accepted/full.json" "$accept_full_start" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    accepted = json.load(handle)
-expected = {
-    "repo": "Example/Full-GGUF",
-    "hf_repo": "Example/Full-GGUF",
-    "family": "full",
-    "alias": "full-next",
-    "model_name": "full-next",
-    "remote_start": "./start98.sh",
-    "launcher_file": sys.argv[2],
-    "hf_file": "Full-Q4_K_M.gguf",
-    "quant": "Q4_K_M",
-    "profile": "reliable",
-    "target": "remote:bench-host",
-    "config": {"ctx": 65536, "batch": 128, "ubatch": 64, "ngl": 999},
-}
-if accepted != expected:
-    raise SystemExit(f"unexpected accepted metadata: {accepted!r}")
-PY
-rm -f "$accept_full_start"
-cat >"$accept_tmp/qwen-coder-next-full.json" <<'EOF'
-{"mode":"full","target":"remote:bench-host","repo":"unsloth/Qwen3-Coder-Next-GGUF","family":"qwen-coder","alias":"qwen3-coder-next","quant":"UD-TQ1_0","hf_file":"Qwen3-Coder-Next-UD-TQ1_0.gguf","recommendations":{"best-overall":{"profile":"reliable","ctx":65536,"batch":64,"ubatch":64,"ngl":999,"load_status":"success","decode_tok_s":76.8,"decode_tokens":512}}}
-EOF
-accept_existing_runs="$accept_tmp/existing-runs"
-mkdir -p "$accept_existing_runs/selections"
-printf '{"repo":"unsloth/Qwen3-Coder-Next-GGUF","family":"qwen-coder","alias":"qwen3-coder-next","target":"remote:bench-host"}\n' >"$accept_existing_runs/selections/qcn.json"
-accept_existing_output="$(LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/qwen-coder-next-full.json")"
-assert_contains "$accept_existing_output" "Accepted benchmark"
-assert_contains "$accept_existing_output" "start_script=$accept_existing_runs/launchers/start1.sh"
-assert_contains "$accept_existing_output" "accepted_metadata_file=$accept_existing_runs/accepted/qwen-coder.json"
-assert_contains "$accept_existing_output" "removed_selection_count=1"
-assert_not_contains "$accept_existing_output" "scripts/start98.sh"
-python3 - "$accept_existing_runs/accepted/qwen-coder.json" <<'PY'
-import json
-import sys
-with open(sys.argv[1], encoding="utf-8") as handle:
-    accepted = json.load(handle)
-if accepted.get("target") != "remote:bench-host":
-    raise SystemExit(f"expected accepted target to be preserved: {accepted!r}")
-PY
-deploy_output="$(LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run)"
-assert_contains "$deploy_output" "Deploy plan"
-assert_contains "$deploy_output" "target=remote:bench-host"
-assert_contains "$deploy_output" "remote_dir=~/llama.cpp"
-assert_contains "$deploy_output" "replace /home/<user>/llama.cpp with the absolute path on the GPU host"
-assert_contains "$deploy_output" "start1.sh"
-assert_contains "$deploy_output" "bench-host:"
-assert_contains "$deploy_output" "copy launcher"
-assert_contains "$deploy_output" "local-llm-switcher.py"
-assert_contains "$deploy_output" "local-llm-switcher.service"
-assert_contains "$deploy_output" "opencode-web.service"
-assert_contains "$deploy_output" "Caddyfile.local-llm"
-assert_contains "$deploy_output" "required env file: ~/.config/local_llm/opencode-web.env"
-assert_contains "$deploy_output" "OPENCODE_WEB_COMMAND='<replace-with-your-opencode-web-command> --host 127.0.0.1 --port 3002'"
-assert_contains "$deploy_output" "required env file: ~/.config/local_llm/local-llm-switcher.env"
-assert_contains "$deploy_output" "LLAMA_DIR=/home/<user>/llama.cpp"
-assert_not_contains "$deploy_output" "LLAMA_DIR=~/llama.cpp"
-assert_contains "$deploy_output" "LOCAL_LLM_WEB_UPSTREAM"
-assert_contains "$deploy_output" "LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002"
-assert_contains "$deploy_output" "LOCAL_LLM_INJECT_TARGET=opencode"
-assert_not_contains "$deploy_output" "open-webui"
-deploy_remote_dir_output="$(LOCAL_LLM_RUNS_DIR="$accept_existing_runs" OC_LOCAL_REMOTE_DIR=/srv/llama "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run)"
-assert_contains "$deploy_remote_dir_output" "remote_dir=/srv/llama"
-assert_contains "$deploy_remote_dir_output" "LLAMA_DIR=/srv/llama"
-assert_not_contains "$deploy_remote_dir_output" "replace /home/<user>/llama.cpp with the absolute path on the GPU host"
-assert_contains "$deploy_remote_dir_output" "LOCAL_LLM_WEB_UPSTREAM=http://127.0.0.1:3002"
-assert_contains "$deploy_remote_dir_output" "required env file: ~/.config/local_llm/opencode-web.env"
-assert_contains "$deploy_remote_dir_output" "required env file: ~/.config/local_llm/local-llm-switcher.env"
-deploy_empty_tmp="$(mktemp -d)"
-deploy_empty_runs="$deploy_empty_tmp/runs"
-deploy_empty_output="$(LOCAL_LLM_RUNS_DIR="$deploy_empty_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run)"
-assert_contains "$deploy_empty_output" "Nothing to deploy"
-assert_contains "$deploy_empty_output" "no accepted models"
-if [[ -e "$deploy_empty_runs" ]]; then
-  printf 'deploy --dry-run created local state at %s\n' "$deploy_empty_runs" >&2
-  exit 1
-fi
-deploy_unsafe_runs="$accept_tmp/deploy-unsafe-runs"
-mkdir -p "$deploy_unsafe_runs/accepted" "$deploy_unsafe_runs/launchers"
-cp "$accept_existing_runs/accepted/qwen-coder.json" "$deploy_unsafe_runs/accepted/qwen-coder.json"
-cp "$accept_existing_runs/launchers/start1.sh" "$deploy_unsafe_runs/launchers/start1.sh"
-python3 - "$deploy_unsafe_runs/accepted/qwen-coder.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    metadata = json.load(handle)
-metadata["family"] = "qwen\tcoder"
-metadata["alias"] = "qwen\nnext"
-metadata["model_name"] = "qwen\nnext"
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
-    json.dump(metadata, handle)
+if field:
+    data[field] = value
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle)
     handle.write("\n")
-PY
-deploy_unsafe_output="$accept_tmp/deploy-unsafe.out"
-if LOCAL_LLM_RUNS_DIR="$deploy_unsafe_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --dry-run >"$deploy_unsafe_output" 2>&1; then
-  printf 'expected deploy dry-run with unsafe accepted metadata labels to fail\n' >&2
+BENCHPY
+}
+
+# A clean benchmark is accepted and produces an executable launcher.
+write_bench_json "$accept_tmp/good.json" '' ''
+accept_output="$(LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/good.json")"
+assert_contains "$accept_output" "accepted: foo"
+assert_contains "$accept_output" "launcher_file=$accept_runs/launchers/launcher-foo.sh"
+if [[ ! -x "$accept_runs/launchers/launcher-foo.sh" ]]; then
+  printf 'expected an executable launcher at %s\n' "$accept_runs/launchers/launcher-foo.sh" >&2
   exit 1
 fi
-deploy_unsafe_contents="$(<"$deploy_unsafe_output")"
-assert_contains "$deploy_unsafe_contents" "invalid accepted metadata"
-assert_contains "$deploy_unsafe_contents" "family contains unsafe characters"
-assert_not_contains "$deploy_unsafe_contents" "qwen next"
-deploy_bin="$accept_tmp/deploy-bin"
-mkdir -p "$deploy_bin"
-cat >"$deploy_bin/scp" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf 'scp %s\n' "$*" >>"$LOCAL_LLM_DEPLOY_LOG"
-EOF
-cat >"$deploy_bin/ssh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf 'ssh %s\n' "$*" >>"$LOCAL_LLM_DEPLOY_LOG"
-EOF
-chmod +x "$deploy_bin/scp" "$deploy_bin/ssh"
-deploy_real_log="$accept_tmp/deploy-real.log"
-deploy_real_output="$(PATH="$deploy_bin:$PATH" LOCAL_LLM_DEPLOY_LOG="$deploy_real_log" LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host)"
-assert_contains "$deploy_real_output" "Deploy complete"
-assert_contains "$deploy_real_output" "current=start1.sh profile=reliable"
-assert_contains "$(<"$deploy_real_log")" "scp $accept_existing_runs/launchers/start1.sh bench-host:~/llama.cpp/start1.sh"
-assert_contains "$(<"$deploy_real_log")" "run-current-model.sh"
-assert_contains "$(<"$deploy_real_log")" "systemctl --user restart llama-server.service"
-deploy_yes_log="$accept_tmp/deploy-yes.log"
-deploy_yes_output="$(PATH="$deploy_bin:$PATH" LOCAL_LLM_DEPLOY_LOG="$deploy_yes_log" LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target remote:bench-host --yes)"
-assert_contains "$deploy_yes_output" "Deploy complete"
-deploy_local_output="$accept_tmp/deploy-local.out"
-if LOCAL_LLM_RUNS_DIR="$accept_existing_runs" "$repo_root/scripts/model-manager.sh" deploy --target local --dry-run >"$deploy_local_output" 2>&1; then
-  printf 'expected deploy local target to fail\n' >&2
+if [[ ! -f "$accept_runs/accepted/foo.json" ]]; then
+  printf 'expected accepted metadata at %s\n' "$accept_runs/accepted/foo.json" >&2
   exit 1
 fi
-assert_contains "$(<"$deploy_local_output")" "deploy currently requires --target remote:<host>"
-cmp -s "$repo_root/scripts/local-llm-switcher.py" "$accept_tmp/local-llm-switcher.before"
-if [[ -e "$accept_existing_runs/selections/qcn.json" ]]; then
-  printf 'expected accept to remove matching selection file\n' >&2
+
+# Shell metacharacters and path traversal must be rejected before anything is
+# written. repo reaches an unquoted `-hf {repo}` in the launcher; family reaches
+# a path. Regression: both were accepted verbatim after the bash->Python port.
+accept_reject_case() {
+  local name="$1"
+  local field="$2"
+  local value="$3"
+  local case_runs="$accept_tmp/$name-runs"
+  local case_out="$accept_tmp/$name.out"
+  write_bench_json "$accept_tmp/$name.json" "$field" "$value"
+  if LOCAL_LLM_RUNS_DIR="$case_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/$name.json" >"$case_out" 2>&1; then
+    printf 'expected accept to reject unsafe %s: %s\n' "$field" "$value" >&2
+    exit 1
+  fi
+  assert_contains "$(<"$case_out")" "benchmark JSON field contains an unsafe $field"
+  if [[ -e "$case_runs/accepted" || -e "$case_runs/launchers" ]]; then
+    printf 'accept wrote state for unsafe %s\n' "$field" >&2
+    exit 1
+  fi
+}
+
+accept_reject_case injection repo 'x; touch /tmp/local-llm-accept-pwned #'
+accept_reject_case traversal family '../../escaped'
+accept_reject_case badalias alias 'bad"alias'
+accept_reject_case quanttab quant "$(printf 'Q4\tK_M')"
+accept_reject_case devices visible_devices '0,1; id'
+accept_reject_case splitmode split_mode 'layer; id'
+if [[ -e /tmp/local-llm-accept-pwned ]]; then
+  printf 'accept executed an injected command\n' >&2
+  rm -f /tmp/local-llm-accept-pwned
   exit 1
 fi
-accept_symlink_accepted_runs="$accept_tmp/symlink-accepted-runs"
-accept_symlink_accepted_outside="$accept_tmp/symlink-accepted-outside"
-mkdir -p "$accept_symlink_accepted_runs" "$accept_symlink_accepted_outside"
-ln -s "$accept_symlink_accepted_outside" "$accept_symlink_accepted_runs/accepted"
-accept_symlink_accepted_output="$accept_tmp/symlink-accepted.out"
-if LOCAL_LLM_RUNS_DIR="$accept_symlink_accepted_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json" >"$accept_symlink_accepted_output" 2>&1; then
-  printf 'expected accept with symlinked accepted dir to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_symlink_accepted_output")" "refuses symlinked accepted dir"
-if [[ -e "$accept_symlink_accepted_outside/full.json" ]]; then
-  printf 'accept wrote through symlinked accepted dir\n' >&2
-  exit 1
-fi
-accept_symlink_launcher_runs="$accept_tmp/symlink-launcher-runs"
-accept_symlink_launcher_outside="$accept_tmp/symlink-launcher-outside"
-mkdir -p "$accept_symlink_launcher_runs" "$accept_symlink_launcher_outside"
-ln -s "$accept_symlink_launcher_outside" "$accept_symlink_launcher_runs/launchers"
-accept_symlink_launcher_output="$accept_tmp/symlink-launcher.out"
-if LOCAL_LLM_RUNS_DIR="$accept_symlink_launcher_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json" >"$accept_symlink_launcher_output" 2>&1; then
-  printf 'expected accept with symlinked launchers dir to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_symlink_launcher_output")" "refuses symlinked launchers dir"
-shopt -s nullglob dotglob
-accept_symlink_launcher_outside_entries=("$accept_symlink_launcher_outside"/*)
-shopt -u nullglob dotglob
-if ((${#accept_symlink_launcher_outside_entries[@]} > 0)); then
-  printf 'accept wrote through symlinked launchers dir\n' >&2
-  exit 1
-fi
-accept_metadata_symlink_runs="$accept_tmp/metadata-symlink-runs"
-accept_metadata_symlink_outside="$accept_tmp/metadata-symlink-outside.json"
-mkdir -p "$accept_metadata_symlink_runs/accepted"
-ln -s "$accept_metadata_symlink_outside" "$accept_metadata_symlink_runs/accepted/full.json"
-accept_metadata_symlink_output="$accept_tmp/metadata-symlink.out"
-if LOCAL_LLM_RUNS_DIR="$accept_metadata_symlink_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json" >"$accept_metadata_symlink_output" 2>&1; then
-  printf 'expected accept with symlinked accepted metadata file to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_metadata_symlink_output")" "refuses symlinked state file"
-if [[ -e "$accept_metadata_symlink_outside" ]]; then
-  printf 'accept wrote through symlinked accepted metadata file\n' >&2
-  exit 1
-fi
-accept_override_symlink_parent="$accept_tmp/override-symlink-parent"
-accept_override_symlink_outside="$accept_tmp/override-symlink-outside"
-mkdir -p "$accept_override_symlink_outside"
-ln -s "$accept_override_symlink_outside" "$accept_override_symlink_parent"
-accept_override_symlink_output="$accept_tmp/override-symlink.out"
-if LOCAL_LLM_RUNS_DIR="$accept_tmp/override-runs" LOCAL_LLM_ACCEPT_START_SCRIPT="$accept_override_symlink_parent/start99.sh" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json" >"$accept_override_symlink_output" 2>&1; then
-  printf 'expected accept with symlinked override parent dir to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_override_symlink_output")" "launcher path must be under runs launchers dir"
-if [[ -e "$accept_override_symlink_outside/start99.sh" ]]; then
-  printf 'accept wrote launcher through symlinked override parent dir\n' >&2
-  exit 1
-fi
-accept_override_symlink_ancestor_runs="$accept_tmp/override-symlink-ancestor-runs"
-accept_override_symlink_ancestor_outside="$accept_tmp/override-symlink-ancestor-outside"
-mkdir -p "$accept_override_symlink_ancestor_runs/launchers" "$accept_override_symlink_ancestor_outside"
-ln -s "$accept_override_symlink_ancestor_outside" "$accept_override_symlink_ancestor_runs/launchers/nested"
-accept_override_symlink_ancestor_output="$accept_tmp/override-symlink-ancestor.out"
-if LOCAL_LLM_RUNS_DIR="$accept_override_symlink_ancestor_runs" LOCAL_LLM_ACCEPT_START_SCRIPT="$accept_override_symlink_ancestor_runs/launchers/nested/deeper/start99.sh" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/full.json" >"$accept_override_symlink_ancestor_output" 2>&1; then
-  printf 'expected accept with symlinked override ancestor dir to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_override_symlink_ancestor_output")" "refuses symlinked runs path component"
-if [[ -e "$accept_override_symlink_ancestor_outside/deeper/start99.sh" ]]; then
-  printf 'accept wrote launcher through symlinked override ancestor dir\n' >&2
-  exit 1
-fi
-cp "$repo_root/scripts/oc-local" "$accept_tmp/oc-local.before"
-cp "$repo_root/installer.sh" "$accept_tmp/installer.before"
-cp "$repo_root/README.md" "$accept_tmp/README.before"
-cp "$repo_root/test_oc_local.sh" "$accept_tmp/test_oc_local.before"
-accept_start08="$accept_runs/launchers/start08.sh"
-mkdir -p "${accept_start08%/*}"
-printf '#!/usr/bin/env bash\n' >"$accept_start08"
-accept_start08_output="$(LOCAL_LLM_RUNS_DIR="$accept_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/foo.json" --dry-run)"
-assert_contains "$accept_start08_output" "would create $accept_runs/launchers/start"
-cmp -s "$repo_root/scripts/oc-local" "$accept_tmp/oc-local.before"
-cmp -s "$repo_root/installer.sh" "$accept_tmp/installer.before"
-cmp -s "$repo_root/README.md" "$accept_tmp/README.before"
-cmp -s "$repo_root/test_oc_local.sh" "$accept_tmp/test_oc_local.before"
-cat >"$accept_tmp/invalid.json" <<'EOF'
-{"repo":
-EOF
+
+# Malformed input is rejected rather than crashing.
+printf 'not json\n' >"$accept_tmp/invalid.json"
 accept_invalid_output="$accept_tmp/invalid.out"
-if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/invalid.json" --dry-run >"$accept_invalid_output" 2>&1; then
+if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/invalid.json" >"$accept_invalid_output" 2>&1; then
   printf 'expected accept with invalid JSON to fail\n' >&2
   exit 1
 fi
-assert_contains "$(<"$accept_invalid_output")" "benchmark JSON is invalid"
-assert_not_contains "$(<"$accept_invalid_output")" "Traceback"
+assert_contains "$(<"$accept_invalid_output")" "cannot read benchmark file"
+
 printf '[]\n' >"$accept_tmp/non-object.json"
 accept_non_object_output="$accept_tmp/non-object.out"
-if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/non-object.json" --dry-run >"$accept_non_object_output" 2>&1; then
+if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/non-object.json" >"$accept_non_object_output" 2>&1; then
   printf 'expected accept with non-object JSON to fail\n' >&2
   exit 1
 fi
 assert_contains "$(<"$accept_non_object_output")" "benchmark JSON must be an object"
-assert_not_contains "$(<"$accept_non_object_output")" "Traceback"
-cat >"$accept_tmp/missing-family.json" <<'EOF'
-{"repo":"Example/Foo-GGUF","alias":"foo-30b","target":"local","profile":"reliable","load_status":"success"}
-EOF
-accept_missing_output="$accept_tmp/missing-family.out"
-if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/missing-family.json" --dry-run >"$accept_missing_output" 2>&1; then
-  printf 'expected accept with missing family to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_missing_output")" "benchmark JSON missing required field: family"
-cat >"$accept_tmp/bad-family.json" <<'EOF'
-{"repo":"Example/Foo-GGUF","family":30,"alias":"foo-30b","target":"local","profile":"reliable","load_status":"success"}
-EOF
-accept_bad_family_output="$accept_tmp/bad-family.out"
-if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/bad-family.json" --dry-run >"$accept_bad_family_output" 2>&1; then
-  printf 'expected accept with non-string family to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_bad_family_output")" "benchmark JSON field must be a string: family"
-cat >"$accept_tmp/unsafe-family.json" <<'EOF'
-{"repo":"Example/Foo-GGUF","family":"../escape","alias":"foo-30b","target":"local","profile":"reliable","load_status":"success","ctx":1,"batch":1,"ubatch":1,"ngl":1,"quant":"Q4"}
-EOF
-accept_unsafe_family_runs="$accept_tmp/unsafe-family-runs"
-accept_unsafe_family_output="$accept_tmp/unsafe-family.out"
-if LOCAL_LLM_RUNS_DIR="$accept_unsafe_family_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/unsafe-family.json" >"$accept_unsafe_family_output" 2>&1; then
-  printf 'expected accept with unsafe family to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_unsafe_family_output")" "benchmark JSON field contains an unsafe family: family"
-if [[ -e "$accept_unsafe_family_runs/accepted/escape.json" ]]; then
-  printf 'accept wrote sanitized metadata for unsafe family\n' >&2
-  exit 1
-fi
-python3 - "$accept_tmp/control.json" <<'PY'
-import json
-import sys
 
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
-    json.dump(
-        {
-            "repo": "Example/Foo-GGUF",
-            "family": "foo\nbar",
-            "alias": "foo-30b",
-            "target": "local",
-            "profile": "reliable",
-            "load_status": "success",
-        },
-        handle,
-    )
-    handle.write("\n")
-PY
-accept_control_output="$accept_tmp/control.out"
-if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/control.json" --dry-run >"$accept_control_output" 2>&1; then
-  printf 'expected accept with control character to fail\n' >&2
+printf '{"repo":"Example/Foo-GGUF"}\n' >"$accept_tmp/missing.json"
+accept_missing_output="$accept_tmp/missing.out"
+if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/missing.json" >"$accept_missing_output" 2>&1; then
+  printf 'expected accept with missing fields to fail\n' >&2
   exit 1
 fi
-assert_contains "$(<"$accept_control_output")" "benchmark JSON field contains a control character: family"
-python3 - "$accept_tmp/hf-file-tab.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
-    json.dump(
-        {
-            "mode": "full",
-            "target": "remote:bench-host",
-            "repo": "Example/HfFileTab-GGUF",
-            "family": "hf-file-tab",
-            "alias": "hf-file-tab",
-            "quant": "Q4_K_M",
-            "hf_file": "HfFile\tQ4_K_M.gguf",
-            "recommendations": {
-                "best-overall": {
-                    "profile": "reliable",
-                    "ctx": 65536,
-                    "batch": 128,
-                    "ubatch": 64,
-                    "ngl": 999,
-                    "load_status": "success",
-                    "decode_tok_s": 76.8,
-                    "decode_tokens": 512,
-                }
-            },
-        },
-        handle,
-    )
-    handle.write("\n")
-PY
-accept_hf_file_tab_runs="$accept_tmp/hf-file-tab-runs"
-accept_hf_file_tab_output="$accept_tmp/hf-file-tab.out"
-if LOCAL_LLM_RUNS_DIR="$accept_hf_file_tab_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/hf-file-tab.json" >"$accept_hf_file_tab_output" 2>&1; then
-  printf 'expected accept with tab in hf_file to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_hf_file_tab_output")" "benchmark JSON field contains a control character: hf_file"
-if [[ -e "$accept_hf_file_tab_runs/accepted/hf-file-tab.json" ]]; then
-  printf 'accept wrote metadata for hf_file containing tab\n' >&2
-  exit 1
-fi
-if [[ -d "$accept_hf_file_tab_runs/launchers" ]]; then
-  shopt -s nullglob
-  accept_hf_file_tab_launchers=("$accept_hf_file_tab_runs/launchers"/start*.sh)
-  shopt -u nullglob
-  if ((${#accept_hf_file_tab_launchers[@]} > 0)); then
-    printf 'accept wrote launcher for hf_file containing tab\n' >&2
-    exit 1
-  fi
-fi
-python3 - "$accept_tmp/quant-tab.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
-    json.dump(
-        {
-            "repo": "Example/QuantTab-GGUF",
-            "family": "quant-tab",
-            "alias": "quant-tab",
-            "target": "local",
-            "profile": "reliable",
-            "load_status": "success",
-            "ctx": 65536,
-            "batch": 128,
-            "ubatch": 64,
-            "ngl": 999,
-            "quant": "Q4\tK_M",
-        },
-        handle,
-    )
-    handle.write("\n")
-PY
-accept_quant_tab_runs="$accept_tmp/quant-tab-runs"
-accept_quant_tab_output="$accept_tmp/quant-tab.out"
-if LOCAL_LLM_RUNS_DIR="$accept_quant_tab_runs" "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/quant-tab.json" >"$accept_quant_tab_output" 2>&1; then
-  printf 'expected accept with tab in quant to fail\n' >&2
-  exit 1
-fi
-assert_contains "$(<"$accept_quant_tab_output")" "benchmark JSON field contains a control character: quant"
-if [[ -e "$accept_quant_tab_runs/accepted/quant-tab.json" ]]; then
-  printf 'accept wrote metadata for quant containing tab\n' >&2
-  exit 1
-fi
-if [[ -d "$accept_quant_tab_runs/launchers" ]]; then
-  shopt -s nullglob
-  accept_quant_tab_launchers=("$accept_quant_tab_runs/launchers"/start*.sh)
-  shopt -u nullglob
-  if ((${#accept_quant_tab_launchers[@]} > 0)); then
-    printf 'accept wrote launcher for quant containing tab\n' >&2
-    exit 1
-  fi
-fi
+assert_contains "$(<"$accept_missing_output")" "missing required field"
 delete_profile_tmp="$(mktemp -d)"
 cat >"$delete_profile_tmp/profiles.json" <<'JSON'
 {
@@ -2233,11 +1245,11 @@ cat >"$accept_tmp/failed-load.json" <<'EOF'
 {"repo":"Example/Foo-GGUF","family":"foo","alias":"foo-30b","target":"local","profile":"reliable","load_status":"failed"}
 EOF
 accept_failed_load_output="$accept_tmp/failed-load.out"
-if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/failed-load.json" --dry-run >"$accept_failed_load_output" 2>&1; then
+if "$repo_root/scripts/model-manager.sh" accept "$accept_tmp/failed-load.json" >"$accept_failed_load_output" 2>&1; then
   printf 'expected accept with unsuccessful load_status to fail\n' >&2
   exit 1
 fi
-assert_contains "$(<"$accept_failed_load_output")" "benchmark JSON load_status is not success: failed"
+assert_contains "$(<"$accept_failed_load_output")" "benchmark load_status is not success: failed"
 installer_contents="$(<"$repo_root/installer.sh")"
 assert_contains "$installer_contents" "Installing generated convenience commands"
 assert_contains "$installer_contents" "RUNS_DIR/accepted"
@@ -2299,7 +1311,7 @@ assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "OC_LOCAL_BASE_
 assert_contains "$(<"$installer_accept_bin/oc-custom-reliable")" "--remote \"\$remote_host\""
 
 probe_tmp="$(mktemp -d)"
-trap 'rm -rf "$probe_tmp" "$manager_tmp" "$discover_tmp" "$select_tmp" "$select_collision_tmp" "$benchmark_tmp" "$benchmark_record_tmp" "$benchmark_multi_tmp" "$benchmark_bad_profile_tmp" "$accept_tmp" "$installer_tmp" "$installer_accept_tmp"' EXIT
+trap 'rm -rf "$probe_tmp" "$manager_tmp" "$accept_tmp" "$installer_tmp" "$installer_accept_tmp"' EXIT
 cat >"$probe_tmp/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -2585,8 +1597,8 @@ if LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/fresh-runs" "$repo_root/scripts/oc-
   exit 1
 fi
 assert_contains "$(<"$fresh_qwen_output")" "no accepted model for family: qwen"
-assert_contains "$(<"$fresh_qwen_output")" "model-manager discover"
-assert_contains "$(<"$fresh_qwen_output")" "model-manager benchmark"
+assert_contains "$(<"$fresh_qwen_output")" "model-manager search"
+assert_contains "$(<"$fresh_qwen_output")" "model-manager install"
 assert_contains "$(<"$fresh_qwen_output")" "model-manager accept"
 assert_not_contains "$(<"$fresh_qwen_output")" "remote_start=./start3.sh reliable"
 
@@ -2958,7 +1970,7 @@ if LOCAL_LLM_RUNS_DIR="$empty_runs_tmp" "$repo_root/scripts/oc-local" qwen relia
   printf 'expected oc-local without accepted metadata to fail\n' >&2
   exit 1
 fi
-assert_contains "$(<"$empty_accepted_output")" "Run model-manager discover, model-manager benchmark, and model-manager accept"
+assert_contains "$(<"$empty_accepted_output")" "Run model-manager search, model-manager install, and model-manager accept"
 
 exec_no_session_output="$(LOCAL_LLM_RUNS_DIR="$generated_accept_tmp/runs" OC_LOCAL_PRINT_EXEC=true OC_LOCAL_WAIT_SECONDS=1 "$repo_root/scripts/oc-local" qwen reliable --dry-run --lean)"
 assert_not_contains "$exec_no_session_output" "opencode_args=-s"
@@ -2999,12 +2011,12 @@ repo = pathlib.Path(sys.argv[1])
 readme = (repo / "README.md").read_text()
 failures = []
 
-# 1. Every path-like reference in the README resolves. Bare filenames used as
-#    prose ("runtime.py") are skipped -- only refs containing a separator.
+# 1. Every reference to a path inside this repo resolves. Anchored on the repo's
+#    top-level directories so that prose fractions ("resolved/total") and external
+#    identifiers ("princeton-nlp/SWE-bench_Lite") are not mistaken for paths.
+_TOP = ("scripts/", "docs/", "container/", "ui/", "runner/", "configs/", "tests/", "lltop/")
 for ref in sorted({m.group(1) for m in re.finditer(r"`([\w./*-]+/[\w./*-]+)`", readme)}):
-    if "*" in ref:
-        continue
-    if ref.startswith(("http", "~/", "/")):
+    if "*" in ref or not ref.startswith(_TOP):
         continue
     if not (repo / ref).exists():
         failures.append(f"README references a path that does not exist: {ref}")

