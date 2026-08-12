@@ -164,6 +164,12 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         args.extend(["--prio", str(cfg["prio"])])
     if cfg.get("no_warmup"):
         args.append("--no-warmup")
+    # Off by default upstream, so main-path sampling reads a full logits vector back
+    # to the host every token — costly on a 262k-vocab model. The backend declines
+    # ops it lacks (ROCm has no TOP_K) and falls back per sampler, so enabling it is
+    # safe but only pays off for chains the device can actually run.
+    if cfg.get("backend_sampling"):
+        args.append("--backend-sampling")
 
     # spec_type is a comma-separated list: draft-mtp / draft-dflash (need -md and
     # --spec-draft-n-*) and/or ngram-mod (needs no draft model, works on any model).
