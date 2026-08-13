@@ -432,6 +432,9 @@ export interface GpuEngineSample {
 	vram_bytes: number;
 	vram_human: string;
 	clients: number;
+	vendor?: string;
+	model_name?: string;
+	board?: string;
 }
 
 export interface GpuRunnerStatus {
@@ -452,6 +455,9 @@ export interface GpuRunnerStatus {
 
 export interface GpuDeviceMetrics {
 	pci_id: string;
+	vendor?: string;
+	model_name?: string;
+	board?: string;
 	gpu_busy_percent: number | null;
 	mem_busy_percent: number | null;
 	vram_used: number | null;
