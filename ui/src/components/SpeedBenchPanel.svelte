@@ -185,7 +185,8 @@
 	{#if table.length > 0 && status?.report}
 		<div class="muted">
 			{status.report.cluster_name} · {status.report.model} · {fmtDate(status.report.ts)}
-			{#if status.report.cancelled}<span class="behind"> · stopped early</span>{/if}
+			{#if status.report.cancelled}<span class="behind"> · stopped early</span>
+			{:else if status.report.in_progress && !status.running}<span class="behind"> · interrupted, partial</span>{/if}
 		</div>
 		<table>
 			<thead><tr><th>Category</th><th>n</th><th>Accept %</th><th>Draft cover %</th><th>tok/s</th></tr></thead>
