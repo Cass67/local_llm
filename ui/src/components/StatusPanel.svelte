@@ -54,9 +54,14 @@
 	// stats card behind it only sees requests proxied by mgmt, so it sits frozen
 	// through a sweep; prefer whichever runner is generating right now.
 	let liveTps = $derived.by(() => {
-		const busy = (gpuStatus?.runners ?? []).filter((r) => r.tg_tok_s != null && r.processing);
-		if (busy.length === 0) return null;
-		return busy.reduce((best, r) => (r.tg_tok_s! > (best.tg_tok_s ?? 0) ? r : best), busy[0]);
+		const rated = (gpuStatus?.runners ?? []).filter((r) => r.tg_tok_s != null);
+		if (rated.length === 0) return null;
+		// A runner that is generating right now outranks one holding a stale figure;
+		// among equals, the most recently measured wins.
+		return rated.reduce((best, r) => {
+			if (!!r.processing !== !!best.processing) return r.processing ? r : best;
+			return (r.tok_s_age ?? 0) < (best.tok_s_age ?? 0) ? r : best;
+		}, rated[0]);
 	});
 
 	// Pooled over tokens, not averaged over requests: a request that drafted two
@@ -216,7 +221,7 @@
 			<div class="status-card">
 				<span>Tok/s</span>
 				{#if liveTps}
-					<strong>{liveTps.tg_tok_s?.toFixed(1)}</strong><small class="stat-live">live · {liveTps.cluster_name}</small>
+					<strong>{liveTps.tg_tok_s?.toFixed(1)}</strong><small class="stat-live">{liveTps.processing ? "generating" : "runner"} · {liveTps.cluster_name}</small>
 				{:else}
 					<strong>{stats.predicted_per_second ? stats.predicted_per_second.toFixed(1) : "-"}</strong>{#if stats.ts}<small class="stat-age">{statsAge(stats.ts)}</small>{/if}
 				{/if}
@@ -381,6 +386,8 @@
 								{/if}
 								{#if runner.tg_tok_s != null}
 									<span class="gpu-tps" class:gpu-tps-idle={!runner.processing}>{runner.tg_tok_s.toFixed(1)} tok/s{#if !runner.processing} <span class="muted">last</span>{/if}</span>
+								{:else if runner.processing}
+									<span class="gpu-tps">generating…</span>
 								{/if}
 								{#if runner.verdict}
 									<span class:verdict-serialized={runner.verdict.startsWith("serialized")} class:verdict-concurrent={runner.verdict === "concurrent"}>{runner.verdict}</span>
