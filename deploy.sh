@@ -8,6 +8,7 @@ echo "=== Pushing to origin ==="
 git push
 
 echo "=== Building and deploying on $REMOTE_HOST ==="
+# shellcheck disable=SC2029  # FORCE_DEPLOY is meant to expand here, not on the remote
 ssh "$REMOTE_HOST" "FORCE_DEPLOY=${FORCE_DEPLOY:-0} bash -s" <<'EOF'
 set -euo pipefail
 cd ~/git/local_llm
@@ -37,5 +38,10 @@ cd ..
 docker rm -f searxng 2>/dev/null || true
 docker compose build
 docker compose up -d
+# The Caddyfile is bind-mounted as a single file, and git pull replaces it rather
+# than editing in place -- so the container keeps the old inode and serves the old
+# routing table forever. compose sees no change to the service, so only a forced
+# recreate picks the new file up. Costs a sub-second restart.
+docker compose up -d --force-recreate local-llm-caddy
 echo "=== Done ==="
 EOF
