@@ -118,6 +118,16 @@
 		reverse_proxy 127.0.0.1:3004
 	}
 
+	# Grafana runs with GF_SERVER_ROOT_URL/serve_from_sub_path set to /metrics,
+	# so like Langfuse it wants the prefix left on.
+	handle /metrics {
+		redir * /metrics/ temporary
+	}
+
+	handle /metrics/* {
+		reverse_proxy 127.0.0.1:3007
+	}
+
 	# Fallback: Open WebUI client-side routes expect root-level routing.
 	handle {
 		reverse_proxy 127.0.0.1:3101

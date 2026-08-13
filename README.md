@@ -640,6 +640,7 @@ Routes are matched in the order below; the first matching `handle` wins.
 | `/ws/socket.io*` | `open-webui :3101` — must precede the generic `/ws/*` arm |
 | `/ws/*`, `/socket.io/*`, `/pty/*/connect` | opencode `:3002`; WebSocket upgrades bypass injection |
 | `/traces`, `/traces/*` | `local-llm-langfuse :3004` (built with `NEXT_PUBLIC_BASE_PATH=/traces`) |
+| `/metrics`, `/metrics/*` | `local-llm-grafana :3007` (served from sub path via `GF_SERVER_ROOT_URL`) |
 | everything else | `open-webui :3101` (its client-side routes expect root-level routing) |
 
 ---
