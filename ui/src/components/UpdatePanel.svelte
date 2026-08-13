@@ -7,8 +7,16 @@
 		fetchCommitDetail,
 		fetchAgentsUpdateStatus,
 		startAgentsBuild,
+		fetchServiceUpdates,
+		startServiceUpdate,
 	} from "../lib/api";
-	import type { UpdateStatus, BuildStatus, CommitDetail, AgentsUpdateStatus } from "../lib/types";
+	import type {
+		UpdateStatus,
+		BuildStatus,
+		CommitDetail,
+		AgentsUpdateStatus,
+		ServiceUpdate,
+	} from "../lib/types";
 
 	let status: UpdateStatus | null = $state(null);
 	let build: BuildStatus | null = $state(null);
@@ -26,6 +34,10 @@
 	let agentsError = $state("");
 	let agentsStarting = $state(false);
 
+	let services: ServiceUpdate[] = $state([]);
+	let servicesError = $state("");
+	let serviceStarting = $state("");
+
 	async function check() {
 		checking = true;
 		error = "";
@@ -40,6 +52,30 @@
 			checking = false;
 		}
 		await checkAgents();
+		await checkServices();
+	}
+
+	async function checkServices() {
+		servicesError = "";
+		try {
+			services = (await fetchServiceUpdates()).services;
+		} catch (e: unknown) {
+			servicesError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function updateService(id: string) {
+		serviceStarting = id;
+		servicesError = "";
+		try {
+			await startServiceUpdate(id);
+			await pollBuild();
+			startPolling();
+		} catch (e: unknown) {
+			servicesError = e instanceof Error ? e.message : String(e);
+		} finally {
+			serviceStarting = "";
+		}
 	}
 
 	async function checkAgents() {
@@ -67,12 +103,13 @@
 
 	async function pollBuild() {
 		try {
-			const wasAgents = build?.backends.includes("agents") ?? false;
+			const was = build?.backends ?? [];
 			build = await fetchBuildStatus();
 			if (!build.running && pollId) {
 				clearInterval(pollId);
 				pollId = null;
-				if (wasAgents) await checkAgents();
+				if (was.includes("agents")) await checkAgents();
+				if (was.some((b) => services.some((s) => s.id === b))) await checkServices();
 			}
 		} catch {
 			// backend briefly unreachable; keep polling
@@ -229,6 +266,47 @@
 				</button>
 				<span class="muted">Rebuilds at the latest npm releases, then restarts pi and opencode (running sessions are lost).</span>
 			</div>
+		</div>
+	{/if}
+
+	{#if servicesError}
+		<div class="error">{servicesError}</div>
+	{/if}
+
+	{#if services.length > 0}
+		<div class="agents">
+			<h3>Chat &amp; tracing</h3>
+			<table>
+				<thead><tr><th>Service</th><th>Image</th><th>Installed</th><th>Latest</th><th></th><th></th></tr></thead>
+				<tbody>
+					{#each services as s}
+						<tr>
+							<td>{s.name}</td>
+							<td>
+								<code>{s.image}</code>{#if !s.present}<span class="missing"> (not built)</span>{/if}
+							</td>
+							<td>{s.current ?? "unknown"}</td>
+							<td>{s.latest ?? "?"}</td>
+							<td>
+								{#if s.outdated}
+									<span class="behind">{s.behind != null ? `${s.behind} commits behind` : "update available"}</span>
+								{:else if s.current && s.latest}<span class="uptodate">up to date</span>
+								{:else}-{/if}
+								{#if s.note}<span class="muted"> · {s.note}</span>{/if}
+							</td>
+							<td>
+								<button
+									onclick={() => updateService(s.id)}
+									disabled={build?.running || serviceStarting !== ""}
+								>
+									{serviceStarting === s.id ? "Starting…" : s.kind === "pull" ? "Pull & restart" : "Rebuild & restart"}
+								</button>
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+			<span class="muted">Each restarts its container at the new image; chat sessions and traces are kept in volumes.</span>
 		</div>
 	{/if}
 

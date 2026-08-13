@@ -250,7 +250,11 @@ services:
       dockerfile: web/Dockerfile
       args:
         NEXT_PUBLIC_BASE_PATH: /traces
-    image: local-llm-langfuse:2.95.11-traces
+      # Read back by the Status page; the update button rebuilds this same tag at
+      # the newest v2 release (v3+ needs ClickHouse/Redis/S3 we don't deploy).
+      labels:
+        langfuse.version: "2.95.11"
+    image: local-llm-langfuse:traces
     container_name: local-llm-langfuse
     network_mode: host
     restart: unless-stopped

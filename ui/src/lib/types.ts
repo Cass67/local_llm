@@ -394,6 +394,20 @@ export interface AgentsUpdateStatus {
 	}[];
 }
 
+export interface ServiceUpdate {
+	id: string;
+	name: string;
+	kind: "pull" | "git-build";
+	container: string;
+	image: string;
+	present: boolean;
+	current: string | null;
+	latest: string | null;
+	behind: number | null;
+	outdated: boolean;
+	note: string | null;
+}
+
 export interface BuildStatus {
 	running: boolean;
 	backends: string[];
