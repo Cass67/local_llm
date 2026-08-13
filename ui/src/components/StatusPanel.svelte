@@ -44,6 +44,20 @@
 		}
 	}
 
+	function draftAccept(draft: number | null | undefined, accepted: number | null | undefined): string {
+		// No drafting at all is not 0% acceptance -- the model just is not speculating.
+		if (!draft) return "off";
+		return `${((100 * (accepted ?? 0)) / draft).toFixed(0)}%`;
+	}
+
+	// Pooled over tokens, not averaged over requests: a request that drafted two
+	// tokens must not weigh the same as one that drafted a thousand.
+	let draftTotals = $derived.by(() => {
+		const drafted = tpsHistory.reduce((sum, m) => sum + (m.draft_n ?? 0), 0);
+		const accepted = tpsHistory.reduce((sum, m) => sum + (m.draft_n_accepted ?? 0), 0);
+		return { drafted, accepted };
+	});
+
 	function sparklinePoints(metrics: ChatMetric[]): string {
 		const vals = metrics
 			.map((m) => m.predicted_per_second)
@@ -192,7 +206,11 @@
 			<div class="status-card"><span>Default</span><strong>{status.default_set ? "yes" : "no"}</strong></div>
 			<div class="status-card"><span>Tok/s</span><strong>{stats.predicted_per_second ? stats.predicted_per_second.toFixed(1) : "-"}</strong>{#if stats.ts}<small class="stat-age">{statsAge(stats.ts)}</small>{/if}</div>
 			<div class="status-card"><span>Prompt tok/s</span><strong>{stats.prompt_per_second ? stats.prompt_per_second.toFixed(1) : "-"}</strong></div>
-			<div class="status-card"><span>Draft accepted</span><strong>{stats.draft_n_accepted ?? "-"}/{stats.draft_n ?? "-"}</strong></div>
+			<div class="status-card">
+				<span>Draft accept</span>
+				<strong>{draftAccept(stats.draft_n, stats.draft_n_accepted)}</strong>
+				{#if stats.draft_n}<small class="stat-age">{stats.draft_n_accepted ?? 0}/{stats.draft_n} tok</small>{/if}
+			</div>
 		</div>
 
 		<h3>Models</h3>
@@ -226,7 +244,12 @@
 
 		<div class="telemetry">
 			<div class="telem-block">
-				<span class="label">TPS history ({tpsHistory.filter(m => m.predicted_per_second != null).length} requests)</span>
+				<span class="label">
+					TPS history ({tpsHistory.filter(m => m.predicted_per_second != null).length} requests)
+					{#if draftTotals.drafted > 0}
+						· draft {draftAccept(draftTotals.drafted, draftTotals.accepted)} over {draftTotals.drafted} tok
+					{/if}
+				</span>
 				{#if sparklinePoints(tpsHistory)}
 					<svg class="sparkline" viewBox="0 0 100 100" preserveAspectRatio="none">
 						<polyline points={sparklinePoints(tpsHistory)} />

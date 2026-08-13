@@ -162,6 +162,10 @@ def _record_metrics(body: bytes, response_body: bytes) -> None:
     if not isinstance(timings, dict):
         return
     model = request_payload.get("model") if isinstance(request_payload, dict) else None
+    _record_timings(model, timings)
+
+
+def _record_timings(model: str | None, timings: dict) -> None:
     metrics = {
         "model": model,
         "predicted_per_second": timings.get("predicted_per_second"),
@@ -263,6 +267,7 @@ async def proxy_chat_completions(request: Request):  # noqa: C901  # pre-existin
             first_token = True
             ttft_ms: float | None = None
             parts: list[str] = []
+            last_timings: dict | None = None
             prompt_tokens: int | None = None
             completion_tokens: int | None = None
 
@@ -304,10 +309,17 @@ async def proxy_chat_completions(request: Request):  # noqa: C901  # pre-existin
                             if isinstance(usage, dict):
                                 prompt_tokens = usage.get("prompt_tokens")
                                 completion_tokens = usage.get("completion_tokens")
+                            # llama-server sends timings in the final chunk. Every
+                            # real client streams, so without this the Status page
+                            # only ever sees the rare non-streaming request.
+                            if isinstance(data.get("timings"), dict):
+                                last_timings = data["timings"]
                         except (json.JSONDecodeError, IndexError, KeyError):
                             pass
                     yield raw
             finally:
+                if last_timings:
+                    _record_timings(model, last_timings)
                 tracing.close_generation(
                     generation,
                     "".join(parts),
