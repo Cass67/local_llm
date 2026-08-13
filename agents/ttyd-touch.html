@@ -1,0 +1,147 @@
+<style>
+  /* xterm.js paints the IME composition overlay black-on-white by default, which
+     is unreadable over the dark ttyd theme. Match the terminal palette instead. */
+  .xterm .composition-view {
+    background: #3f3f46;
+    color: #fafafa;
+  }
+</style>
+<script>
+  // Touch fixes for the web terminals. Desktop is untouched -- everything here is
+  // behind a coarse-pointer check. Two problems, both phone/tablet only:
+  //
+  //  1. Typing. Phone keyboards treat xterm's hidden textarea as prose: the word
+  //     is held in an IME composition until space, then autocorrect rewrites it
+  //     ("apex" -> "Alex") by re-emitting the whole word. The TUI has already
+  //     consumed the earlier keystrokes, so corrections arrive as duplicates and
+  //     the line fills with garbage. `inputmode` and `autocorrect=off` are only
+  //     hints and Samsung/GBoard ignore them. A password field is not a hint --
+  //     no keyboard composes, corrects or capitalises in one -- so we take the
+  //     keystrokes from our own hidden password input, diff it per event, and
+  //     feed the result straight to the terminal via term.input().
+  //  2. Scrolling. tmux mouse mode makes the terminal report mouse events to the
+  //     app instead of scrolling its own viewport, and a touch screen never emits
+  //     wheel events at all. Turn a one-finger drag into wheel events, which both
+  //     xterm's viewport and the app-mouse path understand.
+  (function () {
+    if (!matchMedia('(pointer: coarse)').matches) return;
+
+    function send(data) {
+      if (window.term) window.term.input(data, true);
+    }
+
+    // Zero-width padding so Backspace always has something to delete: on an empty
+    // field Android often reports keyCode 229 with no usable key, and we would
+    // never see the press at all.
+    var PAD = '\u200b\u200b\u200b\u200b';
+    var KEYS = {
+      Enter: '\r',
+      Tab: '\t',
+      Escape: '\x1b',
+      ArrowUp: '\x1b[A',
+      ArrowDown: '\x1b[B',
+      ArrowRight: '\x1b[C',
+      ArrowLeft: '\x1b[D',
+    };
+
+    function makeInput() {
+      var inp = document.createElement('input');
+      inp.type = 'password';
+      inp.autocapitalize = 'off';
+      inp.autocomplete = 'off';
+      inp.spellcheck = false;
+      inp.setAttribute('aria-hidden', 'true');
+      inp.style.cssText =
+        'position:fixed;bottom:0;left:0;width:1px;height:1px;opacity:0;border:0;padding:0;z-index:-1';
+      document.body.appendChild(inp);
+
+      function reset() {
+        inp.value = PAD;
+        try { inp.setSelectionRange(PAD.length, PAD.length); } catch (e) { /* not focused */ }
+      }
+      reset();
+
+      inp.addEventListener('input', function () {
+        var v = inp.value;
+        if (v.length < PAD.length) {
+          send('\x7f'.repeat(PAD.length - v.length));
+        } else {
+          var added = v.slice(PAD.length);
+          if (added) send(added);
+        }
+        reset();
+      });
+
+      inp.addEventListener('keydown', function (e) {
+        if (e.keyCode === 229) return; // soft-keyboard placeholder; the input event has the text
+        if (KEYS[e.key]) {
+          e.preventDefault();
+          send(KEYS[e.key]);
+        } else if (e.key === 'Backspace') {
+          e.preventDefault();
+          send('\x7f');
+        } else if (e.ctrlKey && e.key.length === 1) {
+          var code = e.key.toUpperCase().charCodeAt(0) - 64;
+          if (code >= 1 && code <= 26) {
+            e.preventDefault();
+            send(String.fromCharCode(code));
+          }
+        }
+      });
+
+      return inp;
+    }
+
+    function bindTouch(root, viewport) {
+      var lastY = null;
+      var acc = 0;
+      var STEP = 20; // px of drag per wheel notch
+
+      root.addEventListener('touchstart', function (e) {
+        lastY = e.touches.length === 1 ? e.touches[0].clientY : null;
+        acc = 0;
+      }, { passive: true });
+
+      root.addEventListener('touchmove', function (e) {
+        if (lastY === null || e.touches.length !== 1) return;
+        var t = e.touches[0];
+        acc += lastY - t.clientY; // drag up == scroll down
+        lastY = t.clientY;
+        while (Math.abs(acc) >= STEP) {
+          var dir = acc > 0 ? 1 : -1;
+          acc -= dir * STEP;
+          viewport.dispatchEvent(new WheelEvent('wheel', {
+            deltaY: dir * STEP,
+            deltaMode: 0,
+            bubbles: true,
+            cancelable: true,
+            clientX: t.clientX,
+            clientY: t.clientY,
+          }));
+        }
+      }, { passive: true });
+
+      root.addEventListener('touchend', function () { lastY = null; }, { passive: true });
+    }
+
+    // The terminal is built after this script runs, so poll until it exists.
+    var timer = setInterval(function () {
+      var textarea = document.querySelector('.xterm-helper-textarea');
+      var root = document.querySelector('.xterm');
+      if (!textarea || !root || !window.term) return;
+      clearInterval(timer);
+
+      var inp = makeInput();
+      // xterm focuses its own textarea on every tap; hand the keyboard straight
+      // back to the password input so nothing is ever typed into the textarea.
+      document.addEventListener('focusin', function (e) {
+        if (e.target === textarea) inp.focus();
+      });
+      root.addEventListener('touchend', function () {
+        setTimeout(function () { inp.focus(); }, 0);
+      }, { passive: true });
+
+      bindTouch(root, root.querySelector('.xterm-viewport') || root);
+    }, 250);
+  })();
+</script>
