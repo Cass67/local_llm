@@ -311,7 +311,7 @@
 				<div class="sys-row">
 					{#each gpuStatus.devices as dev}
 						<div class="sys-tile gpu-tile">
-							<span class="label">{dev.pci_id}</span>
+							<span class="label">{dev.pci_id}{#if dev.vendor} <span class="gpu-vendor">{dev.vendor}{dev.model_name ? ` ${dev.model_name}` : ""}{dev.board ? ` · ${dev.board}` : ""}</span>{/if}</span>
 							<div class="meter-track"><div class="meter" style="--fill: {dev.gpu_busy_percent ?? 0}%"></div></div>
 							<strong>{dev.gpu_busy_percent != null ? `${dev.gpu_busy_percent}%` : "-"} <span class="muted">busy</span></strong>
 							<div class="dev-grid">
@@ -363,7 +363,7 @@
 							<div class="gpu-row">
 								{#each Object.entries(runner.gpus) as [pci, gpu]}
 									<div class="gpu-device">
-										<span class="gpu-pci">{pci}</span>
+										<span class="gpu-pci">{pci}{#if gpu.vendor} <span class="gpu-vendor">{gpu.vendor}{gpu.model_name ? ` ${gpu.model_name}` : ""}</span>{/if}</span>
 										{#if gpu.engine_busy != null}
 											<div class="gpu-bar-track">
 												<div class:gpu-bar-serialized={runner.verdict.startsWith("serialized")} class="gpu-bar" style="--busy: {Math.min(gpu.engine_busy, 100)}%"></div>
@@ -464,5 +464,6 @@
 .gpu-bar-serialized { background: #f59e0b; }
 .gpu-busy { font-size: 0.8rem; color: var(--text); }
 .gpu-vram { font-size: 0.7rem; }
+.gpu-vendor { font-family: system-ui, sans-serif; color: var(--text-muted); }
 
 </style>

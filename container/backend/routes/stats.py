@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from .. import active_runners, config
+from ..gpu_inventory import detect_gpus
 from ..gpu_status import GpuStatusCollector, collect_amd_gpu_metrics
 from ..system_status import SystemStatusCollector
 
@@ -106,6 +107,22 @@ _last_gpu_sample: dict | None = None
 _gpu_lock = asyncio.Lock()
 
 
+_VENDOR_LABELS = {"amd": "AMD", "nvidia": "NVIDIA", "intel": "Intel"}
+
+
+@lru_cache(maxsize=1)
+def _gpu_identity() -> dict[str, dict[str, str]]:
+    """PCI id → vendor/model labels. Cached: detect_gpus shells out and hardware is fixed."""
+    return {
+        g.pci_id: {
+            "vendor": _VENDOR_LABELS.get(g.vendor, g.vendor.upper()),
+            "model_name": g.model_name,
+            "board": g.board,
+        }
+        for g in detect_gpus()
+    }
+
+
 def _get_running_runners():
     """Build list of running runners for sampling."""
     runners = []
@@ -142,6 +159,12 @@ async def _sample_gpu_status(initial_warmup: bool = False):
                 lambda: _gpu_collector.sample_all(runners, initial_warmup=initial_warmup)
             )
             devices = await asyncio.to_thread(collect_amd_gpu_metrics)
+            identity = await asyncio.to_thread(_gpu_identity)
+            for pci_id, dev in devices.items():
+                dev.update(identity.get(pci_id, {}))
+            for sample in samples:
+                for pci_id, gpu in sample.get("gpus", {}).items():
+                    gpu.update(identity.get(pci_id, {}))
             system = await asyncio.to_thread(_system_collector.sample)
             _last_gpu_sample = {
                 "ts": time.time(),
