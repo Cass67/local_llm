@@ -50,6 +50,15 @@
 		return `${((100 * (accepted ?? 0)) / draft).toFixed(0)}%`;
 	}
 
+	// Live tok/s straight off the runners, refreshed on the 2.5s GPU poll. The
+	// stats card behind it only sees requests proxied by mgmt, so it sits frozen
+	// through a sweep; prefer whichever runner is generating right now.
+	let liveTps = $derived.by(() => {
+		const busy = (gpuStatus?.runners ?? []).filter((r) => r.tg_tok_s != null && r.processing);
+		if (busy.length === 0) return null;
+		return busy.reduce((best, r) => (r.tg_tok_s! > (best.tg_tok_s ?? 0) ? r : best), busy[0]);
+	});
+
 	// Pooled over tokens, not averaged over requests: a request that drafted two
 	// tokens must not weigh the same as one that drafted a thousand.
 	let draftTotals = $derived.by(() => {
@@ -204,8 +213,22 @@
 			{/if}
 			<div class="status-card"><span>Accepted</span><strong>{status.accepted_count}</strong></div>
 			<div class="status-card"><span>Default</span><strong>{status.default_set ? "yes" : "no"}</strong></div>
-			<div class="status-card"><span>Tok/s</span><strong>{stats.predicted_per_second ? stats.predicted_per_second.toFixed(1) : "-"}</strong>{#if stats.ts}<small class="stat-age">{statsAge(stats.ts)}</small>{/if}</div>
-			<div class="status-card"><span>Prompt tok/s</span><strong>{stats.prompt_per_second ? stats.prompt_per_second.toFixed(1) : "-"}</strong></div>
+			<div class="status-card">
+				<span>Tok/s</span>
+				{#if liveTps}
+					<strong>{liveTps.tg_tok_s?.toFixed(1)}</strong><small class="stat-live">live · {liveTps.cluster_name}</small>
+				{:else}
+					<strong>{stats.predicted_per_second ? stats.predicted_per_second.toFixed(1) : "-"}</strong>{#if stats.ts}<small class="stat-age">{statsAge(stats.ts)}</small>{/if}
+				{/if}
+			</div>
+			<div class="status-card">
+				<span>Prompt tok/s</span>
+				{#if liveTps?.pp_tok_s != null}
+					<strong>{liveTps.pp_tok_s.toFixed(1)}</strong><small class="stat-live">live</small>
+				{:else}
+					<strong>{stats.prompt_per_second ? stats.prompt_per_second.toFixed(1) : "-"}</strong>
+				{/if}
+			</div>
 			<div class="status-card">
 				<span>Draft accept</span>
 				<strong>{draftAccept(stats.draft_n, stats.draft_n_accepted)}</strong>
@@ -356,6 +379,9 @@
 								{#if runner.gpu_count > 1}
 									<span class="gpu-aggregate">{runner.aggregate_gpu_equiv?.toFixed(2) ?? "?"} / {runner.gpu_count}.0 GPU-equiv</span>
 								{/if}
+								{#if runner.tg_tok_s != null}
+									<span class="gpu-tps" class:gpu-tps-idle={!runner.processing}>{runner.tg_tok_s.toFixed(1)} tok/s{#if !runner.processing} <span class="muted">last</span>{/if}</span>
+								{/if}
 								{#if runner.verdict}
 									<span class:verdict-serialized={runner.verdict.startsWith("serialized")} class:verdict-concurrent={runner.verdict === "concurrent"}>{runner.verdict}</span>
 								{/if}
@@ -424,6 +450,9 @@
 	.status-card:hover { border-color: var(--accent); }
 	.status-card span { color: var(--text-muted); font-size: 0.8rem; }
 	.stat-age { color: var(--text-muted); font-size: 0.7rem; margin-top: 0.1rem; }
+	.stat-live { color: #3b82f6; font-size: 0.7rem; margin-top: 0.1rem; }
+	.gpu-tps { font-size: 0.75rem; color: #3b82f6; }
+	.gpu-tps-idle { color: var(--text-muted); }
 	table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 	th, td { padding: 0.6rem 0.4rem; border-bottom: 1px solid var(--border); text-align: left; }
 	th { color: var(--text-muted); font-weight: normal; }

@@ -1,0 +1,23 @@
+# Two scrape targets, both on the host network:
+#   mgmt  :3100/api/metrics — GPU/system telemetry from the sample loop
+#   runner:8080/metrics     — llama-server's own inference counters
+# Runner ports are the per-cluster ports from configs; a cluster that is not
+# running simply scrapes down (up == 0), which is itself worth graphing.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: local-llm-mgmt
+    metrics_path: /api/metrics
+    static_configs:
+      - targets: ["127.0.0.1:3100"]
+
+  - job_name: llama-runner
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "127.0.0.1:8080"
+          - "127.0.0.1:8081"
+          - "127.0.0.1:8082"
+          - "127.0.0.1:8083"
