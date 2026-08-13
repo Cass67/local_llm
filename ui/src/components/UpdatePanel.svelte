@@ -34,6 +34,10 @@
 	let agentsError = $state("");
 	let agentsStarting = $state(false);
 
+	let jobsRunning = $derived.by(
+		() => new Set((build?.jobs ?? []).filter((j) => j.running).map((j) => j.id)),
+	);
+
 	let services: ServiceUpdate[] = $state([]);
 	let servicesError = $state("");
 	let serviceStarting = $state("");
@@ -103,13 +107,16 @@
 
 	async function pollBuild() {
 		try {
-			const was = build?.backends ?? [];
+			const was = [...jobsRunning];
 			build = await fetchBuildStatus();
+			// Jobs are independent, so refresh each one's versions as it lands rather
+			// than waiting for the slowest build to finish.
+			const done = was.filter((id) => !jobsRunning.has(id));
+			if (done.includes("agents")) await checkAgents();
+			if (done.some((id) => services.some((s) => s.id === id))) await checkServices();
 			if (!build.running && pollId) {
 				clearInterval(pollId);
 				pollId = null;
-				if (was.includes("agents")) await checkAgents();
-				if (was.some((b) => services.some((s) => s.id === b))) await checkServices();
 			}
 		} catch {
 			// backend briefly unreachable; keep polling
@@ -190,7 +197,7 @@
 			<tbody>
 				{#each status.backends as b}
 					<tr>
-						<td><input type="checkbox" bind:checked={selected[b.backend]} disabled={build?.running} /></td>
+						<td><input type="checkbox" bind:checked={selected[b.backend]} disabled={jobsRunning.has("runners")} /></td>
 						<td>{b.backend}</td>
 						<td><code>{b.image}</code>{#if !b.present}<span class="missing"> (not built)</span>{/if}</td>
 						<td>
@@ -225,8 +232,8 @@
 		{/if}
 
 		<div class="actions">
-			<button class="rebuild" onclick={rebuild} disabled={starting || build?.running}>
-				{build?.running ? "Build running…" : starting ? "Starting…" : "Update & rebuild selected"}
+			<button class="rebuild" onclick={rebuild} disabled={starting || jobsRunning.has("runners")}>
+				{jobsRunning.has("runners") ? "Build running…" : starting ? "Starting…" : "Update & rebuild selected"}
 			</button>
 			<span class="muted">Running models keep the old image until relaunched.</span>
 		</div>
@@ -261,8 +268,12 @@
 				</tbody>
 			</table>
 			<div class="actions">
-				<button class="rebuild" onclick={rebuildAgents} disabled={agentsStarting || build?.running}>
-					{build?.running ? "Build running…" : agentsStarting ? "Starting…" : "Update & rebuild agents"}
+				<button class="rebuild" onclick={rebuildAgents} disabled={agentsStarting || jobsRunning.has("agents")}>
+					{jobsRunning.has("agents")
+						? "Build running…"
+						: agentsStarting
+							? "Starting…"
+							: "Update & rebuild agents"}
 				</button>
 				<span class="muted">Rebuilds at the latest npm releases, then restarts pi and opencode (running sessions are lost).</span>
 			</div>
@@ -295,11 +306,11 @@
 								{#if s.note}<span class="muted"> · {s.note}</span>{/if}
 							</td>
 							<td>
-								<button
-									onclick={() => updateService(s.id)}
-									disabled={build?.running || serviceStarting !== ""}
-								>
-									{serviceStarting === s.id ? "Starting…" : s.kind === "pull" ? "Pull & restart" : "Rebuild & restart"}
+								<button onclick={() => updateService(s.id)} disabled={jobsRunning.has(s.id)}>
+									{#if jobsRunning.has(s.id)}Building…
+									{:else if serviceStarting === s.id}Starting…
+									{:else if s.kind === "pull"}Pull &amp; restart
+									{:else}Rebuild &amp; restart{/if}
 								</button>
 							</td>
 						</tr>
@@ -310,23 +321,23 @@
 		</div>
 	{/if}
 
-	{#if build && (build.running || Object.keys(build.results).length > 0)}
+	{#each build?.jobs ?? [] as job}
 		<div class="build-status">
 			<div>
-				{#if build.running}
-					<strong>Building {build.current ?? "…"}</strong> ({build.backends.join(", ")})
+				{#if job.running}
+					<strong>Building {job.current ?? "…"}</strong> ({job.targets.join(", ")})
 				{:else}
-					<strong>Last build:</strong>
-					{#each Object.entries(build.results) as [backend, code]}
-						<span class={code === 0 ? "uptodate" : "behind"}> {backend}: {code === 0 ? "ok" : `failed (${code})`}</span>
+					<strong>Last {job.id} build:</strong>
+					{#each Object.entries(job.results) as [target, code]}
+						<span class={code === 0 ? "uptodate" : "behind"}> {target}: {code === 0 ? "ok" : `failed (${code})`}</span>
 					{/each}
 				{/if}
 			</div>
-			{#if build.log_tail}
-				<pre>{build.log_tail}</pre>
+			{#if job.log_tail}
+				<pre>{job.log_tail}</pre>
 			{/if}
 		</div>
-	{/if}
+	{/each}
 </div>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && closeCommit()} />

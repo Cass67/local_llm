@@ -56,6 +56,25 @@ async def test_chat_row_counts_commits_behind_upstream(monkeypatch):
     assert (row["behind"], row["outdated"]) == (7, True)
 
 
+def test_jobs_are_independent():
+    """A langfuse rebuild must not lock out an opencode bump."""
+    from backend.routes import update
+    from fastapi import HTTPException
+
+    update._jobs.clear()
+    update._claim_job("langfuse", ["langfuse"])
+    update._claim_job("agents", ["agents"])  # different job: allowed while langfuse runs
+
+    with pytest.raises(HTTPException) as excinfo:
+        update._claim_job("langfuse", ["langfuse"])  # same job twice: rejected
+    assert excinfo.value.status_code == 409
+
+    assert update._others_running("langfuse") is True
+    update._finish(update._jobs["agents"])
+    assert update._others_running("langfuse") is False
+    update._jobs.clear()
+
+
 @pytest.mark.asyncio
 async def test_unknown_service_is_404():
     from backend.main import app

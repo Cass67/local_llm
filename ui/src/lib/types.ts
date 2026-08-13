@@ -408,13 +408,19 @@ export interface ServiceUpdate {
 	note: string | null;
 }
 
-export interface BuildStatus {
+export interface BuildJob {
+	id: string;
 	running: boolean;
-	backends: string[];
+	targets: string[];
 	current: string | null;
-	started: number | null;
+	started: number;
 	results: Record<string, number>;
 	log_tail: string;
+}
+
+export interface BuildStatus {
+	running: boolean;
+	jobs: BuildJob[];
 }
 
 // --- GPU status (fdinfo) ---
