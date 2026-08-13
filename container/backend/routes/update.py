@@ -18,7 +18,8 @@ from .. import config, regression, runtime
 
 router = APIRouter(prefix="/api/update", tags=["update"])
 
-GITHUB_API = "https://api.github.com/repos/ggml-org/llama.cpp"
+GITHUB_REPOS = "https://api.github.com/repos"
+GITHUB_API = f"{GITHUB_REPOS}/ggml-org/llama.cpp"
 COMMIT_LABEL = "llama.cpp.commit"
 RUNNER_SRC_DIR = Path(os.environ.get("RUNNER_SRC_DIR", "/app/runner"))
 BUILD_LOG = config.STATE_DIR / "runner-build.log"
@@ -37,8 +38,36 @@ AGENT_PACKAGES = {
     "opencode": ("opencode-ai", "OPENCODE_VERSION", "local-llm-opencode", "opencode-linux-x64"),
 }
 NPM_REGISTRY = "https://registry.npmjs.org"
+
 # Abbreviated packument: the full one for opencode is megabytes of changelog.
 NPM_ABBREVIATED = {"Accept": "application/vnd.npm.install-v1+json"}
+
+# The rest of the stack: containers we run from someone else's release instead of
+# building from llama.cpp. The chat UI is a pulled image tracking a branch; Langfuse
+# is built here because the /traces base path is baked in at build time.
+SERVICES: dict[str, dict] = {
+    "chat": {
+        "name": "Open WebUI (chat)",
+        "kind": "pull",
+        "container": "open-webui",
+        "image": "ghcr.io/open-webui/open-webui:main",
+        "repo": "open-webui/open-webui",
+        "branch": "main",
+    },
+    "langfuse": {
+        "name": "Langfuse (traces)",
+        "kind": "git-build",
+        "container": "local-llm-langfuse",
+        "image": "local-llm-langfuse:traces",
+        "repo": "langfuse/langfuse",
+        # Pinned to the v2 line: v3+ needs ClickHouse, Redis and S3, none of which
+        # this stack deploys, so a "latest" build would come up dead.
+        "series": "v2.",
+        "dockerfile": "web/Dockerfile",
+        "build_args": {"NEXT_PUBLIC_BASE_PATH": "/traces"},
+        "version_label": "langfuse.version",
+    },
+}
 
 # image id -> short sha, so we only `docker run --version` once per image build
 _version_cache: dict[str, str] = {}
@@ -319,7 +348,7 @@ async def agents_status():
     }
 
 
-def _recreate_container(name: str) -> None:
+def _recreate_container(name: str, image: str | None = None) -> None:
     """Re-create a container from its own config so it picks up the rebuilt image."""
 
     def api(method: str, path: str, body: str | None = None) -> dict:
@@ -334,6 +363,8 @@ def _recreate_container(name: str) -> None:
         for key in ("Image", "Cmd", "Entrypoint", "Env", "User", "WorkingDir", "Labels", "Tty")
         if key in cfg
     }
+    if image:
+        payload["Image"] = image  # the deployed container may still name an older tag
     payload["HostConfig"] = info["HostConfig"]
     api("POST", f"/containers/{name}/stop?t=10")
     api("DELETE", f"/containers/{name}?force=true")
@@ -409,6 +440,171 @@ async def start_agents_build():
         )
     threading.Thread(target=_run_agents_build, args=(versions,), daemon=True).start()
     return {"status": "started", "versions": versions}
+
+
+def _image_meta(image: str) -> tuple[bool, dict[str, str], list[str]]:
+    """(present, labels, repo_tags) for a local image."""
+    try:
+        result = _docker(
+            "image", "inspect", "-f", "{{json .Config.Labels}}|{{json .RepoTags}}", image
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False, {}, []
+    if result.returncode != 0:
+        return False, {}, []
+    labels_json, _, tags_json = result.stdout.strip().partition("|")
+    try:
+        labels = json.loads(labels_json) or {}
+        tags = json.loads(tags_json) or []
+    except json.JSONDecodeError:
+        return True, {}, []
+    return True, labels, tags
+
+
+def _version_key(tag: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", tag))
+
+
+async def _latest_tag(client: httpx.AsyncClient, repo: str, series: str) -> str | None:
+    """Newest stable release tag in a pinned major series (e.g. 'v2.')."""
+    for page in range(1, 6):
+        resp = await client.get(
+            f"{GITHUB_REPOS}/{repo}/tags", params={"per_page": 100, "page": page}
+        )
+        if resp.status_code != 200:
+            return None
+        names = [t["name"] for t in resp.json()]
+        if not names:
+            return None
+        matching = [n for n in names if n.startswith(series) and "-" not in n]
+        if matching:
+            return max(matching, key=_version_key)
+    return None
+
+
+async def _service_row(client: httpx.AsyncClient, service_id: str, svc: dict) -> dict:
+    present, labels, tags = _image_meta(svc["image"])
+    row = {
+        "id": service_id,
+        "name": svc["name"],
+        "kind": svc["kind"],
+        "container": svc["container"],
+        "image": svc["image"],
+        "present": present,
+        "current": None,
+        "latest": None,
+        "behind": None,
+        "outdated": False,
+        "note": None,
+    }
+
+    if svc["kind"] == "pull":
+        # Branch-tracking tag: the image's own version label just says "main", so
+        # the upstream commit it was built from is the only real version we have.
+        revision = labels.get("org.opencontainers.image.revision")
+        resp = await client.get(f"{GITHUB_REPOS}/{svc['repo']}/commits/{svc['branch']}")
+        head = resp.json()["sha"] if resp.status_code == 200 else None
+        row["latest"] = head[:12] if head else None
+        row["current"] = revision[:12] if revision else None
+        if revision and head:
+            cmp_resp = await client.get(
+                f"{GITHUB_REPOS}/{svc['repo']}/compare/{revision}...{svc['branch']}"
+            )
+            if cmp_resp.status_code == 200:
+                row["behind"] = cmp_resp.json().get("ahead_by", 0)
+                row["outdated"] = row["behind"] > 0
+        return row
+
+    version = labels.get(svc["version_label"])
+    if not version:
+        # Pre-label image, or the compose-pinned tag it was first deployed under.
+        match = re.search(r"\d+\.\d+\.\d+", " ".join(tags))
+        version = match.group(0) if match else None
+    latest = await _latest_tag(client, svc["repo"], svc["series"])
+    row["current"] = version
+    row["latest"] = latest.lstrip("v") if latest else None
+    row["outdated"] = bool(version and row["latest"] and version != row["latest"])
+    row["note"] = f"pinned to the {svc['series'].rstrip('.')} line"
+    return row
+
+
+@router.get("/services")
+async def services_status():
+    """Installed vs upstream for the chat and tracing containers."""
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        try:
+            rows = [await _service_row(client, sid, svc) for sid, svc in SERVICES.items()]
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"upstream unreachable: {e}") from e
+    return {"services": rows}
+
+
+def _run_service_update(service_id: str, svc: dict, ref: str | None) -> None:
+    with open(BUILD_LOG, "w") as log:
+        _build["current"] = service_id
+        if svc["kind"] == "pull":
+            log.write(f"\n=== Pulling {svc['image']} ===\n")
+            cmd = ["docker", "pull", svc["image"]]
+        else:
+            log.write(f"\n=== Building {svc['image']} @ {ref} ===\n")
+            args = []
+            for key, value in svc["build_args"].items():
+                args += ["--build-arg", f"{key}={value}"]
+            cmd = [
+                "docker",
+                "build",
+                "--network",
+                "host",
+                "-f",
+                svc["dockerfile"],
+                *args,
+                "--label",
+                f"{svc['version_label']}={(ref or '').lstrip('v')}",
+                "-t",
+                svc["image"],
+                f"https://github.com/{svc['repo']}.git#{ref}",
+            ]
+        log.flush()
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)  # nosec B603  # noqa: S603
+        code = proc.wait()
+        _build["results"][service_id] = code
+        if code == 0:
+            try:
+                _recreate_container(svc["container"], svc["image"])
+                log.write(f"recreated {svc['container']}\n")
+            except (RuntimeError, OSError) as exc:
+                log.write(f"failed to recreate {svc['container']}: {exc}\n")
+                _build["results"][service_id] = 1
+            log.flush()
+    _build["current"] = None
+    _build["running"] = False
+
+
+@router.post("/services/{service_id}/build")
+async def start_service_update(service_id: str):
+    """Pull or rebuild one supporting container, then re-create it at the new image."""
+    svc = SERVICES.get(service_id)
+    if not svc:
+        raise HTTPException(404, f"unknown service '{service_id}'")
+
+    ref = None
+    if svc["kind"] == "git-build":
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            try:
+                ref = await _latest_tag(client, svc["repo"], svc["series"])
+            except httpx.HTTPError as e:
+                raise HTTPException(502, f"GitHub unreachable: {e}") from e
+        if not ref:
+            raise HTTPException(502, f"no {svc['series']}x release found for {svc['repo']}")
+
+    with _build_lock:
+        if _build["running"]:
+            raise HTTPException(409, "a build is already running")
+        _build.update(
+            running=True, backends=[service_id], current=None, started=time.time(), results={}
+        )
+    threading.Thread(target=_run_service_update, args=(service_id, svc, ref), daemon=True).start()
+    return {"status": "started", "ref": ref}
 
 
 def _run_builds(targets: list[tuple[str, str]], ref: str) -> None:
