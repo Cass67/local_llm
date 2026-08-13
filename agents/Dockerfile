@@ -46,5 +46,23 @@ RUN printf '%s\n' \
       > /home/agent/.tmux.conf \
     && chmod 0644 /home/agent/.tmux.conf
 
+# ttyd serves one self-contained index.html with the xterm.js bundle inlined, and
+# `-I` is the only hook for changing it. Pull ttyd's own page from a throwaway
+# instance and splice in the touch/IME fixes, so nothing here is a fork of the
+# upstream client -- a ttyd bump picks up its new page automatically.
+COPY ttyd-touch.html /opt/ttyd/touch.html
+RUN set -eu; \
+    ttyd -p 7681 -i lo /bin/true & pid=$!; \
+    for _ in 1 2 3 4 5 6 7 8 9 10; do \
+      curl -fsS -o /tmp/ttyd-index.html http://127.0.0.1:7681/ && break; \
+      sleep 0.5; \
+    done; \
+    kill "$pid"; \
+    node -e 'const fs=require("fs"), \
+      page=fs.readFileSync("/tmp/ttyd-index.html","utf8"), \
+      patch=fs.readFileSync("/opt/ttyd/touch.html","utf8"); \
+      if (!page.includes("</body>")) throw new Error("ttyd index.html has no </body>"); \
+      fs.writeFileSync("/opt/ttyd/index.html", page.replace("</body>", patch + "</body>"));'
+
 WORKDIR /work
 ENTRYPOINT ["/usr/bin/tini", "--"]
