@@ -189,12 +189,12 @@
 			{:else if status.report.in_progress && !status.running}<span class="behind"> · interrupted, partial</span>{/if}
 		</div>
 		<table>
-			<thead><tr><th>Category</th><th>n</th><th>Accept %</th><th>Draft cover %</th><th>tok/s</th></tr></thead>
+			<thead><tr><th>Category</th><th class="num">n</th><th class="num">Accept %</th><th class="num">Draft cover %</th><th class="num">tok/s</th></tr></thead>
 			<tbody>
 				{#each table as row}
 					<tr>
 						<td>{row.category}</td>
-						<td>{row.n}</td>
+						<td class="num">{row.n}</td>
 						<td class="num">{row.accept_pct}</td>
 						<td class="num">{row.cover_pct}</td>
 						<td class="num">{row.tg_tok_s}</td>
@@ -202,7 +202,7 @@
 				{/each}
 				<tr class="total">
 					<td>ALL</td>
-					<td>{status.report.overall.n}</td>
+					<td class="num">{status.report.overall.n}</td>
 					<td class="num">{status.report.overall.accept_pct}</td>
 					<td class="num">{status.report.overall.cover_pct}</td>
 					<td class="num">{status.report.overall.tg_tok_s}</td>
@@ -241,7 +241,9 @@
 	table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 	th, td { padding: 0.35rem 0.4rem; border-bottom: 1px solid var(--border); text-align: left; }
 	th { color: var(--text-muted); font-weight: normal; }
-	.num { text-align: right; font-variant-numeric: tabular-nums; }
+	/* Numeric columns hug their content so each header sits over its own numbers;
+	   the category column absorbs the leftover width. */
+	.num { text-align: right; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; padding-left: 1.25rem; }
 	.total td { font-weight: 600; border-top: 1px solid var(--border); }
 	pre { background: #000; border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; max-height: 160px; overflow: auto; font-size: 0.7rem; margin: 0.3rem 0 0; }
 </style>
