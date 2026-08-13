@@ -442,3 +442,99 @@ export async function getBenchmarkRunFile(
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.text();
 }
+
+// --- SPEED-Bench (speculative-decoding acceptance by domain) ---
+
+const SPEED = "/api/local-llm/speed-bench";
+
+export interface SpeedBenchCategory {
+	name: string;
+	usable: number;
+	placeholders: number;
+}
+
+export interface SpeedBenchCategories {
+	categories: SpeedBenchCategory[];
+	usable_total: number;
+	placeholder_total: number;
+	hydrated: boolean;
+}
+
+export interface SpeedBenchRow {
+	category: string;
+	question_id: string;
+	multiturn: boolean;
+	prompt_n: number;
+	predicted_n: number;
+	draft_n: number;
+	draft_accepted: number;
+	accept_pct: number;
+	cover_pct: number;
+	tg_tok_s: number;
+}
+
+export interface SpeedBenchSummaryRow {
+	category: string;
+	n: number;
+	accept_pct: number;
+	cover_pct: number;
+	tg_tok_s: number;
+}
+
+export interface SpeedBenchReport {
+	ts: number;
+	cluster_name: string;
+	model: string;
+	max_tokens: number;
+	cancelled: boolean;
+	rows: SpeedBenchRow[];
+	per_category: SpeedBenchSummaryRow[];
+	overall: { n: number; accept_pct: number; cover_pct: number; tg_tok_s: number };
+}
+
+export interface SpeedBenchStatus {
+	running: boolean;
+	cluster_name: string | null;
+	model: string | null;
+	total: number;
+	done: number;
+	current: string | null;
+	started: number | null;
+	errors: string[];
+	rows: SpeedBenchRow[];
+	report: SpeedBenchReport | null;
+}
+
+async function speedJson<T>(path: string, init?: RequestInit): Promise<T> {
+	const res = await fetch(`${SPEED}${path}`, init);
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function fetchSpeedBenchCategories(): Promise<SpeedBenchCategories> {
+	return speedJson<SpeedBenchCategories>("/categories");
+}
+
+export async function fetchSpeedBenchStatus(): Promise<SpeedBenchStatus> {
+	return speedJson<SpeedBenchStatus>("/status");
+}
+
+export async function startSpeedBench(req: {
+	cluster_id: string;
+	categories: string[];
+	per_category: number;
+	max_tokens: number;
+}): Promise<{ status: string; total: number; model: string }> {
+	return speedJson("/run", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(req),
+	});
+}
+
+export async function stopSpeedBench(): Promise<{ status: string }> {
+	return speedJson("/stop", { method: "POST" });
+}

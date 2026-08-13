@@ -101,3 +101,7 @@ node_modules/
 *.bak-*
 *.bak.*
 .sync-staging/
+
+# SPEED-Bench harness scratch output
+speed-bench-qualitative.json
+bench-speed-bench.tsv
