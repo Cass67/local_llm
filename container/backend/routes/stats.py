@@ -8,9 +8,10 @@ import time
 from functools import lru_cache
 from typing import Any
 
-from fastapi import APIRouter, Query
+import httpx
+from fastapi import APIRouter, Query, Response
 
-from .. import active_runners, config
+from .. import active_runners, config, prom_export
 from ..gpu_inventory import detect_gpus
 from ..gpu_status import GpuStatusCollector, collect_amd_gpu_metrics
 from ..system_status import SystemStatusCollector
@@ -144,10 +145,87 @@ def _get_running_runners():
                     "cluster_id": cluster.id,
                     "cluster_name": cluster.name,
                     "container": container,
+                    "port": cluster.port,
                     "gpu_pci_ids": list(cluster.gpu_pci_ids),
                 }
             )
     return runners
+
+
+_METRIC_KEYS = (
+    "llamacpp:tokens_predicted_total",
+    "llamacpp:tokens_predicted_seconds_total",
+    "llamacpp:prompt_tokens_total",
+    "llamacpp:prompt_seconds_total",
+    "llamacpp:requests_processing",
+)
+# Previous /metrics counter read per runner, for rate deltas.
+_metrics_prev: dict[str, dict[str, float]] = {}
+
+
+def _parse_prom(text: str) -> dict[str, float]:
+    values: dict[str, float] = {}
+    for line in text.splitlines():
+        if line.startswith("#"):
+            continue
+        name, _, raw = line.partition(" ")
+        if name in _METRIC_KEYS:
+            try:
+                values[name] = float(raw)
+            except ValueError:
+                continue
+    return values
+
+
+async def _runner_throughput(runners: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Live tok/s per runner from llama-server's /metrics counters.
+
+    Rates come from token counters divided by the server's own generation-seconds
+    counters, not by wall time, so idle gaps between requests do not drag the
+    number down. Runners launched before --metrics existed answer 501; they get
+    no entry rather than a zero, which would read as "stalled".
+    """
+    out: dict[str, dict[str, Any]] = {}
+
+    async def sample(runner: dict[str, Any]) -> None:
+        container = str(runner.get("container") or "")
+        port = runner.get("port")
+        if not container or not port:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(f"http://127.0.0.1:{port}/metrics")
+            if resp.status_code != 200:
+                return
+            now = _parse_prom(resp.text)
+        except (httpx.HTTPError, OSError):
+            return
+        if not now:
+            return
+        prev = _metrics_prev.get(container)
+        _metrics_prev[container] = now
+        entry: dict[str, Any] = {
+            "processing": int(now.get("llamacpp:requests_processing", 0)),
+        }
+        if prev:
+            for label, tokens_key, seconds_key in (
+                (
+                    "tg_tok_s",
+                    "llamacpp:tokens_predicted_total",
+                    "llamacpp:tokens_predicted_seconds_total",
+                ),
+                ("pp_tok_s", "llamacpp:prompt_tokens_total", "llamacpp:prompt_seconds_total"),
+            ):
+                d_tokens = now.get(tokens_key, 0) - prev.get(tokens_key, 0)
+                d_seconds = now.get(seconds_key, 0) - prev.get(seconds_key, 0)
+                # A restarted runner resets the counters; a negative delta means
+                # this sample has no baseline, not a negative rate.
+                if d_tokens > 0 and d_seconds > 0:
+                    entry[label] = round(d_tokens / d_seconds, 1)
+        out[container] = entry
+
+    await asyncio.gather(*(sample(r) for r in runners))
+    return out
 
 
 async def _sample_gpu_status(initial_warmup: bool = False):
@@ -165,6 +243,9 @@ async def _sample_gpu_status(initial_warmup: bool = False):
             for sample in samples:
                 for pci_id, gpu in sample.get("gpus", {}).items():
                     gpu.update(identity.get(pci_id, {}))
+            throughput = await _runner_throughput(runners)
+            for sample in samples:
+                sample.update(throughput.get(sample.get("container", ""), {}))
             system = await asyncio.to_thread(_system_collector.sample)
             _last_gpu_sample = {
                 "ts": time.time(),
@@ -181,6 +262,14 @@ async def _sample_gpu_status(initial_warmup: bool = False):
                 "devices": [],
                 "system": {},
             }
+
+
+@router.get("/metrics")
+async def prometheus_metrics():
+    """GPU/system telemetry in Prometheus exposition format, for the Grafana stack."""
+    if _last_gpu_sample is None:
+        await _sample_gpu_status()
+    return Response(content=prom_export.render(_last_gpu_sample), media_type="text/plain")
 
 
 @router.get("/gpu-status")

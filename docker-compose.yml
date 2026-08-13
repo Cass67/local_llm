@@ -290,8 +290,50 @@ services:
       GRANIAN_HOST: "192.168.2.1"
       GRANIAN_PORT: "3005"
 
+  # ── Monitoring ──────────────────────────────────────────────────────────────
+  # Prometheus scrapes llama-server's /metrics (inference counters) and mgmt's
+  # /api/metrics (GPU + host telemetry); Grafana graphs both on one time axis.
+  # Host network so 127.0.0.1:<runner port> resolves the same way mgmt sees it.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: local-llm-prometheus
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.listen-address=127.0.0.1:3008"
+
+  # UI at http://ubt26:3007 — anonymous viewing on the LAN, login only to edit.
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: local-llm-grafana
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_SERVER_HTTP_PORT: "3007"
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-local-llm-admin}"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_USERS_DEFAULT_THEME: "dark"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+
 volumes:
   open-webui:
   caddy-data:
   caddy-config:
   langfuse-postgres:
+  prometheus-data:
+  grafana-data:

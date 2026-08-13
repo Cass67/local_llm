@@ -84,6 +84,10 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         "llama-server",
         "--port",
         str(port),
+        # Live throughput for the Status page. latest-metrics.json only sees requests
+        # that go through the mgmt chat proxy, so sweeps and anything aimed straight
+        # at the runner port left the tok/s card frozen; /metrics counts every request.
+        "--metrics",
         "-m",
         _model_path(metadata),
     ]

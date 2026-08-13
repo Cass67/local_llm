@@ -451,6 +451,11 @@ export interface GpuRunnerStatus {
 	aggregate_gpu_equiv: number | null;
 	gpu_count: number;
 	verdict: string;
+	// Live from the runner's own /metrics counters — counts every request, including
+	// sweeps and traffic that never passes through the mgmt chat proxy.
+	tg_tok_s?: number;
+	pp_tok_s?: number;
+	processing?: number;
 }
 
 export interface GpuDeviceMetrics {
