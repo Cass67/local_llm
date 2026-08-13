@@ -7,6 +7,11 @@ FROM node:22-slim
 ARG PI_VERSION=0.84.1
 # renovate: datasource=npm depName=opencode-ai
 ARG OPENCODE_VERSION=1.18.16
+# OpenCode 2 beta, installed alongside v1 as the `opencode2` binary. Pinned to an
+# exact prerelease rather than the @next tag: the beta moves daily and its config,
+# server and plugin APIs are all still declared unstable upstream. No renovate
+# comment -- the `latest` dist-tag does not track this line.
+ARG OPENCODE2_VERSION=0.0.0-next-17428
 
 ARG TTYD_VERSION=1.7.7
 
@@ -23,6 +28,7 @@ RUN curl -fsSL -o /usr/local/bin/ttyd \
 RUN npm install -g \
       "@earendil-works/pi-coding-agent@${PI_VERSION}" \
       "opencode-ai@${OPENCODE_VERSION}" \
+      "@opencode-ai/cli@${OPENCODE2_VERSION}" \
     && npm cache clean --force
 
 # Runs as the host user (see docker-compose `user:`) so files created in the

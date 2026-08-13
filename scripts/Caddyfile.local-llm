@@ -91,6 +91,16 @@
 		reverse_proxy 127.0.0.1:3002
 	}
 
+	# OpenCode 2 beta, same ttyd shape under its own /opencode2 base path. Distinct
+	# first path segment from /opencode, so the matchers above never catch it.
+	handle /opencode2 {
+		redir * /opencode2/ permanent
+	}
+
+	handle /opencode2/* {
+		reverse_proxy 127.0.0.1:3009
+	}
+
 	# Open WebUI Socket.IO uses /ws/socket.io; route it before generic OpenCode /ws.
 	handle /ws/socket.io* {
 		reverse_proxy 127.0.0.1:3101
