@@ -49,6 +49,9 @@ services:
       TERMINAL_BENCH_DATASET_VERSION: "0.1.1"
       # Raises HF Hub rate limits for dataset/model downloads (terminal-bench, swe-bench)
       HF_TOKEN: "${HF_TOKEN:-}"
+      # NVIDIA prepare.py output. Without it SPEED-Bench falls back to the HF rows
+      # API, where 494 of 880 prompts are un-hydrated placeholders.
+      SPEED_BENCH_PROMPTS_JSONL: "${SPEED_BENCH_PROMPTS_JSONL:-/state/speed-bench}"
       # Update checks read public repos only, so a token with no scopes is enough.
       # Without one GitHub allows 60 requests an hour per IP and the Status page
       # runs out mid-check; with one, 5000.

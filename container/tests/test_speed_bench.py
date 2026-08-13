@@ -1,5 +1,7 @@
 """SPEED-Bench: placeholder rows are dropped, acceptance is pooled over tokens."""
 
+import json
+
 import pytest
 from backend import speed_bench
 
@@ -25,6 +27,33 @@ def test_placeholders_are_dropped_and_counted(monkeypatch):
     assert listing["usable_total"] == 2
     assert listing["placeholder_total"] == 2
     assert listing["categories"][0] == {"name": "code", "usable": 1, "placeholders": 1}
+
+
+def test_hydrated_copy_wins_over_its_placeholder_twin(tmp_path, monkeypatch):
+    """prepare.py emits qualitative and qualitative-nohle: same ids, one hydrated."""
+    nohle = tmp_path / "qualitative-nohle.jsonl"  # sorts first
+    full = tmp_path / "qualitative.jsonl"
+    nohle.write_text(
+        json.dumps({"category": "stem", "question_id": "q1", "turns": [speed_bench.PLACEHOLDER]})
+        + "\n"
+    )
+    full.write_text(
+        json.dumps({"category": "stem", "question_id": "q1", "turns": ["real prompt"]}) + "\n"
+    )
+    monkeypatch.setattr(speed_bench, "_fetch_rows", lambda: pytest.fail("should not hit the API"))
+
+    keep, dropped = speed_bench.load_prompts(str(tmp_path))
+    assert len(keep) == 1  # de-duplicated, not counted twice
+    assert keep[0]["turns"] == ["real prompt"]
+    assert dropped == {}  # its twin supplied it, so nothing is missing
+
+
+def test_falls_back_to_the_api_when_the_jsonl_path_is_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        speed_bench, "_fetch_rows", lambda: [_row("code", "a", ["from the rows API"])]
+    )
+    keep, _ = speed_bench.load_prompts(str(tmp_path))
+    assert [r["question_id"] for r in keep] == ["a"]
 
 
 def test_acceptance_is_pooled_over_tokens_not_averaged_over_rows():

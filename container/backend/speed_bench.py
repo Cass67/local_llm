@@ -96,10 +96,23 @@ def _is_placeholder(row: dict[str, Any]) -> bool:
 
 def load_prompts(jsonl_dir: str = "") -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Usable prompts, plus the per-category count of what was dropped."""
-    rows = _hydrated_rows(jsonl_dir) if jsonl_dir else _fetch_rows()
-    keep = [r for r in rows if not _is_placeholder(r)]
-    dropped = collections.Counter(r["category"] for r in rows if _is_placeholder(r))
-    return keep, dict(dropped)
+    rows = _hydrated_rows(jsonl_dir) if jsonl_dir else []
+    if not rows:
+        # Nothing hydrated (or the path is wrong): fall back to the HF rows API,
+        # which still gives 386 real prompts out of the 880.
+        rows = _fetch_rows()
+    # Placeholders first, then de-duplicate: prepare.py's variants (qualitative
+    # and qualitative-nohle) share question_ids, and dropping the placeholder
+    # copy first is what keeps the hydrated one.
+    keep: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not _is_placeholder(row):
+            keep.setdefault(row["question_id"], row)
+    # Only count a row as lost if no file hydrated it -- a placeholder that its
+    # sibling file supplies for real is not missing.
+    missing = {r["question_id"]: r["category"] for r in rows if r["question_id"] not in keep}
+    dropped = collections.Counter(missing.values())
+    return list(keep.values()), dict(dropped)
 
 
 def categories(jsonl_dir: str = "") -> dict[str, Any]:
