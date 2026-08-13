@@ -56,6 +56,55 @@ async def test_chat_row_counts_commits_behind_upstream(monkeypatch):
     assert (row["behind"], row["outdated"]) == (7, True)
 
 
+@pytest.mark.asyncio
+async def test_github_client_caches_and_reports_rate_limit(monkeypatch):
+    from backend.routes import update
+
+    calls = []
+    limited = {"on": False}
+
+    class Counting:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, **kw):
+            calls.append(url)
+            request = httpx.Request("GET", url)
+            if limited["on"]:
+                return httpx.Response(
+                    403,
+                    json={},
+                    request=request,
+                    headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1786700000"},
+                )
+            return httpx.Response(200, json={"sha": "abc"}, request=request)
+
+    monkeypatch.setattr(update.httpx, "AsyncClient", Counting)
+    update._gh_cache.clear()
+
+    async with update.GitHub() as client:
+        await client.get("https://api.github.com/repos/x/y/commits/main")
+        await client.get("https://api.github.com/repos/x/y/commits/main")
+    assert len(calls) == 1  # second read served from cache, not from the quota
+
+    limited["on"] = True
+    update._gh_cache.clear()
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as excinfo:
+        async with update.GitHub() as client:
+            await client.get("https://api.github.com/repos/x/y/tags")
+    assert excinfo.value.status_code == 429
+    assert "GITHUB_TOKEN" in excinfo.value.detail  # tells the user how to raise the cap
+    update._gh_cache.clear()
+
+
 def test_jobs_are_independent():
     """A langfuse rebuild must not lock out an opencode bump."""
     from backend.routes import update

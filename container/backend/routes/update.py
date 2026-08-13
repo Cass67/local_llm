@@ -20,11 +20,65 @@ router = APIRouter(prefix="/api/update", tags=["update"])
 
 GITHUB_REPOS = "https://api.github.com/repos"
 GITHUB_API = f"{GITHUB_REPOS}/ggml-org/llama.cpp"
+# Anonymous GitHub allows 60 requests an hour per IP, and one "check for updates"
+# spends a dozen (a compare per runner sha, a tag walk for Langfuse). A token
+# raises that to 5000; the cache keeps a refresh cheap either way.
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_CACHE_TTL = 600.0
 COMMIT_LABEL = "llama.cpp.commit"
 RUNNER_SRC_DIR = Path(os.environ.get("RUNNER_SRC_DIR", "/app/runner"))
 BUILD_LOG_PREFIX = "build-"
 
 _BACKENDS = ("vulkan", "rocm", "cuda")
+
+_gh_cache: dict[str, tuple[float, httpx.Response]] = {}
+
+
+class GitHub:
+    """GitHub client with auth and a short response cache, to stay under the quota."""
+
+    def __init__(self, timeout: float = 20.0):
+        self._timeout = timeout
+        self._client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> "GitHub":
+        headers = {"Accept": "application/vnd.github+json"}
+        if GITHUB_TOKEN:
+            headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+        self._client = httpx.AsyncClient(timeout=self._timeout, headers=headers)
+        await self._client.__aenter__()
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        if self._client:
+            await self._client.__aexit__(*exc)
+        return False
+
+    async def get(self, url: str, **kw) -> httpx.Response:
+        key = f"{url}?{sorted((kw.get('params') or {}).items())}"
+        hit = _gh_cache.get(key)
+        if hit and hit[0] > time.monotonic():
+            return hit[1]
+        resp = await self._client.get(url, **kw)  # ty: ignore[possibly-unbound-attribute]
+        if resp.status_code in (403, 429) and resp.headers.get("x-ratelimit-remaining") == "0":
+            raise HTTPException(429, _rate_limit_message(resp))
+        if resp.status_code == 200:
+            _gh_cache[key] = (time.monotonic() + GITHUB_CACHE_TTL, resp)
+        return resp
+
+
+def _rate_limit_message(resp: httpx.Response) -> str:
+    reset = resp.headers.get("x-ratelimit-reset")
+    when = ""
+    if reset and reset.isdigit():
+        when = f" until {time.strftime('%H:%M', time.localtime(int(reset)))}"
+    if GITHUB_TOKEN:
+        return f"GitHub rate limit exhausted{when}."
+    return (
+        f"GitHub rate limit exhausted{when} (60/hour without a token). "
+        "Set GITHUB_TOKEN in .env and redeploy to raise it to 5000/hour."
+    )
+
 
 # The coding-agent image (pi + opencode) is version-pinned by build arg, so a
 # plain `docker compose build` is a cache hit and never picks up new releases.
@@ -165,7 +219,7 @@ async def update_status():
         if present and commit:
             current_shas.add(commit)
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with GitHub(timeout=15.0) as client:
         try:
             resp = await client.get(f"{GITHUB_API}/commits/master")
             resp.raise_for_status()
@@ -215,7 +269,7 @@ async def commit_detail(sha: str):
     if not re.fullmatch(r"[0-9a-fA-F]{7,40}", sha):
         raise HTTPException(400, "not a commit sha")
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with GitHub(timeout=20.0) as client:
 
         async def get(url: str, **kw):
             resp = await client.get(url, **kw)
@@ -559,7 +613,7 @@ async def _service_row(client: httpx.AsyncClient, service_id: str, svc: dict) ->
 @router.get("/services")
 async def services_status():
     """Installed vs upstream for the chat and tracing containers."""
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+    async with GitHub(timeout=20.0) as client:
         try:
             rows = [await _service_row(client, sid, svc) for sid, svc in SERVICES.items()]
         except httpx.HTTPError as e:
@@ -617,7 +671,7 @@ async def start_service_update(service_id: str):
 
     ref = None
     if svc["kind"] == "git-build":
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with GitHub(timeout=20.0) as client:
             try:
                 ref = await _latest_tag(client, svc["repo"], svc["series"])
             except httpx.HTTPError as e:
@@ -688,7 +742,7 @@ async def start_build(req: BuildRequest):
     if not targets:
         raise HTTPException(400, "no backends given")
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with GitHub(timeout=15.0) as client:
         try:
             resp = await client.get(f"{GITHUB_API}/commits/master")
             resp.raise_for_status()

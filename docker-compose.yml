@@ -49,6 +49,10 @@ services:
       TERMINAL_BENCH_DATASET_VERSION: "0.1.1"
       # Raises HF Hub rate limits for dataset/model downloads (terminal-bench, swe-bench)
       HF_TOKEN: "${HF_TOKEN:-}"
+      # Update checks read public repos only, so a token with no scopes is enough.
+      # Without one GitHub allows 60 requests an hour per IP and the Status page
+      # runs out mid-check; with one, 5000.
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
       # Coding agents surfaced on the UI's Coding tab
       AGENTS_REPO_DIR: "${AGENTS_REPO_DIR:-/home/cass/git}"
       AGENT_PI_PORT: "${AGENT_PI_PORT:-3006}"
