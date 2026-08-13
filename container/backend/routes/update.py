@@ -22,7 +22,7 @@ GITHUB_REPOS = "https://api.github.com/repos"
 GITHUB_API = f"{GITHUB_REPOS}/ggml-org/llama.cpp"
 COMMIT_LABEL = "llama.cpp.commit"
 RUNNER_SRC_DIR = Path(os.environ.get("RUNNER_SRC_DIR", "/app/runner"))
-BUILD_LOG = config.STATE_DIR / "runner-build.log"
+BUILD_LOG_PREFIX = "build-"
 
 _BACKENDS = ("vulkan", "rocm", "cuda")
 
@@ -72,8 +72,42 @@ SERVICES: dict[str, dict] = {
 # image id -> short sha, so we only `docker run --version` once per image build
 _version_cache: dict[str, str] = {}
 
-_build_lock = threading.Lock()
-_build: dict = {"running": False, "backends": [], "current": None, "started": None, "results": {}}
+# One job per updatable thing, running concurrently: a Langfuse rebuild takes
+# minutes and must not block an opencode bump. The three runners stay a single
+# job -- they build the same llama.cpp source, and serialising them keeps the
+# machine responsive while it compiles.
+_jobs_lock = threading.Lock()
+_jobs: dict[str, dict] = {}
+
+
+def _job_log(job_id: str) -> Path:
+    return config.STATE_DIR / f"{BUILD_LOG_PREFIX}{job_id}.log"
+
+
+def _claim_job(job_id: str, targets: list[str]) -> dict:
+    """Reserve the job slot, or 409 if that same job is already building."""
+    with _jobs_lock:
+        if _jobs.get(job_id, {}).get("running"):
+            raise HTTPException(409, f"'{job_id}' is already building")
+        job = {
+            "id": job_id,
+            "running": True,
+            "targets": targets,
+            "current": None,
+            "started": time.time(),
+            "results": {},
+        }
+        _jobs[job_id] = job
+        return job
+
+
+def _finish(job: dict) -> None:
+    job["current"] = None
+    job["running"] = False
+
+
+def _others_running(job_id: str) -> bool:
+    return any(j["running"] for jid, j in _jobs.items() if jid != job_id)
 
 
 def _docker(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
@@ -372,12 +406,12 @@ def _recreate_container(name: str, image: str | None = None) -> None:
     api("POST", f"/containers/{name}/start")
 
 
-def _run_agents_build(versions: dict[str, str]) -> None:
+def _run_agents_build(job: dict, versions: dict[str, str]) -> None:
     build_args = []
     for agent_id, version in versions.items():
         build_args += ["--build-arg", f"{AGENT_PACKAGES[agent_id][1]}={version}"]
-    with open(BUILD_LOG, "w") as log:
-        _build["current"] = "agents"
+    with open(_job_log(job["id"]), "w") as log:
+        job["current"] = "agents"
         pinned = ", ".join(f"{a} {v}" for a, v in versions.items())
         log.write(f"\n=== Building {AGENTS_IMAGE} ({pinned}) ===\n")
         log.flush()
@@ -397,7 +431,7 @@ def _run_agents_build(versions: dict[str, str]) -> None:
             stderr=subprocess.STDOUT,
         )
         code = proc.wait()
-        _build["results"]["agents"] = code
+        job["results"]["agents"] = code
         _agent_version_cache.clear()
         # The image tag is unchanged, so the running containers keep the old one
         # until they are re-created -- unlike runners, nothing else relaunches them.
@@ -409,10 +443,9 @@ def _run_agents_build(versions: dict[str, str]) -> None:
                     log.write(f"recreated {name}\n")
                 except (RuntimeError, OSError) as exc:
                     log.write(f"failed to recreate {name}: {exc}\n")
-                    _build["results"]["agents"] = 1
+                    job["results"]["agents"] = 1
                 log.flush()
-    _build["current"] = None
-    _build["running"] = False
+    _finish(job)
 
 
 @router.post("/agents/build")
@@ -432,13 +465,8 @@ async def start_agents_build():
         except httpx.HTTPError as e:
             raise HTTPException(502, f"npm registry unreachable: {e}") from e
 
-    with _build_lock:
-        if _build["running"]:
-            raise HTTPException(409, "a build is already running")
-        _build.update(
-            running=True, backends=["agents"], current=None, started=time.time(), results={}
-        )
-    threading.Thread(target=_run_agents_build, args=(versions,), daemon=True).start()
+    job = _claim_job("agents", ["agents"])
+    threading.Thread(target=_run_agents_build, args=(job, versions), daemon=True).start()
     return {"status": "started", "versions": versions}
 
 
@@ -539,9 +567,10 @@ async def services_status():
     return {"services": rows}
 
 
-def _run_service_update(service_id: str, svc: dict, ref: str | None) -> None:
-    with open(BUILD_LOG, "w") as log:
-        _build["current"] = service_id
+def _run_service_update(job: dict, svc: dict, ref: str | None) -> None:
+    service_id = job["id"]
+    with open(_job_log(service_id), "w") as log:
+        job["current"] = service_id
         if svc["kind"] == "pull":
             log.write(f"\n=== Pulling {svc['image']} ===\n")
             cmd = ["docker", "pull", svc["image"]]
@@ -567,17 +596,16 @@ def _run_service_update(service_id: str, svc: dict, ref: str | None) -> None:
         log.flush()
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)  # nosec B603  # noqa: S603
         code = proc.wait()
-        _build["results"][service_id] = code
+        job["results"][service_id] = code
         if code == 0:
             try:
                 _recreate_container(svc["container"], svc["image"])
                 log.write(f"recreated {svc['container']}\n")
             except (RuntimeError, OSError) as exc:
                 log.write(f"failed to recreate {svc['container']}: {exc}\n")
-                _build["results"][service_id] = 1
+                job["results"][service_id] = 1
             log.flush()
-    _build["current"] = None
-    _build["running"] = False
+    _finish(job)
 
 
 @router.post("/services/{service_id}/build")
@@ -597,20 +625,15 @@ async def start_service_update(service_id: str):
         if not ref:
             raise HTTPException(502, f"no {svc['series']}x release found for {svc['repo']}")
 
-    with _build_lock:
-        if _build["running"]:
-            raise HTTPException(409, "a build is already running")
-        _build.update(
-            running=True, backends=[service_id], current=None, started=time.time(), results={}
-        )
-    threading.Thread(target=_run_service_update, args=(service_id, svc, ref), daemon=True).start()
+    job = _claim_job(service_id, [service_id])
+    threading.Thread(target=_run_service_update, args=(job, svc, ref), daemon=True).start()
     return {"status": "started", "ref": ref}
 
 
-def _run_builds(targets: list[tuple[str, str]], ref: str) -> None:
-    with open(BUILD_LOG, "w") as log:
+def _run_builds(job: dict, targets: list[tuple[str, str]], ref: str) -> None:
+    with open(_job_log(job["id"]), "w") as log:
         for backend, image in targets:
-            _build["current"] = backend
+            job["current"] = backend
             log.write(f"\n=== Building {image} @ {ref[:12]} ===\n")
             log.flush()
             proc = subprocess.Popen(  # nosec B603 B607  # noqa: S603
@@ -630,23 +653,22 @@ def _run_builds(targets: list[tuple[str, str]], ref: str) -> None:
                 stdout=log,
                 stderr=subprocess.STDOUT,
             )
-            _build["results"][backend] = proc.wait()
+            job["results"][backend] = proc.wait()
             _version_cache.clear()
-    _build["current"] = None
-    _build["running"] = False
 
     # A rebuild is the moment upstream performance changes; measure it now, while
     # we know which commit caused it, rather than noticing weeks later.
-    if _build["results"] and all(code == 0 for code in _build["results"].values()):
-        _build["current"] = "regression guard"
-        _build["running"] = True
+    if job["results"] and all(code == 0 for code in job["results"].values()):
+        job["current"] = "regression guard"
+        # Another job compiling in the background would eat the CPU this measures
+        # against, so wait it out rather than blame upstream for the slowdown.
+        while _others_running(job["id"]):
+            time.sleep(5)
         try:
-            _build["regression"] = regression.run_guard(ref)
+            job["regression"] = regression.run_guard(ref)
         except Exception as exc:  # noqa: BLE001
             logging.warning("regression guard failed after build: %s", exc)
-        finally:
-            _build["current"] = None
-            _build["running"] = False
+    _finish(job)
 
 
 class BuildRequest(BaseModel):
@@ -674,38 +696,29 @@ async def start_build(req: BuildRequest):
         except httpx.HTTPError as e:
             raise HTTPException(502, f"GitHub unreachable: {e}") from e
 
-    with _build_lock:
-        if _build["running"]:
-            raise HTTPException(409, "a build is already running")
-        _build.update(
-            running=True,
-            backends=[b for b, _ in targets],
-            current=None,
-            started=time.time(),
-            results={},
-        )
-    threading.Thread(target=_run_builds, args=(targets, ref), daemon=True).start()
-    return {"status": "started", "ref": ref, "backends": _build["backends"]}
+    job = _claim_job("runners", [b for b, _ in targets])
+    threading.Thread(target=_run_builds, args=(job, targets, ref), daemon=True).start()
+    return {"status": "started", "ref": ref, "backends": job["targets"]}
+
+
+def _log_tail(job_id: str) -> str:
+    path = _job_log(job_id)
+    if not path.exists():
+        return ""
+    try:
+        return "\n".join(path.read_text(errors="replace").splitlines()[-40:])
+    except OSError:
+        return ""
 
 
 @router.get("/build/status")
 async def build_status():
-    log_tail = ""
-    if BUILD_LOG.exists():
-        try:
-            lines = BUILD_LOG.read_text(errors="replace").splitlines()
-            log_tail = "\n".join(lines[-40:])
-        except OSError:
-            pass
-    return {
-        "running": _build["running"],
-        "backends": _build["backends"],
-        "current": _build["current"],
-        "started": _build["started"],
-        "results": _build["results"],
-        "log_tail": log_tail,
-        "regression": _build.get("regression"),
-    }
+    """Every build job, running or last-finished. Jobs are independent."""
+    jobs = [
+        {**job, "log_tail": _log_tail(job["id"])}
+        for job in sorted(_jobs.values(), key=lambda j: j["started"])
+    ]
+    return {"running": any(job["running"] for job in jobs), "jobs": jobs}
 
 
 @router.get("/regression")
@@ -717,7 +730,7 @@ async def regression_report():
 @router.post("/regression/run")
 async def run_regression_guard(commit: str = ""):
     """Measure every running cluster against its baseline without rebuilding."""
-    if _build["running"]:
+    if any(job["running"] for job in _jobs.values()):
         raise HTTPException(409, "a build is already running")
     return await asyncio.to_thread(regression.run_guard, commit)
 
