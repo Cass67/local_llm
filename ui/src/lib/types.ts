@@ -456,6 +456,9 @@ export interface GpuRunnerStatus {
 	tg_tok_s?: number;
 	pp_tok_s?: number;
 	processing?: number;
+	// Seconds since that rate was measured. The counters only move when a request
+	// finishes, so a runner mid-generation reports a rising age, not a fresh number.
+	tok_s_age?: number;
 }
 
 export interface GpuDeviceMetrics {

@@ -161,6 +161,10 @@ _METRIC_KEYS = (
 )
 # Previous /metrics counter read per runner, for rate deltas.
 _metrics_prev: dict[str, dict[str, float]] = {}
+# Last rate we managed to compute per runner. llama-server only advances the token
+# counters when a request finishes, so mid-generation every delta is zero: without
+# this the card would blank out for exactly as long as the model is working.
+_metrics_last_rate: dict[str, dict[str, Any]] = {}
 
 
 def _parse_prom(text: str) -> dict[str, float]:
@@ -207,6 +211,7 @@ async def _runner_throughput(runners: list[dict[str, Any]]) -> dict[str, dict[st
         entry: dict[str, Any] = {
             "processing": int(now.get("llamacpp:requests_processing", 0)),
         }
+        last = _metrics_last_rate.setdefault(container, {})
         if prev:
             for label, tokens_key, seconds_key in (
                 (
@@ -221,7 +226,11 @@ async def _runner_throughput(runners: list[dict[str, Any]]) -> dict[str, dict[st
                 # A restarted runner resets the counters; a negative delta means
                 # this sample has no baseline, not a negative rate.
                 if d_tokens > 0 and d_seconds > 0:
-                    entry[label] = round(d_tokens / d_seconds, 1)
+                    last[label] = round(d_tokens / d_seconds, 1)
+                    last["ts"] = time.time()
+        entry.update(last)
+        if last.get("ts"):
+            entry["tok_s_age"] = round(time.time() - last["ts"], 1)
         out[container] = entry
 
     await asyncio.gather(*(sample(r) for r in runners))
