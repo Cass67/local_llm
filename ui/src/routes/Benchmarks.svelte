@@ -24,6 +24,7 @@
 	} from "../lib/benchmarkApi";
 	import { fetchClusters } from "../lib/api";
 	import BakeoffPanel from "../components/BakeoffPanel.svelte";
+	import SpeedBenchPanel from "../components/SpeedBenchPanel.svelte";
 	import LeaderboardTable from "../components/LeaderboardTable.svelte";
 	import { formatMs, formatThroughput, runDelta } from "../lib/benchmarkMetrics";
 	import type { BenchmarkEndpoint, BenchmarkPrompt, BenchmarkRun, BenchmarkSummary, BenchmarkJobProgress } from "../lib/benchmarkApi";
@@ -748,6 +749,8 @@
 	</section>
 
 	<BakeoffPanel onfinish={() => { leaderboard?.load(); loadAll(); }} />
+
+	<SpeedBenchPanel />
 
 	{#if consoleVisible}
 		<section class="panel">
