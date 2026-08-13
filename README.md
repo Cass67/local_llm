@@ -637,6 +637,7 @@ Routes are matched in the order below; the first matching `handle` wins.
 | `/_switcher` | `local-llm-mgmt :3100` |
 | `/pi`, `/pi/*` | pi coding agent `:3006` (ttyd serves its own `/pi` base path, so no rewrite) |
 | `/opencode`, `/opencode/*` | opencode TUI `:3002` (ttyd, own base path) |
+| `/opencode2`, `/opencode2/*` | OpenCode 2 beta TUI `:3009` (ttyd, own base path) |
 | `/ws/socket.io*` | `open-webui :3101` — must precede the generic `/ws/*` arm |
 | `/ws/*`, `/socket.io/*`, `/pty/*/connect` | opencode `:3002`; WebSocket upgrades bypass injection |
 | `/traces`, `/traces/*` | `local-llm-langfuse :3004` (built with `NEXT_PUBLIC_BASE_PATH=/traces`) |

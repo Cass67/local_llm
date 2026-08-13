@@ -234,6 +234,49 @@ services:
       - opencode
       - opencode
 
+  # OpenCode 2 beta on :3009, alongside v1 rather than replacing it. v2 reuses
+  # v1's XDG paths, so it is isolated by mounting different host dirs at the same
+  # container paths -- sessions and credentials never mix. `--standalone` keeps
+  # the private-server shape of v1: v2 otherwise talks to a background service
+  # that would outlive the tmux session ttyd is holding open.
+  opencode2:
+    build:
+      context: ./agents
+    image: local-llm-agents:latest
+    container_name: local-llm-opencode2
+    network_mode: host
+    restart: unless-stopped
+    user: "${LOCAL_LLM_UID:-1000}:${LOCAL_LLM_GID:-1000}"
+    working_dir: /home/agent/git
+    volumes:
+      - ${AGENTS_REPO_DIR:-/home/cass/git}:/home/agent/git
+      - ${AGENTS_CONFIG_DIR:-${HOME}/.config/local_llm/agents}/opencode2:/home/agent/.config/opencode
+      - ${AGENTS_CONFIG_DIR:-${HOME}/.config/local_llm/agents}/opencode2-data:/home/agent/.local/share/opencode
+    environment:
+      TERM: xterm-256color
+    command:
+      - ttyd
+      - -W
+      - -p
+      - "3009"
+      - -i
+      - lo
+      - -b
+      - /opencode2
+      - -t
+      - 'theme={"background":"#09090b","foreground":"#fafafa","cursor":"#fafafa","cursorAccent":"#09090b","selectionBackground":"#3f3f46","black":"#18181b","brightBlack":"#52525b"}'
+      - -t
+      - fontSize=14
+      - -I
+      - /opt/ttyd/index.html
+      - tmux
+      - new
+      - -A
+      - -s
+      - opencode2
+      - opencode2
+      - --standalone
+
   # ── Langfuse observability ───────────────────────────────────────────────────
   # LLM request tracing — UI at http://ubt26:3004
   # First-time setup is manual: register at the Langfuse UI, create a project,
