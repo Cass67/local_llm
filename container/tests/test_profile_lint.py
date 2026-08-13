@@ -125,10 +125,24 @@ def _write_gguf(path: Path, *, layers=48, head_kv=8, head_count=40, embd=5120, p
             + struct.pack("<I", value)
         )
 
+    def kv_u32_array(key, values):
+        return (
+            struct.pack("<Q", len(key))
+            + key.encode()
+            + struct.pack("<I", 9)
+            + struct.pack("<I", 4)
+            + struct.pack("<Q", len(values))
+            + b"".join(struct.pack("<I", v) for v in values)
+        )
+
     entries = [
         kv_str("general.architecture", "llama"),
         kv_u32("llama.block_count", layers),
-        kv_u32("llama.attention.head_count_kv", head_kv),
+        (
+            kv_u32_array("llama.attention.head_count_kv", head_kv)
+            if isinstance(head_kv, list)
+            else kv_u32("llama.attention.head_count_kv", head_kv)
+        ),
         kv_u32("llama.attention.head_count", head_count),
         kv_u32("llama.embedding_length", embd),
     ]
@@ -143,6 +157,17 @@ def test_gguf_header_parses(tmp_path):
     meta = read_gguf_meta(p)
     assert meta is not None
     assert (meta.n_layers, meta.n_head_kv, meta.key_length) == (48, 8, 128)
+
+
+def test_hybrid_per_layer_head_count_kv_only_counts_attention_layers(tmp_path):
+    # nemotron_h_moe-style: 8 blocks, attention on 2 of them, state-space on the rest.
+    p = tmp_path / "hybrid.gguf"
+    _write_gguf(p, layers=8, head_kv=[0, 0, 2, 0, 0, 0, 2, 0])
+    meta = read_gguf_meta(p)
+    assert meta is not None
+    assert meta.kv_heads_total == 4  # not 8 layers * 2 heads = 16
+    # 4 kv-heads total * 65536 ctx * 128 dim * 2 (K+V) * 2 bytes = 128 MiB
+    assert round(kv_cache_mb(meta, 65536, "f16", "f16")) == 128
 
 
 def test_non_gguf_file_returns_none(tmp_path):

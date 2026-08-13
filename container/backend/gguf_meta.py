@@ -12,6 +12,10 @@ from pathlib import Path
 
 _MAGIC = b"GGUF"
 
+# Longest array kept in full. Per-layer config arrays are one entry per block;
+# the next size up is a tokenizer vocab, which is worth skipping.
+_MAX_ARRAY = 1024
+
 # GGUF metadata value type enum
 _UINT8, _INT8, _UINT16, _INT16, _UINT32, _INT32, _FLOAT32 = range(7)
 _BOOL, _STRING, _ARRAY, _UINT64, _INT64, _FLOAT64 = range(7, 13)
@@ -39,6 +43,10 @@ class GgufMeta:
     key_length: int
     value_length: int
     file_bytes: int
+    # Sum of kv-heads over every block. Equals n_layers * n_head_kv for uniform
+    # models, but hybrid archs (nemotron_h_moe, …) carry attention on only a few
+    # blocks and state-space layers on the rest, so the product overcounts wildly.
+    kv_heads_total: int = 0
 
 
 class _Reader:
@@ -67,9 +75,14 @@ class _Reader:
         if vtype == _ARRAY:
             elem_type = struct.unpack("<I", self.raw(4))[0]
             count = struct.unpack("<Q", self.raw(8))[0]
-            # Arrays are only tokenizer vocabs here — skip the contents rather than
-            # materialising a 150k-entry list we will never look at.
+            # Short numeric arrays are per-layer config (head counts, ffn sizes) and
+            # are needed to size the KV cache. Anything longer is a tokenizer vocab —
+            # skip it rather than materialise a 150k-entry list we never look at.
             if elem_type in _FIXED:
+                if count <= _MAX_ARRAY:
+                    fmt, size = _FIXED[elem_type]
+                    raw = self.raw(size * count)
+                    return list(struct.unpack(f"<{count}{fmt[1:]}", raw))
                 self.raw(_FIXED[elem_type][1] * count)
             elif elem_type == _STRING:
                 for _ in range(count):
@@ -104,7 +117,17 @@ def read_gguf_meta(path: str | Path) -> GgufMeta | None:
 
     def num(suffix: str, default: int = 0) -> int:
         value = kv.get(f"{arch}.{suffix}")
+        if isinstance(value, list):
+            # Per-layer array: the peak is the representative head count.
+            nums = [int(v) for v in value if isinstance(v, (int, float))]
+            return max(nums, default=default) or default
         return int(value) if isinstance(value, (int, float)) else default
+
+    def per_layer(suffix: str) -> list[int] | None:
+        value = kv.get(f"{arch}.{suffix}")
+        if isinstance(value, list) and value:
+            return [int(v) for v in value if isinstance(v, (int, float))]
+        return None
 
     n_layers = num("block_count")
     n_head_kv = num("attention.head_count_kv") or num("attention.head_count")
@@ -113,6 +136,11 @@ def read_gguf_meta(path: str | Path) -> GgufMeta | None:
     head_dim = (n_embd // n_head) if n_head else 0
     key_length = num("attention.key_length") or head_dim
     value_length = num("attention.value_length") or head_dim
+
+    # Hybrid archs list head_count_kv per block, with 0 on the layers that use a
+    # state-space mixer instead of attention and so hold no KV at all.
+    heads = per_layer("attention.head_count_kv")
+    kv_heads_total = sum(heads) if heads else n_layers * n_head_kv
 
     if not (n_layers and n_head_kv and key_length):
         return None
@@ -123,6 +151,7 @@ def read_gguf_meta(path: str | Path) -> GgufMeta | None:
         key_length=key_length,
         value_length=value_length,
         file_bytes=size,
+        kv_heads_total=kv_heads_total,
     )
 
 
@@ -143,5 +172,6 @@ _KV_BYTES = {
 def kv_cache_mb(meta: GgufMeta, ctx: int, cache_type_k: str, cache_type_v: str) -> float:
     k_bytes = _KV_BYTES.get(cache_type_k.lower(), 2.0)
     v_bytes = _KV_BYTES.get(cache_type_v.lower(), 2.0)
-    per_token = meta.n_head_kv * (meta.key_length * k_bytes + meta.value_length * v_bytes)
-    return meta.n_layers * ctx * per_token / (1024 * 1024)
+    heads = meta.kv_heads_total or meta.n_layers * meta.n_head_kv
+    per_head = meta.key_length * k_bytes + meta.value_length * v_bytes
+    return heads * ctx * per_head / (1024 * 1024)
