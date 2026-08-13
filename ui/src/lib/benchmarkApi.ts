@@ -487,6 +487,7 @@ export interface SpeedBenchReport {
 	model: string;
 	max_tokens: number;
 	cancelled: boolean;
+	in_progress?: boolean;
 	rows: SpeedBenchRow[];
 	per_category: SpeedBenchSummaryRow[];
 	overall: { n: number; accept_pct: number; cover_pct: number; tg_tok_s: number };

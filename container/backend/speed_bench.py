@@ -228,6 +228,32 @@ def select_rows(
     return selected
 
 
+def _write_report(
+    cluster: ClusterDef,
+    model: str,
+    max_tokens: int,
+    results: list[dict[str, Any]],
+    *,
+    cancelled: bool,
+    in_progress: bool,
+) -> dict[str, Any]:
+    report = {
+        "ts": time.time(),
+        "cluster_id": cluster.id,
+        "cluster_name": cluster.name,
+        "model": model,
+        "max_tokens": max_tokens,
+        "cancelled": cancelled,
+        "in_progress": in_progress,
+        "rows": results,
+        **summarise(results),
+    }
+    path = report_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2))
+    return report
+
+
 def run_sweep(
     cluster: ClusterDef,
     model: str,
@@ -249,19 +275,17 @@ def run_sweep(
             logger.warning("speed-bench row %s failed: %s", row.get("question_id"), exc)
             job.setdefault("errors", []).append(f"{row.get('question_id', '?')}: {exc}"[:300])
         job["rows"] = results
+        # Checkpoint: job state is in memory, so a full sweep is an hour of GPU
+        # time that a container restart would otherwise erase completely.
+        if results:
+            _write_report(cluster, model, max_tokens, results, cancelled=False, in_progress=True)
     job.update(done=len(results), current=None)
 
-    report = {
-        "ts": time.time(),
-        "cluster_id": cluster.id,
-        "cluster_name": cluster.name,
-        "model": model,
-        "max_tokens": max_tokens,
-        "cancelled": bool(job.get("cancel")),
-        "rows": results,
-        **summarise(results),
-    }
-    path = report_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2))
-    return report
+    return _write_report(
+        cluster,
+        model,
+        max_tokens,
+        results,
+        cancelled=bool(job.get("cancel")),
+        in_progress=False,
+    )
