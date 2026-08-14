@@ -14,7 +14,9 @@
 		createProfileSnapshot,
 		restoreProfileSnapshot,
 		deleteProfileSnapshot,
+		fetchSnapshotDiff,
 		type ProfileSnapshot,
+		type SnapshotChange,
 	} from "../lib/api";
 	import type { LintFinding, VramEstimate } from "../lib/types";
 
@@ -147,6 +149,10 @@
 	let snapshots = $state<ProfileSnapshot[]>([]);
 	let restoreTarget = $state<ProfileSnapshot | null>(null);
 	let snapshotting = $state(false);
+	let expanded = $state("");
+	let diff = $state<SnapshotChange[]>([]);
+	let diffLoading = $state(false);
+	let scopedTarget = $state<{ snap: string; change: SnapshotChange } | null>(null);
 
 	const familyBackend = $derived(
 		Object.fromEntries(models.map((m) => [m.family, m.backend])) as Record<string, string>,
@@ -409,6 +415,41 @@
 		}
 	}
 
+	async function toggleExpand(id: string) {
+		if (expanded === id) {
+			expanded = "";
+			return;
+		}
+		expanded = id;
+		diff = [];
+		diffLoading = true;
+		try {
+			diff = await fetchSnapshotDiff(id);
+		} catch (e: any) {
+			error = e.message;
+		} finally {
+			diffLoading = false;
+		}
+	}
+
+	async function handleScopedRestore() {
+		if (!scopedTarget) return;
+		const { snap, change } = scopedTarget;
+		scopedTarget = null;
+		error = "";
+		try {
+			await restoreProfileSnapshot(snap, {
+				family: change.family,
+				profile: change.profile,
+			});
+			await reload();
+			diff = await fetchSnapshotDiff(snap);
+			if (change.family === selectedFamily) pickProfile(change.profile);
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
 	async function handleRestore() {
 		if (!restoreTarget) return;
 		const id = restoreTarget.id;
@@ -529,18 +570,86 @@
 					<tbody>
 						{#each snapshots as s}
 							<tr>
-								<td class="h-when">{snapshotTime(s.id)}</td>
+								<td class="h-when">
+									<button class="h-expand" onclick={() => toggleExpand(s.id)}>
+										{expanded === s.id ? "▾" : "▸"} {snapshotTime(s.id)}
+									</button>
+								</td>
 								<td class="h-label">{s.label || "—"}</td>
 								<td class="h-count">{s.families} families · {s.profiles} profiles</td>
 								<td class="h-actions">
-									<button onclick={() => (restoreTarget = s)}>Restore</button>
+									<button onclick={() => (restoreTarget = s)}>Restore all</button>
 									<button class="btn-del" onclick={() => handleDeleteSnapshot(s.id)}>✕</button>
 								</td>
 							</tr>
+							{#if expanded === s.id}
+								<tr>
+									<td colspan="4" class="h-diff">
+										{#if diffLoading}
+											<span class="muted">Comparing…</span>
+										{:else if diff.length === 0}
+											<span class="muted">Identical to the current config.</span>
+										{:else}
+											<table class="diff-table">
+												<tbody>
+													{#each diff as c}
+														<tr>
+															<td class="d-status {c.status}">
+																{c.status === "changed"
+																	? "changed"
+																	: c.status === "added-since"
+																		? "added since"
+																		: "deleted since"}
+															</td>
+															<td class="d-name">{c.family}<span class="muted"> / </span>{c.profile}</td>
+															<td class="d-keys">{c.keys.join(", ") || "—"}</td>
+															<td class="d-act">
+																<button onclick={() => (scopedTarget = { snap: s.id, change: c })}>
+																	Restore this
+																</button>
+															</td>
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+										{/if}
+									</td>
+								</tr>
+							{/if}
 						{/each}
 					</tbody>
 				</table>
 			{/if}
+		</div>
+	{/if}
+
+	{#if scopedTarget}
+		<div class="confirm-overlay">
+			<div class="confirm-box">
+				<p>
+					Restore <strong>{scopedTarget.change.profile}</strong> in
+					<strong>{scopedTarget.change.family}</strong> from
+					{snapshotTime(scopedTarget.snap)}?
+				</p>
+				<p class="muted">
+					{#if scopedTarget.change.status === "added-since"}
+						This profile didn't exist in the snapshot — restoring is not possible, cancel and
+						delete it instead if that's what you want.
+					{:else}
+						Only this profile changes. Keys affected:
+						<code>{scopedTarget.change.keys.join(", ") || "—"}</code>. A snapshot is taken
+						first, and any cluster running this profile is restarted.
+					{/if}
+				</p>
+				<div class="confirm-actions">
+					<button onclick={() => (scopedTarget = null)}>Cancel</button>
+					<button
+						class="btn-save"
+						disabled={scopedTarget.change.status === "added-since"}
+						onclick={handleScopedRestore}>Restore</button
+					>
+				</div>
+			</div>
 		</div>
 	{/if}
 
@@ -727,6 +836,25 @@
 	.h-count { color: var(--text-muted); white-space: nowrap; }
 	.h-actions { text-align: right; white-space: nowrap; }
 	.h-actions button { padding: 0.15rem 0.5rem; font-size: 0.78rem; }
+	.h-expand {
+		border: none;
+		background: none;
+		padding: 0;
+		font-size: 0.82rem;
+		color: var(--text);
+		cursor: pointer;
+	}
+	.h-diff { padding: 0.2rem 0.4rem 0.5rem 1.4rem; }
+	.diff-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+	.diff-table td { padding: 0.2rem 0.4rem; vertical-align: top; }
+	.d-status { white-space: nowrap; font-size: 0.72rem; text-transform: uppercase; }
+	.d-status.changed { color: #e0a458; }
+	.d-status.added-since { color: #6bbf8a; }
+	.d-status.deleted-since { color: #e57373; }
+	.d-name { font-family: monospace; word-break: break-all; }
+	.d-keys { color: var(--text-muted); font-family: monospace; font-size: 0.72rem; }
+	.d-act { text-align: right; white-space: nowrap; }
+	.d-act button { padding: 0.1rem 0.45rem; font-size: 0.75rem; }
 
 	.mode-tabs { display: flex; gap: 0.25rem; }
 	.mode-tabs button { font-size: 0.8rem; opacity: 0.7; }

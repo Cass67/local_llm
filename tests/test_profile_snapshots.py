@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -68,6 +69,70 @@ def test_snapshot_path_rejects_traversal(state):
 
     with pytest.raises(HTTPException) as exc:
         profiles._snapshot_path("../secret")
+    assert exc.value.status_code == 404
+
+
+def _write(path, families):
+    path.write_text(json.dumps({"families": families}))
+
+
+def test_diff_reports_only_what_changed(state):
+    before = {
+        "fam-a": {"default": "dflash", "profiles": {"dflash": {"ngl": 999, "spec_type": "x"}}},
+        "fam-b": {"default": "rccl", "profiles": {"rccl": {"ubatch": 512}}},
+    }
+    _write(config.PROFILES_CONFIG, before)
+    snap_id = config.snapshot_profiles("before")
+
+    after = {
+        # spec_type dropped, ubatch added — the real dflash regression shape.
+        "fam-a": {"default": "dflash", "profiles": {"dflash": {"ngl": 999, "ubatch": 256}}},
+        # untouched, must not appear
+        "fam-b": before["fam-b"],
+        "fam-c": {"default": "new", "profiles": {"new": {}}},
+    }
+    _write(config.PROFILES_CONFIG, after)
+
+    changes = asyncio.run(profiles.diff_snapshot(snap_id))["changes"]
+    by_name = {(c["family"], c["profile"]): c for c in changes}
+
+    assert ("fam-b", "rccl") not in by_name
+    assert by_name[("fam-a", "dflash")]["status"] == "changed"
+    assert by_name[("fam-a", "dflash")]["keys"] == ["spec_type", "ubatch"]
+    assert by_name[("fam-c", "new")]["status"] == "added-since"
+
+
+def test_scoped_restore_touches_only_that_profile(state, monkeypatch):
+    monkeypatch.setattr(profiles.active_runners, "restart_running_for_profile", lambda f, p: [])
+    _write(
+        config.PROFILES_CONFIG,
+        {
+            "fam": {
+                "default": "dflash",
+                "profiles": {"dflash": {"spec_type": "draft-dflash"}, "rccl": {"ubatch": 512}},
+            }
+        },
+    )
+    snap_id = config.snapshot_profiles("good")
+
+    _write(
+        config.PROFILES_CONFIG,
+        {"fam": {"default": "dflash", "profiles": {"dflash": {}, "rccl": {"ubatch": 999}}}},
+    )
+
+    res = asyncio.run(profiles.restore_snapshot(snap_id, {"family": "fam", "profile": "dflash"}))
+    assert res["scope"] == "fam/dflash"
+
+    now = json.loads(config.PROFILES_CONFIG.read_text())["families"]["fam"]["profiles"]
+    assert now["dflash"] == {"spec_type": "draft-dflash"}  # restored
+    assert now["rccl"] == {"ubatch": 999}  # NOT reverted
+
+
+def test_scoped_restore_rejects_profile_absent_from_snapshot(state):
+    _write(config.PROFILES_CONFIG, {"fam": {"default": "a", "profiles": {"a": {}}}})
+    snap_id = config.snapshot_profiles("s")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(profiles.restore_snapshot(snap_id, {"family": "fam", "profile": "ghost"}))
     assert exc.value.status_code == 404
 
 
