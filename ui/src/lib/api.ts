@@ -568,6 +568,55 @@ export async function setDefaultProfile(family: string, name: string): Promise<v
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
+// --- Profile snapshots (backup / restore) ---
+
+export interface ProfileSnapshot {
+	id: string;
+	created_at: string;
+	label: string;
+	families: number;
+	profiles: number;
+	bytes: number;
+}
+
+export async function fetchProfileSnapshots(): Promise<ProfileSnapshot[]> {
+	const res = await fetch(`${BASE}/profiles/snapshots`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return (await res.json()).snapshots;
+}
+
+export async function createProfileSnapshot(label = ""): Promise<{ id: string }> {
+	const res = await fetch(`${BASE}/profiles/snapshots`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ label }),
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function restoreProfileSnapshot(id: string): Promise<{ restored: string }> {
+	const res = await fetch(
+		`${BASE}/profiles/snapshots/${encodeURIComponent(id)}/restore`,
+		{ method: "POST" },
+	);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function fetchProfileSnapshot(id: string): Promise<ProfilesData> {
+	const res = await fetch(`${BASE}/profiles/snapshots/${encodeURIComponent(id)}`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+export async function deleteProfileSnapshot(id: string): Promise<void> {
+	const res = await fetch(`${BASE}/profiles/snapshots/${encodeURIComponent(id)}`, {
+		method: "DELETE",
+	});
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
 // --- Init ---
 
 export async function initTarget(target: string): Promise<any> {
