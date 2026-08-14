@@ -75,11 +75,58 @@ async def get_snapshot(snap_id: str):
     return json.loads(_snapshot_path(snap_id).read_text())
 
 
+@router.get("/snapshots/{snap_id}/diff")
+async def diff_snapshot(snap_id: str):
+    """Per-profile comparison of a snapshot against the live config.
+
+    Only profiles that actually differ are returned — the point is to find the one
+    thing that got clobbered, not to scroll 88 identical rows.
+    """
+    old = json.loads(_snapshot_path(snap_id).read_text()).get("families", {})
+    new = _load().get("families", {})
+    rows = []
+    for family in sorted(set(old) | set(new)):
+        old_profiles = old.get(family, {}).get("profiles", {})
+        new_profiles = new.get(family, {}).get("profiles", {})
+        for name in sorted(set(old_profiles) | set(new_profiles)):
+            was, now = old_profiles.get(name), new_profiles.get(name)
+            if was == now:
+                continue
+            if was is None:
+                status, keys = "added-since", []
+            elif now is None:
+                status, keys = "deleted-since", sorted(was)
+            else:
+                status = "changed"
+                keys = sorted(k for k in set(was) | set(now) if was.get(k) != now.get(k))
+            rows.append({"family": family, "profile": name, "status": status, "keys": keys})
+    return {"id": snap_id, "changes": rows}
+
+
 @router.post("/snapshots/{snap_id}/restore")
-async def restore_snapshot(snap_id: str):
-    data = json.loads(_snapshot_path(snap_id).read_text())
-    _save(data, f"pre-restore-{snap_id[:15]}")
-    return {"restored": snap_id, "families": len(data.get("families", {}))}
+async def restore_snapshot(snap_id: str, body: dict | None = None):
+    """Restore a whole snapshot, or one profile from it when family+profile are given."""
+    snap = json.loads(_snapshot_path(snap_id).read_text())
+    family = (body or {}).get("family")
+    profile = (body or {}).get("profile")
+
+    if not family or not profile:
+        _save(snap, f"pre-restore-{snap_id[:15]}")
+        return {"restored": snap_id, "scope": "all", "families": len(snap.get("families", {}))}
+
+    was = snap.get("families", {}).get(family, {}).get("profiles", {}).get(profile)
+    if was is None:
+        raise HTTPException(404, f"{family}/{profile} not in snapshot {snap_id}")
+    data = _load()
+    fam = data.setdefault("families", {}).setdefault(family, {"default": profile, "profiles": {}})
+    fam["profiles"][profile] = was
+    _save(data, f"restore-{family}-{profile}")
+    restarted = await asyncio.to_thread(active_runners.restart_running_for_profile, family, profile)
+    return {
+        "restored": snap_id,
+        "scope": f"{family}/{profile}",
+        "restarted_clusters": restarted,
+    }
 
 
 @router.delete("/snapshots/{snap_id}")

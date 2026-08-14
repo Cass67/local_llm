@@ -595,10 +595,31 @@ export async function createProfileSnapshot(label = ""): Promise<{ id: string }>
 	return res.json();
 }
 
-export async function restoreProfileSnapshot(id: string): Promise<{ restored: string }> {
+export interface SnapshotChange {
+	family: string;
+	profile: string;
+	status: "changed" | "added-since" | "deleted-since";
+	keys: string[];
+}
+
+export async function fetchSnapshotDiff(id: string): Promise<SnapshotChange[]> {
+	const res = await fetch(`${BASE}/profiles/snapshots/${encodeURIComponent(id)}/diff`);
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return (await res.json()).changes;
+}
+
+/** Restores the whole snapshot, or just one profile when family+profile are given. */
+export async function restoreProfileSnapshot(
+	id: string,
+	scope?: { family: string; profile: string },
+): Promise<{ restored: string; scope: string; restarted_clusters?: string[] }> {
 	const res = await fetch(
 		`${BASE}/profiles/snapshots/${encodeURIComponent(id)}/restore`,
-		{ method: "POST" },
+		{
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(scope ?? {}),
+		},
 	);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.json();
