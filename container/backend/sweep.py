@@ -49,8 +49,7 @@ def _load_profiles() -> dict[str, Any]:
 
 
 def _save_profiles(data: dict[str, Any]) -> None:
-    config.PROFILES_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    config.PROFILES_CONFIG.write_text(json.dumps(data, indent=2))
+    config.save_profiles(data, "sweep")
 
 
 def base_profile_config(family: str, profile: str) -> dict[str, Any] | None:

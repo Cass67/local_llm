@@ -23,9 +23,68 @@ def _load() -> dict:
         return {"families": {}}
 
 
-def _save(data: dict) -> None:
-    config.PROFILES_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    config.PROFILES_CONFIG.write_text(json.dumps(data, indent=2))
+def _save(data: dict, label: str = "") -> None:
+    config.save_profiles(data, label)
+
+
+def _snapshot_meta(path) -> dict:
+    try:
+        data = json.loads(path.read_text())
+        fams = data.get("families", {})
+        profiles = sum(len(f.get("profiles", {})) for f in fams.values() if isinstance(f, dict))
+    except (OSError, json.JSONDecodeError):
+        fams, profiles = {}, 0
+    snap_id = path.stem
+    stamp, _, label = snap_id.partition("_")
+    return {
+        "id": snap_id,
+        "created_at": stamp,
+        "label": label,
+        "families": len(fams),
+        "profiles": profiles,
+        "bytes": path.stat().st_size,
+    }
+
+
+def _snapshot_path(snap_id: str):
+    path = (config.PROFILE_SNAPSHOTS_DIR / f"{snap_id}.json").resolve()
+    if path.parent != config.PROFILE_SNAPSHOTS_DIR.resolve() or not path.exists():
+        raise HTTPException(404, f"no such snapshot: {snap_id}")
+    return path
+
+
+@router.get("/snapshots")
+async def list_snapshots():
+    if not config.PROFILE_SNAPSHOTS_DIR.exists():
+        return {"snapshots": []}
+    paths = sorted(config.PROFILE_SNAPSHOTS_DIR.glob("*.json"), reverse=True)
+    return {"snapshots": [_snapshot_meta(p) for p in paths]}
+
+
+@router.post("/snapshots")
+async def create_snapshot(body: dict | None = None):
+    label = (body or {}).get("label", "") or "manual"
+    snap_id = config.snapshot_profiles(label)
+    if snap_id is None:
+        raise HTTPException(404, "no profiles.json to snapshot")
+    return {"id": snap_id}
+
+
+@router.get("/snapshots/{snap_id}")
+async def get_snapshot(snap_id: str):
+    return json.loads(_snapshot_path(snap_id).read_text())
+
+
+@router.post("/snapshots/{snap_id}/restore")
+async def restore_snapshot(snap_id: str):
+    data = json.loads(_snapshot_path(snap_id).read_text())
+    _save(data, f"pre-restore-{snap_id[:15]}")
+    return {"restored": snap_id, "families": len(data.get("families", {}))}
+
+
+@router.delete("/snapshots/{snap_id}")
+async def delete_snapshot(snap_id: str):
+    _snapshot_path(snap_id).unlink()
 
 
 @router.get("")
@@ -102,7 +161,7 @@ async def upsert_profile(family: str, name: str, body: dict):
     else:
         name = _resolve_name(data["families"][family], name)
     data["families"][family]["profiles"][name] = body
-    _save(data)
+    _save(data, f"edit-{family}-{name}")
     findings = await asyncio.to_thread(_lint, family, body)
     # Blocking: relaunch + _wait_ready sleep-loops up to 120s per cluster.
     # Run off the event loop so other requests (Architecture tab) aren't frozen.
@@ -141,7 +200,7 @@ async def delete_profile(family: str, name: str):
     if fam["default"] == name:
         remaining = list(fam["profiles"])
         fam["default"] = remaining[0] if remaining else ""
-    _save(data)
+    _save(data, f"delete-{family}-{name}")
     return {"status": "deleted"}
 
 
@@ -158,7 +217,7 @@ async def clone_profile(family: str, name: str, body: dict):
         raise HTTPException(status_code=404, detail="profile not found")
     new_name = _resolve_name(fam, new_name)
     fam["profiles"][new_name] = dict(fam["profiles"][name])
-    _save(data)
+    _save(data, f"clone-{family}-{name}")
     return {"status": "cloned", "name": new_name}
 
 
@@ -288,7 +347,7 @@ async def import_from_models():
         fam["profiles"][profile_name] = profile  # always overwrite
         imported += 1
 
-    _save(data)
+    _save(data, "import-from-models")
     return {"imported": imported}
 
 
@@ -302,5 +361,5 @@ async def set_default(family: str, name: str):
     if name not in fam["profiles"]:
         raise HTTPException(status_code=404, detail="profile not found")
     fam["default"] = name
-    _save(data)
+    _save(data, f"default-{family}-{name}")
     return {"status": "updated"}

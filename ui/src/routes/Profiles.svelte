@@ -10,6 +10,11 @@
 		cloneProfile,
 		setDefaultProfile,
 		lintProfile,
+		fetchProfileSnapshots,
+		createProfileSnapshot,
+		restoreProfileSnapshot,
+		deleteProfileSnapshot,
+		type ProfileSnapshot,
 	} from "../lib/api";
 	import type { LintFinding, VramEstimate } from "../lib/types";
 
@@ -138,6 +143,10 @@
 	let cloning = $state(false);
 	let cloneName = $state("");
 	let showDeleteConfirm = $state(false);
+	let showHistory = $state(false);
+	let snapshots = $state<ProfileSnapshot[]>([]);
+	let restoreTarget = $state<ProfileSnapshot | null>(null);
+	let snapshotting = $state(false);
 
 	const familyBackend = $derived(
 		Object.fromEntries(models.map((m) => [m.family, m.backend])) as Record<string, string>,
@@ -366,6 +375,65 @@
 		}
 	}
 
+	function snapshotTime(id: string): string {
+		// ids look like 20260814T153000123456Z[_label]
+		const m = id.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
+		if (!m) return id;
+		const [, y, mo, d, h, mi, s] = m;
+		return new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`).toLocaleString();
+	}
+
+	async function toggleHistory() {
+		showHistory = !showHistory;
+		if (showHistory) await loadSnapshots();
+	}
+
+	async function loadSnapshots() {
+		try {
+			snapshots = await fetchProfileSnapshots();
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
+	async function handleSnapshotNow() {
+		snapshotting = true;
+		error = "";
+		try {
+			await createProfileSnapshot("manual");
+			await loadSnapshots();
+		} catch (e: any) {
+			error = e.message;
+		} finally {
+			snapshotting = false;
+		}
+	}
+
+	async function handleRestore() {
+		if (!restoreTarget) return;
+		const id = restoreTarget.id;
+		restoreTarget = null;
+		error = "";
+		try {
+			await restoreProfileSnapshot(id);
+			await reload();
+			await loadSnapshots();
+			const names = Object.keys(allProfiles[selectedFamily]?.profiles ?? {}).sort();
+			pickProfile(names.includes(selectedProfile) ? selectedProfile : names[0] || "");
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
+	async function handleDeleteSnapshot(id: string) {
+		try {
+			await deleteProfileSnapshot(id);
+			await loadSnapshots();
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
 	async function handleSetDefault() {
 		if (!selectedProfile || isNew) return;
 		try {
@@ -416,6 +484,9 @@
 
 		<span class="spacer"></span>
 
+		<button class="btn-history" class:active={showHistory} onclick={toggleHistory}>
+			⏱ History
+		</button>
 		<button class="btn-import" onclick={handleImport} disabled={importing}>
 			{importing ? "Importing…" : "Import from models"}
 		</button>
@@ -438,6 +509,59 @@
 	</div>
 
 	{#if error}<p class="error">{error}</p>{/if}
+
+	{#if showHistory}
+		<div class="history-panel">
+			<div class="history-head">
+				<strong>Profile history</strong>
+				<span class="muted">
+					every save, delete, clone and sweep snapshots <code>profiles.json</code> first
+				</span>
+				<span class="spacer"></span>
+				<button onclick={handleSnapshotNow} disabled={snapshotting}>
+					{snapshotting ? "Saving…" : "Snapshot now"}
+				</button>
+			</div>
+			{#if snapshots.length === 0}
+				<p class="muted">No snapshots yet — the next change will create one.</p>
+			{:else}
+				<table class="history-table">
+					<tbody>
+						{#each snapshots as s}
+							<tr>
+								<td class="h-when">{snapshotTime(s.id)}</td>
+								<td class="h-label">{s.label || "—"}</td>
+								<td class="h-count">{s.families} families · {s.profiles} profiles</td>
+								<td class="h-actions">
+									<button onclick={() => (restoreTarget = s)}>Restore</button>
+									<button class="btn-del" onclick={() => handleDeleteSnapshot(s.id)}>✕</button>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+		</div>
+	{/if}
+
+	{#if restoreTarget}
+		<div class="confirm-overlay">
+			<div class="confirm-box">
+				<p>
+					Restore <strong>all profiles</strong> from
+					<strong>{snapshotTime(restoreTarget.id)}</strong>?
+				</p>
+				<p class="muted">
+					This replaces every family and profile, not just the one you're editing. The current
+					state is snapshotted first, so this is undoable. Running clusters are not restarted.
+				</p>
+				<div class="confirm-actions">
+					<button onclick={() => (restoreTarget = null)}>Cancel</button>
+					<button class="btn-save" onclick={handleRestore}>Restore</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 
 	{#if lint.length > 0 || vram}
 		<div class="lint-panel">
@@ -582,6 +706,27 @@
 	.btn-del { color: #e57373; border-color: #e5737333; }
 	.btn-del:hover { background: #e5737322; }
 	.btn-import { color: var(--text-muted); font-size: 0.8rem; }
+	.btn-history { font-size: 0.8rem; color: var(--text-muted); }
+	.btn-history.active { color: var(--accent, #6c8ebf); border-color: var(--accent, #6c8ebf); }
+
+	.history-panel {
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		background: var(--bg-card);
+		padding: 0.6rem 0.75rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.history-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+	.muted { color: var(--text-muted); font-size: 0.8rem; }
+	.history-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+	.history-table td { padding: 0.28rem 0.4rem; border-top: 1px solid var(--border); }
+	.h-when { white-space: nowrap; }
+	.h-label { color: var(--accent, #6c8ebf); font-family: monospace; font-size: 0.78rem; }
+	.h-count { color: var(--text-muted); white-space: nowrap; }
+	.h-actions { text-align: right; white-space: nowrap; }
+	.h-actions button { padding: 0.15rem 0.5rem; font-size: 0.78rem; }
 
 	.mode-tabs { display: flex; gap: 0.25rem; }
 	.mode-tabs button { font-size: 0.8rem; opacity: 0.7; }
