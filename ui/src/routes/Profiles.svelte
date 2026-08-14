@@ -566,6 +566,7 @@
 			{#if snapshots.length === 0}
 				<p class="muted">No snapshots yet — the next change will create one.</p>
 			{:else}
+				<div class="history-scroll">
 				<table class="history-table">
 					<tbody>
 						{#each snapshots as s}
@@ -619,6 +620,11 @@
 						{/each}
 					</tbody>
 				</table>
+				</div>
+				<p class="muted">
+					{snapshots.length} snapshot{snapshots.length === 1 ? "" : "s"} · oldest
+					{snapshotTime(snapshots[snapshots.length - 1].id)} · capped at 100
+				</p>
 			{/if}
 		</div>
 	{/if}
@@ -829,6 +835,7 @@
 	}
 	.history-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
 	.muted { color: var(--text-muted); font-size: 0.8rem; }
+	.history-scroll { max-height: 22rem; overflow-y: auto; overflow-x: auto; }
 	.history-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 	.history-table td { padding: 0.28rem 0.4rem; border-top: 1px solid var(--border); }
 	.h-when { white-space: nowrap; }
