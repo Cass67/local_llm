@@ -7,7 +7,7 @@
       "compat": {
         "supportsDeveloperRole": false,
         "supportsReasoningEffort": false,
-        "supportsUsageInStreaming": false,
+        "supportsUsageInStreaming": true,
         "maxTokensField": "max_tokens",
         "thinkingFormat": "qwen-chat-template"
       },
@@ -16,10 +16,17 @@
           "id": "router",
           "name": "local-llm router",
           "contextWindow": 131072,
-          "maxTokens": 4096,
-          "input": ["text"],
+          "maxTokens": 32768,
+          "input": [
+            "text"
+          ],
           "reasoning": true,
-          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
         }
       ]
     }
