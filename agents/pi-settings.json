@@ -1,0 +1,10 @@
+{
+  "defaultProvider": "local-llm-router",
+  "defaultModel": "router",
+  "theme": "dark",
+  "defaultThinkingLevel": "low",
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 49152
+  }
+}

@@ -23,6 +23,10 @@ seed() {
 }
 
 seed "$REPO_DIR/agents/pi-models.json" "$CONFIG_DIR/pi/agent/models.json"
+# Without compaction.reserveTokens pi falls back to DEFAULT_COMPACTION_SETTINGS
+# (16384), which is too small for one tool loop: the turn walks past
+# contextWindow - 4096, where pi clamps max_tokens to 1 and the session dies.
+seed "$REPO_DIR/agents/pi-settings.json" "$CONFIG_DIR/pi/agent/settings.json"
 seed "$REPO_DIR/agents/opencode.json" "$CONFIG_DIR/opencode/opencode.json"
 # v2 reuses v1's XDG paths verbatim, so it gets its own host dirs mounted at the
 # same in-container locations. It does not read v1's auth.json: sign in once with
