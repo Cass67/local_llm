@@ -1,0 +1,18 @@
+diff --git a/common/speculative.cpp b/common/speculative.cpp
+index cd2dfc7..32d9b21 100644
+--- a/common/speculative.cpp
++++ b/common/speculative.cpp
+@@ -1141,6 +1141,13 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+                     batch_inject.seq_id[i][0] = seq_id;
+                     batch_inject.logits[i]    = false;
+                 }
++                // the target may splice its own KV (cache_reuse / context checkpoints), which
++                // moves the position this chunk injects at. draft cells at or beyond that
++                // position are stale, and llama_decode below rejects the batch with
++                // inconsistent sequence positions - permanently, since every retry re-enters
++                // here at the same stale pos. drop them so the injection is authoritative.
++                llama_memory_seq_rm(llama_get_memory(ctx_dft), seq_id, batch_inject.pos[0], -1);
++
+                 rc = llama_decode(ctx_dft, batch_inject);
+                 if (rc != 0) {
+                     LOG_ERR("%s: llama_decode(ctx_dft) failed rc=%d (n_tokens=%d, offset=%d)\n",
