@@ -96,6 +96,11 @@ local-llm-postgres  :5433  (Langfuse database)
 
 ## Setup
 
+Rebuilding from scratch, or after losing the host? See
+**[docs/RECOVERY.md](docs/RECOVERY.md)** — the full checklist, including what is
+deliberately *not* in git. `scripts/bootstrap-host.sh` audits a host read-only
+and installs what is missing with `--install`.
+
 ### Prerequisites
 
 - Linux host with an AMD GPU (ROCm or Vulkan) and/or an Nvidia GPU (CUDA).
