@@ -66,7 +66,14 @@ async def v1_models():
     ``data`` and ignore the extra key.
     """
     seen: set[str] = set()
-    data = [{"id": "router", "object": "model", "owned_by": "local_llm"}]
+    data = [
+        {
+            "id": "router",
+            "object": "model",
+            "owned_by": "local_llm",
+            "max_tokens": output_limit(None),
+        }
+    ]
     models: dict[str, dict] = {"router": _model_entry(None)}
     seen.add("router")
 
@@ -82,6 +89,10 @@ async def v1_models():
             rec: dict = {"id": alias, "object": "model", "owned_by": "local_llm"}
             if ctx:
                 rec["context_window"] = ctx
+            # Same budget as models[alias].limit.output, in the flat shape pi's
+            # llama-cpp extension reads. Without it the client picks its own
+            # default and truncates long replies.
+            rec["max_tokens"] = output_limit(ctx)
             rec["input"] = ["text", "image"] if vision else ["text"]
             data.append(rec)
             models[alias] = _model_entry(ctx, vision)
