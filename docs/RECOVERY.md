@@ -125,7 +125,55 @@ hangs over the tunnel rather than failing fast.
 4. **Restore extras** — `scripts/backup.sh restore <path>` for snapshot history;
    `agents/pi-extensions/llama-cpp.ts` → `~/.pi/agent/extensions/` for the Mac pi.
 
-## 6. Verify
+## 6. Backups
+
+A daily timer (`local-llm-backup.timer`, 03:30 + up to 15m jitter, `Persistent=true`)
+runs `scripts/backup-full.sh` as root and writes to `/mnt/spare/local_llm-backups`,
+keeping 14 archives. ~1 GB each, ~30s to make.
+
+The destination must not be the root disk — `/state`, the docker volumes, `.env`
+and the agent config all live on `nvme0n1`. `/mnt/spare` is `nvme1n1` and
+`/mnt/hfcache-old` is `sda`; either survives losing the root disk.
+
+Contents, and why each is there:
+
+| Component | Note |
+|---|---|
+| `env` | the 6 secrets; **this is why the archive is 0600 and must not be synced casually** |
+| `cloudflared/` | tunnel credentials — lose them and the tunnel must be recreated |
+| `agents.tar` | opencode/opencode2 `auth.json` plus pi + opencode session history |
+| `state.tar` | `profiles.json`, profile snapshots, speed-bench (`runs/` excluded) |
+| `langfuse.sql` | `pg_dump`, **not** a file copy — a live data dir copies torn |
+| `open-webui.tar` | container is paused for the copy; the image has no `sqlite3`, so there is no online `.backup` |
+
+Excluded on purpose: `/mnt/hfcache` (244 GB, re-downloadable) and `/state/runs`
+(benchmark history, not function).
+
+```bash
+sudo scripts/backup-full.sh                       # manual run
+systemctl list-timers local-llm-backup            # when it next fires
+journalctl -u local-llm-backup -n 20              # what it did
+```
+
+Restoring — nothing is written without `--yes`, and existing targets are moved to
+`<path>.pre-restore-<ts>` rather than overwritten:
+
+```bash
+scripts/restore-full.sh <archive>                          # list, change nothing
+sudo scripts/restore-full.sh <archive> --yes --into /tmp/p # stage to scratch first
+sudo scripts/restore-full.sh <archive> --yes               # restore in place
+sudo scripts/restore-full.sh <archive> --yes --only state,env
+```
+
+Verified end to end: an archive restores to 74 profile families, and
+`langfuse.sql` reloads into a scratch database with matching table and row counts.
+Restoring `langfuse` drops and recreates the database, because `pg_dump` output is
+not idempotent against a populated one.
+
+**Off-host copy is still TODO.** Everything above is one machine; a second copy
+pulled to another box is what actually protects against losing ubt26.
+
+## 7. Verify
 
 ```bash
 scripts/bootstrap-host.sh                          # all green
