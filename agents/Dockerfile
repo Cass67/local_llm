@@ -46,10 +46,28 @@ RUN mkdir -p /home/agent/.local/share /home/agent/.local/state \
 # `mouse on` hands the wheel to tmux (copy-mode for pi, which paints on the main
 # screen; passed through to any TUI that requests mouse tracking). Shift+drag
 # still gives a native browser selection.
-RUN printf '%s\n' \
-      'set -g mouse on' \
-      'set -g history-limit 50000' \
-      > /home/agent/.tmux.conf \
+#
+# Copy-mode then swallows every unbound key, which made the agents look frozen:
+# pi sets neither mouse_any_flag nor alternate_on, so one stray wheel notch puts
+# its pane in copy-mode, and with mode-keys=emacs a typed "/model" is silently
+# discarded -- the screen has jumped into scrollback and nothing reaches pi.
+# (opencode grabs the mouse, so it never enters copy-mode and only ever scrolls
+# its own viewport.) So bind every printable key to cancel copy-mode and deliver
+# itself: scroll to read history, start typing, and you are back with the
+# keystroke intact. `q` is left as a pure cancel so it does not type a stray q;
+# arrows, PageUp and the C-r/C-s search bindings are untouched.
+RUN { printf '%s\n' \
+        'set -g mouse on' \
+        'set -g history-limit 50000'; \
+      awk 'BEGIN{ \
+        sq=sprintf("%c",39); dq=sprintf("%c",34); \
+        for (i=32; i<127; i++) { \
+          if (i==113) continue; \
+          c=sprintf("%c",i); \
+          q=(i==39)?dq:sq; \
+          printf "bind -T copy-mode %s%s%s send -X cancel \\; send-keys -l %s%s%s\n", q,c,q,q,c,q; \
+        } }'; \
+    } > /home/agent/.tmux.conf \
     && chmod 0644 /home/agent/.tmux.conf
 
 # ttyd serves one self-contained index.html with the xterm.js bundle inlined, and
