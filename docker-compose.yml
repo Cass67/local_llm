@@ -60,11 +60,13 @@ services:
       AGENTS_REPO_DIR: "${AGENTS_REPO_DIR:-/home/cass/git}"
       AGENT_PI_PORT: "${AGENT_PI_PORT:-3006}"
       AGENT_OPENCODE_PORT: "${AGENT_OPENCODE_PORT:-3002}"
+      AGENT_OPENCODE2_PORT: "${AGENT_OPENCODE2_PORT:-3009}"
       # Where the UI links to. Cloudflare proxies only a fixed set of ports, so a
       # host:port link hangs over the tunnel -- pi defaults to the /pi/ path, and
       # opencode needs its own hostname (its SPA assets are root-absolute).
       AGENT_PI_URL: "${AGENT_PI_URL:-/pi/}"
       AGENT_OPENCODE_URL: "${AGENT_OPENCODE_URL:-/opencode/}"
+      AGENT_OPENCODE2_URL: "${AGENT_OPENCODE2_URL:-/opencode2/}"
 
   # ── Model Router ─────────────────────────────────────────────────────────────
   # Keyword-based request router on :3200.

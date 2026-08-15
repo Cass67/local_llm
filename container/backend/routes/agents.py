@@ -19,12 +19,22 @@ _AGENTS = [
     },
     {
         "id": "opencode",
-        "name": "OpenCode",
+        "name": "OpenCode v1",
         "description": "Agentic coding TUI with session history and sub-agents.",
         "port_env": "AGENT_OPENCODE_PORT",
         "default_port": 3002,
         "url_env": "AGENT_OPENCODE_URL",
         "default_url": "/opencode/",
+        "auth": "via Cloudflare Access",
+    },
+    {
+        "id": "opencode2",
+        "name": "OpenCode 2 (beta)",
+        "description": "OpenCode 2 prerelease, alongside v1 with its own sessions and login.",
+        "port_env": "AGENT_OPENCODE2_PORT",
+        "default_port": 3009,
+        "url_env": "AGENT_OPENCODE2_URL",
+        "default_url": "/opencode2/",
         "auth": "via Cloudflare Access",
     },
 ]

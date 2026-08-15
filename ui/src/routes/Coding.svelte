@@ -37,7 +37,7 @@
 <div class="route">
 	<h2>Coding</h2>
 	<p class="sub">
-		Agentic coding in the browser, backed by the router. Both agents edit real files in
+		Agentic coding in the browser, backed by the router. They all edit real files in
 		{#if workdir}<code>{workdir}</code>{:else}the mounted directory{/if}.
 	</p>
 
