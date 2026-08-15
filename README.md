@@ -12,13 +12,22 @@ Tabs in nav order.
 | [![Models](screenshot-models.png)](screenshot-models.png) | **Models** — installed models per backend (ROCm / ROCmFP4 / Vulkan / CUDA), each card showing family, alias, context and quant, with launch-on-cluster, edit, copy-to-backend, and audit of orphaned registrations |
 | [![Profiles](screenshot-profiles.png)](screenshot-profiles.png) | **Profiles** — named load configs per model family, edited as a form or raw JSON, with a live VRAM estimate (weights + KV at the chosen context) and lint that flags configs that cannot work |
 | [![Search](screenshot-search.png)](screenshot-search.png) | **Search** — HuggingFace GGUF search ranked by a fit score against the target cluster's VRAM, with the best quant chosen per repo and one-click install |
-| [![Status](screenshot-status.png)](screenshot-status.png) | **Status** — running model and profile, tok/s, prompt tok/s, draft acceptance, every accepted model with a launch button, TPS sparkline and runner health |
+| [![Status](screenshot-status.png)](screenshot-status.png) | **Status** — running model and profile, tok/s, prompt tok/s, draft acceptance, every accepted model with a launch button, TPS sparkline, runner health, and the update panel below it (llama.cpp, coding agents, chat and tracing) |
 | [![Benchmarks](screenshot-benchmarks.png)](screenshot-benchmarks.png) | **Benchmarks** — run a prompt with configurable sampling, bake several models off against each other on one cluster, and read the leaderboard: one row per model+profile with best/avg tok/s, tok/s/W, golden-set quality and agentic scores, sortable |
 | [![Tuning](screenshot-tuning.png)](screenshot-tuning.png) | **Tuning** — grid-search llama-server knobs (ubatch, batch, split mode, KV cache type, spec decoding, ngram n_max, MTP depth), rank by objective, and promote the winner. A quality gate scores a golden set so a config that got faster by getting worse cannot win |
 | [![Coding](screenshot-coding.png)](screenshot-coding.png) | **Coding** — browser-based agentic coding backed by the router: `pi` and OpenCode, both editing real files on the host |
 | [![Chat](screenshot-chat.png)](screenshot-chat.png) | **Chat** — Open WebUI at `/chat/`, defaulting to the `router` model so prompts are dispatched to the right cluster automatically |
 | **Traces** | **Traces** — Langfuse at `/traces/`: TTFT, token throughput, prompt/completion tokens, per-request timelines. No screenshot here — Langfuse is behind its own login, so a capture would only show a sign-in form |
 | [![Logs](screenshot-logs.png)](screenshot-logs.png) | **Logs** — live container log streaming with a source selector (runner, mgmt, router), auto-scroll and per-request timing lines |
+
+### Updates
+
+The bottom half of the **Status** tab keeps the stack current without a shell.
+
+| | |
+|---|---|
+| [![Updates](screenshot-updates.png)](screenshot-updates.png) | **Update panel** — how far each runner image is behind llama.cpp master (built commit vs upstream, per backend), the coding agents' installed vs latest npm versions, and the chat/tracing containers' installed vs latest images. Tick the backends and rebuild; agents and services each rebuild or pull on their own button. Jobs run concurrently, with a live log tail and per-target exit codes |
+| [![Commit detail](screenshot-commit.png)](screenshot-commit.png) | **Commit detail** — click any commit sha (upstream head, a built commit, or a row in the recent-commits list) to read what actually changed before rebuilding: full message body, diffstat, files changed, and the pull request it came from with its description and the whole review thread, each comment against the file it was left on |
 
 ### Feature summary
 
@@ -38,6 +47,7 @@ Tabs in nav order.
 - **Router** — keyword-based request router with live config reload, routing rules editor in the Architecture tab, and per-request routing audit. Open WebUI defaults to the `router` model so all chats are automatically dispatched to the best cluster.
 - **Idle unload** — clusters auto-stop after a configurable idle timeout (5 min–2 hr) to save GPU power. Models reload automatically on the next request. Toggle and timeout in the Architecture tab.
 - **Web search** — SearXNG container on `:3005` wired to Open WebUI. Enable per-chat with the 🌐 icon.
+- **Update** the whole stack from the Status tab: how far each runner image is behind llama.cpp master, agent npm versions, chat/tracing images — rebuild or pull any of them, concurrently, with a live log tail. Click a commit to read its message, diffstat, files and the merged PR's description and review comments before deciding to rebuild.
 - **Stream logs** from the runner, management, or router containers in real time.
 - **Monitor** TPS sparkline and runner slot health in the Status panel.
 - **Trace** LLM requests with Langfuse: TTFT, token throughput, prompt/completion tokens, per-request timeline.
@@ -498,6 +508,18 @@ Open WebUI has web search built in, powered by a local SearXNG container on `:30
 ### Status
 
 **Status** tab shows a live TPS sparkline (last 30 chat completions), runner slot health (idle/processing), and system stats from the Raspberry Pi agent if configured.
+
+### Updates
+
+Below the status cards, **Check for updates** compares what is running against upstream:
+
+- **llama.cpp** — per backend (vulkan / rocm / cuda), the commit each runner image was built from against current master, and how many commits behind it is. Tick the backends to refresh and hit **Update & rebuild selected**. Running models keep the old image until they are next relaunched.
+- **Coding agents** — installed vs latest npm versions of `pi` and `opencode`. Rebuilding restarts both; in-flight sessions are lost.
+- **Chat & tracing** — Open WebUI and Langfuse image versions, pulled or rebuilt per service. Chat history and traces live in volumes and survive the restart.
+
+Builds run as concurrent jobs; each shows a live log tail and, when it lands, a per-target exit code. Versions refresh per job as it finishes rather than waiting for the slowest one.
+
+Any commit sha is clickable — upstream head, a built commit, or a row in the expandable recent-commits list. The detail view pulls the full commit message, diffstat and changed files, plus the pull request it was merged from: title, author, state, description, and the entire review thread with each comment attached to the file it was left on. That is enough to tell whether an upstream change is worth a 40-minute ROCm rebuild before spending the rebuild on it. Commits pushed directly with no PR say so.
 
 ### Logs
 
