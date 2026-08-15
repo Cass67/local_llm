@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily local_llm full backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# Catch up after downtime rather than silently skipping a day.
+Persistent=true
+# Avoids landing exactly on the hour alongside other scheduled work.
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target
