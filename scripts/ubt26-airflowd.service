@@ -1,0 +1,12 @@
+[Unit]
+Description=ubt26 chassis fans driven by GPU temperature
+After=multi-user.target ubt26-fan-tune.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/ubt26-airflowd
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
