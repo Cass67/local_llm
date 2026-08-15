@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Drive the chassis fans off GPU temperature instead of CPU temperature.
+#
+# The BIOS fan curve on this board (ASUS WS Z390 PRO, NCT6798D Super-IO) is
+# keyed to the CPU, and the CPU is idle whenever the box is doing what it is
+# actually for -- inference on three 7900 XTs. The result is four chassis fans
+# sitting at pwm 150 while card0's junction rides 104C. This daemon takes the
+# chassis channels off the BIOS curve whenever any GPU is hot and hands them
+# back when it cools.
+set -euo pipefail
+log() { echo "[airflowd] $*"; }
+
+# Resolve hwmon by name, never by number. hwmonN ordering depends on probe
+# order and the amdgpu/nct6798 nodes have already been renumbered once on this
+# box; a hardcoded hwmon9 would eventually write pwm values into the PSU.
+hwmon_by_name() {
+  local want="$1" h
+  for h in /sys/class/hwmon/hwmon*; do
+    [[ "$(cat "$h/name" 2>/dev/null)" == "$want" ]] && { echo "$h"; return 0; }
+  done
+  return 1
+}
+
+# Chassis channels and the pwm the BIOS holds them at. The floor matters: ch5
+# idles at 218 under the BIOS curve, so taking manual control at the ch1-4
+# floor of 150 would make it *quieter* under load, which is the opposite of
+# the point. ch6 has no fan; ch7 is already pinned at 255 by the BIOS and has
+# nothing left to give, so both are left alone.
+CHANNELS=(1:150 2:150 3:150 4:150 5:218)
+
+TEMP_LOW=${TEMP_LOW:-70}    # below this, hand the fans back to the BIOS
+TEMP_HIGH=${TEMP_HIGH:-90}  # at or above this, full tilt
+TEMP_REARM_T=${TEMP_REARM:-65}
+INTERVAL=${INTERVAL:-5}
+
+NCT=$(hwmon_by_name nct6798) || { log "ERROR: nct6798 not found, is nct6775 loaded?"; exit 1; }
+log "super-io at $NCT"
+
+# Hottest junction across every amdgpu card. Junction, not edge: edge lags the
+# hotspot by ~20C on these cards, so an edge-keyed curve ramps far too late.
+max_gpu_temp() {
+  local h f hi=0 t
+  for h in /sys/class/hwmon/hwmon*; do
+    [[ "$(cat "$h/name" 2>/dev/null)" == amdgpu ]] || continue
+    for f in "$h"/temp*_label; do
+      [[ -e "$f" ]] || continue
+      [[ "$(cat "$f")" == junction ]] || continue
+      t=$(( $(cat "${f%_label}_input" 2>/dev/null || echo 0) / 1000 ))
+      ((t > hi)) && hi=$t
+    done
+  done
+  echo "$hi"
+}
+
+release() {
+  local ch
+  for ch in "${CHANNELS[@]}"; do
+    echo 5 > "$NCT/pwm${ch%%:*}_enable" 2>/dev/null || true
+  done
+}
+# Leaving the fans latched at whatever pwm we last wrote is the one genuinely
+# bad exit: manual mode survives the process. Hand them back on any exit.
+trap 'release; log "released to BIOS curve"' EXIT INT TERM
+
+manual=0
+while :; do
+  temp=$(max_gpu_temp)
+  if ((temp >= TEMP_LOW)); then
+    if ((temp >= TEMP_HIGH)); then frac=100; else
+      frac=$(( (temp - TEMP_LOW) * 100 / (TEMP_HIGH - TEMP_LOW) ))
+    fi
+    for ch in "${CHANNELS[@]}"; do
+      n=${ch%%:*} floor=${ch##*:}
+      pwm=$(( floor + (255 - floor) * frac / 100 ))
+      echo 1 > "$NCT/pwm${n}_enable" 2>/dev/null || true
+      echo "$pwm" > "$NCT/pwm${n}" 2>/dev/null || true
+    done
+    if ((manual == 0)); then log "engaged at ${temp}C"; fi
+    manual=1
+  elif ((manual == 1 && temp < TEMP_REARM_T)); then
+    release
+    log "back to BIOS at ${temp}C"
+    manual=0
+  fi
+  sleep "$INTERVAL"
+done
