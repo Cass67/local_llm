@@ -1,0 +1,16 @@
+[Unit]
+Description=local_llm full backup (state, secrets, agent creds, langfuse, open-webui)
+Documentation=file:///home/cass/git/local_llm/docs/RECOVERY.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Root is required to read /var/lib/docker/volumes.
+User=root
+ExecStart=/home/cass/git/local_llm/scripts/backup-full.sh
+# The archive holds .env and the tunnel credentials, so keep it off any
+# world-readable path; backup-full.sh also chmods it 0600.
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
