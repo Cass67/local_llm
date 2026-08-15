@@ -2,9 +2,16 @@
 
 import os
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from fastapi.responses import RedirectResponse
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
+
+# The agent paths only exist on the Caddy vhost, but mgmt serves the same UI on
+# :3100, where the cards' root-relative links 404. Redirect them across rather
+# than making the links absolute -- Cloudflare proxies only a fixed port list,
+# so a host:port link would hang over the tunnel.
+redirect_router = APIRouter(include_in_schema=False)
 
 _AGENTS = [
     {
@@ -38,6 +45,26 @@ _AGENTS = [
         "auth": "via Cloudflare Access",
     },
 ]
+
+
+async def _redirect_to_proxy(request: Request):
+    port = os.environ.get("PUBLIC_HTTP_PORT", "3001")
+    target = f"//{request.url.hostname}:{port}{request.url.path}"
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    return RedirectResponse(target, status_code=307)
+
+
+for _a in _AGENTS:
+    _base = os.environ.get(_a["url_env"], _a["default_url"])
+    # Only root-relative paths live on the Caddy vhost; an absolute URL already
+    # points somewhere reachable and needs no redirect.
+    if _base.startswith("/") and not _base.startswith("//"):
+        _stripped = _base.rstrip("/")
+        redirect_router.add_api_route(_stripped, _redirect_to_proxy, methods=["GET"])
+        redirect_router.add_api_route(
+            f"{_stripped}/{{rest:path}}", _redirect_to_proxy, methods=["GET"]
+        )
 
 
 @router.get("")

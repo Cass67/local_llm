@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import active_runners
 from .config import VERSION
+from .routes.agents import redirect_router as agents_redirect_router
 from .routes.agents import router as agents_router
 from .routes.bakeoff import router as bakeoff_router
 from .routes.benchmark import router as benchmark_router
@@ -90,6 +91,7 @@ app.include_router(benchmark_router)
 app.include_router(profiles_router)
 app.include_router(update_router)
 app.include_router(agents_router)
+app.include_router(agents_redirect_router)
 app.include_router(speed_bench_router)
 app.include_router(sweep_router)
 app.include_router(quality_router)
