@@ -43,17 +43,52 @@ async def test_chat_row_counts_commits_behind_upstream(monkeypatch):
         "_image_meta",
         lambda image: (True, {"org.opencontainers.image.revision": revision}, [image]),
     )
-    client = FakeClient(
-        [
-            ("/commits/main", {"sha": "b" * 40}),
-            (f"/compare/{revision}...main", {"ahead_by": 7}),
-        ]
-    )
+    history = [{"sha": f"{i:040x}"} for i in range(7)] + [{"sha": revision}]
+    client = FakeClient([("/commits", history)])
     row = await update._service_row(client, "chat", update.SERVICES["chat"])
 
     assert row["current"] == "a" * 12
-    assert row["latest"] == "b" * 12
+    assert row["latest"] == f"{0:040x}"[:12]
     assert (row["behind"], row["outdated"]) == (7, True)
+
+
+@pytest.mark.asyncio
+async def test_runner_behind_count_walks_master(monkeypatch):
+    """/compare 404s on llama.cpp, so behind-counts come from the commit list."""
+    from backend.routes import update
+
+    def commit(i):
+        return {
+            "sha": f"{i:02d}" + "a" * 38,
+            "commit": {
+                "message": f"c{i}\n\nbody",
+                "author": {"name": "dev"},
+                "committer": {"date": "2026-08-17T00:00:00Z"},
+            },
+        }
+
+    history = [commit(i) for i in range(60)]
+    monkeypatch.setattr(update, "_distinct_images", lambda: {"rocm": "runner-rocm:latest"})
+    # image label carries a 12-char sha, master's list carries the full one
+    monkeypatch.setattr(update, "_image_commit", lambda image: (True, ("39" + "a" * 38)[:12]))
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, **kw):
+            request = httpx.Request("GET", url, params=kw.get("params"))
+            return httpx.Response(200, json=history, request=request)
+
+    monkeypatch.setattr(update, "GitHub", lambda **kw: Client())
+    data = await update.update_status()
+
+    assert data["backends"][0]["behind"] == 39
+    assert data["latest"]["sha"] == "00" + "a" * 38
+    assert len(data["commits"]) == 39  # the commits it is missing, newest first
 
 
 @pytest.mark.asyncio
