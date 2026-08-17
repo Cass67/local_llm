@@ -8,6 +8,7 @@ import re
 import subprocess  # nosec B404  # noqa: S404
 import threading
 import time
+from collections.abc import Collection
 from pathlib import Path
 
 import httpx
@@ -21,8 +22,9 @@ router = APIRouter(prefix="/api/update", tags=["update"])
 GITHUB_REPOS = "https://api.github.com/repos"
 GITHUB_API = f"{GITHUB_REPOS}/ggml-org/llama.cpp"
 # Anonymous GitHub allows 60 requests an hour per IP, and one "check for updates"
-# spends a dozen (a compare per runner sha, a tag walk for Langfuse). A token
-# raises that to 5000; the cache keeps a refresh cheap either way.
+# spends a dozen (a page of master history, a tag walk for Langfuse). A token
+# raises that to 5000, and deep history pages 504 without one; the cache keeps a
+# refresh cheap either way.
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_CACHE_TTL = 600.0
 COMMIT_LABEL = "llama.cpp.commit"
@@ -208,6 +210,42 @@ def _distinct_images() -> dict[str, str]:
     return {b: config.RUNNER_IMAGES[b] for b in _BACKENDS}
 
 
+# GitHub's /compare endpoint cannot keep up with llama.cpp: past roughly a day of
+# master it times out (504), then serves the cached failure as a 404 -- with or
+# without a token. Walking the commit list instead is one request per 100 commits
+# and never fails that way.
+HISTORY_PAGES = 5
+
+
+async def _branch_history(
+    client, repo: str, branch: str, until: Collection[str] = (), pages: int = HISTORY_PAGES
+) -> list[dict]:
+    """Newest-first commits on a branch, stopping once every sha in `until` is in hand."""
+    history: list[dict] = []
+    for page in range(1, pages + 1):
+        resp = await client.get(
+            f"{GITHUB_REPOS}/{repo}/commits",
+            params={"sha": branch, "per_page": 100, "page": page},
+        )
+        if resp.status_code != 200:
+            break
+        batch = resp.json()
+        history += batch
+        if len(batch) < 100:
+            break
+        if until and all(_behind(history, sha) is not None for sha in until):
+            break
+    return history
+
+
+def _behind(history: list[dict], sha: str) -> int | None:
+    """How many commits `history` holds ahead of `sha`, or None if it is out of range."""
+    for i, commit in enumerate(history):
+        if commit["sha"].startswith(sha):  # image labels carry a truncated sha
+            return i
+    return None
+
+
 @router.get("/status")
 async def update_status():
     """Current llama.cpp commit per runner image vs upstream master."""
@@ -221,29 +259,19 @@ async def update_status():
 
     async with GitHub(timeout=15.0) as client:
         try:
-            resp = await client.get(f"{GITHUB_API}/commits/master")
-            resp.raise_for_status()
-            head = resp.json()
-            commits = []
-            behind: dict[str, int] = {}
-            for sha in current_shas:
-                cmp_resp = await client.get(f"{GITHUB_API}/compare/{sha}...master")
-                if cmp_resp.status_code != 200:
-                    continue
-                cmp = cmp_resp.json()
-                behind[sha] = cmp.get("ahead_by", 0)
-                if len(cmp.get("commits", [])) > len(commits):
-                    commits = cmp["commits"]
-            if not current_shas:
-                list_resp = await client.get(f"{GITHUB_API}/commits", params={"per_page": 20})
-                list_resp.raise_for_status()
-                commits = list_resp.json()
+            history = await _branch_history(
+                client, "ggml-org/llama.cpp", "master", until=current_shas
+            )
         except httpx.HTTPError as e:
             raise HTTPException(502, f"GitHub unreachable: {e}") from e
+    if not history:
+        raise HTTPException(502, "GitHub returned no commits for llama.cpp master")
 
+    head = history[0]
     for b in backends:
-        b["behind"] = behind.get(b["commit"]) if b.get("commit") else None
+        b["behind"] = _behind(history, b["commit"]) if b.get("commit") else None
 
+    depth = max((b["behind"] or 0 for b in backends), default=0)
     return {
         "latest": {
             "sha": head["sha"],
@@ -258,7 +286,7 @@ async def update_status():
                 "date": c["commit"]["committer"]["date"],
                 "author": (c["commit"]["author"] or {}).get("name", ""),
             }
-            for c in list(reversed(commits))[:50]  # newest first
+            for c in history[: min(max(depth, 20), 50)]  # newest first
         ],
     }
 
@@ -584,17 +612,14 @@ async def _service_row(client: httpx.AsyncClient, service_id: str, svc: dict) ->
         # Branch-tracking tag: the image's own version label just says "main", so
         # the upstream commit it was built from is the only real version we have.
         revision = labels.get("org.opencontainers.image.revision")
-        resp = await client.get(f"{GITHUB_REPOS}/{svc['repo']}/commits/{svc['branch']}")
-        head = resp.json()["sha"] if resp.status_code == 200 else None
-        row["latest"] = head[:12] if head else None
+        history = await _branch_history(
+            client, svc["repo"], svc["branch"], until=[revision] if revision else ()
+        )
+        row["latest"] = history[0]["sha"][:12] if history else None
         row["current"] = revision[:12] if revision else None
-        if revision and head:
-            cmp_resp = await client.get(
-                f"{GITHUB_REPOS}/{svc['repo']}/compare/{revision}...{svc['branch']}"
-            )
-            if cmp_resp.status_code == 200:
-                row["behind"] = cmp_resp.json().get("ahead_by", 0)
-                row["outdated"] = row["behind"] > 0
+        if revision and history:
+            row["behind"] = _behind(history, revision)
+            row["outdated"] = bool(row["behind"])
         return row
 
     version = labels.get(svc["version_label"])
