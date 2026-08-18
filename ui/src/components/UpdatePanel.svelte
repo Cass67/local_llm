@@ -333,7 +333,7 @@
 					{/each}
 				{/if}
 			</div>
-			{#if job.log_tail}
+			{#if job.log_tail && (job.running || Object.values(job.results).some((c) => c !== 0))}
 				<pre>{job.log_tail}</pre>
 			{/if}
 		</div>
