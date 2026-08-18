@@ -162,6 +162,10 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         args.extend(["--threads-http", str(cfg["threads_http"])])
     if cfg.get("parallel") is not None:
         args.extend(["--parallel", str(cfg["parallel"])])
+    # With more than one slot llama-server splits -c evenly per slot unless the KV is
+    # unified, which pools it so one long agent can borrow from an idle one.
+    if cfg.get("kv_unified") is not None:
+        args.append("--kv-unified" if cfg["kv_unified"] else "--no-kv-unified")
     if cfg.get("no_cont_batching"):
         args.append("--no-cont-batching")
     if cfg.get("prio") is not None:

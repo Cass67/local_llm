@@ -211,3 +211,24 @@ def test_build_runner_container_spec_uses_nvidia_device_requests_for_cuda():
     assert spec.environment == {"CUDA_VISIBLE_DEVICES": "0,1"}
     assert "GGML_VK_VISIBLE_DEVICES" not in spec.environment
     assert "HIP_VISIBLE_DEVICES" not in spec.environment
+
+
+def test_build_llama_server_args_kv_unified_is_tristate():
+    def args_for(cfg_extra):
+        metadata = {
+            "family": "qwen35",
+            "alias": "qwen35-q4kl",
+            "model_path": "/models/x/y.gguf",
+            "config": {"ctx": 131072, "parallel": 2, **cfg_extra},
+        }
+        return build_llama_server_args(metadata, port=8080)
+
+    assert "--kv-unified" in args_for({"kv_unified": True})
+    assert "--no-kv-unified" not in args_for({"kv_unified": True})
+
+    assert "--no-kv-unified" in args_for({"kv_unified": False})
+    assert "--kv-unified" not in args_for({"kv_unified": False})
+
+    omitted = args_for({})
+    assert "--kv-unified" not in omitted
+    assert "--no-kv-unified" not in omitted
