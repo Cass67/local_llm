@@ -38,6 +38,7 @@ KNOWN_FIELDS: set[str] = {
     "cache_type_k",
     "cache_type_v",
     "no_kv_offload",
+    "kv_unified",
     # sampling
     "temperature",
     "top_p",
@@ -60,6 +61,7 @@ KNOWN_FIELDS: set[str] = {
     "mtp_draft_n_max",
     "mtp_draft_n_min",
     "mtp_draft_p_min",
+    "mtp_draft_ngl",
     "ngram_mod_n_match",
     "ngram_mod_n_min",
     "ngram_mod_n_max",
@@ -93,6 +95,7 @@ _SPEC_FIELDS = {
     "mtp_draft_n_max",
     "mtp_draft_n_min",
     "mtp_draft_p_min",
+    "mtp_draft_ngl",
     "ngram_mod_n_match",
     "ngram_mod_n_min",
     "ngram_mod_n_max",
@@ -196,7 +199,10 @@ def _lint_spec(profile: dict[str, Any]) -> list[dict[str, str]]:
                 "more than it saves. Leave it unset unless measured.",
             )
         )
-    if (profile.get("mtp_draft_n_max") or 0) > 3:
+    # Scoped to draft-mtp on purpose. A DFlash2 sidecar is trained to emit a whole
+    # block at once and measures fastest at its block_size (7 after llama.cpp's
+    # clamp, ~2.24x vs 1.98x at 3 on Qwen3.8-27B) -- warning there is backwards.
+    if "draft-mtp" in kinds and (profile.get("mtp_draft_n_max") or 0) > 3:
         out.append(
             _finding(
                 "warn",

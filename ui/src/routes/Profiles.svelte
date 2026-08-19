@@ -61,6 +61,7 @@
 				{ key: "ctx_checkpoints", label: "Ctx checkpoints", type: "int", placeholder: "64" },
 				{ key: "checkpoint_min_step", label: "Checkpoint min step", type: "int", placeholder: "4096" },
 				{ key: "cache_reuse", label: "Cache reuse (min chunk)", type: "int", placeholder: "256" },
+				{ key: "kv_unified", label: "Unified KV", type: "bool", hint: "pool the KV across slots instead of splitting -c evenly per --parallel slot" },
 			],
 		},
 		{
