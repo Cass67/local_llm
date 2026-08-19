@@ -191,6 +191,11 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
             draft_path = cfg.get("mtp_draft_model")
             if draft_path:
                 args.extend(["-md", str(draft_path)])
+            # The draft model gets its own layer count. llama.cpp defaults it to -1
+            # ("use default"), which leaves a DFlash2 sidecar on the CPU -- that alone
+            # costs more than speculation saves, so a profile must be able to say 999.
+            if cfg.get("mtp_draft_ngl") is not None:
+                args.extend(["-ngld", str(cfg["mtp_draft_ngl"])])
             if cfg.get("mtp_draft_n_max") is not None:
                 args.extend(["--spec-draft-n-max", str(cfg["mtp_draft_n_max"])])
             if cfg.get("mtp_draft_n_min") is not None:
@@ -255,6 +260,10 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         "--spec-draft-n-max",
         "--spec-draft-n-min",
         "--spec-draft-p-min",
+        "-ngld",
+        "--spec-draft-ngl",
+        "--gpu-layers-draft",
+        "--n-gpu-layers-draft",
         "--spec-ngram-mod-n-match",
         "--spec-ngram-mod-n-min",
         "--spec-ngram-mod-n-max",
