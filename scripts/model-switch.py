@@ -71,7 +71,12 @@ def live_limits() -> tuple[int | None, int | None, list[dict]]:
     smallest one on offer — not the largest, or a long session dies on whichever
     model has the shorter window.
     """
-    models = [m for m in _get(f"{ROUTER}/v1/models")["data"] if m["id"] != "router"]
+    try:
+        data = _get(f"{ROUTER}/v1/models")["data"]
+    except OSError as exc:  # URLError subclasses OSError
+        print(f"cannot reach the router at {ROUTER}: {exc}", file=sys.stderr)
+        return None, None, []
+    models = [m for m in data if m["id"] != "router"]
     ctxs = [m["context_window"] for m in models if m.get("context_window")]
     outs = [m["max_tokens"] for m in models if m.get("max_tokens")]
     return (min(ctxs) if ctxs else None), (min(outs) if outs else None), models
@@ -196,6 +201,8 @@ def cmd_sync(args) -> int:
 
 def cmd_status(args) -> int:
     ctx, out, models = live_limits()
+    if not models:
+        return 1
     print(f"{'ADVERTISED':<12} ctx={ctx} output={out}")
     for m in models:
         print(f"  {m['id']}  ctx={m.get('context_window')} max_tokens={m.get('max_tokens')}")
