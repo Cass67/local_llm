@@ -38,6 +38,12 @@ AGENTS_DIR = Path(os.environ.get("AGENTS_CONFIG_DIR", Path.home() / ".config/loc
 # holds cloud providers whose real limits we must not touch.
 ROUTER_MARK = ":3200"
 
+# Compaction headroom. NOT the output limit: that is a ceiling on one reply, while
+# this is subtracted from the window on every turn, so setting it to a half-window
+# output budget would halve the usable context. It only has to fit one tool loop --
+# pi dies at 16384, and 49152 is the value that has held up.
+RESERVE_FLOOR = 49152
+
 SAMPLING_KEYS = {
     "temperature", "topP", "top_p", "topK", "top_k", "minP", "min_p",
     "presencePenalty", "presence_penalty", "frequencyPenalty", "frequency_penalty",
@@ -69,6 +75,10 @@ def live_limits() -> tuple[int | None, int | None, list[dict]]:
     ctxs = [m["context_window"] for m in models if m.get("context_window")]
     outs = [m["max_tokens"] for m in models if m.get("max_tokens")]
     return (min(ctxs) if ctxs else None), (min(outs) if outs else None), models
+
+
+def reserve_for(ctx: int, out: int) -> int:
+    return min(out, max(RESERVE_FLOOR, ctx // 8))
 
 
 def _targets() -> list[Path]:
@@ -133,10 +143,11 @@ def patch_file(
     # fit a whole tool loop or the turn clamps max_tokens to 1 and the session dies.
     # Keyed on the field existing, not on the file shape -- opencode configs also
     # carry a "compaction" block, spelled "reserved" and handled below.
+    reserve = reserve_for(ctx, out)
     comp = data.get("compaction")
-    if isinstance(comp, dict) and "reserveTokens" in comp and comp["reserveTokens"] != out:
-        changes.append(f"reserveTokens {comp['reserveTokens']} -> {out}")
-        comp["reserveTokens"] = out
+    if isinstance(comp, dict) and "reserveTokens" in comp and comp["reserveTokens"] != reserve:
+        changes.append(f"reserveTokens {comp['reserveTokens']} -> {reserve}")
+        comp["reserveTokens"] = reserve
 
     for key in ("provider", "providers"):
         for pid, prov in (data.get(key) or {}).items():
@@ -154,9 +165,9 @@ def patch_file(
 
             # opencode's own compaction reserve lives at the top level.
             comp = data.get("compaction")
-            if isinstance(comp, dict) and "reserved" in comp and comp["reserved"] != out:
-                changes.append(f"reserved {comp.get('reserved')} -> {out}")
-                comp["reserved"] = out
+            if isinstance(comp, dict) and "reserved" in comp and comp["reserved"] != reserve:
+                changes.append(f"reserved {comp.get('reserved')} -> {reserve}")
+                comp["reserved"] = reserve
 
     if changes and write:
         path.write_text(json.dumps(data, indent=2) + "\n")
