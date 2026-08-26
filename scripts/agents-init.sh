@@ -33,6 +33,15 @@ seed "$REPO_DIR/agents/opencode.json" "$CONFIG_DIR/opencode/opencode.json"
 # `opencode2 auth login` (or /connect in the TUI) and the credentials land here.
 seed "$REPO_DIR/agents/opencode2.json" "$CONFIG_DIR/opencode2/opencode.json"
 
+# The seeds carry whatever model happened to be live when they were committed, and
+# sync leaves them alone by default (rewriting them dirties the deploy checkout). So
+# pull the real numbers from the running server rather than letting a fresh host run
+# on stale limits. Non-fatal: on a cold host nothing is serving yet.
+if ! AGENTS_CONFIG_DIR="$CONFIG_DIR" python3 "$REPO_DIR/scripts/model-switch.py" sync; then
+  echo "note: no running model to read limits from --"
+  echo "      run 'scripts/model-switch.py sync' once one is up"
+fi
+
 echo
 echo "Agent config dir: $CONFIG_DIR"
 echo "Set AGENTS_CONFIG_DIR in .env to override."
