@@ -17,6 +17,10 @@ RUNNER_IMAGES = {
     "mixed_vulkan": os.environ.get("RUNNER_IMAGE_VULKAN", "local-llm-runner-vulkan:latest"),
     "rocm": os.environ.get("RUNNER_IMAGE_ROCM", "local-llm-runner-rocm:latest"),
     "rocmfp4": os.environ.get("RUNNER_IMAGE_ROCMFP4", "local-llm-runner-rocmfp4:latest"),
+    # Qwen3.8-Flash-Next (arch qwen4exp) needs llama.cpp PR #27742; master cannot load it.
+    "rocmqwen4exp": os.environ.get(
+        "RUNNER_IMAGE_ROCMQWEN4EXP", "local-llm-runner-rocmqwen4exp:latest"
+    ),
     "cuda": os.environ.get("RUNNER_IMAGE_CUDA", "local-llm-runner-cuda:latest"),
 }
 
