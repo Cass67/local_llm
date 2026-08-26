@@ -13,8 +13,8 @@
         "router": {
           "name": "local-llm router",
           "limit": {
-            "context": 131072,
-            "output": 4096
+            "context": 256000,
+            "output": 49152
           }
         }
       }

@@ -19,7 +19,7 @@ def output_limit(context: int | None) -> int:
     their own small default (a few thousand tokens) and truncate long replies
     with "reached the maximum output token limit".
     """
-    return min((context or 131072) // 2, 49152)
+    return min((context or 131072) // 2, 131072)
 
 
 def _snapshot_files() -> set[tuple[str, str]]:
