@@ -81,22 +81,25 @@ def reserve_for(ctx: int, out: int) -> int:
     return min(out, max(RESERVE_FLOOR, ctx // 8))
 
 
-def _targets() -> list[Path]:
-    return [
-        p
-        for p in [
-            Path.home() / ".config/opencode/opencode.json",
-            AGENTS_DIR / "opencode/opencode.json",
-            AGENTS_DIR / "opencode2/opencode.json",
-            AGENTS_DIR / "pi/agent/models.json",
-            AGENTS_DIR / "pi/agent/settings.json",
+def _targets(seeds: bool = False) -> list[Path]:
+    """Live client configs. The repo seeds under agents/ are opt-in: they only
+    matter when bootstrapping a fresh host, and rewriting them here leaves the
+    deploy host's checkout dirty, which aborts the next git pull."""
+    paths = [
+        Path.home() / ".config/opencode/opencode.json",
+        AGENTS_DIR / "opencode/opencode.json",
+        AGENTS_DIR / "opencode2/opencode.json",
+        AGENTS_DIR / "pi/agent/models.json",
+        AGENTS_DIR / "pi/agent/settings.json",
+    ]
+    if seeds:
+        paths += [
             REPO / "agents/opencode.json",
             REPO / "agents/opencode2.json",
             REPO / "agents/pi-models.json",
             REPO / "agents/pi-settings.json",
         ]
-        if p.exists()
-    ]
+    return [p for p in paths if p.exists()]
 
 
 def _strip_sampling(obj: dict) -> list[str]:
@@ -180,7 +183,7 @@ def cmd_sync(args) -> int:
         print("no running model advertises a context window — start one first", file=sys.stderr)
         return 1
     print(f"live: {', '.join(m['id'] for m in models)}  ctx={ctx} output={out}\n")
-    for path in _targets():
+    for path in _targets(args.seeds):
         changes = patch_file(path, ctx, out, write=not args.dry_run, strip=args.strip_sampling)
         label = str(path).replace(str(Path.home()), "~")
         print(f"{label}\n  " + ("\n  ".join(changes) if changes else "up to date"))
@@ -192,7 +195,6 @@ def cmd_sync(args) -> int:
 
 
 def cmd_status(args) -> int:
-    _ = args
     ctx, out, models = live_limits()
     print(f"{'ADVERTISED':<12} ctx={ctx} output={out}")
     for m in models:
@@ -206,7 +208,7 @@ def cmd_status(args) -> int:
             print(f"  {c['name']:<14} {a.get('model')}  profile={a.get('profile')}")
 
     print("\nCLIENTS")
-    for path in _targets():
+    for path in _targets(args.seeds):
         changes = patch_file(path, ctx or 0, out or 0, write=False, strip=False)
         label = str(path).replace(str(Path.home()), "~")
         print(f"  {label}: " + ("; ".join(changes) if changes else "in sync"))
@@ -265,6 +267,11 @@ def _profile_context(family: str, profile: str) -> int | None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--dry-run", action="store_true", help="show changes without writing")
+    ap.add_argument(
+        "--seeds",
+        action="store_true",
+        help="also rewrite the repo agents/*.json seeds (dirties the checkout)",
+    )
     ap.add_argument(
         "--strip-sampling",
         action="store_true",
