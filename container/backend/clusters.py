@@ -14,8 +14,13 @@ from .gpu_inventory import GpuInfo
 
 # rocmfp4: same AMD/HIP device wiring as rocm, but the runner image is built from
 # the ROCmFPX fork (ROCmFP4 weight quants + MTP self-speculation).
-_VALID_BACKENDS = {"rocm", "rocmfp4", "vulkan", "cuda"}
-_SINGLE_VENDOR_BACKENDS = {"rocm": "amd", "rocmfp4": "amd", "cuda": "nvidia"}
+_VALID_BACKENDS = {"rocm", "rocmfp4", "rocmqwen4exp", "vulkan", "cuda"}
+_SINGLE_VENDOR_BACKENDS = {
+    "rocm": "amd",
+    "rocmfp4": "amd",
+    "rocmqwen4exp": "amd",
+    "cuda": "nvidia",
+}
 
 # Base port for cluster-allocated runner ports (8080 + cluster slot)
 _PORT_BASE = config.LLAMA_SERVER_PORT
@@ -163,7 +168,7 @@ def visible_devices_for(cluster: ClusterDef, inventory: list[GpuInfo]) -> str:
         gpu = inv_map.get(pci)
         if gpu is None:
             continue
-        if cluster.backend in ("rocm", "rocmfp4"):
+        if cluster.backend in ("rocm", "rocmfp4", "rocmqwen4exp"):
             idx = gpu.rocm_index
         elif cluster.backend == "cuda":
             idx = gpu.cuda_index
