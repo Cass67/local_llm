@@ -10,8 +10,25 @@ from .models import output_limit
 router = APIRouter(prefix="/v1", tags=["openai"])
 
 
-def _context_window_for(family: str) -> int | None:
-    """Read context window from the model's active profile."""
+def _context_window_for(family: str, profile: str | None = None) -> int | None:
+    """Read context window from the profile this model actually runs under.
+
+    The caller knows the live profile (the active/desired record names it); the
+    accepted-model JSON only carries a pin that nothing updates on a profile
+    switch, so trusting it reports a stale window. Fall back to that JSON only
+    when the family has no profiles at all.
+    """
+    try:
+        from .profiles import _load
+
+        fam = _load().get("families", {}).get(family, {})
+        profiles = fam.get("profiles", {})
+        name = profile if profile in profiles else fam.get("default")
+        ctx = profiles.get(name, {}).get("context")
+        if ctx:
+            return int(ctx)
+    except Exception:  # nosec B110  # noqa: BLE001, S110
+        pass
     try:
         from .models import _read_accepted_models
 
@@ -84,7 +101,7 @@ async def v1_models():
             if not alias or alias in seen:
                 continue
             seen.add(alias)
-            ctx = _context_window_for(family)
+            ctx = _context_window_for(family, entry.get("profile"))
             vision = _vision_for(family, entry.get("profile"))
             rec: dict = {"id": alias, "object": "model", "owned_by": "local_llm"}
             if ctx:

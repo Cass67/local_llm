@@ -43,6 +43,7 @@ async def test_v1_models_lists_only_running_instances(temp_state):
 async def test_v1_models_only_router_sentinel_when_nothing_running(temp_state):
     _ = temp_state
     from backend.main import app
+    from backend.routes.models import output_limit
 
     with patch("backend.routes.openai.active_runners.list_active", return_value=[]):
         transport = ASGITransport(app=app)
@@ -51,4 +52,11 @@ async def test_v1_models_only_router_sentinel_when_nothing_running(temp_state):
 
     assert response.status_code == 200
     # The router sentinel is always advertised; with no runners it is the only entry.
-    assert response.json()["data"] == [{"id": "router", "object": "model", "owned_by": "local_llm"}]
+    assert response.json()["data"] == [
+        {
+            "id": "router",
+            "object": "model",
+            "owned_by": "local_llm",
+            "max_tokens": output_limit(None),
+        }
+    ]
