@@ -21,6 +21,8 @@ RUNNER_IMAGES = {
     "rocmqwen4exp": os.environ.get(
         "RUNNER_IMAGE_ROCMQWEN4EXP", "local-llm-runner-rocmqwen4exp:latest"
     ),
+    # LaurentZuijdwijk fork, HIP build: --spec-draft-adaptive (+46% structured output on 27B).
+    "rocmfork": os.environ.get("RUNNER_IMAGE_ROCMFORK", "local-llm-runner-rocmfork:latest"),
     "cuda": os.environ.get("RUNNER_IMAGE_CUDA", "local-llm-runner-cuda:latest"),
 }
 
