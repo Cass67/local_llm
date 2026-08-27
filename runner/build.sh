@@ -11,9 +11,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND="${1:-}"
 case "$BACKEND" in
-  vulkan | rocm | cuda | rocmfp4 | rocmdflash) ;;
+  vulkan | vulkanqwen4exp | rocm | cuda | rocmfp4 | rocmdflash | rocmdflash2 | rocmfork | rocmqwen4exp) ;;
   *)
-    echo "Usage: $0 <vulkan|rocm|cuda|rocmfp4|rocmdflash> [--run] [--no-cache]"
+    echo "Usage: $0 <vulkan|vulkanqwen4exp|rocm|cuda|rocmfp4|rocmdflash|rocmdflash2|rocmfork|rocmqwen4exp> [--run] [--no-cache]"
     exit 1
     ;;
 esac

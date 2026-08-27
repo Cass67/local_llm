@@ -3,13 +3,14 @@
 from copy import deepcopy
 from typing import Any, Literal
 
-Backend = Literal["rocm", "rocmfp4", "rocmqwen4exp", "rocmfork", "vulkan", "cuda"]
+Backend = Literal["rocm", "rocmfp4", "rocmqwen4exp", "rocmfork", "rocmdflash2", "vulkan", "cuda"]
 _BACKEND_SUFFIXES = ("-rocmfp4", "-rocm", "-vulkan", "-cuda")
 _BACKEND_LABELS = {
     "rocm": "ROCm",
     "rocmfp4": "ROCmFP4",
     "rocmqwen4exp": "ROCmQwen4Exp",
     "rocmfork": "ROCmFork",
+    "rocmdflash2": "ROCmDFlash2",
     "vulkan": "Vulkan",
     "cuda": "CUDA",
 }
@@ -59,6 +60,14 @@ def migrate_backend_variant(metadata: dict[str, Any]) -> dict[str, Any]:
     config_value = metadata.get("config")
     cfg: dict[str, Any] = config_value if isinstance(config_value, dict) else {}
     backend = str(metadata.get("backend") or cfg.get("backend") or "rocm")
-    if backend not in ("rocm", "rocmfp4", "rocmqwen4exp", "rocmfork", "vulkan", "cuda"):
+    if backend not in (
+        "rocm",
+        "rocmfp4",
+        "rocmqwen4exp",
+        "rocmfork",
+        "rocmdflash2",
+        "vulkan",
+        "cuda",
+    ):
         backend = "rocm"
     return copy_backend_variant(metadata, backend)  # type: ignore[arg-type]

@@ -1,0 +1,20 @@
+--- a/common/speculative.cpp
++++ b/common/speculative.cpp
+@@ -2412,6 +2412,17 @@ common_params common_base_params_to_speculative(const common_params & params) {
+         if (params_spec.backend_sampling) {
+             result.n_outputs_max_per_seq = per_seq;
+         }
++
++        // The draft context inherits split_mode from the target, and DFlash's local
++        // convolution / candidate selector ops have no defined tensor-split axis, so a
++        // tensor-split target aborts the drafter in graph alloc:
++        //   ggml-backend-meta.cpp:537: GGML_ASSERT(ret.axis != GGML_BACKEND_SPLIT_AXIS_UNKNOWN)
++        // -devd only picks devices, not the split mode, so it cannot avoid this. The
++        // drafter is ~2 GB; splitting it buys nothing. Keep it whole on one device and
++        // leave the target's own split mode alone.
++        if (has_draft && result.split_mode == LLAMA_SPLIT_MODE_TENSOR) {
++            result.split_mode = LLAMA_SPLIT_MODE_NONE;
++        }
+     }
+ 
+     return result;
