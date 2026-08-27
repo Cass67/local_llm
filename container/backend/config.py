@@ -23,6 +23,10 @@ RUNNER_IMAGES = {
     ),
     # LaurentZuijdwijk fork, HIP build: --spec-draft-adaptive (+46% structured output on 27B).
     "rocmfork": os.environ.get("RUNNER_IMAGE_ROCMFORK", "local-llm-runner-rocmfork:latest"),
+    # DFlash2 block-diffusion drafter needs llama.cpp PR #27342; not in master. Layer split only.
+    "rocmdflash2": os.environ.get(
+        "RUNNER_IMAGE_ROCMDFLASH2", "local-llm-runner-rocmdflash2:latest"
+    ),
     "cuda": os.environ.get("RUNNER_IMAGE_CUDA", "local-llm-runner-cuda:latest"),
 }
 
