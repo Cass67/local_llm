@@ -34,6 +34,7 @@ services:
       RUNNER_IMAGE_VULKAN: ${RUNNER_IMAGE_VULKAN:-local-llm-runner-vulkan:latest}
       RUNNER_IMAGE_ROCM: ${RUNNER_IMAGE_ROCM:-local-llm-runner-rocm:latest}
       RUNNER_IMAGE_ROCMQWEN4EXP: ${RUNNER_IMAGE_ROCMQWEN4EXP:-local-llm-runner-rocmqwen4exp:latest}
+      RUNNER_IMAGE_ROCMFORK: ${RUNNER_IMAGE_ROCMFORK:-local-llm-runner-rocmfork:latest}
       RUNNER_IMAGE_CUDA: ${RUNNER_IMAGE_CUDA:-local-llm-runner-cuda:latest}
       LLAMA_SERVER_PORT: ${LLAMA_SERVER_PORT:-8080}
       LOCAL_LLM_DISABLE_THINKING_BY_DEFAULT: "${LOCAL_LLM_DISABLE_THINKING_BY_DEFAULT:-false}"
