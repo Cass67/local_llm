@@ -3,12 +3,22 @@
 from copy import deepcopy
 from typing import Any, Literal
 
-Backend = Literal["rocm", "rocmfp4", "rocmqwen4exp", "rocmfork", "rocmdflash2", "vulkan", "cuda"]
+Backend = Literal[
+    "rocm",
+    "rocmfp4",
+    "rocmqwen4exp",
+    "rocmqwen4exp2",
+    "rocmfork",
+    "rocmdflash2",
+    "vulkan",
+    "cuda",
+]
 _BACKEND_SUFFIXES = ("-rocmfp4", "-rocm", "-vulkan", "-cuda")
 _BACKEND_LABELS = {
     "rocm": "ROCm",
     "rocmfp4": "ROCmFP4",
     "rocmqwen4exp": "ROCmQwen4Exp",
+    "rocmqwen4exp2": "ROCmQwen4Exp2",
     "rocmfork": "ROCmFork",
     "rocmdflash2": "ROCmDFlash2",
     "vulkan": "Vulkan",
@@ -64,6 +74,7 @@ def migrate_backend_variant(metadata: dict[str, Any]) -> dict[str, Any]:
         "rocm",
         "rocmfp4",
         "rocmqwen4exp",
+        "rocmqwen4exp2",
         "rocmfork",
         "rocmdflash2",
         "vulkan",

@@ -18,6 +18,7 @@ _VALID_BACKENDS = {
     "rocm",
     "rocmfp4",
     "rocmqwen4exp",
+    "rocmqwen4exp2",
     "rocmfork",
     "rocmdflash2",
     "vulkan",
@@ -27,6 +28,7 @@ _SINGLE_VENDOR_BACKENDS = {
     "rocm": "amd",
     "rocmfp4": "amd",
     "rocmqwen4exp": "amd",
+    "rocmqwen4exp2": "amd",
     "rocmfork": "amd",
     "rocmdflash2": "amd",
     "cuda": "nvidia",
@@ -178,7 +180,14 @@ def visible_devices_for(cluster: ClusterDef, inventory: list[GpuInfo]) -> str:
         gpu = inv_map.get(pci)
         if gpu is None:
             continue
-        if cluster.backend in ("rocm", "rocmfp4", "rocmqwen4exp", "rocmfork", "rocmdflash2"):
+        if cluster.backend in (
+            "rocm",
+            "rocmfp4",
+            "rocmqwen4exp",
+            "rocmqwen4exp2",
+            "rocmfork",
+            "rocmdflash2",
+        ):
             idx = gpu.rocm_index
         elif cluster.backend == "cuda":
             idx = gpu.cuda_index

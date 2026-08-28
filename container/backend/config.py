@@ -21,6 +21,11 @@ RUNNER_IMAGES = {
     "rocmqwen4exp": os.environ.get(
         "RUNNER_IMAGE_ROCMQWEN4EXP", "local-llm-runner-rocmqwen4exp:latest"
     ),
+    # Nathanw1014 fork, HIP build: PR #27742 plus qwen4exp decode graph reuse
+    # (+9-11% tg upstream) and NextN/MTP draft support Flash-Next otherwise cannot use.
+    "rocmqwen4exp2": os.environ.get(
+        "RUNNER_IMAGE_ROCMQWEN4EXP2", "local-llm-runner-rocmqwen4exp2:latest"
+    ),
     # LaurentZuijdwijk fork, HIP build: --spec-draft-adaptive (+46% structured output on 27B).
     "rocmfork": os.environ.get("RUNNER_IMAGE_ROCMFORK", "local-llm-runner-rocmfork:latest"),
     # DFlash2 block-diffusion drafter needs llama.cpp PR #27342; not in master. Layer split only.
