@@ -34,6 +34,7 @@ services:
       RUNNER_IMAGE_VULKAN: ${RUNNER_IMAGE_VULKAN:-local-llm-runner-vulkan:latest}
       RUNNER_IMAGE_ROCM: ${RUNNER_IMAGE_ROCM:-local-llm-runner-rocm:latest}
       RUNNER_IMAGE_ROCMQWEN4EXP: ${RUNNER_IMAGE_ROCMQWEN4EXP:-local-llm-runner-rocmqwen4exp:latest}
+      RUNNER_IMAGE_ROCMQWEN4EXP2: ${RUNNER_IMAGE_ROCMQWEN4EXP2:-local-llm-runner-rocmqwen4exp2:latest}
       RUNNER_IMAGE_ROCMFORK: ${RUNNER_IMAGE_ROCMFORK:-local-llm-runner-rocmfork:latest}
       RUNNER_IMAGE_ROCMDFLASH2: ${RUNNER_IMAGE_ROCMDFLASH2:-local-llm-runner-rocmdflash2:latest}
       RUNNER_IMAGE_CUDA: ${RUNNER_IMAGE_CUDA:-local-llm-runner-cuda:latest}
