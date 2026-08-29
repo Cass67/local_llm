@@ -2463,7 +2463,8 @@
           "mmproj": "/models/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/mmproj-F16.gguf",
           "ngram_mod_n_match": 24,
           "ngram_mod_n_min": 24,
-          "ngram_mod_n_max": 86
+          "ngram_mod_n_max": 86,
+          "presence_penalty": 1.0
         }
       }
     }
