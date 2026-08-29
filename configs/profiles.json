@@ -2440,15 +2440,15 @@
           "cache_type_v": "q8_0",
           "flash_attention": true,
           "jinja": true,
-          "reasoning": false,
-          "flags": "-ot per_layer_token_embd=CPU",
-          "spec_type": "draft-mtp",
+          "reasoning": true,
+          "flags": "-ot per_layer_token_embd=CPU --reasoning-effort low",
+          "spec_type": "draft-mtp,ngram-mod",
           "mtp_draft_model": "/models/models--agentionai--Qwen3.8-Flash-Next-MTP-Q8_0-GGUF/snapshots/main/Qwen3.8-Flash-Next-MTP-Q8_0.gguf",
           "mtp_draft_ngl": 999,
           "mtp_draft_n_max": 3,
           "mtp_draft_n_min": 1,
           "cache_prompt": true,
-          "cache_ram": 16384,
+          "cache_ram": 8192,
           "ctx_checkpoints": 4,
           "checkpoint_min_step": 2048,
           "threads": 16,
@@ -2459,8 +2459,11 @@
           "top_p": 0.95,
           "top_k": 20,
           "min_p": 0,
-          "no_mmap": false,
-          "mmproj": "/models/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/mmproj-F16.gguf"
+          "no_mmap": true,
+          "mmproj": "/models/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/mmproj-F16.gguf",
+          "ngram_mod_n_match": 24,
+          "ngram_mod_n_min": 24,
+          "ngram_mod_n_max": 86
         }
       }
     }
