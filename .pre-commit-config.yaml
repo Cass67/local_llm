@@ -215,13 +215,17 @@ repos:
       - id: trivy-fs
         name: trivy filesystem scan
         entry: >-
-          bash -lc 'trivy fs --severity HIGH,CRITICAL --exit-code 1 .'
+          bash -lc 'trivy fs --severity HIGH,CRITICAL --exit-code 1
+          --skip-dirs container/.venv --skip-dirs ui/node_modules --skip-dirs .git
+          --skip-version-check --timeout 3m .'
         language: system
         pass_filenames: false
       - id: trivy-config
         name: trivy config scan
         entry: >-
-          bash -lc 'trivy config --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore .'
+          bash -lc 'trivy config --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore
+          --skip-dirs container/.venv --skip-dirs ui/node_modules --skip-dirs .git
+          --skip-version-check --timeout 3m .'
         language: system
         pass_filenames: false
 # repo-guard:containers:end
