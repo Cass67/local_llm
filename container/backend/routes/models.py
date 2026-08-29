@@ -18,8 +18,16 @@ def output_limit(context: int | None) -> int:
     context — but harnesses need a number. Report 0/absent and they fall back to
     their own small default (a few thousand tokens) and truncate long replies
     with "reached the maximum output token limit".
+
+    Capped at 49152 rather than half the window. Harnesses differ in what they do
+    with this number: model-switch treats it as a ceiling on one reply and derives
+    a separate, smaller compaction reserve, but Forge subtracts it from the context
+    on every turn. At ctx 256000 the old half-window value of 128000 therefore cost
+    Forge half its usable prompt budget and made it compact at ~140k. 49152 is
+    RESERVE_FLOOR in scripts/model-switch.py — the value that has held up there —
+    and is still far beyond any real single reply.
     """
-    return min((context or 131072) // 2, 131072)
+    return min((context or 131072) // 2, 49152)
 
 
 def _snapshot_files() -> set[tuple[str, str]]:
