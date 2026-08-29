@@ -43,7 +43,7 @@ RUN cmake -S . -B build \
     -DAMDGPU_TARGETS="$AMDGPU_TARGETS" \
     -DLLAMA_BUILD_UI=OFF \
     -DLLAMA_USE_PREBUILT_UI=OFF \
-    && cmake --build build --target llama-server llama-bench -j"$(nproc)"
+    && cmake --build build --target llama-server llama-bench llama-perplexity -j"$(nproc)"
 # stage libomp via the /opt/rocm symlink so the ROCm patch version isn't hardcoded below
 RUN cp /opt/rocm/lib/llvm/lib/libomp.so /src/libomp.so
 
@@ -72,6 +72,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=build /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=build /src/llama.cpp/build/bin/llama-bench /usr/local/bin/llama-bench
+COPY --from=build /src/llama.cpp/build/bin/llama-perplexity /usr/local/bin/llama-perplexity
 COPY --from=build /src/llama.cpp/build/bin/*.so /usr/local/lib/
 COPY --from=build /src/libomp.so /usr/local/lib/
 RUN ldconfig

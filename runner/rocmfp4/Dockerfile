@@ -47,7 +47,7 @@ RUN cmake -S . -B build \
     -DLLAMA_BUILD_SERVER=ON \
     -DLLAMA_BUILD_WEBUI=OFF \
     -DLLAMA_USE_PREBUILT_WEBUI=OFF \
-    && cmake --build build --target llama-server llama-quantize -j"$(nproc)"
+    && cmake --build build --target llama-server llama-quantize llama-perplexity -j"$(nproc)"
 
 FROM ubuntu:24.04
 
@@ -73,6 +73,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=build /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=build /src/llama.cpp/build/bin/llama-quantize /usr/local/bin/llama-quantize
+COPY --from=build /src/llama.cpp/build/bin/llama-perplexity /usr/local/bin/llama-perplexity
 COPY --from=build /src/llama.cpp/build/bin/*.so /usr/local/lib/
 COPY --from=build /opt/rocm-6.3.0/lib/llvm/lib/libomp.so /usr/local/lib/
 RUN ldconfig

@@ -46,6 +46,14 @@ docker build "${NETWORK_FLAG[@]}" "${BUILD_ARGS[@]}" -t "$IMAGE" "$SCRIPT_DIR/$B
 echo ""
 docker run --rm "$IMAGE" llama-server --version
 
+# Every runner ships llama-perplexity so the ppl harness can run against the same
+# image being measured. A new backend that forgets it fails here, not weeks later.
+if ! docker run --rm --entrypoint test "$IMAGE" -x /usr/local/bin/llama-perplexity; then
+  echo "ERROR: $IMAGE has no llama-perplexity" >&2
+  echo "  add it to the cmake --build --target list and COPY it into the final stage" >&2
+  exit 1
+fi
+
 if $RUN_AFTER; then
   echo ""
   docker run --rm "$IMAGE" llama-server --help

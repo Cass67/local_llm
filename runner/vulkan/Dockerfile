@@ -37,7 +37,7 @@ RUN cmake -S . -B build \
     -DLLAMA_VULKAN=1 \
     -DLLAMA_BUILD_UI=OFF \
     -DLLAMA_USE_PREBUILT_UI=OFF \
-    && cmake --build build --target llama-server -j"$(nproc)"
+    && cmake --build build --target llama-server llama-perplexity -j"$(nproc)"
 
 FROM ubuntu:24.04
 
@@ -52,6 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+COPY --from=build /src/llama.cpp/build/bin/llama-perplexity /usr/local/bin/llama-perplexity
 COPY --from=build /src/llama.cpp/build/bin/*.so /usr/local/lib/
 
 # Headless NVIDIA Vulkan ICD — uses libEGL_nvidia.so.0 (injected by nvidia-container-toolkit)
