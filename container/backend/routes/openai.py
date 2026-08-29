@@ -83,16 +83,15 @@ async def v1_models():
     ``data`` and ignore the extra key.
     """
     seen: set[str] = set()
-    data = [
-        {
-            "id": "router",
-            "object": "model",
-            "owned_by": "local_llm",
-            "max_tokens": output_limit(None),
-        }
-    ]
-    models: dict[str, dict] = {"router": _model_entry(None)}
+    data: list[dict] = []
+    models: dict[str, dict] = {}
     seen.add("router")
+    # Filled from the models below, then spliced in at index 0 as the sentinel.
+    # Forge (and any client that trusts the API) reads the router entry, not the
+    # per-model ones, so leaving it at 0 made Forge fall back to its own default
+    # and compact at ~32k against a 262144-token model.
+    routed_ctx: list[int] = []
+    routed_vision: list[bool] = []
 
     for source in (active_runners.list_active(), list_desired()):
         for entry in source:
@@ -113,6 +112,26 @@ async def v1_models():
             rec["input"] = ["text", "image"] if vision else ["text"]
             data.append(rec)
             models[alias] = _model_entry(ctx, vision)
+            if ctx:
+                routed_ctx.append(ctx)
+            routed_vision.append(vision)
+
+    # The router forwards to whichever model is live, so advertise the smallest
+    # window it could land on -- overstating it makes a client overrun the ctx,
+    # and vision only holds if every candidate has an mmproj.
+    router_ctx = min(routed_ctx) if routed_ctx else None
+    router_vision = bool(routed_vision) and all(routed_vision)
+    router_rec: dict = {
+        "id": "router",
+        "object": "model",
+        "owned_by": "local_llm",
+        "max_tokens": output_limit(router_ctx),
+    }
+    if router_ctx:
+        router_rec["context_window"] = router_ctx
+    router_rec["input"] = ["text", "image"] if router_vision else ["text"]
+    data.insert(0, router_rec)
+    models = {"router": _model_entry(router_ctx, router_vision), **models}
 
     return {"object": "list", "data": data, "models": models}
 
