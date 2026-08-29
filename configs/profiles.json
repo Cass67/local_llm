@@ -2421,6 +2421,48 @@
           "visible_devices": "0,1,2"
         }
       }
+    },
+    "qwen3.8-flash-next-reap256-rocm": {
+      "default": "balanced",
+      "profiles": {
+        "balanced": {
+          "backend": "rocmqwen4exp2",
+          "context": 262144,
+          "batch": 4096,
+          "ubatch": 1024,
+          "parallel": 1,
+          "kv_unified": true,
+          "ngl": 999,
+          "split_mode": "layer",
+          "tensor_split": "1.09,1.18,0.73",
+          "visible_devices": "0,1,2",
+          "cache_type_k": "q8_0",
+          "cache_type_v": "q8_0",
+          "flash_attention": true,
+          "jinja": true,
+          "reasoning": false,
+          "flags": "-ot per_layer_token_embd=CPU",
+          "spec_type": "draft-mtp",
+          "mtp_draft_model": "/models/models--agentionai--Qwen3.8-Flash-Next-MTP-Q8_0-GGUF/snapshots/main/Qwen3.8-Flash-Next-MTP-Q8_0.gguf",
+          "mtp_draft_ngl": 999,
+          "mtp_draft_n_max": 3,
+          "mtp_draft_n_min": 1,
+          "cache_prompt": true,
+          "cache_ram": 16384,
+          "ctx_checkpoints": 4,
+          "checkpoint_min_step": 2048,
+          "threads": 16,
+          "threads_http": 2,
+          "timeout": 600,
+          "load_timeout_s": 1800,
+          "temperature": 1,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0,
+          "no_mmap": false,
+          "mmproj": "/models/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/mmproj-F16.gguf"
+        }
+      }
     }
   }
 }
