@@ -48,6 +48,11 @@ KNOWN_FIELDS: set[str] = {
     "repetition_penalty",
     "presence_penalty",
     "frequency_penalty",
+    "penalty_last_n",
+    "dry_multiplier",
+    "dry_base",
+    "dry_allowed_length",
+    "dry_penalty_last_n",
     # reasoning
     "reasoning",
     "reasoning_budget",
@@ -279,6 +284,40 @@ def _lint_shapes(profile: dict[str, Any]) -> list[dict[str, str]]:
                 "tensor_split",
                 f"tensor_split '{tensor_split}' gives a GPU zero weight, loading the whole "
                 "model onto the rest. These are proportions, not device indices — use '1,1'.",
+            )
+        )
+
+    # -c is the total KV budget shared by the slots, not a per-request size. With a
+    # non-unified cache llama_n_ctx_seq() hands each slot ctx/parallel, so a big ctx
+    # here does not mean a big context per request.
+    parallel = int(profile.get("parallel") or 1)
+    ctx = profile.get("ctx") or profile.get("context")
+    if parallel > 1 and not profile.get("kv_unified") and ctx:
+        out.append(
+            _finding(
+                "warn",
+                "parallel",
+                f"parallel {parallel} without kv_unified splits ctx {int(ctx)} across the slots — "
+                f"each request gets {int(ctx) // parallel}. Set kv_unified or raise ctx.",
+            )
+        )
+
+    # The penalty samplers score only the last --repeat-last-n tokens (llama.cpp
+    # default 64). A repeated sentence fills that window within a few repeats and
+    # presence penalty, which is flat per-token and does not escalate with count,
+    # stops pushing away from the loop.
+    penalising = (
+        any(float(profile.get(k) or 0) > 0 for k in ("presence_penalty", "frequency_penalty"))
+        or float(profile.get("repetition_penalty") or profile.get("repeat_penalty") or 1) > 1
+    )
+    if penalising and profile.get("penalty_last_n") is None:
+        out.append(
+            _finding(
+                "warn",
+                "penalty_last_n",
+                "penalties are set but penalty_last_n is not — llama.cpp scores only the "
+                "last 64 tokens, which a looping sentence fills in a few repeats. "
+                "Set penalty_last_n (~1024), and dry_multiplier for sequence-level loops.",
             )
         )
 
