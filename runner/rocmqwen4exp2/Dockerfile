@@ -51,6 +51,22 @@ RUN git init . \
     && git remote add origin "$LLAMA_CPP_REPO" \
     && git fetch --depth 1 origin "$LLAMA_CPP_REF" \
     && git checkout FETCH_HEAD
+
+# The QSA/DSA indexer calls ggml_top_k() on the full n_kv score vector, but ggml-cuda compiled CUB
+# out on HIP and then refused TOP_K above 1024 columns -- so the op fell back to the CPU backend and
+# the whole score vector was copied device->host once per QSA layer per token. Measured on 3x
+# 7900 XT: 511 graph splits (235 CPU) and 12 CPU round trips per token.
+#
+# Upstream fixed this properly in f8dbcd61 ("ROCm: add radix TOP_K for long rows", #27466): a real
+# O(N) radix select with per-row state, so it handles nrows (prefill) natively and is HIP-graph
+# capture safe. We vendor that file rather than carrying our own patch. Note upstream relaxes ONLY
+# TOP_K -- ARGSORT keeps its 1024 limit, because the bitonic argsort kernel is structurally capped
+# near 1024 columns and relaxing it aborts at context reserve.
+COPY top-k.cu /src/top-k.cu
+COPY topk-supports-op.patch /src/topk-supports-op.patch
+RUN cp /src/top-k.cu ggml/src/ggml-cuda/top-k.cu \
+    && git apply /src/topk-supports-op.patch \
+    && echo "upstream radix TOP_K (f8dbcd61) applied"
 RUN cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
@@ -102,5 +118,10 @@ COPY --from=build /src/llama.cpp/build/bin/llama-perplexity /usr/local/bin/llama
 COPY --from=build /src/llama.cpp/build/bin/*.so /usr/local/lib/
 COPY --from=build /src/libomp.so /usr/local/lib/
 RUN ldconfig
+# HIP graph capture costs more than it saves on qwen4exp: 6 paired seeds measured +5.83%
+# decode with it off (6/6 wins, identical acceptance), prefill unchanged. The verify batch
+# width changes constantly under MTP, so the graph is re-captured continually.
+ENV GGML_CUDA_DISABLE_GRAPHS=1
+
 ENTRYPOINT []
 CMD ["llama-server", "--help"]
