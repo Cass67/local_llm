@@ -221,6 +221,20 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         args.extend(["--min-p", str(cfg["min_p"])])
     if cfg.get("repetition_penalty") is not None:
         args.extend(["--repeat-penalty", str(cfg["repetition_penalty"])])
+    # The penalty samplers only look at the last --repeat-last-n tokens (default 64).
+    # A looping sentence fills that window in a few repeats, after which presence
+    # penalty -- a flat one-shot nudge that does not escalate with count -- stops
+    # discriminating. Widen the window, and use DRY for sequence-level loops.
+    if cfg.get("penalty_last_n") is not None:
+        args.extend(["--repeat-last-n", str(cfg["penalty_last_n"])])
+    if cfg.get("dry_multiplier") is not None:
+        args.extend(["--dry-multiplier", str(cfg["dry_multiplier"])])
+    if cfg.get("dry_base") is not None:
+        args.extend(["--dry-base", str(cfg["dry_base"])])
+    if cfg.get("dry_allowed_length") is not None:
+        args.extend(["--dry-allowed-length", str(cfg["dry_allowed_length"])])
+    if cfg.get("dry_penalty_last_n") is not None:
+        args.extend(["--dry-penalty-last-n", str(cfg["dry_penalty_last_n"])])
 
     if cfg.get("cache_type_k") is not None:
         args.extend(["--cache-type-k", str(cfg["cache_type_k"])])

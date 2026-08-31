@@ -87,6 +87,16 @@ def test_tensor_split_zero_weight_flagged():
     assert _levels(lint_profile({"tensor_split": "1,1"}), "tensor_split") == []
 
 
+def test_parallel_without_kv_unified_splits_ctx():
+    findings = lint_profile({"ctx": 131072, "parallel": 4})
+    assert _levels(findings, "parallel") == ["warn"]
+    assert "each request gets 32768" in findings[0]["message"]
+    assert (
+        _levels(lint_profile({"ctx": 131072, "parallel": 4, "kv_unified": True}), "parallel") == []
+    )
+    assert _levels(lint_profile({"ctx": 131072, "parallel": 1}), "parallel") == []
+
+
 def test_ubatch_larger_than_batch_flagged():
     findings = lint_profile({"batch": 512, "ubatch": 4096})
     assert _levels(findings, "ubatch") == ["error"]
@@ -203,3 +213,13 @@ def test_vram_within_budget_is_silent(tmp_path):
     _write_gguf(p, pad=8 * 1024 * 1024)
     profile = {"context": 8192, "cache_type_k": "q8_0", "cache_type_v": "q8_0"}
     assert lint_profile(profile, model_path=p, vram_mb=20480) == []
+
+
+def test_penalties_without_window_flagged():
+    assert _levels(lint_profile({"presence_penalty": 1.0}), "penalty_last_n") == ["warn"]
+    assert _levels(lint_profile({"repetition_penalty": 1.1}), "penalty_last_n") == ["warn"]
+    assert (
+        _levels(lint_profile({"presence_penalty": 1.0, "penalty_last_n": 1024}), "penalty_last_n")
+        == []
+    )
+    assert _levels(lint_profile({"presence_penalty": 0, "temperature": 1}), "penalty_last_n") == []
