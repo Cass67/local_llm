@@ -36,6 +36,11 @@ RUNNER_IMAGES = {
     "rocmmainmtp": os.environ.get(
         "RUNNER_IMAGE_ROCMMAINMTP", "local-llm-runner-rocmmainmtp:latest"
     ),
+    # unslothai/llama.cpp prebuilt gfx1100 release, vendored. The only build with MTP on the
+    # REAP quants AND upstream's qwen4exp fixes AND cross-model tensor borrowing.
+    "rocmunsloth": os.environ.get(
+        "RUNNER_IMAGE_ROCMUNSLOTH", "local-llm-runner-rocmunsloth:latest"
+    ),
     # LaurentZuijdwijk fork, HIP build: --spec-draft-adaptive (+46% structured output on 27B).
     "rocmfork": os.environ.get("RUNNER_IMAGE_ROCMFORK", "local-llm-runner-rocmfork:latest"),
     # DFlash2 block-diffusion drafter needs llama.cpp PR #27342; not in master. Layer split only.
