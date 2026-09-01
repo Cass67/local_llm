@@ -31,7 +31,10 @@ COMMIT_LABEL = "llama.cpp.commit"
 RUNNER_SRC_DIR = Path(os.environ.get("RUNNER_SRC_DIR", "/app/runner"))
 BUILD_LOG_PREFIX = "build-"
 
-_BACKENDS = ("vulkan", "rocm", "cuda")
+# Only backends built from ggml-org/llama.cpp belong here: the rebuild passes
+# --build-arg LLAMA_CPP_REF=<upstream sha>, which would silently build upstream
+# instead of the fork for rocmqwen4exp2 / rocmfork / rocmdflash2.
+_BACKENDS = ("vulkan", "rocm", "cuda", "rocmmain")
 
 _gh_cache: dict[str, tuple[float, httpx.Response]] = {}
 
@@ -194,12 +197,15 @@ def _image_commit(image: str) -> tuple[bool, str | None]:
         return True, label[:12]
     if image_id in _version_cache:
         return True, _version_cache[image_id]
-    # Pre-label image: llama-server --version prints "version: N (sha)"
+    # Pre-label image. Older builds print "version: N (sha)"; since roughly b10700 the
+    # format is "version: 0.3.0-dev (build 1, commit 3466812)", which the bare-parens
+    # pattern does not match, so try the commit form too before giving up.
     try:
         result = _docker("run", "--rm", image, "llama-server", "--version", timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return True, None
-    match = re.search(r"\(([0-9a-f]{7,40})\)", result.stdout + result.stderr)
+    out = result.stdout + result.stderr
+    match = re.search(r"\(([0-9a-f]{7,40})\)", out) or re.search(r"commit ([0-9a-f]{7,40})", out)
     if match:
         _version_cache[image_id] = match.group(1)
         return True, match.group(1)
