@@ -30,6 +30,12 @@ RUNNER_IMAGES = {
     # --spec-type draft-mtp/draft-dflash/draft-dspark, recurrent state rollback (#28123) and
     # the indexer head slicing (#28023) -- a superset of what rocmqwen4exp2 was forked for.
     "rocmmain": os.environ.get("RUNNER_IMAGE_ROCMMAIN", "local-llm-runner-rocmmain:latest"),
+    # Upstream master + the two Nathanw1014 MTP-sidecar commits cherry-picked: the only
+    # build with both master's qwen4exp fixes (#28023 indexer slices, #28123 rollback,
+    # #27941 kvu/ext-restore/seq_cp) and MTP on a model with no in-file NextN.
+    "rocmmainmtp": os.environ.get(
+        "RUNNER_IMAGE_ROCMMAINMTP", "local-llm-runner-rocmmainmtp:latest"
+    ),
     # LaurentZuijdwijk fork, HIP build: --spec-draft-adaptive (+46% structured output on 27B).
     "rocmfork": os.environ.get("RUNNER_IMAGE_ROCMFORK", "local-llm-runner-rocmfork:latest"),
     # DFlash2 block-diffusion drafter needs llama.cpp PR #27342; not in master. Layer split only.
