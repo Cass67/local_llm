@@ -77,8 +77,8 @@ RUN cmake -S . -B build \
     -DGGML_CUDA_FORCE_MMQ="$GGML_CUDA_FORCE_MMQ" \
     -DGGML_CUDA_FORCE_CUBLAS="$GGML_CUDA_FORCE_CUBLAS" \
     -DAMDGPU_TARGETS="$AMDGPU_TARGETS" \
-    -DLLAMA_BUILD_UI=OFF \
-    -DLLAMA_USE_PREBUILT_UI=OFF \
+    -DLLAMA_BUILD_UI=ON \
+    -DLLAMA_USE_PREBUILT_UI=ON \
     && cmake --build build --target llama-server llama-bench llama-perplexity -j"$BUILD_JOBS"
 # stage libomp via the /opt/rocm symlink so the ROCm patch version isn't hardcoded below
 RUN cp /opt/rocm/lib/llvm/lib/libomp.so /src/libomp.so
