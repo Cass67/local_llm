@@ -1,14 +1,26 @@
-# local-llm-runner-rocmfork
-# HIP/ROCm build of LaurentZuijdwijk/llama.cpp, branch vulkan/qwen4exp-rocmfpx.
-# The fork advertises itself as a Vulkan fork, but --spec-draft-adaptive lives in
-# common/speculative.cpp and is backend-agnostic, and the FP4 path has HIP kernels
-# (ggml/rocmfp4/rocmfp4_hip.cu). Its Vulkan path is unusable for qwen4exp on gfx1100
-# (measured 0.24 t/s decode vs 20.3 on ROCm) though it is healthy on qwen35 27B,
-# so HIP is the only way to reach the adaptive-speculation work from here.
+# local-llm-runner-rocmmain
+# Plain upstream llama.cpp, HIP gfx1100. No fork, no vendored patches.
+#
+# Exists to answer "why are we on forks at all". As of 2026-09-01 upstream master carries
+# everything the fork backends were built for except two flags:
+#   * src/models/qwen4exp.cpp is upstream now, so Flash-Next needs no fork to load.
+#   * f8dbcd61 "ROCm: add radix TOP_K for long rows" (#27466) is in, so the sampler's top-k
+#     no longer falls back to the CPU backend -- nothing to vendor here.
+#   * 09412af3 "qwen4exp: sum the indexer heads by slices" (#28023): prompt processing
+#     2170 -> 2366 t/s at 55k on their box, and the gain grows with context and ubatch.
+#   * 0eadefeb "qwen4exp: support recurrent state rollback" (#28123): without it the context
+#     is classified SEQ_RM_TYPE_FULL and the server serialises the whole recurrent state to
+#     host memory every speculative round, "which costs more than the drafting saves".
+#     Both qwen4exp forks predate this, so their MTP may be paying that tax silently.
+# Still fork-only, and the whole reason the other images exist:
+#   * --spec-draft-adaptive  (LaurentZuijdwijk, commit ca2616991 -- cherry-picks onto master
+#                             with one ~70-line conflict hunk in common/speculative.cpp)
+#   * --spec-type draft-mtp  (Nathanw1014 -- 35-file conflict vs master, a real porting job)
+# Pinned to a sha rather than the master branch so a rebuild is reproducible.
 FROM rocm/dev-ubuntu-24.04:7.2 AS build
 
-ARG LLAMA_CPP_REF=vulkan/qwen4exp-rocmfpx
-ARG LLAMA_CPP_REPO=https://github.com/LaurentZuijdwijk/llama.cpp.git
+ARG LLAMA_CPP_REF=518b76236b1f72a186deb5fcabc7b6e59e21fbc4
+ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG AMDGPU_TARGETS=gfx1100
 # hipcc peaks several GB per TU; -j$(nproc) OOM-kills the clang backend on this 60 GB box
 ARG BUILD_JOBS=4
@@ -21,16 +33,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # The hash in the Packages index still matches, so apt does not retry on its own.
 RUN for i in 1 2 3 4 5; do \
       apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        ca-certificates \
-        cmake \
-        git \
-        hipblas-dev \
-        libcurl4-openssl-dev \
-        rccl-dev \
-        pkg-config \
-        python3 \
-        rocblas-dev \
+        build-essential ca-certificates cmake git hipblas-dev \
+        libcurl4-openssl-dev rccl-dev pkg-config python3 rocblas-dev \
       && break; \
       echo "apt attempt $i failed, discarding cached debs and retrying"; \
       apt-get clean; dpkg --configure -a || true; \
@@ -38,28 +42,12 @@ RUN for i in 1 2 3 4 5; do \
     && dpkg -s hipblaslt >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
-# init+fetch instead of clone --branch so LLAMA_CPP_REF can be a commit sha
 WORKDIR /src/llama.cpp
 RUN git init . \
     && git remote add origin "$LLAMA_CPP_REPO" \
     && git fetch --depth 1 origin "$LLAMA_CPP_REF" \
     && git checkout FETCH_HEAD
-# ggml-cuda compiles CUB out on HIP and then refuses TOP_K above 1024 columns, so the sampler's
-# top-k op (the vocab row, ~151k wide) falls back to the CPU backend:
-#   llama_sampler_backend_support: device 'ROCm2' does not have support for op TOP_K
-#     needed for sampler 'top-k'
-# and the logits row round-trips device->host once per token. Upstream fixed it in f8dbcd61
-# ("ROCm: add radix TOP_K for long rows", #27466) with an O(N) radix select that handles nrows
-# and is HIP-graph capture safe; we vendor that file rather than carry our own kernel. The same
-# pair applied cleanly to two unrelated forks already (rocmqwen4exp2, and a 761797ff-based tree),
-# so it is not tied to one base. Upstream relaxes ONLY TOP_K -- ARGSORT keeps its 1024 limit,
-# because the bitonic argsort kernel is structurally capped near 1024 columns and relaxing it
-# aborts at context reserve.
-COPY top-k.cu /src/top-k.cu
-COPY topk-supports-op.patch /src/topk-supports-op.patch
-RUN cp /src/top-k.cu ggml/src/ggml-cuda/top-k.cu \
-    && git apply -v /src/topk-supports-op.patch \
-    && echo "upstream radix TOP_K (f8dbcd61) applied"
+
 RUN cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
@@ -70,21 +58,15 @@ RUN cmake -S . -B build \
     -DGGML_CUDA_FORCE_MMQ="$GGML_CUDA_FORCE_MMQ" \
     -DGGML_CUDA_FORCE_CUBLAS="$GGML_CUDA_FORCE_CUBLAS" \
     -DAMDGPU_TARGETS="$AMDGPU_TARGETS" \
-    -DLLAMA_BUILD_UI=OFF \
-    -DLLAMA_USE_PREBUILT_UI=OFF \
+    -DLLAMA_BUILD_UI=ON \
+    -DLLAMA_USE_PREBUILT_UI=ON \
     && cmake --build build --target llama-server llama-bench llama-perplexity -j"$BUILD_JOBS"
-# stage libomp via the /opt/rocm symlink so the ROCm patch version isn't hardcoded below
 RUN cp /opt/rocm/lib/llvm/lib/libomp.so /src/libomp.so
 
 FROM ubuntu:24.04
-
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    gnupg \
-    libcurl4 \
-    libgomp1 \
-    wget \
+    ca-certificates gnupg libcurl4 libgomp1 wget \
     && mkdir -p /etc/apt/keyrings \
     && wget -qO /usr/share/keyrings/rocm.gpg.key https://repo.radeon.com/rocm/rocm.gpg.key \
     && gpg --dearmor -o /etc/apt/keyrings/rocm.gpg /usr/share/keyrings/rocm.gpg.key \
@@ -92,10 +74,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         > /etc/apt/sources.list.d/rocm.list \
     && for i in 1 2 3 4 5; do \
         apt-get update && apt-get install -y --no-install-recommends \
-          hip-runtime-amd \
-          hipblas \
-          rccl \
-          rocblas \
+          hip-runtime-amd hipblas rccl rocblas \
         && break; \
         echo "apt attempt $i failed, discarding cached debs and retrying"; \
         apt-get clean; dpkg --configure -a || true; \
@@ -111,5 +90,6 @@ COPY --from=build /src/llama.cpp/build/bin/llama-perplexity /usr/local/bin/llama
 COPY --from=build /src/llama.cpp/build/bin/*.so /usr/local/lib/
 COPY --from=build /src/libomp.so /usr/local/lib/
 RUN ldconfig
+
 ENTRYPOINT []
 CMD ["llama-server", "--help"]

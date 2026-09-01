@@ -1,0 +1,18 @@
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -5283,10 +5283,15 @@
+         case GGML_OP_SUM:
+             return ggml_is_contiguous_rows(op->src[0]);
+         case GGML_OP_TOP_K:
++#if defined(GGML_USE_HIP) || defined(GGML_CUDA_USE_CUB)
++            return true;
++#else
++            return op->src[0]->ne[0] <= 1024;
++#endif // defined(GGML_USE_HIP) || defined(GGML_CUDA_USE_CUB)
+         case GGML_OP_ARGSORT:
+ #ifndef GGML_CUDA_USE_CUB
+             return op->src[0]->ne[0] <= 1024;
+ #else
+             return true;
+ #endif
+         case GGML_OP_SUM_ROWS:
