@@ -2467,7 +2467,7 @@
           "min_p": 0,
           "no_mmap": true,
           "mmproj": "/models/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/mmproj-F16.gguf",
-          "presence_penalty": 0,
+          "presence_penalty": 1.0,
           "penalty_last_n": 1024,
           "dry_multiplier": 0.8,
           "dry_base": 1.75,
