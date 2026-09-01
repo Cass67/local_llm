@@ -26,6 +26,10 @@ RUNNER_IMAGES = {
     "rocmqwen4exp2": os.environ.get(
         "RUNNER_IMAGE_ROCMQWEN4EXP2", "local-llm-runner-rocmqwen4exp2:latest"
     ),
+    # Plain upstream llama.cpp, HIP. As of 2026-09-01 master carries the qwen4exp arch,
+    # --spec-type draft-mtp/draft-dflash/draft-dspark, recurrent state rollback (#28123) and
+    # the indexer head slicing (#28023) -- a superset of what rocmqwen4exp2 was forked for.
+    "rocmmain": os.environ.get("RUNNER_IMAGE_ROCMMAIN", "local-llm-runner-rocmmain:latest"),
     # LaurentZuijdwijk fork, HIP build: --spec-draft-adaptive (+46% structured output on 27B).
     "rocmfork": os.environ.get("RUNNER_IMAGE_ROCMFORK", "local-llm-runner-rocmfork:latest"),
     # DFlash2 block-diffusion drafter needs llama.cpp PR #27342; not in master. Layer split only.

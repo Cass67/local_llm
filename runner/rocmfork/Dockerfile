@@ -44,6 +44,22 @@ RUN git init . \
     && git remote add origin "$LLAMA_CPP_REPO" \
     && git fetch --depth 1 origin "$LLAMA_CPP_REF" \
     && git checkout FETCH_HEAD
+# ggml-cuda compiles CUB out on HIP and then refuses TOP_K above 1024 columns, so the sampler's
+# top-k op (the vocab row, ~151k wide) falls back to the CPU backend:
+#   llama_sampler_backend_support: device 'ROCm2' does not have support for op TOP_K
+#     needed for sampler 'top-k'
+# and the logits row round-trips device->host once per token. Upstream fixed it in f8dbcd61
+# ("ROCm: add radix TOP_K for long rows", #27466) with an O(N) radix select that handles nrows
+# and is HIP-graph capture safe; we vendor that file rather than carry our own kernel. The same
+# pair applied cleanly to two unrelated forks already (rocmqwen4exp2, and a 761797ff-based tree),
+# so it is not tied to one base. Upstream relaxes ONLY TOP_K -- ARGSORT keeps its 1024 limit,
+# because the bitonic argsort kernel is structurally capped near 1024 columns and relaxing it
+# aborts at context reserve.
+COPY top-k.cu /src/top-k.cu
+COPY topk-supports-op.patch /src/topk-supports-op.patch
+RUN cp /src/top-k.cu ggml/src/ggml-cuda/top-k.cu \
+    && git apply -v /src/topk-supports-op.patch \
+    && echo "upstream radix TOP_K (f8dbcd61) applied"
 RUN cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
