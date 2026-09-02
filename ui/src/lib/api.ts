@@ -29,6 +29,7 @@ import type {
 	BuildStatus,
 	AgentsUpdateStatus,
 	ServiceUpdate,
+	UnslothStatus,
 	ModelProfile,
 	FamilyProfiles,
 	ProfilesData,
@@ -700,6 +701,15 @@ export async function fetchAgentsUpdateStatus(): Promise<AgentsUpdateStatus> {
 
 export async function startAgentsBuild(): Promise<{ status: string; versions: Record<string, string> }> {
 	const res = await fetch(`${BASE}/update/agents/build`, { method: "POST" });
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
+export async function fetchUnslothStatus(): Promise<UnslothStatus> {
+	const res = await fetch(`${BASE}/update/unsloth`);
 	if (!res.ok) {
 		const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
 		throw new Error(err.detail || `HTTP ${res.status}`);
