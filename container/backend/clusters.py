@@ -22,6 +22,7 @@ _VALID_BACKENDS = {
     "rocmmain",
     "rocmmainmtp",
     "rocmunsloth",
+    "rocmunslothsrc",
     "rocmfork",
     "rocmdflash2",
     "vulkan",
@@ -35,6 +36,7 @@ _SINGLE_VENDOR_BACKENDS = {
     "rocmmain": "amd",
     "rocmmainmtp": "amd",
     "rocmunsloth": "amd",
+    "rocmunslothsrc": "amd",
     "rocmfork": "amd",
     "rocmdflash2": "amd",
     "cuda": "nvidia",
@@ -194,6 +196,7 @@ def visible_devices_for(cluster: ClusterDef, inventory: list[GpuInfo]) -> str:
             "rocmmain",
             "rocmmainmtp",
             "rocmunsloth",
+            "rocmunslothsrc",
             "rocmfork",
             "rocmdflash2",
         ):
