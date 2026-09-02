@@ -41,6 +41,11 @@ RUNNER_IMAGES = {
     "rocmunsloth": os.environ.get(
         "RUNNER_IMAGE_ROCMUNSLOTH", "local-llm-runner-rocmunsloth:latest"
     ),
+    # unslothai/llama.cpp built FROM SOURCE by replaying their release recipe (base tag plus
+    # the pinned PR set from scripts/unsloth/pr-set.json). gfx1100 only, no vendored binary.
+    "rocmunslothsrc": os.environ.get(
+        "RUNNER_IMAGE_ROCMUNSLOTHSRC", "local-llm-runner-rocmunslothsrc:latest"
+    ),
     # LaurentZuijdwijk fork, HIP build: --spec-draft-adaptive (+46% structured output on 27B).
     "rocmfork": os.environ.get("RUNNER_IMAGE_ROCMFORK", "local-llm-runner-rocmfork:latest"),
     # DFlash2 block-diffusion drafter needs llama.cpp PR #27342; not in master. Layer split only.

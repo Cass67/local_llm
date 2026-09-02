@@ -38,6 +38,7 @@ services:
       RUNNER_IMAGE_ROCMMAIN: ${RUNNER_IMAGE_ROCMMAIN:-local-llm-runner-rocmmain:latest}
       RUNNER_IMAGE_ROCMMAINMTP: ${RUNNER_IMAGE_ROCMMAINMTP:-local-llm-runner-rocmmainmtp:latest}
       RUNNER_IMAGE_ROCMUNSLOTH: ${RUNNER_IMAGE_ROCMUNSLOTH:-local-llm-runner-rocmunsloth:latest}
+      RUNNER_IMAGE_ROCMUNSLOTHSRC: ${RUNNER_IMAGE_ROCMUNSLOTHSRC:-local-llm-runner-rocmunslothsrc:latest}
       RUNNER_IMAGE_ROCMFORK: ${RUNNER_IMAGE_ROCMFORK:-local-llm-runner-rocmfork:latest}
       RUNNER_IMAGE_ROCMDFLASH2: ${RUNNER_IMAGE_ROCMDFLASH2:-local-llm-runner-rocmdflash2:latest}
       RUNNER_IMAGE_CUDA: ${RUNNER_IMAGE_CUDA:-local-llm-runner-cuda:latest}
