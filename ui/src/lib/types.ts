@@ -408,6 +408,28 @@ export interface ServiceUpdate {
 	note: string | null;
 }
 
+export interface UnslothStatus {
+	repo: string;
+	variants: {
+		backend: string;
+		note: string;
+		image: string;
+		present: boolean;
+		tag: string | null;
+		behind: number | null;
+		outdated: boolean;
+	}[];
+	latest: { tag: string; date: string | null; url: string } | null;
+	releases: {
+		tag: string;
+		current: boolean;
+		date: string | null;
+		url: string;
+		body: string;
+		buildable: boolean;
+	}[];
+}
+
 export interface BuildJob {
 	id: string;
 	running: boolean;

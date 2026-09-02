@@ -9,6 +9,7 @@
 		startAgentsBuild,
 		fetchServiceUpdates,
 		startServiceUpdate,
+		fetchUnslothStatus,
 	} from "../lib/api";
 	import type {
 		UpdateStatus,
@@ -16,6 +17,7 @@
 		CommitDetail,
 		AgentsUpdateStatus,
 		ServiceUpdate,
+		UnslothStatus,
 	} from "../lib/types";
 
 	let status: UpdateStatus | null = $state(null);
@@ -38,6 +40,10 @@
 		() => new Set((build?.jobs ?? []).filter((j) => j.running).map((j) => j.id)),
 	);
 
+	let unsloth: UnslothStatus | null = $state(null);
+	let unslothError = $state("");
+	let openRelease: string | null = $state(null);
+
 	let services: ServiceUpdate[] = $state([]);
 	let servicesError = $state("");
 	let serviceStarting = $state("");
@@ -57,6 +63,16 @@
 		}
 		await checkAgents();
 		await checkServices();
+		await checkUnsloth();
+	}
+
+	async function checkUnsloth() {
+		unslothError = "";
+		try {
+			unsloth = await fetchUnslothStatus();
+		} catch (e: unknown) {
+			unslothError = e instanceof Error ? e.message : String(e);
+		}
 	}
 
 	async function checkServices() {
@@ -280,6 +296,68 @@
 		</div>
 	{/if}
 
+	{#if unslothError}
+		<div class="error">{unslothError}</div>
+	{/if}
+
+	{#if unsloth}
+		<div class="agents">
+			<h3>unsloth runner</h3>
+			<div class="muted">
+				<code>{unsloth.repo}</code> releases · vendored by tag, so the release notes are the changelog
+			</div>
+			<table>
+				<thead><tr><th>Backend</th><th>Image</th><th>Pinned tag</th><th>Latest</th><th></th></tr></thead>
+				<tbody>
+					{#each unsloth.variants as v}
+						<tr>
+							<td>{v.backend}<div class="muted">{v.note}</div></td>
+							<td>
+								<code>{v.image}</code>{#if !v.present}<span class="missing"> (not built)</span>{/if}
+							</td>
+							<td><code>{v.tag ?? "unknown"}</code></td>
+							<td><code>{unsloth.latest?.tag ?? "?"}</code></td>
+							<td>
+								{#if v.outdated}<span class="behind">{v.behind} releases behind</span>
+								{:else if v.behind === 0}<span class="uptodate">up to date</span>
+								{:else}-{/if}
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+
+			{#if unsloth.releases.length > 0}
+				<div class="commits">
+					{#each unsloth.releases as r}
+						<div class="release">
+							<button
+								class="commit"
+								onclick={() => (openRelease = openRelease === r.tag ? null : r.tag)}
+							>
+								<span>{openRelease === r.tag ? "▾" : "▸"}</span>
+								<code>{r.tag}</code>
+								<span class="msg">{r.date ? fmtDate(r.date) : ""}</span>
+								{#if r.current}<span class="uptodate">running</span>{/if}
+								{#if !r.buildable}<span class="behind">no gfx110X asset</span>{/if}
+							</button>
+							{#if openRelease === r.tag}
+								<pre class="msgbody">{r.body || "(no notes)"}</pre>
+								<a href={r.url} target="_blank" rel="noreferrer">view on GitHub</a>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{:else}
+				<div class="muted">No releases found.</div>
+			{/if}
+			<span class="muted">
+				Bump and rebuild with <code>./scripts/update-unsloth.sh --apply</code>; the panel's rebuild
+				button only drives builds off ggml-org master.
+			</span>
+		</div>
+	{/if}
+
 	{#if servicesError}
 		<div class="error">{servicesError}</div>
 	{/if}
@@ -431,8 +509,9 @@
 	.uptodate { color: #4caf50; }
 	.behind { color: #f59e0b; }
 	.error { background: var(--red); color: white; padding: 0.5rem; border-radius: 4px; }
-	.commits { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; }
+	.commits { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; }
 	.commit { display: flex; gap: 0.5rem; align-items: baseline; border: none; background: none; padding: 0.1rem 0.2rem; text-align: left; font: inherit; color: inherit; border-radius: 4px; }
+	.release { display: flex; flex-direction: column; gap: 0.3rem; }
 	.commit:hover { background: var(--bg-hover, #ffffff14); }
 	.commit .msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.sha { border: none; background: none; padding: 0; font-family: monospace; font-size: 0.8rem; color: var(--accent); text-decoration: underline; }

@@ -128,6 +128,16 @@ SERVICES: dict[str, dict] = {
     },
 }
 
+# unslothai/llama.cpp is vendored by tag, not by upstream sha: their release is an
+# ephemeral CI merge of a base plus a pinned PR set, so the release notes are the only
+# changelog there is. scripts/update-unsloth.sh applies a bump; this only reports one.
+UNSLOTH_REPO = "unslothai/llama.cpp"
+UNSLOTH_ASSET_SUFFIX = "linux-x64-rocm-gfx110X.tar.gz"  # gfx1100 = 7900 XT
+UNSLOTH_VARIANTS = {
+    "rocmunsloth": "prebuilt release tarball",
+    "rocmunslothsrc": "built from source off the same tag",
+}
+
 # image id -> short sha, so we only `docker run --version` once per image build
 _version_cache: dict[str, str] = {}
 
@@ -713,6 +723,89 @@ async def start_service_update(service_id: str):
     job = _claim_job(service_id, [service_id])
     threading.Thread(target=_run_service_update, args=(job, svc, ref), daemon=True).start()
     return {"status": "started", "ref": ref}
+
+
+def _unsloth_pin(backend: str) -> str | None:
+    """The UNSLOTH_TAG a vendored runner's Dockerfile is pinned to."""
+    try:
+        text = (RUNNER_SRC_DIR / backend / "Dockerfile").read_text()
+    except OSError:
+        return None
+    match = re.search(r"^ARG UNSLOTH_TAG=(.+)$", text, re.M)
+    return match.group(1).strip() if match else None
+
+
+@router.get("/unsloth")
+async def unsloth_status():
+    """Vendored unslothai/llama.cpp pin vs their newest gfx110X release, with the notes."""
+    variants = [
+        {
+            "backend": backend,
+            "note": note,
+            "image": config.RUNNER_IMAGES[backend],
+            "present": _image_meta(config.RUNNER_IMAGES[backend])[0],
+            "tag": _unsloth_pin(backend),
+        }
+        for backend, note in UNSLOTH_VARIANTS.items()
+    ]
+
+    async with GitHub(timeout=20.0) as client:
+        try:
+            resp = await client.get(
+                f"{GITHUB_REPOS}/{UNSLOTH_REPO}/releases", params={"per_page": 20}
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"GitHub unreachable: {e}") from e
+    releases = resp.json()
+
+    # A release whose ROCm leg failed publishes with no gfx110X asset; bumping to it
+    # would break the build, so it is not "the latest" for our purposes.
+    latest = next(
+        (
+            r
+            for r in releases
+            if any(a["name"].endswith(UNSLOTH_ASSET_SUFFIX) for a in r.get("assets", []))
+        ),
+        None,
+    )
+
+    pins = [v["tag"] for v in variants if v["tag"]]
+    tags = [r["tag_name"] for r in releases]
+    oldest_pin = max((tags.index(t) for t in pins if t in tags), default=None)
+    for v in variants:
+        v["behind"] = tags.index(v["tag"]) if v["tag"] in tags else None
+        v["outdated"] = bool(v["behind"])
+
+    # Include the pinned release itself, so the notes for what is running are readable
+    # even when there is nothing newer.
+    shown = releases[: oldest_pin + 1] if oldest_pin is not None else releases[:1]
+    return {
+        "repo": UNSLOTH_REPO,
+        "variants": variants,
+        "latest": (
+            {
+                "tag": latest["tag_name"],
+                "date": latest.get("published_at"),
+                "url": latest["html_url"],
+            }
+            if latest
+            else None
+        ),
+        "releases": [  # newest first, same order the table reads
+            {
+                "tag": r["tag_name"],
+                "current": r["tag_name"] in pins,
+                "date": r.get("published_at"),
+                "url": r["html_url"],
+                "body": (r.get("body") or "").strip(),
+                "buildable": any(
+                    a["name"].endswith(UNSLOTH_ASSET_SUFFIX) for a in r.get("assets", [])
+                ),
+            }
+            for r in shown
+        ],
+    }
 
 
 def _run_builds(job: dict, targets: list[tuple[str, str]], ref: str) -> None:
