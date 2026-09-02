@@ -64,13 +64,21 @@ RUN git clone --filter=blob:none "$UPSTREAM_REPO" . \
     && git config user.email build@local && git config user.name build \
     && replay-mix.sh "$UNSLOTH_TAG" "$UPSTREAM_BASE"
 
+# Flags mirror .github/workflows/unsloth-prebuilt-rocm.yml rather than our other backends.
+# GGML_CUDA_FORCE_CUBLAS is the one that matters: their CI sets it OFF, we had inherited ON
+# from runner/rocmqwen4exp2, and that alone halved prefill on this model -- 348 t/s vs the
+# vendored binary's 665 on a 12,650-token prompt, with decode identical at ~42 t/s, which is
+# the signature of forcing every GEMM through hipBLAS instead of ggml's own kernels.
+# ROCWMMA_FATTN stays OFF (it costs decode on gfx1100 regardless), OPENMP OFF as they do.
 RUN cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
     -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
     -DLLAMA_CURL=ON -DGGML_HIP=ON -DGGML_HIP_RCCL=ON \
-    -DGGML_CUDA_FORCE_MMQ=OFF -DGGML_CUDA_FORCE_CUBLAS=ON \
-    -DAMDGPU_TARGETS="$AMDGPU_TARGETS" \
+    -DGGML_CUDA_FORCE_CUBLAS=OFF \
+    -DGGML_HIP_ROCWMMA_FATTN=OFF \
+    -DGGML_OPENMP=OFF \
+    -DGPU_TARGETS="$AMDGPU_TARGETS" \
     -DLLAMA_BUILD_UI=ON -DLLAMA_USE_PREBUILT_UI=ON \
     && cmake --build build --target llama-server llama-bench llama-perplexity -j"$BUILD_JOBS"
 RUN cp /opt/rocm/lib/llvm/lib/libomp.so /src/libomp.so
