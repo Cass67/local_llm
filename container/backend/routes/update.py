@@ -130,9 +130,12 @@ SERVICES: dict[str, dict] = {
 
 # unslothai/llama.cpp is vendored by tag, not by upstream sha: their release is an
 # ephemeral CI merge of a base plus a pinned PR set, so the release notes are the only
-# changelog there is. scripts/update-unsloth.sh applies a bump; this only reports one.
+# changelog there is. A rebuild here passes the tag as a build arg and stamps it as a label,
+# so the built image is the source of truth for what is running; the Dockerfile ARG is only
+# the fallback default. scripts/update-unsloth.sh additionally rewrites that ARG in the repo.
 UNSLOTH_REPO = "unslothai/llama.cpp"
 UNSLOTH_ASSET_SUFFIX = "linux-x64-rocm-gfx110X.tar.gz"  # gfx1100 = 7900 XT
+UNSLOTH_TAG_LABEL = "unsloth.tag"
 UNSLOTH_VARIANTS = {
     "rocmunsloth": "prebuilt release tarball",
     "rocmunslothsrc": "built from source off the same tag",
@@ -725,29 +728,36 @@ async def start_service_update(service_id: str):
     return {"status": "started", "ref": ref}
 
 
-def _unsloth_pin(backend: str) -> str | None:
-    """The UNSLOTH_TAG a vendored runner's Dockerfile is pinned to."""
+def _unsloth_arg(backend: str, name: str) -> str | None:
+    """A build ARG's default in a vendored runner's Dockerfile."""
     try:
         text = (RUNNER_SRC_DIR / backend / "Dockerfile").read_text()
     except OSError:
         return None
-    match = re.search(r"^ARG UNSLOTH_TAG=(.+)$", text, re.M)
+    match = re.search(rf"^ARG {name}=(.+)$", text, re.M)
     return match.group(1).strip() if match else None
+
+
+def _unsloth_pin(backend: str, labels: dict[str, str]) -> str | None:
+    """The unsloth tag a variant is at: what the image was built with, else the ARG default."""
+    return labels.get(UNSLOTH_TAG_LABEL) or _unsloth_arg(backend, "UNSLOTH_TAG")
 
 
 @router.get("/unsloth")
 async def unsloth_status():
     """Vendored unslothai/llama.cpp pin vs their newest gfx110X release, with the notes."""
-    variants = [
-        {
-            "backend": backend,
-            "note": note,
-            "image": config.RUNNER_IMAGES[backend],
-            "present": _image_meta(config.RUNNER_IMAGES[backend])[0],
-            "tag": _unsloth_pin(backend),
-        }
-        for backend, note in UNSLOTH_VARIANTS.items()
-    ]
+    variants = []
+    for backend, note in UNSLOTH_VARIANTS.items():
+        present, labels, _ = _image_meta(config.RUNNER_IMAGES[backend])
+        variants.append(
+            {
+                "backend": backend,
+                "note": note,
+                "image": config.RUNNER_IMAGES[backend],
+                "present": present,
+                "tag": _unsloth_pin(backend, labels),
+            }
+        )
 
     async with GitHub(timeout=20.0) as client:
         try:
@@ -806,6 +816,79 @@ async def unsloth_status():
             for r in shown
         ],
     }
+
+
+async def _latest_unsloth(client) -> tuple[str, str]:
+    """(tag, asset) of the newest release that actually carries a gfx110X build."""
+    try:
+        resp = await client.get(f"{GITHUB_REPOS}/{UNSLOTH_REPO}/releases", params={"per_page": 20})
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"GitHub unreachable: {e}") from e
+    for release in resp.json():
+        for asset in release.get("assets", []):
+            if asset["name"].endswith(UNSLOTH_ASSET_SUFFIX):
+                return release["tag_name"], asset["name"]
+    raise HTTPException(502, f"no release with a {UNSLOTH_ASSET_SUFFIX} asset")
+
+
+async def _unsloth_base(client, tag: str) -> str:
+    """The upstream commit a release tag was cut from -- its bNNNNN prefix is a ggml-org tag."""
+    match = re.match(r"(b\d+)-", tag)
+    if not match:
+        raise HTTPException(502, f"cannot read an upstream base out of tag '{tag}'")
+    try:
+        resp = await client.get(f"{GITHUB_API}/commits/{match.group(1)}")
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"upstream base {match.group(1)} unresolvable: {e}") from e
+    return resp.json()["sha"]
+
+
+def _run_unsloth_build(job: dict, backend: str, image: str, args: dict[str, str]) -> None:
+    with open(_job_log(job["id"]), "w") as log:
+        job["current"] = backend
+        log.write(f"\n=== Building {image} @ {args['UNSLOTH_TAG']} ===\n")
+        log.flush()
+        cmd = ["docker", "build", "--network", "host"]
+        for key, value in args.items():
+            cmd += ["--build-arg", f"{key}={value}"]
+        cmd += [
+            "--label",
+            f"{UNSLOTH_TAG_LABEL}={args['UNSLOTH_TAG']}",
+            "-t",
+            image,
+            str(RUNNER_SRC_DIR / backend),
+        ]
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)  # nosec B603  # noqa: S603
+        job["results"][backend] = proc.wait()
+    _finish(job)
+
+
+@router.post("/unsloth/{backend}/build")
+async def start_unsloth_build(backend: str):
+    """Rebuild one unsloth runner variant at their newest gfx110X release."""
+    if backend not in UNSLOTH_VARIANTS:
+        raise HTTPException(404, f"unknown unsloth variant '{backend}'")
+    if not (RUNNER_SRC_DIR / backend / "Dockerfile").exists():
+        raise HTTPException(500, f"runner sources for '{backend}' not found in image")
+
+    async with GitHub(timeout=20.0) as client:
+        tag, asset = await _latest_unsloth(client)
+        args = {"UNSLOTH_TAG": tag}
+        if backend == "rocmunslothsrc":
+            # The source build replays base + PR set, and the base is not in the recipe.
+            args["UPSTREAM_BASE"] = await _unsloth_base(client, tag)
+        else:
+            args["UNSLOTH_ASSET"] = asset
+
+    job = _claim_job(backend, [backend])
+    threading.Thread(
+        target=_run_unsloth_build,
+        args=(job, backend, config.RUNNER_IMAGES[backend], args),
+        daemon=True,
+    ).start()
+    return {"status": "started", "tag": tag, "args": args}
 
 
 def _run_builds(job: dict, targets: list[tuple[str, str]], ref: str) -> None:
