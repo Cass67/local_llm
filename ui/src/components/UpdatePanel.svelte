@@ -10,6 +10,7 @@
 		fetchServiceUpdates,
 		startServiceUpdate,
 		fetchUnslothStatus,
+		startUnslothBuild,
 	} from "../lib/api";
 	import type {
 		UpdateStatus,
@@ -43,6 +44,7 @@
 	let unsloth: UnslothStatus | null = $state(null);
 	let unslothError = $state("");
 	let openRelease: string | null = $state(null);
+	let unslothStarting = $state("");
 
 	let services: ServiceUpdate[] = $state([]);
 	let servicesError = $state("");
@@ -72,6 +74,20 @@
 			unsloth = await fetchUnslothStatus();
 		} catch (e: unknown) {
 			unslothError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function rebuildUnsloth(backend: string) {
+		unslothStarting = backend;
+		unslothError = "";
+		try {
+			await startUnslothBuild(backend);
+			await pollBuild();
+			startPolling();
+		} catch (e: unknown) {
+			unslothError = e instanceof Error ? e.message : String(e);
+		} finally {
+			unslothStarting = "";
 		}
 	}
 
@@ -130,6 +146,7 @@
 			const done = was.filter((id) => !jobsRunning.has(id));
 			if (done.includes("agents")) await checkAgents();
 			if (done.some((id) => services.some((s) => s.id === id))) await checkServices();
+			if (done.some((id) => unsloth?.variants.some((v) => v.backend === id))) await checkUnsloth();
 			if (!build.running && pollId) {
 				clearInterval(pollId);
 				pollId = null;
@@ -307,7 +324,7 @@
 				<code>{unsloth.repo}</code> releases · vendored by tag, so the release notes are the changelog
 			</div>
 			<table>
-				<thead><tr><th>Backend</th><th>Image</th><th>Pinned tag</th><th>Latest</th><th></th></tr></thead>
+				<thead><tr><th>Backend</th><th>Image</th><th>Pinned tag</th><th>Latest</th><th></th><th></th></tr></thead>
 				<tbody>
 					{#each unsloth.variants as v}
 						<tr>
@@ -321,6 +338,16 @@
 								{#if v.outdated}<span class="behind">{v.behind} releases behind</span>
 								{:else if v.behind === 0}<span class="uptodate">up to date</span>
 								{:else}-{/if}
+							</td>
+							<td>
+								<button
+									onclick={() => rebuildUnsloth(v.backend)}
+									disabled={jobsRunning.has(v.backend) || !unsloth?.latest}
+								>
+									{#if jobsRunning.has(v.backend)}Building…
+									{:else if unslothStarting === v.backend}Starting…
+									{:else}Rebuild at latest{/if}
+								</button>
 							</td>
 						</tr>
 					{/each}
@@ -352,8 +379,10 @@
 				<div class="muted">No releases found.</div>
 			{/if}
 			<span class="muted">
-				Bump and rebuild with <code>./scripts/update-unsloth.sh --apply</code>; the panel's rebuild
-				button only drives builds off ggml-org master.
+				Rebuild builds at the newest release carrying a gfx110X asset and stamps the tag on the
+				image; the Dockerfile pin in the repo is unchanged, so use
+				<code>./scripts/update-unsloth.sh --apply</code> to make the bump permanent. Running models
+				keep the old image until the cluster is restarted.
 			</span>
 		</div>
 	{/if}

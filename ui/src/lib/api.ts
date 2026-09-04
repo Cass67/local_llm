@@ -717,6 +717,17 @@ export async function fetchUnslothStatus(): Promise<UnslothStatus> {
 	return res.json();
 }
 
+export async function startUnslothBuild(
+	backend: string,
+): Promise<{ status: string; tag: string }> {
+	const res = await fetch(`${BASE}/update/unsloth/${backend}/build`, { method: "POST" });
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+		throw new Error(err.detail || `HTTP ${res.status}`);
+	}
+	return res.json();
+}
+
 export async function fetchServiceUpdates(): Promise<{ services: ServiceUpdate[] }> {
 	const res = await fetch(`${BASE}/update/services`);
 	if (!res.ok) {
