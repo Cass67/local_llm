@@ -10,7 +10,7 @@
 #   /state/runs       benchmark artifacts -- history, not function
 #
 # Everything here lives on the root disk (nvme0n1), so the destination must be
-# another spindle. /mnt/spare is nvme1n1, /mnt/hfcache-old is sda; either works.
+# another spindle. /mnt/spare is nvme1n1 -- use that.
 #
 # Needs root to read the docker volume dirs. Run under sudo or via the timer.
 # Restore with scripts/restore-full.sh.
