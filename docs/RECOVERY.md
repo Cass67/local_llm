@@ -63,7 +63,6 @@ it comes back with the OS. The model cache is separate and large:
 ```
 /mnt/hfcache      ext4   500G nvme, HF model cache
 /mnt/spare        ext4   scratch for large builds/downloads
-/mnt/hfcache-old  ext4   previous cache location
 ```
 
 `/tmp` is cleared on reboot — use `~/scratch` or `/mnt/spare` for big work.
@@ -133,7 +132,8 @@ keeping 14 archives. ~1 GB each, ~30s to make.
 
 The destination must not be the root disk — `/state`, the docker volumes, `.env`
 and the agent config all live on `nvme0n1`. `/mnt/spare` is `nvme1n1` and
-`/mnt/hfcache-old` is `sda`; either survives losing the root disk.
+`sda` is being converted into the new root disk (docs/plans/boot-disk-swap-uefi.md),
+so `/mnt/spare` is the only valid destination.
 
 Contents, and why each is there:
 
