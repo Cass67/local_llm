@@ -28,8 +28,8 @@ RUN cmake -S . -B build \
     -DGGML_CUDA=ON \
     -DGGML_CUDA_NO_VMM=ON \
     -DGGML_CUDA_FORCE_MMQ=ON \
-    -DLLAMA_BUILD_UI=OFF \
-    -DLLAMA_USE_PREBUILT_UI=OFF \
+    -DLLAMA_BUILD_UI=ON \
+    -DLLAMA_USE_PREBUILT_UI=ON \
     && cmake --build build --target llama-server llama-perplexity -j"$(nproc)"
 
 FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
