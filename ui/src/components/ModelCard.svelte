@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BACKENDS } from "../lib/types";
+	import { BACKENDS, BACKEND_LABELS } from "../lib/types";
 	import type { Backend, ModelInfo, ClusterInfo } from "../lib/types";
 	import { editModel, fetchFamilyProfiles } from "../lib/api";
 
@@ -47,21 +47,6 @@
 		if (e.key === "Escape") { editingLabel = false; }
 	}
 
-	// Mirrors _BACKEND_LABELS in container/backend/model_variants.py.
-	const BACKEND_LABELS: Record<Backend, string> = {
-		rocm: "ROCm",
-		rocmfp4: "ROCmFP4",
-		rocmmain: "ROCmMain",
-		rocmmainmtp: "ROCmMainMTP",
-		rocmunsloth: "ROCmUnsloth",
-		rocmunslothsrc: "ROCmUnslothSrc",
-		rocmqwen4exp: "ROCmQwen4Exp",
-		rocmqwen4exp2: "ROCmQwen4Exp2",
-		rocmfork: "ROCmFork",
-		rocmdflash2: "ROCmDFlash2",
-		vulkan: "Vulkan",
-		cuda: "CUDA",
-	};
 	const ALL_BACKENDS: Backend[] = [...BACKENDS];
 	const STANDARD_PROFILES = ["speed", "fastlong", "balanced", "reliable", "tiny"];
 

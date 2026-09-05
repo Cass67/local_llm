@@ -18,6 +18,22 @@ export const BACKENDS = [
 
 export type Backend = (typeof BACKENDS)[number];
 
+// Mirrors _BACKEND_LABELS in container/backend/model_variants.py.
+export const BACKEND_LABELS: Record<Backend, string> = {
+	rocm: "ROCm",
+	rocmfp4: "ROCmFP4",
+	rocmmain: "ROCmMain",
+	rocmmainmtp: "ROCmMainMTP",
+	rocmunsloth: "ROCmUnsloth",
+	rocmunslothsrc: "ROCmUnslothSrc",
+	rocmqwen4exp: "ROCmQwen4Exp",
+	rocmqwen4exp2: "ROCmQwen4Exp2",
+	rocmfork: "ROCmFork",
+	rocmdflash2: "ROCmDFlash2",
+	vulkan: "Vulkan",
+	cuda: "CUDA",
+};
+
 export interface ModelProfile {
 	batch: number;
 	ubatch: number;
