@@ -26,6 +26,22 @@ def temp_state(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
     monkeypatch.setattr(cfg, "ACCEPTED_DIR", accepted)
+    profiles = tmp_path / "profiles.json"
+    profiles.write_text(
+        json.dumps(
+            {
+                "families": {
+                    "qwen": {
+                        "profiles": {
+                            "balanced": {"mtp_enabled": True, "ngl": 999, "backend": "rocmfork"}
+                        }
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(cfg, "PROFILES_CONFIG", profiles)
+    monkeypatch.setattr(cfg, "PROFILE_SNAPSHOTS_DIR", tmp_path / "profile-snapshots")
     return tmp_path
 
 
@@ -59,6 +75,23 @@ async def test_copy_backend_creates_cuda_metadata(temp_state):
     assert copied["model_path"] == "/models/qwen.gguf"
     assert copied["backend"] == "cuda"
     assert copied["config"]["backend"] == "cuda"
+
+
+@pytest.mark.asyncio
+async def test_copy_backend_clones_the_profiles_and_drops_the_image_pin(temp_state):
+    from backend.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/models/qwen/copy-backend", json={"backend": "rocm"})
+
+    assert response.json()["profiles"] == 1
+    families = json.loads((temp_state / "profiles.json").read_text())["families"]
+    copied = families["qwen-rocm"]["profiles"]["balanced"]
+    assert copied["mtp_enabled"] is True
+    # the source pinned this profile to another runner image; the copy must not inherit it
+    assert "backend" not in copied
+    assert families["qwen"]["profiles"]["balanced"]["backend"] == "rocmfork"
 
 
 @pytest.mark.asyncio
