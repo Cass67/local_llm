@@ -1,7 +1,7 @@
 """Helpers for ROCm/Vulkan/CUDA accepted-model variants."""
 
 from copy import deepcopy
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 Backend = Literal[
     "rocm",
@@ -17,7 +17,10 @@ Backend = Literal[
     "vulkan",
     "cuda",
 ]
-_BACKEND_SUFFIXES = ("-rocmfp4", "-rocm", "-vulkan", "-cuda")
+# Derived from Backend, longest first so "-rocmfp4" is stripped before "-rocm" and
+# "-rocmunsloth" before both. Hand-listing these went stale as backends were added, which
+# made copy-from-a-variant accumulate suffixes (foo-rocmunsloth -> foo-rocmunsloth-rocm).
+_BACKEND_SUFFIXES = tuple(sorted((f"-{b}" for b in get_args(Backend)), key=len, reverse=True))
 _BACKEND_LABELS = {
     "rocm": "ROCm",
     "rocmfp4": "ROCmFP4",
