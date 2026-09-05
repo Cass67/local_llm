@@ -117,7 +117,25 @@ async def traces_redirect(request: Request):
     return RedirectResponse(f"{request.url.scheme}://{host}:3004/")
 
 
+class _UIStatics(StaticFiles):
+    """Serve hashed assets as immutable, but never let index.html be cached.
+
+    Vite fingerprints every asset, so those are safe to pin forever. index.html is the
+    only file whose name is stable, and it is what names the current bundle -- a browser
+    holding a cached copy asks for a bundle a deploy has already deleted, so the page
+    breaks or silently runs old code until a hard refresh.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if path.startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # SPA fallback: mount UI dist at /ui/
 ui_dist = Path(__file__).parent.parent / "ui-dist"
 if ui_dist.exists():
-    app.mount("/ui", StaticFiles(directory=str(ui_dist), html=True), name="ui")
+    app.mount("/ui", _UIStatics(directory=str(ui_dist), html=True), name="ui")
