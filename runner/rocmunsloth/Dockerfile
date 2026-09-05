@@ -22,8 +22,13 @@
 # UNSLOTH_TAG for a newer release; they publish most days.
 FROM ubuntu:24.04
 
-ARG UNSLOTH_TAG=b10715-mix-86bd2d3
-ARG UNSLOTH_ASSET=app-b10715-mix-86bd2d3-linux-x64-rocm-gfx110X.tar.gz
+# No defaults on purpose. The tag is resolved to their newest gfx110X release at build time
+# and stamped on the image as the `unsloth.tag` label, which is the single source of truth for
+# what a variant is at. A default here would be a second one that nothing keeps current, and it
+# silently drifted for five days before anyone noticed. Build via the Updates panel or
+# scripts/update-unsloth.sh; a bare `docker build` fails below rather than vendoring a stale pin.
+ARG UNSLOTH_TAG
+ARG UNSLOTH_ASSET
 ENV DEBIAN_FRONTEND=noninteractive
 
 # The tarball ships its own libamdhip64 / hipblaslt / libLLVM, so no ROCm apt repo is needed --
@@ -33,7 +38,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/unsloth
-RUN curl -fsSL -o /tmp/app.tar.gz \
+RUN : "${UNSLOTH_TAG:?pass --build-arg UNSLOTH_TAG=<release tag>; see scripts/update-unsloth.sh}" \
+    && : "${UNSLOTH_ASSET:?pass --build-arg UNSLOTH_ASSET=<gfx110X asset name>}" \
+    && curl -fsSL -o /tmp/app.tar.gz \
       "https://github.com/unslothai/llama.cpp/releases/download/${UNSLOTH_TAG}/${UNSLOTH_ASSET}" \
     && tar -xzf /tmp/app.tar.gz -C /opt/unsloth \
     && rm /tmp/app.tar.gz \

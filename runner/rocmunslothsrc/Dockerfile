@@ -21,12 +21,15 @@
 FROM rocm/dev-ubuntu-24.04:7.2 AS build
 
 # The unsloth release tag. Its tree pins the base and the PR set; both are read below.
-ARG UNSLOTH_TAG=b10715-mix-86bd2d3
+# No default -- see the note in runner/rocmunsloth/Dockerfile. The `unsloth.tag` image label is
+# the one record of what a variant is at; a default here is a second one that goes stale.
+ARG UNSLOTH_TAG
 ARG UNSLOTH_REPO=https://github.com/unslothai/llama.cpp.git
 ARG UPSTREAM_REPO=https://github.com/ggml-org/llama.cpp.git
-# Upstream base the tag was cut from (b10715). Kept explicit: the tag name encodes it, but
-# parsing a tag name to decide what to build is a worse failure mode than a wrong pin.
-ARG UPSTREAM_BASE=662a0b0121a5
+# Upstream base the tag was cut from. Kept explicit rather than parsed out of the tag name
+# here: the caller resolves it (bNNNNN -> sha) and passes it, so a rename upstream fails at
+# resolve time with a clear error instead of silently building the wrong tree.
+ARG UPSTREAM_BASE
 ARG AMDGPU_TARGETS=gfx1100
 ARG BUILD_JOBS=4
 ENV DEBIAN_FRONTEND=noninteractive
@@ -58,7 +61,9 @@ WORKDIR /src/llama.cpp
 # the && chain before the script ever ran and produced a failure with no output. The replay
 # fetches each PR commit by sha and reads the recipe over HTTP, so tags are not needed.
 COPY replay-mix.sh /usr/local/bin/replay-mix.sh
-RUN git clone --filter=blob:none "$UPSTREAM_REPO" . \
+RUN : "${UNSLOTH_TAG:?pass --build-arg UNSLOTH_TAG=<release tag>; see scripts/update-unsloth.sh}" \
+    && : "${UPSTREAM_BASE:?pass --build-arg UPSTREAM_BASE=<upstream sha for that tag>}" \
+    && git clone --filter=blob:none "$UPSTREAM_REPO" . \
     && git checkout "$UPSTREAM_BASE" \
     && git remote add unsloth "$UNSLOTH_REPO" \
     && git config user.email build@local && git config user.name build \
