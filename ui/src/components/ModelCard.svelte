@@ -10,6 +10,7 @@
 		starting = false,
 		onStartOnCluster,
 		onCopyBackend,
+		onDeleteBackend,
 		onDetail,
 		onEdit,
 	}: {
@@ -19,6 +20,7 @@
 		starting: boolean;
 		onStartOnCluster: (clusterId: string, profile: string) => void;
 		onCopyBackend?: (backend: Backend) => void;
+		onDeleteBackend?: () => void;
 		onDetail?: () => void;
 		onEdit?: () => void;
 	} = $props();
@@ -178,6 +180,14 @@
 				{/each}
 			</select>
 			<button onclick={() => onCopyBackend?.(copyTarget)}>Copy to backend</button>
+			<button
+				class="danger"
+				disabled={runningClusterIds.length > 0}
+				title={runningClusterIds.length > 0
+					? "stop this model before deleting it"
+					: `remove the ${BACKEND_LABELS[model.backend]} entry from management state; the GGUF on disk is untouched`}
+				onclick={() => onDeleteBackend?.()}>Delete</button
+			>
 		</div>
 	</div>
 </div>
@@ -302,4 +312,7 @@
 		transition: all 0.1s;
 	}
 	.card-actions button:hover { border-color: var(--text-muted); color: var(--text); }
+	.card-actions button.danger:not(:disabled) { border-color: var(--red); color: var(--red); }
+	.card-actions button.danger:not(:disabled):hover { background: var(--red); color: white; }
+	.card-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { fetchModels, fetchCurrentModel, fetchClusters, startOnCluster, copyModelBackend, auditModels, cleanupOrphanedModels } from "../lib/api";
+	import { fetchModels, fetchCurrentModel, fetchClusters, startOnCluster, copyModelBackend, deleteModels, auditModels, cleanupOrphanedModels } from "../lib/api";
 	import type { Backend, ModelInfo, CurrentModelResponse, ClusterInfo } from "../lib/types";
 	import ModelCard from "./ModelCard.svelte";
 	import ModelDetail from "./ModelDetail.svelte";
@@ -45,6 +45,21 @@
 		try {
 			await copyModelBackend(family, backend);
 			selectedBackend = backend;
+			await load();
+		} catch (e: unknown) {
+			error = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	// The endpoint drops the accepted-model entry and its state references; the GGUF on disk
+	// is left alone, so this undoes a Copy to backend rather than freeing space. DeletePanel
+	// is still the place to reclaim disk.
+	async function handleDeleteBackend(model: ModelInfo) {
+		const id = model.alias || model.family;
+		if (!confirm(`Delete "${id}" from management state?\n\nThe GGUF on disk is not removed.`)) return;
+		error = "";
+		try {
+			await deleteModels([id]);
 			await load();
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : String(e);
@@ -171,6 +186,7 @@
 				starting={startingCluster !== null && clustersFor(model).some((c) => c.id === startingCluster)}
 				onStartOnCluster={(clusterId, profile) => handleStartOnCluster(model.family, clusterId, profile)}
 				onCopyBackend={(backend) => handleCopyBackend(model.family, backend)}
+				onDeleteBackend={() => handleDeleteBackend(model)}
 				onDetail={() => (detailFamily = model.family)}
 				onEdit={() => (editFamily = model.family)}
 			/>
