@@ -2,6 +2,7 @@
 	import { onMount } from "svelte";
 	import { editModel, fetchModelDetail } from "../lib/api";
 	import { splitKnownFlags } from "../lib/mtpFlags";
+	import { BACKENDS } from "../lib/types";
 	import type { Backend, ClusterInfo } from "../lib/types";
 
 	let {
@@ -152,7 +153,7 @@
 					<label>Cache V<input bind:value={form.cache_type_v} /></label>
 					<label>Ctx Shift<input bind:value={form.ctx_shift} /></label>
 					<label>Reasoning<select bind:value={form.reasoning}><option value="on">on</option><option value="off">off</option></select></label>
-					<label>Backend<select bind:value={form.backend}><option value="rocm">rocm</option><option value="rocmfp4">rocmfp4</option><option value="vulkan">vulkan</option><option value="cuda">cuda</option></select></label>
+					<label>Backend<select bind:value={form.backend}>{#each BACKENDS as b}<option value={b}>{b}</option>{/each}</select></label>
 					<label>Visible Devices<input bind:value={form.visible_devices} /></label>
 					<label>Split Mode<input bind:value={form.split_mode} /></label>
 					<label>Tensor Split<input bind:value={form.tensor_split} /></label>
