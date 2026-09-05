@@ -1,4 +1,22 @@
-export type Backend = "rocm" | "rocmfp4" | "vulkan" | "cuda";
+// Mirrors the Backend literal in container/backend/model_variants.py. Keep in sync: an
+// unknown name silently falls back to the rocm image in runner_image_for_backend(), so a
+// stale list here means a runner you cannot pick rather than an error.
+export const BACKENDS = [
+	"rocm",
+	"rocmfp4",
+	"rocmmain",
+	"rocmmainmtp",
+	"rocmunsloth",
+	"rocmunslothsrc",
+	"rocmqwen4exp",
+	"rocmqwen4exp2",
+	"rocmfork",
+	"rocmdflash2",
+	"vulkan",
+	"cuda",
+] as const;
+
+export type Backend = (typeof BACKENDS)[number];
 
 export interface ModelProfile {
 	batch: number;

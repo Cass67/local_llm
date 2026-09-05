@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { BACKENDS } from "../lib/types";
 	import type { Backend, ModelInfo, ClusterInfo } from "../lib/types";
 	import { editModel, fetchFamilyProfiles } from "../lib/api";
 
@@ -44,19 +45,33 @@
 		if (e.key === "Escape") { editingLabel = false; }
 	}
 
+	// Mirrors _BACKEND_LABELS in container/backend/model_variants.py.
 	const BACKEND_LABELS: Record<Backend, string> = {
 		rocm: "ROCm",
 		rocmfp4: "ROCmFP4",
+		rocmmain: "ROCmMain",
+		rocmmainmtp: "ROCmMainMTP",
+		rocmunsloth: "ROCmUnsloth",
+		rocmunslothsrc: "ROCmUnslothSrc",
+		rocmqwen4exp: "ROCmQwen4Exp",
+		rocmqwen4exp2: "ROCmQwen4Exp2",
+		rocmfork: "ROCmFork",
+		rocmdflash2: "ROCmDFlash2",
 		vulkan: "Vulkan",
 		cuda: "CUDA",
 	};
-	const ALL_BACKENDS: Backend[] = ["rocm", "rocmfp4", "vulkan", "cuda"];
+	const ALL_BACKENDS: Backend[] = [...BACKENDS];
 	const STANDARD_PROFILES = ["speed", "fastlong", "balanced", "reliable", "tiny"];
 
 	let selectedProfile = $state("");
 	let selectedCluster = $state("");
 	let savedProfiles: string[] = $state([]);
 	let otherBackends = $derived(ALL_BACKENDS.filter((b) => b !== model.backend));
+	// Never default the picker to the backend the model is already on.
+	let copyTarget = $state<Backend>("rocm");
+	$effect(() => {
+		if (!otherBackends.includes(copyTarget)) copyTarget = otherBackends[0];
+	});
 	let isRunning = $derived(runningClusterIds.length > 0);
 	let idleClusters = $derived(clusters.filter((c) => !runningClusterIds.includes(c.id)));
 
@@ -157,9 +172,12 @@
 		<div class="card-actions">
 			<button onclick={onDetail}>Detail</button>
 			<button onclick={onEdit}>Edit</button>
-			{#each otherBackends as backend (backend)}
-				<button onclick={() => onCopyBackend?.(backend)}>Copy to {BACKEND_LABELS[backend]}</button>
-			{/each}
+			<select bind:value={copyTarget} title="copy this model as a variant on another runner image">
+				{#each otherBackends as backend (backend)}
+					<option value={backend}>{BACKEND_LABELS[backend]}</option>
+				{/each}
+			</select>
+			<button onclick={() => onCopyBackend?.(copyTarget)}>Copy to backend</button>
 		</div>
 	</div>
 </div>
