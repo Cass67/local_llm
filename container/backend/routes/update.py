@@ -728,21 +728,6 @@ async def start_service_update(service_id: str):
     return {"status": "started", "ref": ref}
 
 
-def _unsloth_arg(backend: str, name: str) -> str | None:
-    """A build ARG's default in a vendored runner's Dockerfile."""
-    try:
-        text = (RUNNER_SRC_DIR / backend / "Dockerfile").read_text()
-    except OSError:
-        return None
-    match = re.search(rf"^ARG {name}=(.+)$", text, re.M)
-    return match.group(1).strip() if match else None
-
-
-def _unsloth_pin(backend: str, labels: dict[str, str]) -> str | None:
-    """The unsloth tag a variant is at: what the image was built with, else the ARG default."""
-    return labels.get(UNSLOTH_TAG_LABEL) or _unsloth_arg(backend, "UNSLOTH_TAG")
-
-
 @router.get("/unsloth")
 async def unsloth_status():
     """Vendored unslothai/llama.cpp pin vs their newest gfx110X release, with the notes."""
@@ -755,7 +740,10 @@ async def unsloth_status():
                 "note": note,
                 "image": config.RUNNER_IMAGES[backend],
                 "present": present,
-                "tag": _unsloth_pin(backend, labels),
+                # The label the build stamped on is the only record of a variant's tag: the
+                # Dockerfiles carry no default to fall back to, on purpose. An image from
+                # before the label reads as None -- unknown, not "the pin in the repo".
+                "tag": labels.get(UNSLOTH_TAG_LABEL),
             }
         )
 

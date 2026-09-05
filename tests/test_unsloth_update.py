@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 
@@ -10,18 +11,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "container"))
 from backend.routes import update  # noqa: E402
 
 
-def test_reads_the_pinned_tag(tmp_path, monkeypatch):
-    (tmp_path / "rocmunsloth").mkdir()
-    (tmp_path / "rocmunsloth" / "Dockerfile").write_text(
-        "FROM x\nARG UNSLOTH_TAG=b10715-mix-86bd2d3\nARG UNSLOTH_ASSET=app.tar.gz\n"
-    )
-    monkeypatch.setattr(update, "RUNNER_SRC_DIR", tmp_path)
-    assert update._unsloth_pin("rocmunsloth", {}) == "b10715-mix-86bd2d3"
-    assert update._unsloth_pin("missing", {}) is None
-    # A rebuilt image carries the tag it was built with; the ARG is only the fallback.
-    assert update._unsloth_pin("rocmunsloth", {"unsloth.tag": "b10796-mix-659e406"}) == (
-        "b10796-mix-659e406"
-    )
+@pytest.mark.parametrize("backend", ["rocmunsloth", "rocmunslothsrc"])
+def test_no_default_tag_in_the_dockerfile(backend):
+    """The image label is the only record of a variant's tag.
+
+    A default here is a second source of truth that nothing keeps current -- it silently sat
+    five releases behind what the Updates panel was actually building.
+    """
+    text = (Path(__file__).resolve().parents[1] / "runner" / backend / "Dockerfile").read_text()
+    assert re.search(r"^ARG UNSLOTH_TAG$", text, re.M), "UNSLOTH_TAG must have no default"
+    assert not re.search(r"^ARG UNSLOTH_TAG=", text, re.M)
 
 
 class _FakeClient:

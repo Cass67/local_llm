@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 # Show and apply unslothai/llama.cpp prebuilt updates for runner/rocmunsloth.
 #
-# The Updates panel cannot drive this backend: it rebuilds from ggml-org master with
-# --build-arg LLAMA_CPP_REF, while rocmunsloth vendors a prebuilt release tarball. Their
-# release is an ephemeral CI merge of an upstream base plus a pinned PR set, so there is no
-# single ref to hand the panel.
+# The CLI twin of the Updates panel's unsloth build, and it resolves the tag the same way the
+# panel does: newest release carrying a gfx110X asset, passed as --build-arg and stamped on the
+# image as the `unsloth.tag` label. The Dockerfile holds no default tag, so that label is the
+# only record of what the image is at -- read it, never a pin in the tree.
 #
 #   ./scripts/update-unsloth.sh            # what is available, and what changed. changes nothing
 #   ./scripts/update-unsloth.sh --apply    # bump the pin and rebuild
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/runner/rocmunsloth"
-DOCKERFILE="$DIR/Dockerfile"
+IMAGE="local-llm-runner-rocmunsloth:latest"
 ASSET_SUFFIX="linux-x64-rocm-gfx110X.tar.gz" # gfx1100 = 7900 XT
 API="https://api.github.com/repos/unslothai/llama.cpp"
 
-cur_tag=$(grep -oP '^ARG UNSLOTH_TAG=\K.*' "$DOCKERFILE")
+cur_tag=$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "unsloth.tag"}}' 2>/dev/null || true)
+[ -n "$cur_tag" ] || cur_tag="(no image built yet)"
 
 # Newest release that actually carries a gfx110X asset: a release whose ROCm leg failed
 # publishes without one, and bumping to it would break the build rather than the download.
@@ -63,18 +64,20 @@ for r in reversed(newer):          # oldest first
 ' "$cur_tag" <<<"$releases"
 
 if [ "${1:-}" != "--apply" ]; then
-  echo "run with --apply to bump and rebuild"
+  echo "run with --apply to rebuild at the newer tag"
   exit 0
 fi
 
-sed -i "s|^ARG UNSLOTH_TAG=.*|ARG UNSLOTH_TAG=$new_tag|" "$DOCKERFILE"
-sed -i "s|^ARG UNSLOTH_ASSET=.*|ARG UNSLOTH_ASSET=$new_asset|" "$DOCKERFILE"
-echo "bumped $cur_tag -> $new_tag"
+echo "building $cur_tag -> $new_tag"
 
-docker build --network host -t local-llm-runner-rocmunsloth:latest "$DIR"
+docker build --network host \
+  --build-arg "UNSLOTH_TAG=$new_tag" \
+  --build-arg "UNSLOTH_ASSET=$new_asset" \
+  --label "unsloth.tag=$new_tag" \
+  -t "$IMAGE" "$DIR"
 
 echo
-docker run --rm local-llm-runner-rocmunsloth:latest llama-server --version 2>&1 | grep -i version
+docker run --rm "$IMAGE" llama-server --version 2>&1 | grep -i version
 cat <<'NOTE'
 
 restart the cluster to pick it up:
