@@ -35,6 +35,13 @@
 		{
 			title: "Model / GPU",
 			fields: [
+				{
+					key: "backend",
+					label: "Backend (runner image)",
+					type: "select",
+					options: ["rocm", "rocmfp4", "rocmmain", "rocmmainmtp", "rocmunsloth", "rocmunslothsrc", "rocmqwen4exp", "rocmqwen4exp2", "rocmfork", "rocmdflash2", "vulkan", "cuda"],
+					hint: "which runner image serves this profile; unset means rocm. An unbuilt image fails at launch, and an unknown name silently falls back to rocm",
+				},
 				{ key: "ngl", label: "GPU layers (-ngl)", type: "int", placeholder: "999" },
 				{ key: "split_mode", label: "Split mode", type: "select", options: ["layer", "tensor", "row", "none"] },
 				{ key: "tensor_split", label: "Tensor split", type: "text", placeholder: "3,1" },
