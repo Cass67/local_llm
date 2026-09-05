@@ -35,8 +35,8 @@ RUN cmake -S . -B build \
     -DLLAMA_CURL=ON \
     -DGGML_VULKAN=ON \
     -DLLAMA_VULKAN=1 \
-    -DLLAMA_BUILD_UI=OFF \
-    -DLLAMA_USE_PREBUILT_UI=OFF \
+    -DLLAMA_BUILD_UI=ON \
+    -DLLAMA_USE_PREBUILT_UI=ON \
     && cmake --build build --target llama-server llama-perplexity -j"$(nproc)"
 
 FROM ubuntu:24.04
