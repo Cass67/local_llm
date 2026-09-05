@@ -1,5 +1,6 @@
 """Model management: inventory, detail, edit, delete, status, hfcard."""
 
+import copy
 import json
 import re
 import subprocess
@@ -151,6 +152,34 @@ def _read_metadata_file(path):
     return data
 
 
+def _copy_profiles_to_variant(source_family: str, target_family: str, backend: str) -> int:
+    """Clone a family's profile entry onto its backend variant.
+
+    Without this the variant starts with no profiles at all: the API still reports whatever
+    profile name was asked for, but llama-server is launched on bare defaults -- no MTP, no
+    flash attention, a two-way tensor split on a three-card cluster.
+    """
+    try:
+        data = json.loads(config.PROFILES_CONFIG.read_text())
+    except (OSError, json.JSONDecodeError):
+        return 0
+    families = data.get("families")
+    if not isinstance(families, dict) or source_family not in families:
+        return 0
+    entry = copy.deepcopy(families[source_family])
+    profiles = entry.get("profiles")
+    if not isinstance(profiles, dict) or not profiles:
+        return 0
+    # A per-profile "backend" pins that profile to another runner image; it is the source
+    # family's choice and would send the copy straight back to the image it came from.
+    for prof in profiles.values():
+        if isinstance(prof, dict):
+            prof.pop("backend", None)
+    families[target_family] = entry
+    config.save_profiles(data, f"copy-backend-{backend}")
+    return len(profiles)
+
+
 @router.post("/models/{family}/copy-backend")
 async def copy_model_backend(family: str, req: CopyBackendRequest):
     _safe_family(family)
@@ -164,7 +193,13 @@ async def copy_model_backend(family: str, req: CopyBackendRequest):
     if target_path.exists() and not req.overwrite:
         raise HTTPException(409, f"backend variant '{target_family}' already exists")
     target_path.write_text(json.dumps(copied, indent=2, sort_keys=True) + "\n")
-    return {"status": "copied", "family": target_family, "backend": req.backend}
+    profiles = _copy_profiles_to_variant(family, target_family, req.backend)
+    return {
+        "status": "copied",
+        "family": target_family,
+        "backend": req.backend,
+        "profiles": profiles,
+    }
 
 
 @router.post("/models/migrate-backend-names")
