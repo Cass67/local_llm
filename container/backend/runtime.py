@@ -84,6 +84,12 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         "llama-server",
         "--port",
         str(port),
+        # The runner shares the host network namespace, and llama-server defaults to
+        # binding loopback -- which leaves its own web UI (the only client that reports
+        # per-message tok/s) unreachable from a browser on the LAN. A --host in the
+        # profile flags still wins: raw flags are appended last.
+        "--host",
+        "0.0.0.0",  # noqa: S104
         # Live throughput for the Status page. latest-metrics.json only sees requests
         # that go through the mgmt chat proxy, so sweeps and anything aimed straight
         # at the runner port left the tok/s card frozen; /metrics counts every request.

@@ -28,10 +28,13 @@ def test_build_llama_server_args_includes_model_runtime_and_mtp_flags():
 
     args = build_llama_server_args(metadata, port=8080)
 
-    assert args[:23] == [
+    assert args[:26] == [
         "llama-server",
         "--port",
         "8080",
+        "--host",
+        "0.0.0.0",  # noqa: S104
+        "--metrics",
         "-m",
         "/models/models--Jackrong--Qwopus/snapshots/abc/qwopus.gguf",
         "-ngl",
