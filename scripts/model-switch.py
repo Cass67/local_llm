@@ -35,14 +35,32 @@ REPO = Path(__file__).resolve().parent.parent
 AGENTS_DIR = Path(os.environ.get("AGENTS_CONFIG_DIR", Path.home() / ".config/local_llm/agents"))
 
 # Only providers pointing at the router get rewritten; the same file often also
-# holds cloud providers whose real limits we must not touch.
-ROUTER_MARK = ":3200"
+# holds cloud providers whose real limits we must not touch. The router is also
+# reachable through the LAN Caddy front on another port, and a client configured
+# that way is still a client we have to keep in sync.
+ROUTER_MARKS = tuple(
+    m
+    for m in [":3200", *os.environ.get("LOCAL_LLM_ROUTER_ALIASES", "192.168.2.1:3001").split(",")]
+    if m
+)
 
 # Compaction headroom. NOT the output limit: that is a ceiling on one reply, while
 # this is subtracted from the window on every turn, so setting it to a half-window
 # output budget would halve the usable context. It only has to fit one tool loop --
 # pi dies at 16384, and 49152 is the value that has held up.
 RESERVE_FLOOR = 49152
+
+# The server rejects a prompt over n_ctx outright -- no truncation, no eviction --
+# and the client just resubmits the same oversized transcript forever. Clients
+# count tokens approximately, so budgeting them to the exact advertised window
+# lands them a few tokens over it; hold them below the wall instead.
+CTX_SLACK_DIVISOR = 64
+CTX_SLACK_FLOOR = 2048
+
+
+def client_ctx(ctx: int) -> int:
+    return ctx - max(CTX_SLACK_FLOOR, ctx // CTX_SLACK_DIVISOR)
+
 
 SAMPLING_KEYS = {
     "temperature", "topP", "top_p", "topK", "top_k", "minP", "min_p",
@@ -79,7 +97,8 @@ def live_limits() -> tuple[int | None, int | None, list[dict]]:
     models = [m for m in data if m["id"] != "router"]
     ctxs = [m["context_window"] for m in models if m.get("context_window")]
     outs = [m["max_tokens"] for m in models if m.get("max_tokens")]
-    return (min(ctxs) if ctxs else None), (min(outs) if outs else None), models
+    ctx = min(ctxs) if ctxs else None
+    return (client_ctx(ctx) if ctx else None), (min(outs) if outs else None), models
 
 
 def reserve_for(ctx: int, out: int) -> int:
@@ -96,6 +115,9 @@ def _targets(seeds: bool = False) -> list[Path]:
         AGENTS_DIR / "opencode2/opencode.json",
         AGENTS_DIR / "pi/agent/models.json",
         AGENTS_DIR / "pi/agent/settings.json",
+        # pi's own default location -- on a workstation it is the only one there is.
+        Path.home() / ".pi/agent/models.json",
+        Path.home() / ".pi/agent/settings.json",
     ]
     if seeds:
         paths += [
@@ -153,7 +175,7 @@ def patch_file(
     # carry a "compaction" block, spelled "reserved" and handled below.
     reserve = reserve_for(ctx, out)
     comp = data.get("compaction")
-    if isinstance(comp, dict) and "reserveTokens" in comp and comp["reserveTokens"] != reserve:
+    if isinstance(comp, dict) and "reserveTokens" in comp and comp["reserveTokens"] < reserve:
         changes.append(f"reserveTokens {comp['reserveTokens']} -> {reserve}")
         comp["reserveTokens"] = reserve
 
@@ -161,7 +183,7 @@ def patch_file(
         for pid, prov in (data.get(key) or {}).items():
             settings = prov.get("options") or prov.get("settings") or prov
             base = str(settings.get("baseURL") or settings.get("baseUrl") or "")
-            if ROUTER_MARK not in base:
+            if not any(mark in base for mark in ROUTER_MARKS):
                 continue
 
             models = prov.get("models")
@@ -173,7 +195,7 @@ def patch_file(
 
             # opencode's own compaction reserve lives at the top level.
             comp = data.get("compaction")
-            if isinstance(comp, dict) and "reserved" in comp and comp["reserved"] != reserve:
+            if isinstance(comp, dict) and "reserved" in comp and comp["reserved"] < reserve:
                 changes.append(f"reserved {comp.get('reserved')} -> {reserve}")
                 comp["reserved"] = reserve
 
@@ -187,7 +209,7 @@ def cmd_sync(args) -> int:
     if not ctx or not out:
         print("no running model advertises a context window — start one first", file=sys.stderr)
         return 1
-    print(f"live: {', '.join(m['id'] for m in models)}  ctx={ctx} output={out}\n")
+    print(f"live: {', '.join(m['id'] for m in models)}  ctx={ctx} (budget) output={out}\n")
     for path in _targets(args.seeds):
         changes = patch_file(path, ctx, out, write=not args.dry_run, strip=args.strip_sampling)
         label = str(path).replace(str(Path.home()), "~")
@@ -203,7 +225,8 @@ def cmd_status(args) -> int:
     ctx, out, models = live_limits()
     if not models:
         return 1
-    print(f"{'ADVERTISED':<12} ctx={ctx} output={out}")
+    print(f"{'CLIENT BUDGET':<14} ctx={ctx} output={out}")
+    print("ADVERTISED")
     for m in models:
         print(f"  {m['id']}  ctx={m.get('context_window')} max_tokens={m.get('max_tokens')}")
 
@@ -243,7 +266,7 @@ def cmd_switch(args) -> int:
 
     ctx, _out, _models = live_limits()
     profile_ctx = _profile_context(args.family, args.profile)
-    if profile_ctx and ctx and profile_ctx != ctx:
+    if profile_ctx and ctx and client_ctx(profile_ctx) != ctx:
         print(
             f"!! server advertises ctx={ctx} but the profile says {profile_ctx} — "
             f"the accepted-model JSON pin is stale (mgmt needs the openai.py fix deployed)\n",
