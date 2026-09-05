@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { fetchModels, fetchCurrentModel, fetchClusters, startOnCluster, copyModelBackend, deleteModels, auditModels, cleanupOrphanedModels } from "../lib/api";
+	import { BACKENDS, BACKEND_LABELS } from "../lib/types";
 	import type { Backend, ModelInfo, CurrentModelResponse, ClusterInfo } from "../lib/types";
 	import ModelCard from "./ModelCard.svelte";
 	import ModelDetail from "./ModelDetail.svelte";
@@ -108,6 +109,18 @@
 
 	onMount(load);
 
+	// Only backends that actually hold a model get a tab; the copy picker on each card is
+	// where an unused backend gets its first variant.
+	let usedBackends = $derived(
+		BACKENDS.filter((b) => models.some((m) => m.backend === b)),
+	);
+
+	$effect(() => {
+		if (usedBackends.length > 0 && !usedBackends.includes(selectedBackend)) {
+			selectedBackend = usedBackends[0];
+		}
+	});
+
 	let filteredModels = $derived(models.filter((m) => m.backend === selectedBackend));
 
 	function clustersFor(model: ModelInfo) {
@@ -126,10 +139,12 @@
 
 	<div class="toolbar">
 		<div class="backend-toggle">
-			<button class:active={selectedBackend === "rocm"} onclick={() => (selectedBackend = "rocm")}>ROCm</button>
-			<button class:active={selectedBackend === "rocmfp4"} onclick={() => (selectedBackend = "rocmfp4")}>ROCmFP4</button>
-			<button class:active={selectedBackend === "vulkan"} onclick={() => (selectedBackend = "vulkan")}>Vulkan</button>
-			<button class:active={selectedBackend === "cuda"} onclick={() => (selectedBackend = "cuda")}>CUDA</button>
+			{#each usedBackends as backend (backend)}
+				<button class:active={selectedBackend === backend} onclick={() => (selectedBackend = backend)}
+					>{BACKEND_LABELS[backend]}
+					<span class="count">{models.filter((m) => m.backend === backend).length}</span></button
+				>
+			{/each}
 		</div>
 		<div class="toolbar-actions">
 			<button class="audit" onclick={handleAudit} disabled={auditing}>{auditing ? "Scanning…" : "Audit"}</button>
@@ -207,7 +222,8 @@
 	.native-warning code { background: #0004; padding: 0.1rem 0.3rem; border-radius: 4px; font-size: 0.82rem; }
 	.toolbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
 	.toolbar-actions { display: flex; gap: 0.5rem; }
-	.backend-toggle { display: flex; gap: 0; }
+	.backend-toggle { display: flex; flex-wrap: wrap; gap: 0; }
+	.backend-toggle .count { opacity: 0.55; font-size: 0.85em; margin-left: 4px; }
 	.backend-toggle button {
 		padding: 0.3rem 0.8rem;
 		border: 1px solid var(--border);
