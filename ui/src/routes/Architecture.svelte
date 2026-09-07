@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import type { GpuInfo, ClusterInfo, Backend, ModelInfo, IdleUnloadConfig, FamilyProfiles } from "../lib/types";
+	import { BACKENDS, BACKEND_LABELS } from "../lib/types";
 	import {
 		fetchGpus,
 		fetchClusters,
@@ -371,7 +372,7 @@
 	}
 
 	function backendIndex(g: GpuInfo, backend: Backend) {
-		if (backend === "rocm" || backend === "rocmfp4") return g.rocm_index;
+		if (backend.startsWith("rocm")) return g.rocm_index;
 		if (backend === "cuda") return g.cuda_index;
 		return g.vulkan_index;
 	}
@@ -428,10 +429,9 @@
 			<div class="create-form">
 				<input bind:value={newName} placeholder="Cluster name" />
 				<select bind:value={newBackend}>
-					<option value="rocm">ROCm</option>
-					<option value="rocmfp4">ROCmFP4</option>
-					<option value="vulkan">Vulkan</option>
-					<option value="cuda">CUDA</option>
+					{#each BACKENDS as b}
+						<option value={b}>{BACKEND_LABELS[b]}</option>
+					{/each}
 				</select>
 				<div class="gpu-picks">
 					{#each gpus as g}
