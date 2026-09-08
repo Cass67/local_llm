@@ -1,23 +1,43 @@
 # local-llm-runner-rocmmainmtp
-# Upstream llama.cpp master PLUS the two Nathanw1014 commits that add MTP sidecar support.
-# This is the only configuration that gets both halves:
-#   * from master -- qwen4exp native, 09412af3 indexer head slicing (#28023), 0eadefeb
-#     recurrent state rollback (#28123), and 36b10154 (#27941): the -kvu NaN collapse fix,
-#     the indexer cache ext.x/ext.y save/restore fix (state_read_meta was dropping mrope ext
-#     fields -- 198 of 335692 bytes differed on a round trip), seq_cp and block position
-#     keying fixes, and 444 rewritten lines of llama-memory-hybrid-idx.cpp. The profile here
-#     exercises all of those: kv_unified, ctx_checkpoints, hybrid indexed memory.
-#   * from the fork -- 354390810 "load NextN/MTP draft tensors (sidecar and in-file)" and
-#     39817c476 "NextN/MTP draft graph and context". Master's draft-mtp is IN-FILE ONLY and
-#     REAP-256/320 carry no NextN, so without these master cannot speculate on these models
-#     at all (measured: 20.4 t/s vs 44.1 with the fork).
-# Both cherry-picks were verified to apply cleanly onto master before this image existed.
-# Note master declares -sm tensor unsupported for qwen4exp (36b10154); use layer split.
-# A blobless full clone is used rather than a shallow fetch because cherry-pick needs each
-# commit's parent to compute the patch.
+# Upstream llama.cpp master PLUS unsloth's qwen4exp NextN/MTP series (PR unslothai#144, still
+# open) PLUS the LaurentZuijdwijk adaptive-draft commit. Applied as a patch series from
+# patches/, not cherry-picked at build time: the two conflicts below are resolved once, here,
+# so a rebuild is deterministic instead of racing whatever master looks like today.
+#
+# Why this replaced the Nathanw1014 cherry-picks that used to live here:
+#   Both forks implement a qwen4exp NextN head, but they are DIFFERENT implementations and the
+#   sidecar decides which one is correct. unsloth's exporter emits blk.N.nextn.hc_head_{norm,
+#   down,up} -- the MTP block's own copy of the hyper-connection mixer, which qwen4exp has in
+#   place of a final output norm. Master knows LLM_TENSOR_HC_HEAD_* only as trunk-level
+#   "output_hc_*", and the Nathanw1014 loader has no NEXTN_HC_HEAD_* at all, so against an
+#   unsloth sidecar it builds the head WITHOUT its output mixer: compiles, loads, generates
+#   garbage. Verified by inspecting the sidecar's tensor list against src/llama-arch.cpp.
+#   PR #144 adds the mapping, so it is the implementation that matches our weights.
+#
+# What each patch is for:
+#   0001 gguf-py: register NEXTN_HC_HEAD_{NORM,DOWN,UP} + list NextN under QWEN4EXP
+#   0002 model:   the NextN/MTP draft head itself                    <-- conflict resolved
+#   0003 convert: export the head (--mtp / --no-nextn); unused at runtime, kept for parity
+#   0004 llama:   let a draft borrow the target's embd + lm_head (the "shared" sidecar)
+#   0005 qwen4exp: allow loading a draft-only MTP export
+#   0006 ggml-cuda: key the CUDA graph cache by shape (HIP shares this backend)
+#   0007 speculative: --spec-draft-adaptive                          <-- conflict resolved
+#
+# The two resolutions, both against changes master made after the forks branched:
+#   0002 -- master turned n_ff_exp into a per-layer array behind an accessor. The NextN key
+#           read MUST come before get_key_or_arr, which sizes n_ff_exp_arr against n_layer_all;
+#           and the per-layer read stays the no-arg n_ff_exp(), because n_ff_exp_arr is sized
+#           to the trunk and indexing it by il reads past the end for the appended MTP block.
+#   0007 -- master added n_max to the common_speculative_impl ctor; the adaptive commit had
+#           replaced that ctor to seed its EMA vectors. Merged: master's signature, fork's body.
+#
+# Sidecar note: use the SELF-CONTAINED head (MTP/mtp-...-Q8_0.gguf, 3.85 GiB, carries its own
+# token_embd + output.weight). The "shared" head is 2.6 GiB but only loads via 0004's borrow
+# path; the self-contained one needs nothing special and is the safer default.
+# Master declares -sm tensor unsupported for qwen4exp; use layer split.
 FROM rocm/dev-ubuntu-24.04:7.2 AS build
 
-ARG LLAMA_CPP_REF=36b10154383b60eb15baac2c7a40d2a5f784faa7
+ARG LLAMA_CPP_REF=050dde50c9d70cf207db84f7224eedc491d817b2
 ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG AMDGPU_TARGETS=gfx1100
 # hipcc peaks several GB per TU; -j$(nproc) OOM-kills the clang backend on this 60 GB box
@@ -40,16 +60,15 @@ RUN for i in 1 2 3 4 5; do \
     && dpkg -s hipblaslt >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
-ARG FORK_REPO=https://github.com/Nathanw1014/llama.cpp.git
-ARG MTP_COMMITS="354390810 39817c476"
-
 WORKDIR /src/llama.cpp
-RUN git clone --filter=blob:none "$LLAMA_CPP_REPO" . \
-    && git checkout "$LLAMA_CPP_REF" \
-    && git remote add fork "$FORK_REPO" \
-    && git fetch fork \
-    && git -c user.email=build@local -c user.name=build cherry-pick $MTP_COMMITS \
-    && git log --oneline -3
+COPY patches/ /src/patches/
+# A shallow fetch is enough now that nothing is cherry-picked: git am needs only the tip.
+RUN git init -q . \
+    && git remote add origin "$LLAMA_CPP_REPO" \
+    && git fetch -q --depth 1 origin "$LLAMA_CPP_REF" \
+    && git checkout -q FETCH_HEAD \
+    && git -c user.email=build@local -c user.name=build am --keep-non-patch /src/patches/*.patch \
+    && git log --oneline -8
 
 RUN cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \

@@ -500,6 +500,13 @@ class DockerRunner:
             # Docker's 64 MiB default is too small for three-GPU communicators and
             # makes llama.cpp silently fall back to its slow butterfly all-reduce.
             "ShmSize": self.config.shm_size,
+            # Runners die on their own: the qwen4exp HIP backend takes a GPU page fault
+            # ("Memory access fault by GPU node-N") every few hours at deep context and
+            # exits 139, and nothing was bringing it back — one such fault cost an hour of
+            # silent downtime. Bounded rather than unless-stopped on purpose: a genuinely
+            # broken profile should stop retrying and surface, not loop on a 45 s model load
+            # forever. stop() removes the container, so this never fights a deliberate stop.
+            "RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 10},
             "Binds": binds,
             "Devices": [
                 {"PathOnHost": device, "PathInContainer": device, "CgroupPermissions": "rwm"}
