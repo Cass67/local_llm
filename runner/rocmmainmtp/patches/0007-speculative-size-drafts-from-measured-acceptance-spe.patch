@@ -1,0 +1,307 @@
+From 425a0f68a6b8b5ad96803253c6cba1ed586b5ee5 Mon Sep 17 00:00:00 2001
+From: Marshall <assistant@llama.cpp>
+Date: Sun, 23 Aug 2026 22:30:18 +0100
+Subject: [PATCH 7/7] speculative: size drafts from measured acceptance
+ (--spec-draft-adaptive)
+
+A fixed --spec-draft-n-max can only be right for one kind of content.
+Drafting past what the target will accept is pure waste: the draft proposes
+every token and the target verifies all of them, but everything after the
+first rejection is discarded. Measured on Qwen3.8-27B, MTP loses ~18% on
+JSON at n=3 and ~9% on prose at n=7 -- the correct setting is opposite for
+the two.
+
+Track a per-sequence EMA of accepted tokens and size each draft from it.
+
+The subtlety is that the action censors the measurement: when every drafted
+token is accepted we learn only that acceptance was *at least* n_drafted,
+never how much further it would have gone. Averaging that lower bound
+ratchets the draft length down and strands it there. So the two outcomes are
+different observations:
+
+  partial accept -> uncensored, the exact stopping point was seen: track it
+  full accept    -> censored, a lower bound only: probe upward instead
+
+Backing off is averaged (alpha 0.25, ~4-step memory) and probing is additive,
+so the controller follows content drift within a response without thrashing
+on a single unlucky rejection. Reset happens on begin() -- a new prompt or a
+reused server slot -- and never mid-generation, since tracking drift is the
+point.
+
+Qwen3.8-27B-ROCmFP4-FAST target, Radeon 8060S, greedy, 300 tokens:
+
+  MTP                    prose  json
+  n=3 fixed               23.3  36.7
+  n=7 fixed               21.3  44.9
+  n=7 adaptive            23.0  45.1
+
+  DFlash2 + z-lab Q8_0   prose  json
+  n=3 fixed               24.7  36.6
+  n=7 fixed               23.0  35.8
+  n=7 adaptive            25.0  48.5
+
+  DFlash2 + FP4 sidecar  prose  json
+  n=3 fixed               25.5  38.3
+  n=7 fixed               21.8  34.1
+  n=7 adaptive            23.6  50.2
+
+MTP adaptive matches the better fixed setting on both content types at once.
+DFlash2 with the z-lab Q8_0 sidecar beats every fixed setting on both, +32%
+on JSON. With the weaker FP4 sidecar it still gains 31% on JSON but gives up
+7% on prose -- the optimum depends on which draft is loaded, which is itself
+an argument for adapting rather than hand-tuning n_max.
+
+Adaptive at n_max=12 lands within noise of n_max=7 in every arm, so n_max
+becomes a safety ceiling rather than a tuning parameter.
+
+Off by default. Speculation stays distribution-preserving, so this can only
+move throughput, never output.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ common/arg.cpp         |  7 +++
+ common/common.h        |  3 ++
+ common/speculative.cpp | 97 +++++++++++++++++++++++++++++++++++++++---
+ 3 files changed, 102 insertions(+), 5 deletions(-)
+
+diff --git a/common/arg.cpp b/common/arg.cpp
+index 015196ca1..b4249ae89 100644
+--- a/common/arg.cpp
++++ b/common/arg.cpp
+@@ -4164,6 +4164,13 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+             params.speculative.draft.n_max = value;
+         }
+     ).set_spec().set_examples({LLAMA_EXAMPLE_SPECULATIVE, LLAMA_EXAMPLE_LOOKUP, LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_SPEC_DRAFT_N_MAX"));
++    add_opt(common_arg(
++        {"--spec-draft-adaptive"},
++        string_format("size each draft from measured acceptance rather than always drafting --spec-draft-n-max (default: %s)", params.speculative.draft.adaptive ? "true" : "false"),
++        [](common_params & params) {
++            params.speculative.draft.adaptive = true;
++        }
++    ).set_spec().set_examples({LLAMA_EXAMPLE_SPECULATIVE, LLAMA_EXAMPLE_LOOKUP, LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_SPEC_DRAFT_ADAPTIVE"));
+     add_opt(common_arg(
+         {"--spec-draft-n-min"}, "N",
+         string_format("minimum number of draft tokens to use for speculative decoding (default: %d)", params.speculative.draft.n_min),
+diff --git a/common/common.h b/common/common.h
+index 63d0badd0..c316f6427 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -341,6 +341,9 @@ struct common_params_speculative_draft {
+     ggml_type cache_type_k = GGML_TYPE_F16; // KV cache data type for the K
+     ggml_type cache_type_v = GGML_TYPE_F16; // KV cache data type for the V
+ 
++    // size each draft from measured acceptance instead of always drafting n_max
++    bool adaptive = false;
++
+     common_cpu_params cpuparams;
+     common_cpu_params cpuparams_batch;
+ 
+diff --git a/common/speculative.cpp b/common/speculative.cpp
+index 70dcb2e41..944562458 100644
+--- a/common/speculative.cpp
++++ b/common/speculative.cpp
+@@ -159,7 +159,74 @@ struct common_speculative_impl {
+     int64_t t_draft_us  = 0; // total time spent in generating drafts in this implementation in microseconds.
+     int64_t t_accept_us = 0; // total time spent in accumulation of this implementation in microseconds.
+ 
+-    common_speculative_impl(common_speculative_type type, uint32_t n_seq, int32_t n_max) : type(type), n_seq(n_seq), n_max(n_max) {}
++    // Adaptive draft length.
++    //
++    // Drafting more tokens than the target will accept is pure waste: the draft
++    // pays for every token it proposes, and the target verifies all of them, but
++    // everything after the first rejection is discarded. A fixed n_max therefore
++    // overshoots on unpredictable content (prose) and undershoots on predictable
++    // content (JSON, verbatim quoting) -- which is exactly why MTP measures worse
++    // at n=7 than at n=3 on every content class while DFlash2 prefers 7.
++    //
++    // Track an EMA of how many tokens the target actually accepted per draft and
++    // size the next draft just above it. Sizing to ema+1 keeps one token of
++    // headroom so the estimate can climb again when content becomes predictable.
++    // The action censors the measurement: if every drafted token is accepted we
++    // only learn the true acceptance was *at least* n_drafted, never how much
++    // further it would have gone. Averaging a censored sample would ratchet the
++    // draft length down and strand it there. So the two outcomes are treated as
++    // different observations:
++    //   partial accept -> uncensored, we saw the exact stopping point: track it
++    //   full accept    -> censored, a lower bound only: probe upward instead
++    // Backing off is averaged (gentle), probing is additive (faster), so the
++    // controller recovers quickly when content turns predictable again.
++    std::vector<float>   acc_ema;      // per-seq EMA of accepted tokens per draft
++    std::vector<int32_t> n_last_draft; // per-seq size of the draft just issued
++    bool adaptive_n = false;           // enabled by --spec-draft-adaptive
++
++    static constexpr float acc_ema_alpha  = 0.25f; // ~4-step memory
++    static constexpr float acc_ema_probe  = 1.0f;  // additive growth on a clean draft
++    static constexpr float acc_ema_init   = 2.0f;
++
++    void update_acc_ema(llama_seq_id seq_id, uint16_t n_accepted) {
++        if (seq_id < 0 || (size_t) seq_id >= acc_ema.size()) {
++            return;
++        }
++        const int32_t n_drafted = n_last_draft[seq_id];
++        if (n_drafted > 0 && (int32_t) n_accepted >= n_drafted) {
++            acc_ema[seq_id] += acc_ema_probe;   // censored: lower bound, probe up
++        } else {
++            acc_ema[seq_id] = (1.0f - acc_ema_alpha) * acc_ema[seq_id] + acc_ema_alpha * (float) n_accepted;
++        }
++        n_last_draft[seq_id] = 0;
++    }
++
++    // reset on a new prompt / reused server slot; never mid-generation, since
++    // tracking content drift within a response is the point of the EMA
++    void reset_acc_ema(llama_seq_id seq_id) {
++        if (seq_id >= 0 && (size_t) seq_id < acc_ema.size()) {
++            acc_ema[seq_id]      = acc_ema_init;
++            n_last_draft[seq_id] = 0;
++        }
++    }
++
++    // effective draft length for this step, never above the configured n_max
++    int32_t adaptive_n_draft(llama_seq_id seq_id, int32_t n_cfg, int32_t n_min) {
++        if (!adaptive_n || seq_id < 0 || (size_t) seq_id >= acc_ema.size()) {
++            return n_cfg;
++        }
++        const int32_t n_want = (int32_t) std::lround(acc_ema[seq_id]);
++        const int32_t n      = std::max(std::max(1, n_min), std::min(n_cfg, n_want));
++        acc_ema[seq_id]      = std::min(acc_ema[seq_id], (float) n_cfg); // do not let the probe run away
++        n_last_draft[seq_id] = n;
++        return n;
++    }
++
++    common_speculative_impl(common_speculative_type type, uint32_t n_seq, int32_t n_max) : type(type), n_seq(n_seq), n_max(n_max) {
++        // start optimistic so a predictable prefix is not throttled from step one
++        acc_ema.assign(n_seq, acc_ema_init);
++        n_last_draft.assign(n_seq, 0);
++    }
+ 
+     virtual ~common_speculative_impl() = default;
+ 
+@@ -195,6 +262,7 @@ struct common_speculative_impl_draft_simple : public common_speculative_impl {
+         }
+ 
+         SPC_TRC("%s", "adding speculative implementation 'draft-simple'\n");
++        adaptive_n = this->params.adaptive;
+         SPC_TRC("- n_max=%d, n_min=%d, p_min=%f\n", this->params.n_max, this->params.n_min, this->params.p_min);
+         SPC_TRC("- gpu_layers=%d, cache_k=%s, cache_v=%s, ctx_tgt=%s, ctx_dft=%s, devices=[%s]\n",
+                 this->params.n_gpu_layers,
+@@ -319,6 +387,8 @@ struct common_speculative_impl_draft_simple : public common_speculative_impl {
+ 
+                 auto * smpl = smpls[seq_id].get();
+ 
++                const int32_t n_draft_eff = adaptive_n_draft(seq_id, params.n_max, params.n_min);
++
+                 common_sampler_sample(smpl, ctx_dft, i_batch, true);
+                 ++i_batch;
+ 
+@@ -348,7 +418,7 @@ struct common_speculative_impl_draft_simple : public common_speculative_impl {
+ 
+                 result.push_back(id);
+ 
+-                if ((params.n_max <= (int) result.size()) ||
++                if ((n_draft_eff <= (int) result.size()) ||
+                     (dp.n_max > 0 && dp.n_max <= (int) result.size())) {
+                     drafting[seq_id] = false;
+                     n_drafting--;
+@@ -458,6 +528,7 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
+         , params(params.draft)
+     {
+         SPC_TRC("%s", "adding speculative implementation 'draft-eagle3'\n");
++        adaptive_n = this->params.adaptive;
+         SPC_TRC("- n_max=%d, n_min=%d, p_min=%f, backend_sampling=%d\n", params.draft.n_max, params.draft.n_min, params.draft.p_min, (int) params.draft.backend_sampling);
+ 
+         auto * ctx_tgt = this->params.ctx_tgt;
+@@ -779,6 +850,8 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
+ 
+                 auto * smpl = smpls[seq_id].get();
+ 
++                const int32_t n_draft_eff = adaptive_n_draft(seq_id, params.n_max, params.n_min);
++
+                 common_sampler_sample(smpl, ctx_dft, i_batch, true);
+                 // pre-norm hidden state of this position becomes g_embd for the next step
+                 const float * prenorm = llama_get_embeddings_nextn_ith(ctx_dft, i_batch);
+@@ -810,7 +883,7 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
+ 
+                 result.push_back(id);
+ 
+-                if (params.n_max <= (int) result.size()) {
++                if (n_draft_eff <= (int) result.size()) {
+                     drafting[seq_id] = false;
+                     n_drafting--;
+                     continue;
+@@ -992,6 +1065,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+         }
+ 
+         LOG_INF("%s: adding speculative implementation '%s'\n", __func__, common_speculative_type_to_str(type).c_str());
++        adaptive_n = this->params.adaptive;
+         LOG_INF("%s: - n_max=%d, n_min=%d, p_min=%.2f\n", __func__, this->params.n_max, this->params.n_min, this->params.p_min);
+         LOG_INF("%s: - block_size=%d, mask_token_id=%d, n_extract=%u, sample_from_anchor=%s\n", __func__,
+                 block_size, mask_token_id, target_layer_ids_n, sample_from_anchor ? "true" : "false");
+@@ -1070,6 +1144,8 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+     }
+ 
+     void begin(llama_seq_id seq_id, const llama_tokens & prompt) override {
++
++        reset_acc_ema(seq_id);
+         if (seq_id < 0 || seq_id >= (llama_seq_id) n_seq) {
+             return;
+         }
+@@ -1193,7 +1269,10 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+ 
+             const int32_t n = (int32_t) dp.n_past;
+ 
+-            const int32_t n_draft = params.n_max;
++            // DFlash decodes the whole block in one pass, so a shorter block does
++            // not save draft time -- but it does shrink the target's verification
++            // batch, which is where the cost actually is.
++            const int32_t n_draft = adaptive_n_draft(seq_id, params.n_max, params.n_min);
+ 
+             const int32_t n_block_tokens = n_draft + (is_dspark && sample_from_anchor ? 0 : 1);
+             i_block_beg[seq_id] = batch.n_tokens;
+@@ -1371,6 +1450,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+         n_mtp_layers = std::max(1, (int) llama_model_n_layer_nextn(llama_get_model(ctx_dft)));
+ 
+         SPC_TRC("%s", "adding speculative implementation 'draft-mtp'\n");
++        adaptive_n = this->params.adaptive;
+         SPC_TRC("- n_max=%d, n_min=%d, p_min=%.2f, n_embd=%d, backend_sampling=%d\n", this->params.n_max, this->params.n_min, this->params.p_min, n_embd, (int) this->params.backend_sampling);
+         SPC_TRC("- gpu_layers=%d, cache_k=%s, cache_v=%s, ctx_tgt=%s, ctx_dft=%s, devices=[%s]\n",
+                 this->params.n_gpu_layers,
+@@ -1458,6 +1538,8 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+     }
+ 
+     void begin(llama_seq_id seq_id, const llama_tokens & prompt) override {
++
++        reset_acc_ema(seq_id);
+         const int32_t N = (int32_t) prompt.size();
+         if (N <= 0) {
+             return;
+@@ -1662,6 +1744,10 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+ 
+                 auto * smpl = smpls[seq_id].get();
+ 
++                // MTP drafts sequentially, so a shorter draft saves draft passes
++                // as well as target verification work.
++                const int32_t n_draft_eff = adaptive_n_draft(seq_id, params.n_max, params.n_min);
++
+                 common_sampler_sample(smpl, ctx_dft, i_last[seq_id], true);
+                 const float * h_row = llama_get_embeddings_nextn_ith(ctx_dft, i_last[seq_id]);
+ 
+@@ -1691,7 +1777,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+ 
+                 result.push_back(id);
+ 
+-                if (params.n_max <= (int) result.size()) {
++                if (n_draft_eff <= (int) result.size()) {
+                     drafting[seq_id] = false;
+                     n_drafting--;
+                     continue;
+@@ -2899,6 +2985,7 @@ void common_speculative_accept(common_speculative * spec, llama_seq_id seq_id, u
+             impl->n_acc_tokens += n_accepted;
+         }
+ 
++        impl->update_acc_ema(seq_id, n_accepted);
+         impl->accept(seq_id, n_accepted, false);
+         impl->n_call_accept++;
+     }
+-- 
+2.53.0
+
