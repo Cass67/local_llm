@@ -209,7 +209,14 @@ def _lint_spec(profile: dict[str, Any]) -> list[dict[str, str]]:
     # Scoped to draft-mtp on purpose. A DFlash2 sidecar is trained to emit a whole
     # block at once and measures fastest at its block_size (7 after llama.cpp's
     # clamp, ~2.24x vs 1.98x at 3 on Qwen3.8-27B) -- warning there is backwards.
-    if "draft-mtp" in kinds and (profile.get("mtp_draft_n_max") or 0) > 3:
+    # --spec-draft-adaptive turns n_max from a fixed depth into a ceiling: the draft
+    # is sized from measured acceptance, so a high n_max costs nothing on the rounds
+    # where the head is not confident. The warning only applies to fixed-depth drafts.
+    if (
+        "draft-mtp" in kinds
+        and not profile.get("spec_draft_adaptive")
+        and (profile.get("mtp_draft_n_max") or 0) > 3
+    ):
         out.append(
             _finding(
                 "warn",
