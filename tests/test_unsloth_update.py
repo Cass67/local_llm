@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "container"))
 from backend.routes import update  # noqa: E402
 
 
-@pytest.mark.parametrize("backend", ["rocmunsloth", "rocmunslothsrc"])
+@pytest.mark.parametrize("backend", ["rocmunsloth"])
 def test_no_default_tag_in_the_dockerfile(backend):
     """The image label is the only record of a variant's tag.
 

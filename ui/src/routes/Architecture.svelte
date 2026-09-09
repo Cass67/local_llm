@@ -980,10 +980,6 @@
 		background: #c13333;
 		color: #fff;
 	}
-	.badge-rocmfp4 {
-		background: #e0872a;
-		color: #fff;
-	}
 	.badge-vulkan {
 		background: #b84a00;
 		color: #fff;

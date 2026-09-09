@@ -139,15 +139,8 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
     ctx_chk = int(cfg.get("ctx_checkpoints") or 0)
     if ctx_chk > 0:
         args.extend(["--ctx-checkpoints", str(ctx_chk)])
-        # The ROCmFPX fork renamed --checkpoint-min-step to --checkpoint-every-n-tokens
-        # and rejects the stock flag; emit the fork's name on rocmfp4.
         if cfg.get("checkpoint_min_step") is not None:
-            flag = (
-                "--checkpoint-every-n-tokens"
-                if cfg.get("backend") == "rocmfp4"
-                else "--checkpoint-min-step"
-            )
-            args.extend([flag, str(cfg["checkpoint_min_step"])])
+            args.extend(["--checkpoint-min-step", str(cfg["checkpoint_min_step"])])
     else:
         args.extend(["--ctx-checkpoints", "0"])
     # Cheap KV-shift reuse across small prefix mismatches (e.g. per-turn tail
@@ -208,6 +201,10 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
                 args.extend(["--spec-draft-n-min", str(cfg["mtp_draft_n_min"])])
             if cfg.get("mtp_draft_p_min") is not None:
                 args.extend(["--spec-draft-p-min", str(cfg["mtp_draft_p_min"])])
+            # Sizes each draft from measured acceptance instead of always drafting n_max.
+            # rocmmainmtp only -- plain upstream rejects the flag and the runner dies.
+            if cfg.get("spec_draft_adaptive"):
+                args.append("--spec-draft-adaptive")
         if "ngram-mod" in kinds:
             for key, flag in (
                 ("ngram_mod_n_match", "--spec-ngram-mod-n-match"),

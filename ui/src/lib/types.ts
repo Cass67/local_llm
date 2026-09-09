@@ -3,15 +3,9 @@
 // stale list here means a runner you cannot pick rather than an error.
 export const BACKENDS = [
 	"rocm",
-	"rocmfp4",
 	"rocmmain",
 	"rocmmainmtp",
 	"rocmunsloth",
-	"rocmunslothsrc",
-	"rocmqwen4exp",
-	"rocmqwen4exp2",
-	"rocmfork",
-	"rocmdflash2",
 	"vulkan",
 	"cuda",
 ] as const;
@@ -21,15 +15,9 @@ export type Backend = (typeof BACKENDS)[number];
 // Mirrors _BACKEND_LABELS in container/backend/model_variants.py.
 export const BACKEND_LABELS: Record<Backend, string> = {
 	rocm: "ROCm",
-	rocmfp4: "ROCmFP4",
 	rocmmain: "ROCmMain",
 	rocmmainmtp: "ROCmMainMTP",
 	rocmunsloth: "ROCmUnsloth",
-	rocmunslothsrc: "ROCmUnslothSrc",
-	rocmqwen4exp: "ROCmQwen4Exp",
-	rocmqwen4exp2: "ROCmQwen4Exp2",
-	rocmfork: "ROCmFork",
-	rocmdflash2: "ROCmDFlash2",
 	vulkan: "Vulkan",
 	cuda: "CUDA",
 };
@@ -64,6 +52,7 @@ export interface ModelConfig {
 	mtp_draft_n_max?: number;
 	mtp_draft_n_min?: number;
 	mtp_draft_p_min?: number;
+	spec_draft_adaptive?: boolean;
 	spec_type?: string;
 }
 

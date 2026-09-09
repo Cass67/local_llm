@@ -16,41 +16,19 @@ RUNNER_IMAGES = {
     "vulkan": os.environ.get("RUNNER_IMAGE_VULKAN", "local-llm-runner-vulkan:latest"),
     "mixed_vulkan": os.environ.get("RUNNER_IMAGE_VULKAN", "local-llm-runner-vulkan:latest"),
     "rocm": os.environ.get("RUNNER_IMAGE_ROCM", "local-llm-runner-rocm:latest"),
-    "rocmfp4": os.environ.get("RUNNER_IMAGE_ROCMFP4", "local-llm-runner-rocmfp4:latest"),
-    # Qwen3.8-Flash-Next (arch qwen4exp) needs llama.cpp PR #27742; master cannot load it.
-    "rocmqwen4exp": os.environ.get(
-        "RUNNER_IMAGE_ROCMQWEN4EXP", "local-llm-runner-rocmqwen4exp:latest"
-    ),
-    # Nathanw1014 fork, HIP build: PR #27742 plus qwen4exp decode graph reuse
-    # (+9-11% tg upstream) and NextN/MTP draft support Flash-Next otherwise cannot use.
-    "rocmqwen4exp2": os.environ.get(
-        "RUNNER_IMAGE_ROCMQWEN4EXP2", "local-llm-runner-rocmqwen4exp2:latest"
-    ),
-    # Plain upstream llama.cpp, HIP. As of 2026-09-01 master carries the qwen4exp arch,
+    # Plain upstream llama.cpp, HIP. Master carries the qwen4exp arch,
     # --spec-type draft-mtp/draft-dflash/draft-dspark, recurrent state rollback (#28123) and
-    # the indexer head slicing (#28023) -- a superset of what rocmqwen4exp2 was forked for.
+    # the indexer head slicing (#28023).
     "rocmmain": os.environ.get("RUNNER_IMAGE_ROCMMAIN", "local-llm-runner-rocmmain:latest"),
-    # Upstream master + the two Nathanw1014 MTP-sidecar commits cherry-picked: the only
-    # build with both master's qwen4exp fixes (#28023 indexer slices, #28123 rollback,
-    # #27941 kvu/ext-restore/seq_cp) and MTP on a model with no in-file NextN.
+    # Upstream master + unsloth's NextN/MTP patch series + --spec-draft-adaptive: the only
+    # build with master's qwen4exp fixes and MTP against an unsloth sidecar head.
     "rocmmainmtp": os.environ.get(
         "RUNNER_IMAGE_ROCMMAINMTP", "local-llm-runner-rocmmainmtp:latest"
     ),
-    # unslothai/llama.cpp prebuilt gfx1100 release, vendored. The only build with MTP on the
-    # REAP quants AND upstream's qwen4exp fixes AND cross-model tensor borrowing.
+    # unslothai/llama.cpp prebuilt gfx1100 release, vendored. MTP on the REAP quants plus
+    # upstream's qwen4exp fixes and cross-model tensor borrowing.
     "rocmunsloth": os.environ.get(
         "RUNNER_IMAGE_ROCMUNSLOTH", "local-llm-runner-rocmunsloth:latest"
-    ),
-    # unslothai/llama.cpp built FROM SOURCE by replaying their release recipe (base tag plus
-    # the pinned PR set from scripts/unsloth/pr-set.json). gfx1100 only, no vendored binary.
-    "rocmunslothsrc": os.environ.get(
-        "RUNNER_IMAGE_ROCMUNSLOTHSRC", "local-llm-runner-rocmunslothsrc:latest"
-    ),
-    # LaurentZuijdwijk fork, HIP build: --spec-draft-adaptive (+46% structured output on 27B).
-    "rocmfork": os.environ.get("RUNNER_IMAGE_ROCMFORK", "local-llm-runner-rocmfork:latest"),
-    # DFlash2 block-diffusion drafter needs llama.cpp PR #27342; not in master. Layer split only.
-    "rocmdflash2": os.environ.get(
-        "RUNNER_IMAGE_ROCMDFLASH2", "local-llm-runner-rocmdflash2:latest"
     ),
     "cuda": os.environ.get("RUNNER_IMAGE_CUDA", "local-llm-runner-cuda:latest"),
 }

@@ -184,11 +184,11 @@ def test_build_runner_container_spec_pins_radeon_icd_for_amd_only_vulkan():
 
 
 def test_build_runner_container_spec_rocm_backend_does_not_pin_vulkan_icd():
-    # rocm/rocmfp4 also reach the AMD else-branch but use HIP, not Vulkan.
+    # rocm/rocmmain also reach the AMD else-branch but use HIP, not Vulkan.
     metadata = {
         "alias": "qwopus-q5km",
         "model_path": "/models/qwopus.gguf",
-        "config": {"backend": "rocmfp4", "visible_devices": "0,1"},
+        "config": {"backend": "rocmmain", "visible_devices": "0,1"},
     }
     config = DockerRunnerConfig(image="local-llm-runner:latest", port=8080)
 
@@ -235,3 +235,16 @@ def test_build_llama_server_args_kv_unified_is_tristate():
     omitted = args_for({})
     assert "--kv-unified" not in omitted
     assert "--no-kv-unified" not in omitted
+
+
+def test_spec_draft_adaptive_is_emitted_only_when_the_profile_asks_for_it():
+    metadata = {
+        "family": "qwopus",
+        "model_path": "/models/qwopus.gguf",
+        "config": {"ngl": 999, "spec_type": "draft-mtp", "mtp_draft_model": "/models/d.gguf"},
+    }
+
+    assert "--spec-draft-adaptive" not in build_llama_server_args(metadata, port=8080)
+
+    metadata["config"]["spec_draft_adaptive"] = True
+    assert "--spec-draft-adaptive" in build_llama_server_args(metadata, port=8080)

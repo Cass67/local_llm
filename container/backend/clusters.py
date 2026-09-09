@@ -12,33 +12,19 @@ from typing import Any
 from . import config
 from .gpu_inventory import GpuInfo
 
-# rocmfp4: same AMD/HIP device wiring as rocm, but the runner image is built from
-# the ROCmFPX fork (ROCmFP4 weight quants + MTP self-speculation).
 _VALID_BACKENDS = {
     "rocm",
-    "rocmfp4",
-    "rocmqwen4exp",
-    "rocmqwen4exp2",
     "rocmmain",
     "rocmmainmtp",
     "rocmunsloth",
-    "rocmunslothsrc",
-    "rocmfork",
-    "rocmdflash2",
     "vulkan",
     "cuda",
 }
 _SINGLE_VENDOR_BACKENDS = {
     "rocm": "amd",
-    "rocmfp4": "amd",
-    "rocmqwen4exp": "amd",
-    "rocmqwen4exp2": "amd",
     "rocmmain": "amd",
     "rocmmainmtp": "amd",
     "rocmunsloth": "amd",
-    "rocmunslothsrc": "amd",
-    "rocmfork": "amd",
-    "rocmdflash2": "amd",
     "cuda": "nvidia",
 }
 
@@ -190,15 +176,9 @@ def visible_devices_for(cluster: ClusterDef, inventory: list[GpuInfo]) -> str:
             continue
         if cluster.backend in (
             "rocm",
-            "rocmfp4",
-            "rocmqwen4exp",
-            "rocmqwen4exp2",
             "rocmmain",
             "rocmmainmtp",
             "rocmunsloth",
-            "rocmunslothsrc",
-            "rocmfork",
-            "rocmdflash2",
         ):
             idx = gpu.rocm_index
         elif cluster.backend == "cuda":

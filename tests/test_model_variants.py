@@ -13,8 +13,8 @@ from backend.model_variants import (  # noqa: E402
 def test_longest_suffix_wins():
     """Order matters: "-rocmunsloth" must strip before "-rocm", or a variant keeps a stub."""
     assert base_variant_id("qwopus-rocmunsloth") == "qwopus"
-    assert base_variant_id("qwopus-rocmunslothsrc") == "qwopus"
-    assert base_variant_id("qwopus-rocmfp4") == "qwopus"
+    assert base_variant_id("qwopus-rocmmainmtp") == "qwopus"
+    assert base_variant_id("qwopus-rocmunsloth") == "qwopus"
     assert base_variant_id("qwopus-rocm") == "qwopus"
     assert base_variant_id("qwopus") == "qwopus"
 

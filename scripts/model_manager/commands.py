@@ -45,7 +45,7 @@ _DECODE_TOK_S_MIN = 5.0
 _SAFE_SIMPLE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SAFE_REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _SAFE_NUM_LIST = re.compile(r"^[0-9]+(,[0-9]+)*$")
-_SAFE_BACKENDS = frozenset({"rocm", "vulkan", "cuda", "rocmfp4"})
+_SAFE_BACKENDS = frozenset({"rocm", "vulkan", "cuda"})
 _SAFE_SPLIT_MODES = frozenset({"layer", "row", "tensor", "none"})
 
 
