@@ -31,9 +31,9 @@ COMMIT_LABEL = "llama.cpp.commit"
 RUNNER_SRC_DIR = Path(os.environ.get("RUNNER_SRC_DIR", "/app/runner"))
 BUILD_LOG_PREFIX = "build-"
 
-# Only backends built from ggml-org/llama.cpp belong here: the rebuild passes
-# --build-arg LLAMA_CPP_REF=<upstream sha>, which would silently build upstream
-# instead of the fork for rocmqwen4exp2 / rocmfork / rocmdflash2.
+# Only backends built from a plain ggml-org/llama.cpp checkout belong here: the rebuild
+# passes --build-arg LLAMA_CPP_REF=<upstream sha>, which would drop the patch series on a
+# backend like rocmmainmtp.
 _BACKENDS = ("vulkan", "rocm", "cuda", "rocmmain")
 
 _gh_cache: dict[str, tuple[float, httpx.Response]] = {}
@@ -136,10 +136,7 @@ SERVICES: dict[str, dict] = {
 UNSLOTH_REPO = "unslothai/llama.cpp"
 UNSLOTH_ASSET_SUFFIX = "linux-x64-rocm-gfx110X.tar.gz"  # gfx1100 = 7900 XT
 UNSLOTH_TAG_LABEL = "unsloth.tag"
-UNSLOTH_VARIANTS = {
-    "rocmunsloth": "prebuilt release tarball",
-    "rocmunslothsrc": "built from source off the same tag",
-}
+UNSLOTH_VARIANTS = {"rocmunsloth": "prebuilt release tarball"}
 
 # image id -> short sha, so we only `docker run --version` once per image build
 _version_cache: dict[str, str] = {}
@@ -820,19 +817,6 @@ async def _latest_unsloth(client) -> tuple[str, str]:
     raise HTTPException(502, f"no release with a {UNSLOTH_ASSET_SUFFIX} asset")
 
 
-async def _unsloth_base(client, tag: str) -> str:
-    """The upstream commit a release tag was cut from -- its bNNNNN prefix is a ggml-org tag."""
-    match = re.match(r"(b\d+)-", tag)
-    if not match:
-        raise HTTPException(502, f"cannot read an upstream base out of tag '{tag}'")
-    try:
-        resp = await client.get(f"{GITHUB_API}/commits/{match.group(1)}")
-        resp.raise_for_status()
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"upstream base {match.group(1)} unresolvable: {e}") from e
-    return resp.json()["sha"]
-
-
 def _run_unsloth_build(job: dict, backend: str, image: str, args: dict[str, str]) -> None:
     with open(_job_log(job["id"]), "w") as log:
         job["current"] = backend
@@ -863,12 +847,7 @@ async def start_unsloth_build(backend: str):
 
     async with GitHub(timeout=20.0) as client:
         tag, asset = await _latest_unsloth(client)
-        args = {"UNSLOTH_TAG": tag}
-        if backend == "rocmunslothsrc":
-            # The source build replays base + PR set, and the base is not in the recipe.
-            args["UPSTREAM_BASE"] = await _unsloth_base(client, tag)
-        else:
-            args["UNSLOTH_ASSET"] = asset
+        args = {"UNSLOTH_TAG": tag, "UNSLOTH_ASSET": asset}
 
     job = _claim_job(backend, [backend])
     threading.Thread(

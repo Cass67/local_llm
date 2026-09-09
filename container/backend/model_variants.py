@@ -5,33 +5,21 @@ from typing import Any, Literal, get_args
 
 Backend = Literal[
     "rocm",
-    "rocmfp4",
-    "rocmqwen4exp",
-    "rocmqwen4exp2",
     "rocmmain",
     "rocmmainmtp",
     "rocmunsloth",
-    "rocmunslothsrc",
-    "rocmfork",
-    "rocmdflash2",
     "vulkan",
     "cuda",
 ]
-# Derived from Backend, longest first so "-rocmfp4" is stripped before "-rocm" and
-# "-rocmunsloth" before both. Hand-listing these went stale as backends were added, which
+# Derived from Backend, longest first so "-rocmmainmtp" is stripped before "-rocmmain"
+# and "-rocmunsloth" before "-rocm". Hand-listing these went stale as backends were added, which
 # made copy-from-a-variant accumulate suffixes (foo-rocmunsloth -> foo-rocmunsloth-rocm).
 _BACKEND_SUFFIXES = tuple(sorted((f"-{b}" for b in get_args(Backend)), key=len, reverse=True))
 _BACKEND_LABELS = {
     "rocm": "ROCm",
-    "rocmfp4": "ROCmFP4",
-    "rocmqwen4exp": "ROCmQwen4Exp",
-    "rocmqwen4exp2": "ROCmQwen4Exp2",
     "rocmmain": "ROCmMain",
     "rocmmainmtp": "ROCmMainMTP",
     "rocmunsloth": "ROCmUnsloth",
-    "rocmunslothsrc": "ROCmUnslothSrc",
-    "rocmfork": "ROCmFork",
-    "rocmdflash2": "ROCmDFlash2",
     "vulkan": "Vulkan",
     "cuda": "CUDA",
 }
@@ -83,15 +71,9 @@ def migrate_backend_variant(metadata: dict[str, Any]) -> dict[str, Any]:
     backend = str(metadata.get("backend") or cfg.get("backend") or "rocm")
     if backend not in (
         "rocm",
-        "rocmfp4",
-        "rocmqwen4exp",
-        "rocmqwen4exp2",
         "rocmmain",
         "rocmmainmtp",
         "rocmunsloth",
-        "rocmunslothsrc",
-        "rocmfork",
-        "rocmdflash2",
         "vulkan",
         "cuda",
     ):

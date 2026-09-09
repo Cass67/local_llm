@@ -33,7 +33,7 @@ def temp_state(tmp_path, monkeypatch):
                 "families": {
                     "qwen": {
                         "profiles": {
-                            "balanced": {"mtp_enabled": True, "ngl": 999, "backend": "rocmfork"}
+                            "balanced": {"mtp_enabled": True, "ngl": 999, "backend": "rocmmainmtp"}
                         }
                     }
                 }
@@ -91,7 +91,7 @@ async def test_copy_backend_clones_the_profiles_and_drops_the_image_pin(temp_sta
     assert copied["mtp_enabled"] is True
     # the source pinned this profile to another runner image; the copy must not inherit it
     assert "backend" not in copied
-    assert families["qwen"]["profiles"]["balanced"]["backend"] == "rocmfork"
+    assert families["qwen"]["profiles"]["balanced"]["backend"] == "rocmmainmtp"
 
 
 @pytest.mark.asyncio

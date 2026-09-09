@@ -50,6 +50,7 @@
 				mtp_draft_n_max: String(cfg.mtp_draft_n_max ?? ""),
 				mtp_draft_n_min: String(cfg.mtp_draft_n_min ?? ""),
 				mtp_draft_p_min: String(cfg.mtp_draft_p_min ?? ""),
+				spec_draft_adaptive: cfg.spec_draft_adaptive ? "on" : "off",
 				flash_attention: flashOn ? "on" : "off",
 				jinja: jinjaOn ? "on" : "off",
 				flags: parsed.flags,
@@ -91,6 +92,7 @@
 			mtp_draft_n_max: num("mtp_draft_n_max"),
 			mtp_draft_n_min: num("mtp_draft_n_min"),
 			mtp_draft_p_min: mtpFloat() || undefined,
+			spec_draft_adaptive: form.spec_draft_adaptive === "on",
 			flash_attention: form.flash_attention === "on",
 			jinja: form.jinja === "on",
 			flags: form.flags,
@@ -172,6 +174,7 @@
 								<label>Draft max<input type="number" bind:value={form.mtp_draft_n_max} /></label>
 								<label>Draft min<input type="number" bind:value={form.mtp_draft_n_min} /></label>
 								<label>P min<input type="number" step="0.01" bind:value={form.mtp_draft_p_min} /></label>
+								<label>Adaptive draft<select bind:value={form.spec_draft_adaptive}><option value="off">off</option><option value="on">on</option></select></label>
 							</div>
 						{/if}
 					</div>

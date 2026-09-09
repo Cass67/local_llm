@@ -307,6 +307,7 @@ class EditRequest(BaseModel):
     mtp_draft_n_max: int | None = None
     mtp_draft_n_min: int | None = None
     mtp_draft_p_min: float | None = None
+    spec_draft_adaptive: bool | None = None
     spec_type: str | None = None
     ngram_mod_n_match: int | None = None
     ngram_mod_n_min: int | None = None
@@ -368,6 +369,7 @@ async def edit_model(family: str, req: EditRequest):
         "mtp_draft_n_max",
         "mtp_draft_n_min",
         "mtp_draft_p_min",
+        "spec_draft_adaptive",
         "spec_type",
         "ngram_mod_n_match",
         "ngram_mod_n_min",
