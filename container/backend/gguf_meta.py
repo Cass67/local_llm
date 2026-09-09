@@ -48,6 +48,7 @@ class GgufMeta:
     # blocks and state-space layers on the rest, so the product overcounts wildly.
     kv_heads_total: int = 0
     n_embd: int = 0
+    n_tensors: int = 0
 
 
 class _Reader:
@@ -104,7 +105,7 @@ def read_gguf_meta(path: str | Path) -> GgufMeta | None:
                 return None
             struct.unpack("<I", fh.read(4))[0]  # version
             r = _Reader(fh)
-            struct.unpack("<Q", r.raw(8))[0]  # tensor count
+            n_tensors = struct.unpack("<Q", r.raw(8))[0]
             kv_count = struct.unpack("<Q", r.raw(8))[0]
             kv: dict[str, object] = {}
             for _ in range(kv_count):
@@ -148,10 +149,18 @@ def read_gguf_meta(path: str | Path) -> GgufMeta | None:
         # layout instead: ssm.* mixers on every block except every Nth, which is
         # full attention. Only those blocks hold KV. A trailing nextn block is an
         # MTP head appended to the trunk and carries no trunk KV either.
-        trunk = n_layers - num("nextn_predict_layers")
-        interval = num("full_attention_interval")
-        attn_layers = (trunk // interval) if interval > 1 else trunk
-        kv_heads_total = attn_layers * n_head_kv
+        nextn = num("nextn_predict_layers")
+        # A draft-only MTP sidecar copies the parent's hparams wholesale -- same
+        # block_count, same interval -- but ships only the nextn block's tensors (18 of
+        # them, against hundreds for the trunk). llama.cpp gives it KV for that one
+        # layer, so believing block_count here overcounts its cache 16x.
+        if nextn and n_tensors and n_tensors < n_layers:
+            kv_heads_total = nextn * n_head_kv
+        else:
+            trunk = n_layers - nextn
+            interval = num("full_attention_interval")
+            attn_layers = (trunk // interval) if interval > 1 else trunk
+            kv_heads_total = attn_layers * n_head_kv
 
     if not (n_layers and n_head_kv and key_length):
         return None
@@ -164,6 +173,7 @@ def read_gguf_meta(path: str | Path) -> GgufMeta | None:
         file_bytes=size,
         kv_heads_total=kv_heads_total,
         n_embd=n_embd,
+        n_tensors=n_tensors,
     )
 
 

@@ -116,7 +116,15 @@ def test_promoted_flag_in_raw_flags_flagged():
 
 
 def _write_gguf(
-    path: Path, *, layers=48, head_kv=8, head_count=40, embd=5120, pad=4096, extra=None
+    path: Path,
+    *,
+    layers=48,
+    head_kv=8,
+    head_count=40,
+    embd=5120,
+    pad=4096,
+    extra=None,
+    tensors=0,
 ):
     """Write a minimal but structurally real GGUF header."""
 
@@ -159,7 +167,12 @@ def _write_gguf(
         kv_u32("llama.embedding_length", embd),
     ]
     entries += [kv_u32(f"llama.{k}", v) for k, v in (extra or {}).items()]
-    body = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack("<Q", len(entries))
+    body = (
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", tensors)
+        + struct.pack("<Q", len(entries))
+    )
     body += b"".join(entries)
     path.write_bytes(body + b"\0" * pad)
 
@@ -280,3 +293,19 @@ def test_estimate_counts_the_draft_model_as_a_second_context(tmp_path):
     assert without["draft_mb"] == 0
     assert with_draft["draft_mb"] > 10000  # its own weights + KV + compute buffer
     assert with_draft["total_mb"] > without["total_mb"]
+
+
+def test_draft_only_sidecar_gets_kv_for_its_nextn_block_not_the_parent_trunk(tmp_path):
+    # The MTP export copies the parent hparams but ships only the nextn block.
+    p = tmp_path / "mtp.gguf"
+    _write_gguf(
+        p,
+        layers=65,
+        head_kv=4,
+        tensors=18,
+        extra={"full_attention_interval": 4, "nextn_predict_layers": 1},
+    )
+    meta = read_gguf_meta(p)
+    assert meta.kv_heads_total == 4  # one layer, not the trunk's 16
+    # llama.cpp reports exactly 1000 MiB for this sidecar at 256k ctx.
+    assert round(kv_cache_mb(meta, 256000, "f16", "f16")) == 500
