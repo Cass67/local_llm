@@ -4,7 +4,7 @@ import re
 import struct
 from pathlib import Path
 
-from backend.gguf_meta import kv_cache_mb, read_gguf_meta
+from backend.gguf_meta import compute_buffer_mb, kv_cache_mb, read_gguf_meta
 from backend.profile_lint import KNOWN_FIELDS, estimate_vram_mb, lint_profile
 
 RUNTIME_SRC = Path(__file__).resolve().parents[1] / "backend" / "runtime.py"
@@ -252,3 +252,31 @@ def test_scalar_head_count_kv_hybrid_counts_only_full_attention_blocks(tmp_path)
     assert meta.kv_heads_total == 64
     # The old product overcounted this by just over 4x.
     assert round(kv_cache_mb(meta, 256000, "f16", "f16")) == 8000
+
+
+def test_compute_buffer_is_linear_in_ubatch_and_multiplied_by_device_count(tmp_path):
+    p = tmp_path / "m.gguf"
+    _write_gguf(p, layers=65, head_kv=4, head_count=40, embd=5120)
+    meta = read_gguf_meta(p)
+    one = compute_buffer_mb(meta, 512, 1)
+    # Measured on gfx1100: 372.02 MiB/device at ubatch 512, n_embd 5120.
+    assert 370 < one < 375
+    # Linear in ubatch, no constant term: 8x the ubatch is 8x the buffer.
+    assert round(compute_buffer_mb(meta, 4096, 1) / one, 3) == 8.0
+    # Tensor split reserves a full buffer per device, so it multiplies.
+    assert compute_buffer_mb(meta, 512, 4) == one * 4
+
+
+def test_estimate_counts_the_draft_model_as_a_second_context(tmp_path):
+    target = tmp_path / "t.gguf"
+    draft = tmp_path / "d.gguf"
+    _write_gguf(target, layers=65, head_kv=4, embd=5120)
+    _write_gguf(draft, layers=1, head_kv=4, embd=5120)
+    profile = {"context": 256000, "ubatch": 4096, "tensor_split": "1,1,1,1"}
+
+    without = estimate_vram_mb(profile, target)
+    with_draft = estimate_vram_mb(profile | {"mtp_draft_model": str(draft)}, target)
+
+    assert without["draft_mb"] == 0
+    assert with_draft["draft_mb"] > 10000  # its own weights + KV + compute buffer
+    assert with_draft["total_mb"] > without["total_mb"]
