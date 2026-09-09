@@ -115,7 +115,9 @@ def test_promoted_flag_in_raw_flags_flagged():
 # --- GGUF header + VRAM estimate ---
 
 
-def _write_gguf(path: Path, *, layers=48, head_kv=8, head_count=40, embd=5120, pad=4096):
+def _write_gguf(
+    path: Path, *, layers=48, head_kv=8, head_count=40, embd=5120, pad=4096, extra=None
+):
     """Write a minimal but structurally real GGUF header."""
 
     def kv_str(key, value):
@@ -156,6 +158,7 @@ def _write_gguf(path: Path, *, layers=48, head_kv=8, head_count=40, embd=5120, p
         kv_u32("llama.attention.head_count", head_count),
         kv_u32("llama.embedding_length", embd),
     ]
+    entries += [kv_u32(f"llama.{k}", v) for k, v in (extra or {}).items()]
     body = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack("<Q", len(entries))
     body += b"".join(entries)
     path.write_bytes(body + b"\0" * pad)
@@ -223,3 +226,29 @@ def test_penalties_without_window_flagged():
         == []
     )
     assert _levels(lint_profile({"presence_penalty": 0, "temperature": 1}), "penalty_last_n") == []
+
+
+def test_n_max_warning_is_dropped_when_adaptive_sizes_the_draft():
+    fixed = {"spec_type": "draft-mtp", "mtp_draft_model": "/m/d.gguf", "mtp_draft_n_max": 7}
+    assert any(f["field"] == "mtp_draft_n_max" for f in lint_profile(fixed))
+
+    adaptive = fixed | {"spec_draft_adaptive": True}
+    assert not any(f["field"] == "mtp_draft_n_max" for f in lint_profile(adaptive))
+
+
+def test_scalar_head_count_kv_hybrid_counts_only_full_attention_blocks(tmp_path):
+    # qwen35-style: head_count_kv stays scalar and the hybrid layout is described by
+    # full_attention_interval, with a trailing nextn block that holds no trunk KV.
+    p = tmp_path / "qwen35.gguf"
+    _write_gguf(
+        p,
+        layers=65,
+        head_kv=4,
+        extra={"full_attention_interval": 4, "nextn_predict_layers": 1},
+    )
+    meta = read_gguf_meta(p)
+    assert meta is not None
+    # 64 trunk blocks / 4 = 16 attention blocks * 4 heads, not 65 * 4 = 260.
+    assert meta.kv_heads_total == 64
+    # The old product overcounted this by just over 4x.
+    assert round(kv_cache_mb(meta, 256000, "f16", "f16")) == 8000

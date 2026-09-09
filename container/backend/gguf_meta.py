@@ -140,7 +140,17 @@ def read_gguf_meta(path: str | Path) -> GgufMeta | None:
     # Hybrid archs list head_count_kv per block, with 0 on the layers that use a
     # state-space mixer instead of attention and so hold no KV at all.
     heads = per_layer("attention.head_count_kv")
-    kv_heads_total = sum(heads) if heads else n_layers * n_head_kv
+    if heads:
+        kv_heads_total = sum(heads)
+    else:
+        # qwen35 and friends keep head_count_kv scalar and describe the hybrid
+        # layout instead: ssm.* mixers on every block except every Nth, which is
+        # full attention. Only those blocks hold KV. A trailing nextn block is an
+        # MTP head appended to the trunk and carries no trunk KV either.
+        trunk = n_layers - num("nextn_predict_layers")
+        interval = num("full_attention_interval")
+        attn_layers = (trunk // interval) if interval > 1 else trunk
+        kv_heads_total = attn_layers * n_head_kv
 
     if not (n_layers and n_head_kv and key_length):
         return None
