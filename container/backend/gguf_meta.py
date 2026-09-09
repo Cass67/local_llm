@@ -47,6 +47,7 @@ class GgufMeta:
     # models, but hybrid archs (nemotron_h_moe, …) carry attention on only a few
     # blocks and state-space layers on the rest, so the product overcounts wildly.
     kv_heads_total: int = 0
+    n_embd: int = 0
 
 
 class _Reader:
@@ -162,6 +163,7 @@ def read_gguf_meta(path: str | Path) -> GgufMeta | None:
         value_length=value_length,
         file_bytes=size,
         kv_heads_total=kv_heads_total,
+        n_embd=n_embd,
     )
 
 
@@ -185,3 +187,26 @@ def kv_cache_mb(meta: GgufMeta, ctx: int, cache_type_k: str, cache_type_v: str) 
     heads = meta.kv_heads_total or meta.n_layers * meta.n_head_kv
     per_head = meta.key_length * k_bytes + meta.value_length * v_bytes
     return heads * ctx * per_head / (1024 * 1024)
+
+
+# Bytes of compute buffer per token per embedding element, measured on gfx1100 with
+# llama.cpp's own "sched_reserve: compute buffer size" line: a qwen35 27B (n_embd 5120)
+# reserves 372.02 MiB/device at ubatch 512 and 2976.13 MiB at 4096 -- exactly 8x for 8x
+# the ubatch, so the buffer is linear in ubatch with no constant term.
+#   372.02 MiB / 512 tokens / 5120 embd = 148.8 bytes
+# It is roughly the count of live f32 activations the graph keeps, so it moves with the
+# arch; treat it as a calibration point, not a law.
+_COMPUTE_BYTES_PER_TOKEN_EMBD = 148.8
+
+
+def compute_buffer_mb(meta: GgufMeta, ubatch: int, n_devices: int = 1) -> float:
+    """Per-graph compute buffer, summed over devices.
+
+    Under --split-mode tensor every device reserves a FULL-size buffer (all four cards
+    reported 2976.13 MiB, not a quarter each), so this multiplies by device count rather
+    than dividing. That is the term that made the old 0.5*ubatch+512 model wrong by ~4.6x.
+    """
+    if not (meta.n_embd and ubatch):
+        return 0.0
+    per_device = ubatch * meta.n_embd * _COMPUTE_BYTES_PER_TOKEN_EMBD
+    return max(n_devices, 1) * per_device / (1024 * 1024)

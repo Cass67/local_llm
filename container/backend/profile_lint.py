@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .gguf_meta import kv_cache_mb, read_gguf_meta
+from .gguf_meta import compute_buffer_mb, kv_cache_mb, read_gguf_meta
 
 # Every key runtime.py actually reads. tests/test_profile_lint.py cross-checks this
 # against the cfg.get() calls in runtime.py so the two cannot drift apart.
@@ -382,29 +382,71 @@ def _lint_flags(profile: dict[str, Any]) -> list[dict[str, str]]:
     return []
 
 
+def _device_count(profile: dict[str, Any]) -> int:
+    """How many GPUs the runner will spread this over."""
+    for key in ("tensor_split", "visible_devices"):
+        raw = str(profile.get(key) or "")
+        entries = [x for x in raw.split(",") if x.strip()]
+        if entries:
+            return len(entries)
+    return 1
+
+
 def estimate_vram_mb(profile: dict[str, Any], model_path: str | Path) -> dict[str, Any] | None:
-    """Predict VRAM for this profile. None when the GGUF can't be read."""
+    """Predict VRAM for this profile. None when the GGUF can't be read.
+
+    This is a FLOOR, not a bound. It counts the terms llama.cpp reports at load --
+    weights, KV, compute buffers, and the same four for an MTP draft model -- and on the
+    one config measured end to end it lands ~12% under what rocm-smi shows, the rest
+    being allocator slack and per-device HIP context. Treat "fits" as "fits with room to
+    spare", which is why the headroom warning below fires at 15% rather than 5%.
+    """
     meta = read_gguf_meta(model_path)
     if meta is None:
         return None
     ctx = int(profile.get("ctx") or profile.get("context") or 0)
     if ctx <= 0:
         return None
-    weights_mb = meta.file_bytes / (1024 * 1024)
-    kv_mb = kv_cache_mb(
-        meta,
-        ctx,
-        str(profile.get("cache_type_k") or "f16"),
-        str(profile.get("cache_type_v") or "f16"),
-    )
-    # Compute buffers scale with the physical micro-batch, not the logical one.
+    k_type = str(profile.get("cache_type_k") or "f16")
+    v_type = str(profile.get("cache_type_v") or "f16")
     ubatch = int(profile.get("ubatch") or 512)
-    compute_mb = 0.5 * ubatch + 512
+    n_dev = _device_count(profile)
+
+    weights_mb = meta.file_bytes / (1024 * 1024)
+    kv_mb = kv_cache_mb(meta, ctx, k_type, v_type)
+    compute_mb = compute_buffer_mb(meta, ubatch, n_dev)
+
+    # A draft model is a second full llama_context: its own weights, its own KV over the
+    # same ctx, and its own compute buffer of very nearly the target's size (2544 vs 2976
+    # MiB/device on the measured run). Leaving it out understated a live config by ~12 GB.
+    draft_mb = 0.0
+    draft_path = profile.get("mtp_draft_model")
+    if draft_path:
+        draft_meta = read_gguf_meta(str(draft_path))
+        if draft_meta is not None:
+            draft_mb = (
+                draft_meta.file_bytes / (1024 * 1024)
+                + kv_cache_mb(draft_meta, ctx, k_type, v_type)
+                + compute_buffer_mb(draft_meta, ubatch, n_dev)
+            )
+
+    mmproj_mb = 0.0
+    mmproj = profile.get("mmproj")
+    if mmproj:
+        try:
+            mmproj_mb = Path(str(mmproj)).stat().st_size / (1024 * 1024)
+        except OSError:
+            mmproj_mb = 0.0
+
+    total = weights_mb + kv_mb + compute_mb + draft_mb + mmproj_mb
     return {
         "weights_mb": round(weights_mb),
         "kv_mb": round(kv_mb),
         "compute_mb": round(compute_mb),
-        "total_mb": round(weights_mb + kv_mb + compute_mb),
+        "draft_mb": round(draft_mb),
+        "mmproj_mb": round(mmproj_mb),
+        "n_devices": n_dev,
+        "total_mb": round(total),
         "n_layers": meta.n_layers,
         "ctx": ctx,
     }
@@ -429,12 +471,12 @@ def _lint_vram(
                 f"{est['ctx']} ctx) exceeds {vram_mb} MB of VRAM by {over} MB — this will OOM.",
             )
         ]
-    if total > vram_mb * 0.95:
+    if total > vram_mb * 0.85:
         return [
             _finding(
                 "warn",
                 "context",
-                f"estimated {total} MB of {vram_mb} MB VRAM — under 5% headroom.",
+                f"estimated {total} MB of {vram_mb} MB VRAM — under 15% headroom, and the estimate runs low; measure before trusting it.",
             )
         ]
     return []
