@@ -241,12 +241,13 @@ def test_penalties_without_window_flagged():
     assert _levels(lint_profile({"presence_penalty": 0, "temperature": 1}), "penalty_last_n") == []
 
 
-def test_n_max_warning_is_dropped_when_adaptive_sizes_the_draft():
+def test_n_max_warning_stands_even_with_adaptive_sizing():
+    # Adaptive was measured slower than a fixed depth of 3, so it is not an excuse.
     fixed = {"spec_type": "draft-mtp", "mtp_draft_model": "/m/d.gguf", "mtp_draft_n_max": 7}
     assert any(f["field"] == "mtp_draft_n_max" for f in lint_profile(fixed))
-
-    adaptive = fixed | {"spec_draft_adaptive": True}
-    assert not any(f["field"] == "mtp_draft_n_max" for f in lint_profile(adaptive))
+    assert any(
+        f["field"] == "mtp_draft_n_max" for f in lint_profile(fixed | {"spec_draft_adaptive": True})
+    )
 
 
 def test_scalar_head_count_kv_hybrid_counts_only_full_attention_blocks(tmp_path):
