@@ -121,6 +121,12 @@
 				{ key: "mtp_draft_n_max", label: "Draft n-max", type: "int" },
 				{ key: "mtp_draft_n_min", label: "Draft n-min", type: "int" },
 				{ key: "mtp_draft_p_min", label: "Draft p-min", type: "float" },
+				{
+					key: "spec_draft_adaptive",
+					label: "Adaptive draft",
+					type: "bool",
+					hint: "size drafts from measured acceptance; rocmmainmtp only",
+				},
 				{ key: "ngram_mod_n_match", label: "ngram n-match", type: "int" },
 				{ key: "ngram_mod_n_min", label: "ngram n-min", type: "int" },
 				{ key: "ngram_mod_n_max", label: "ngram n-max", type: "int" },
