@@ -25,6 +25,8 @@
 		<a href="#/coding" class:active={currentRoute === "/coding"}>Coding</a>
 		<a href="/chat/">Chat</a>
 		<a href="/llama">llama.cpp</a>
+		<a href="/images">Images</a>
+		<a href="/video">Video</a>
 		<a href="/traces/" target="_blank" rel="noreferrer">Traces</a>
 		<a href="/metrics/" target="_blank" rel="noreferrer">Metrics</a>
 		<a href="#/logs" class:active={currentRoute === "/logs"}>Logs</a>

@@ -342,6 +342,76 @@ services:
   # Prometheus scrapes llama-server's /metrics (inference counters) and mgmt's
   # /api/metrics (GPU + host telemetry); Grafana graphs both on one time axis.
   # Host network so 127.0.0.1:<runner port> resolves the same way mgmt sees it.
+  # ── stable-diffusion.cpp: video generation (MiniMax-H3) ──────────────────────
+  # sd-server pinned to one model, one GPU. H3 generates video with a native
+  # joint-diffused stereo audio track. Behind Caddy at :3001/video.
+  sdcpp-video:
+    build:
+      context: .
+      dockerfile: runner/sdcpp/Dockerfile
+      network: host
+    image: local-llm-sdcpp:latest
+    container_name: sdcpp-video
+    network_mode: host
+    restart: unless-stopped
+    shm_size: 1g
+    group_add:
+      - "${RENDER_GROUP:-991}"
+      - "${VIDEO_GROUP:-44}"
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    environment:
+      # HIP enumerates in reverse of rocm-smi; this is the HIP index, not the card number.
+      HIP_VISIBLE_DEVICES: "${SDCPP_VIDEO_GPU:-0}"
+    volumes:
+      - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/MiniMax-H3:/models:ro
+      - ${SDCPP_OUTPUT_DIR:-${HOME}/h3out}:/work
+    # --cfg-scale MUST stay 1.0: H3 is distilled and cfg-free, and anything above
+    # 1.0 kills the process on GGML_ASSERT(!ggml_is_transposed(a)). The WebUI
+    # prefills whatever the server advertises, so the defaults are set here.
+    command: >
+      sd-server --listen-ip 0.0.0.0 --listen-port ${SDCPP_VIDEO_PORT:-3010}
+      --serve-html-path /ui/index.html
+      --diffusion-model /models/minimax_h3_fl2va_pruned-Q4_K.gguf
+      --vae /models/vae/minimax_h3_video_vae_fp16.safetensors
+      --audio-vae /models/vae/minimax_h3_audio_vae_fp32.safetensors
+      --llm /models/qwen3vl_32b_minimax_h3-Q4_K_M.gguf
+      --backend te=cpu --diffusion-fa --offload-to-cpu --rng cpu
+      --cfg-scale 1.0 --steps 4 --video-frames 49 --fps 24 -W 640 -H 384
+
+  # ── stable-diffusion.cpp: image generation (Qwen-Image) ──────────────────────
+  # Second sd-server instance on its own GPU. Behind Caddy at :3001/images.
+  sdcpp-image:
+    image: local-llm-sdcpp:latest
+    container_name: sdcpp-image
+    network_mode: host
+    restart: unless-stopped
+    shm_size: 1g
+    depends_on:
+      - sdcpp-video
+    group_add:
+      - "${RENDER_GROUP:-991}"
+      - "${VIDEO_GROUP:-44}"
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    environment:
+      HIP_VISIBLE_DEVICES: "${SDCPP_IMAGE_GPU:-1}"
+    volumes:
+      - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/Qwen-Image:/models:ro
+      - ${SDCPP_OUTPUT_DIR:-${HOME}/h3out}:/work
+    # cfg 2.5 is correct for Qwen-Image -- the cfg-1.0 rule is H3-specific.
+    command: >
+      sd-server --listen-ip 0.0.0.0 --listen-port ${SDCPP_IMAGE_PORT:-3011}
+      --serve-html-path /ui/index.html
+      --diffusion-model /models/Qwen_Image-Q6_K.gguf
+      --vae /models/split_files/vae/qwen_image_vae.safetensors
+      --llm /models/Qwen2.5-VL-7B-Instruct.Q8_0.gguf
+      --backend te=cpu --diffusion-fa --offload-to-cpu
+      --cfg-scale 2.5 --sampling-method euler --flow-shift 3
+      --steps 20 -W 1024 -H 1024
+
   prometheus:
     image: prom/prometheus:v3.1.0
     container_name: local-llm-prometheus
