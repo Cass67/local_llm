@@ -15,7 +15,8 @@ WORKDIR /src
 RUN git init . \
     && git remote add origin https://github.com/leejet/stable-diffusion.cpp.git \
     && git fetch --depth 1 origin "$SDCPP_REF" \
-    && git checkout FETCH_HEAD
+    && git checkout FETCH_HEAD \
+    && git submodule update --init --depth 1 examples/server/frontend
 WORKDIR /src/examples/server/frontend
 RUN corepack enable && pnpm install --frozen-lockfile && pnpm build
 
