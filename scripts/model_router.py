@@ -468,25 +468,34 @@ def _is_stream(payload: dict) -> bool:
     return bool(payload.get("stream"))
 
 
-def _redact_sse_line(line: str, redactor: router_redact.StreamRedactor) -> str:
-    """Return the SSE line to emit, with any credential in its delta redacted.
+def _redact_sse_lines(line: str, redactor: router_redact.StreamRedactor) -> list[str]:
+    """Return the SSE line(s) to emit for one upstream line, credentials redacted.
 
     A credential is emitted across several deltas, so it can only be caught after
     reassembly; the redactor holds a carry buffer for that. Lines it does not touch
     are returned unchanged, so clean streams are re-framed byte for byte.
+
+    [DONE] flushes: text held at end of stream is real content the client is owed,
+    and a stream whose last chunk carries no finish_reason would otherwise drop it.
     """
     if not line.startswith("data:"):
-        return line
+        return [line]
     data = line[5:].strip()
-    if not data or data == "[DONE]":
-        return line
+    if data == "[DONE]":
+        tail = redactor.flush_all()
+        if not tail:
+            return [line]
+        held = {"choices": [{"index": 0, "delta": {"content": tail}}]}
+        return ["data: " + json.dumps(held, separators=(",", ":")), "", line]
+    if not data:
+        return [line]
     try:
         chunk = json.loads(data)
     except json.JSONDecodeError:
-        return line
+        return [line]
     if redactor.feed_chunk(chunk):
-        return "data: " + json.dumps(chunk, separators=(",", ":"))
-    return line
+        return ["data: " + json.dumps(chunk, separators=(",", ":"))]
+    return [line]
 
 
 async def _proxy_stream(payload: dict, request: Request, release=None) -> Response:
@@ -524,7 +533,8 @@ async def _proxy_stream(payload: dict, request: Request, release=None) -> Respon
             # Line-aware rather than aiter_raw, so a split credential can be
             # reassembled; re-emitting each line with its newline preserves framing.
             async for line in upstream.aiter_lines():
-                yield (_redact_sse_line(line, redactor) + "\n").encode("utf-8")
+                for out in _redact_sse_lines(line, redactor):
+                    yield (out + "\n").encode("utf-8")
         finally:
             await stream_ctx.__aexit__(None, None, None)
             await client.aclose()

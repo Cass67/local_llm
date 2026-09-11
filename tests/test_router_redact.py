@@ -57,11 +57,24 @@ def test_streaming_reassembles_a_split_key():
     deltas.append(" -- keep it safe.")
     r = rr.StreamRedactor()
     out = "".join(r.feed(0, d) for d in deltas) + r.flush(0)
-    assert key not in out
-    assert "[redacted:anthropic]" in out
-    assert out.startswith("Your key is ")
-    assert out.endswith(" -- keep it safe.")
+    # Exact, not substring: the body is uniform, so "key not in out" still passes
+    # when only the first 24 chars were replaced and the rest streamed out in clear.
+    assert out == "Your key is [redacted:anthropic] -- keep it safe."
     assert r.hits == 1
+
+
+def test_streaming_holds_the_whole_body_not_just_the_first_match():
+    """Regression: redacting before computing the hold leaks everything after the
+    point the pattern first matched -- the label ends in "]", so the tail looks like
+    fresh prose and is released delta by delta."""
+    body = "".join(c * 4 for c in "ABCDEFGHIJKLMNOPQRST")  # 80 chars, position-revealing
+    key = "sk-ant-api03-" + body
+    r = rr.StreamRedactor()
+    out = "".join(r.feed(0, d) for d in [key[i : i + 4] for i in range(0, len(key), 4)])
+    out += r.flush(0)
+    assert out == "[redacted:anthropic]"
+    for marker in ("GGGG", "MMMM", "TTTT"):
+        assert marker not in out
 
 
 def test_streaming_prose_is_not_delayed():
