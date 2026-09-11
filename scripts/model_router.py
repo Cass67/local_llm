@@ -8,6 +8,7 @@ from pathlib import Path
 
 import httpx
 import router_anthropic
+import router_redact
 import router_responses
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -467,6 +468,27 @@ def _is_stream(payload: dict) -> bool:
     return bool(payload.get("stream"))
 
 
+def _redact_sse_line(line: str, redactor: router_redact.StreamRedactor) -> str:
+    """Return the SSE line to emit, with any credential in its delta redacted.
+
+    A credential is emitted across several deltas, so it can only be caught after
+    reassembly; the redactor holds a carry buffer for that. Lines it does not touch
+    are returned unchanged, so clean streams are re-framed byte for byte.
+    """
+    if not line.startswith("data:"):
+        return line
+    data = line[5:].strip()
+    if not data or data == "[DONE]":
+        return line
+    try:
+        chunk = json.loads(data)
+    except json.JSONDecodeError:
+        return line
+    if redactor.feed_chunk(chunk):
+        return "data: " + json.dumps(chunk, separators=(",", ":"))
+    return line
+
+
 async def _proxy_stream(payload: dict, request: Request, release=None) -> Response:
     release = release or (lambda: None)
     client = httpx.AsyncClient(timeout=_PROXY_TIMEOUT)
@@ -497,9 +519,12 @@ async def _proxy_stream(payload: dict, request: Request, release=None) -> Respon
         return JSONResponse({"detail": detail}, status_code=upstream.status_code)
 
     async def stream_upstream():
+        redactor = router_redact.StreamRedactor()
         try:
-            async for raw in upstream.aiter_raw():
-                yield raw
+            # Line-aware rather than aiter_raw, so a split credential can be
+            # reassembled; re-emitting each line with its newline preserves framing.
+            async for line in upstream.aiter_lines():
+                yield (_redact_sse_line(line, redactor) + "\n").encode("utf-8")
         finally:
             await stream_ctx.__aexit__(None, None, None)
             await client.aclose()
@@ -539,6 +564,7 @@ async def _proxy_translated_stream(payload: dict, translator, release=None) -> R
         )
 
     async def translate():
+        redactor = router_redact.StreamRedactor()
         try:
             yield translator.start()
             async for line in upstream.aiter_lines():
@@ -548,9 +574,11 @@ async def _proxy_translated_stream(payload: dict, translator, release=None) -> R
                 if not data or data == "[DONE]":
                     continue
                 try:
-                    yield translator.chunk(json.loads(data))
+                    chunk = json.loads(data)
                 except json.JSONDecodeError:
                     continue
+                redactor.feed_chunk(chunk)
+                yield translator.chunk(chunk)
             yield translator.stop()
         finally:
             await stream_ctx.__aexit__(None, None, None)
@@ -578,9 +606,11 @@ async def _post_chat(payload: dict) -> tuple[dict | None, Response | None]:
             media_type=upstream.headers.get("content-type", "application/json"),
         )
     try:
-        return upstream.json(), None
+        completion = upstream.json()
     except json.JSONDecodeError:
         return None, JSONResponse({"detail": "invalid backend response"}, status_code=502)
+    router_redact.redact_completion(completion)
+    return completion, None
 
 
 async def _pick_model(requested: str, messages: list[dict], api: str) -> str | None:
@@ -611,10 +641,20 @@ async def _proxy_nonstream(payload: dict) -> Response:
             content=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
+    media_type = upstream.headers.get("content-type", "application/json")
+    content = upstream.content
+    if upstream.status_code == 200 and "json" in media_type:
+        try:
+            completion = json.loads(content)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if router_redact.redact_completion(completion):
+                content = json.dumps(completion).encode("utf-8")
     return Response(
-        content=upstream.content,
+        content=content,
         status_code=upstream.status_code,
-        media_type=upstream.headers.get("content-type", "application/json"),
+        media_type=media_type,
     )
 
 

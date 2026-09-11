@@ -4,7 +4,8 @@ RUN pip install --no-cache-dir fastapi uvicorn httpx
 
 WORKDIR /app
 COPY scripts/model_router.py scripts/router_chat.py \
-     scripts/router_anthropic.py scripts/router_responses.py ./
+     scripts/router_anthropic.py scripts/router_responses.py \
+     scripts/router_redact.py ./
 
 EXPOSE 3200
 
