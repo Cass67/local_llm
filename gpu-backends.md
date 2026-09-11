@@ -63,6 +63,18 @@ See [Mixed AMD + NVIDIA Vulkan](#mixed-amd--nvidia-vulkan) for the full setup.
 
 ## ROCm / AMD
 
+> **Large models (>~58 GB) load slowly on ROCm — 2-4 minutes — but they do load, and decode is
+> ~1.6x Vulkan.** The HIP loader registers the mmap'd GGUF against the KFD system-memory cap
+> (96% of RAM, `sudo cat /sys/kernel/debug/kfd/mem_limit`). A file larger than the cap fills it
+> partway through, `dmesg` fills with `amdgpu: SVM mapping failed`, and the loader falls back to
+> staged copies for the remainder. That is normal: **the messages are the safety net working.**
+> Nothing prints between the `model buffer size` lines and `model loaded`, so do not kill a load
+> that looks stuck before ~5 minutes.
+>
+> **Keep `amdgpu.no_system_mem_limit` at its default `N`.** Setting it to 1 silences the messages
+> and breaks the fallback — 0 of 5 loads succeeded with it disabled, 3 of 3 with it enforced.
+> Full analysis: [docs/rocm-large-model-load-hang-2026-09-10.md](docs/rocm-large-model-load-hang-2026-09-10.md).
+
 ### Host requirements
 
 1. **AMDGPU kernel module loaded** — ships with Ubuntu 22.04+ kernels for RDNA2+.
@@ -570,6 +582,23 @@ Check in order:
    stat -c '%g' /dev/kfd     # GID number
    grep RENDER_GROUP .env    # should match
    ```
+
+### AMD ROCm: runner never finishes loading a large model
+
+No error, no timeout — the container prints `ROCm0..3 model buffer size` and then stays in
+`load_tensors` indefinitely with one core pegged. Affects models over roughly 55 GiB; smaller
+ones load normally. **There is no fix on this host — switch the cluster to the `vulkan` backend.**
+
+Do not diagnose this by watching VRAM or CPU percentages:
+
+- `rocm-smi` shows the full weight footprint within seconds and stays flat, because device
+  buffers are allocated up front and filled afterwards. It is not a progress bar.
+- `ps -o %cpu` is a lifetime average and will under-report a pegged core. Use `top -H` or
+  per-thread `/proc/<pid>/task/*/stat` deltas.
+
+One `gdb -p <pid> -batch -ex 'thread apply 1 bt'` answers it immediately: the stall is ~22 frames
+below `ggml_backend_cuda_buffer_set_tensor`, inside `libamdhip64` / `libhsa-runtime64`. See
+[docs/rocm-large-model-load-hang-2026-09-10.md](docs/rocm-large-model-load-hang-2026-09-10.md).
 
 ### CUDA: container exits with driver version error
 
