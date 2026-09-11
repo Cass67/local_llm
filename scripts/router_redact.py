@@ -145,15 +145,23 @@ class StreamRedactor:
         self.hits = 0
 
     def feed(self, idx: int, text: str) -> str:
-        """Feed one delta for choice `idx`; return the text safe to emit now."""
+        """Feed one delta for choice `idx`; return the text safe to emit now.
+
+        Hold first, redact second. Redacting the whole buffer up front replaces the
+        credential with a label ending in "]", so _hold_from then sees no prefix at
+        the tail, releases the carry, and every later delta of the same key streams
+        out in clear -- the body is only redacted up to whatever had arrived when the
+        pattern first matched. Deciding the cut on the raw buffer keeps the credential
+        held until a non-body character ends it, or until flush.
+        """
         buf = self._carry.pop(idx, "") + text
-        buf, n = redact_text(buf)
-        self.hits += n
         cut = _hold_from(buf)
         if cut is not None:
             self._carry[idx] = buf[cut:]
-            return buf[:cut]
-        return buf
+            buf = buf[:cut]
+        out, n = redact_text(buf)
+        self.hits += n
+        return out
 
     def flush(self, idx: int) -> str:
         """Emit whatever is still held for `idx` at end of stream."""

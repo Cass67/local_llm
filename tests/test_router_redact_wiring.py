@@ -47,7 +47,7 @@ def _drain(lines: list[str]) -> str:
         redactor = rr.StreamRedactor()
         out = []
         async for line in upstream.aiter_lines():
-            out.append((mr._redact_sse_line(line, redactor) + "\n").encode("utf-8"))
+            out.extend((o + "\n").encode("utf-8") for o in mr._redact_sse_lines(line, redactor))
         return b"".join(out).decode()
 
     return asyncio.run(run())
@@ -64,7 +64,17 @@ def test_split_key_across_deltas_is_redacted_in_stream():
     body = _drain(_sse(deltas))
     assert KEY not in body
     assert "sk-ant-api03-ZZZ" not in body
-    assert "anthropic" in body
+    assert "[redacted:anthropic]" in body
+    # The body is uniform, so "KEY not in body" alone still passes when only the
+    # first 24 chars were replaced and the rest streamed out delta by delta.
+    assert "ZZZZ" not in body
+
+
+def test_held_text_is_flushed_at_done_without_a_finish_reason():
+    """A stream that ends without finish_reason must still emit what was held."""
+    body = _drain(_sse(["Key: ", "sk-ant-api03-", "A" * 40]))
+    assert "[redacted:anthropic]" in body
+    assert "AAAA" not in body
 
 
 def test_clean_stream_is_reframed_unchanged():
