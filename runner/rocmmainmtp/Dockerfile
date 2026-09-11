@@ -30,6 +30,15 @@
 #           to the trunk and indexing it by il reads past the end for the appended MTP block.
 #   0007 -- master added n_max to the common_speculative_impl ctor; the adaptive commit had
 #           replaced that ctor to seed its EMA vectors. Merged: master's signature, fork's body.
+#           Re-contexted at the 43f3dda bump: master renamed dparams' n_past to pos0.
+#
+# Why the sidecar decides the build, and why no re-export escapes it: master's qwen4exp NextN
+# block expects nextn.shared_head_{head,norm}; unsloth's exporter emits nextn.hc_head_{norm,
+# down,up} instead -- the hyper-connection mixer qwen4exp has in place of a final output norm.
+# Master knows LLM_TENSOR_HC_HEAD_* only at trunk level (output_hc_*), never under nextn., so
+# against master an unsloth sidecar builds the head WITHOUT its output mixer: loads, generates
+# garbage. 0001+0002 add that mapping and are the reason this image exists. The main UD-IQ4_XS
+# carries no in-file nextn at all (checked across all 3 shards), so no sidecar means no MTP.
 #
 # Sidecar note: use the SELF-CONTAINED head (MTP/mtp-...-Q8_0.gguf, 3.85 GiB, carries its own
 # token_embd + output.weight). The "shared" head is 2.6 GiB but only loads via 0004's borrow
@@ -37,7 +46,7 @@
 # Master declares -sm tensor unsupported for qwen4exp; use layer split.
 FROM rocm/dev-ubuntu-24.04:7.2 AS build
 
-ARG LLAMA_CPP_REF=050dde50c9d70cf207db84f7224eedc491d817b2
+ARG LLAMA_CPP_REF=43f3dda6237a453a587a8f00230d52decfeaa8e5
 ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG AMDGPU_TARGETS=gfx1100
 # hipcc peaks several GB per TU; -j$(nproc) OOM-kills the clang backend on this 60 GB box
