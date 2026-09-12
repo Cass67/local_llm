@@ -49,10 +49,14 @@ FROM rocm/dev-ubuntu-24.04:7.2 AS build
 ARG LLAMA_CPP_REF=43f3dda6237a453a587a8f00230d52decfeaa8e5
 ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG AMDGPU_TARGETS=gfx1100
-# hipcc peaks several GB per TU; -j$(nproc) OOM-kills the clang backend on this 60 GB box
-ARG BUILD_JOBS=4
+# hipcc peaks several GB per TU; -j$(nproc) OOM-kills the clang backend on this 60 GB box.
+# -j8 measured safe (peak 11 GB used of 60) and roughly halves the build.
+ARG BUILD_JOBS=8
 ARG GGML_CUDA_FORCE_MMQ=OFF
-ARG GGML_CUDA_FORCE_CUBLAS=ON
+# ON costs ~20% of prefill on gfx1100 (431 -> 517 tok/s at 32k depth on Flash-Next; decode
+# unaffected, which is why decode tuning never caught it). Inherited from
+# runner/rocmqwen4exp2; upstream CI builds with it OFF.
+ARG GGML_CUDA_FORCE_CUBLAS=OFF
 ENV DEBIAN_FRONTEND=noninteractive
 
 # repo.radeon.com intermittently serves a corrupt hipblaslt deb (1.6 GB, "lzma error:
