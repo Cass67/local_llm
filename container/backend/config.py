@@ -30,6 +30,12 @@ RUNNER_IMAGES = {
     "rocmunsloth": os.environ.get(
         "RUNNER_IMAGE_ROCMUNSLOTH", "local-llm-runner-rocmunsloth:latest"
     ),
+    # Same recipe as rocmunsloth but built from source, so our patches apply -- notably 0008,
+    # the host-buffer pin that fixes the multi-GPU restore page fault. Prefill matches the
+    # vendored prebuilt to within 2%.
+    "rocmunslothsrc": os.environ.get(
+        "RUNNER_IMAGE_ROCMUNSLOTHSRC", "local-llm-runner-rocmunslothsrc:latest"
+    ),
     "cuda": os.environ.get("RUNNER_IMAGE_CUDA", "local-llm-runner-cuda:latest"),
 }
 

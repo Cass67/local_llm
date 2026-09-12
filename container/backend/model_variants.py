@@ -8,6 +8,7 @@ Backend = Literal[
     "rocmmain",
     "rocmmainmtp",
     "rocmunsloth",
+    "rocmunslothsrc",
     "vulkan",
     "cuda",
 ]
@@ -20,6 +21,7 @@ _BACKEND_LABELS = {
     "rocmmain": "ROCmMain",
     "rocmmainmtp": "ROCmMainMTP",
     "rocmunsloth": "ROCmUnsloth",
+    "rocmunslothsrc": "ROCmUnslothSrc",
     "vulkan": "Vulkan",
     "cuda": "CUDA",
 }
@@ -74,6 +76,7 @@ def migrate_backend_variant(metadata: dict[str, Any]) -> dict[str, Any]:
         "rocmmain",
         "rocmmainmtp",
         "rocmunsloth",
+        "rocmunslothsrc",
         "vulkan",
         "cuda",
     ):
