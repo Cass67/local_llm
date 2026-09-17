@@ -494,6 +494,12 @@ def build_runner_container_spec(  # noqa: C901
         # mount. Profiles reference them as /sglang-models/<dir>.
         sglang_models = os.environ.get("SGLANG_MODELS_DIR", "/mnt/spare/sglang-models")
         binds.append(f"{sglang_models}:/sglang-models:ro")
+        # Persist the triton/JIT caches across restarts. Each start gets a fresh
+        # container, and a cold cache means serving-time kernel compilation --
+        # which blows the readiness probe (mgmt reports "failed to launch" while
+        # the runner is in fact still compiling) and can trip sglang's watchdog.
+        cache_dir = os.environ.get("SGLANG_CACHE_DIR", "/mnt/spare/sglang-cache")
+        binds.append(f"{cache_dir}:/root/.cache:rw")
 
     return DockerContainerSpec(
         name=config.name,
