@@ -1,7 +1,7 @@
 {
   "backend_url": "http://127.0.0.1:3100",
-  "default_model": null,
-  "default_cluster": "7900sv",
+  "default_model": "laguna-s-2.1-q4km-rocmunslothsrc",
+  "default_cluster": "7900s-unslothsrc",
   "health_check_interval_s": 10,
   "enabled": false,
   "rules": [
@@ -33,9 +33,9 @@
         "svelte",
         "fastapi"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -156,9 +156,9 @@
         "has_code_block",
         "has_code_ref"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -205,9 +205,9 @@
         "wrong output",
         "wrong result"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -243,9 +243,9 @@
         "merge conflict",
         "resolve conflict"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -267,9 +267,9 @@
         "find class",
         "where is this implemented"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -299,9 +299,9 @@
         "understand",
         "trace through"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -326,9 +326,9 @@
         "compare",
         "alternative"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -349,9 +349,9 @@
         "fixture",
         "regression test"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -377,9 +377,9 @@
         "rocm",
         "nvidia"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -405,9 +405,9 @@
         "free sample",
         "royalty free"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -425,9 +425,9 @@
         "is_question",
         "short_prompt"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -445,9 +445,9 @@
         "curl syntax",
         "wget syntax"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -463,9 +463,9 @@
         "spelling",
         "proofread"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -481,9 +481,9 @@
       "signals": [
         "has_math"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     },
     {
@@ -495,9 +495,9 @@
         "parameters for",
         "signature of"
       ],
-      "cluster": "7900s",
+      "cluster": "7900s-unslothsrc",
       "fallback": [
-        "7900s"
+        "7900s-unslothsrc"
       ]
     }
   ],
