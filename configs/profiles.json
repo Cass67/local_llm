@@ -2772,7 +2772,7 @@
       }
     },
     "qwen3.8-27b-bf16-sglang": {
-      "default": "balanced",
+      "default": "mtp",
       "profiles": {
         "balanced": {
           "backend": "sglang",
