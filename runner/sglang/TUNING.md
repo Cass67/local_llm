@@ -69,6 +69,55 @@ cold cache.)
 
 ---
 
+## 0c. The real cost of speculation: it halves the KV pool
+
+Found by reading the runner log during a real session rather than a benchmark.
+The conversation grew to 80k tokens and then pinned:
+
+```
+#new-token: 271, #cached-token: 72448, full token usage: 0.90
+#new-token: 537, #cached-token: 77056, full token usage: 0.96
+#new-token:  26, #cached-token: 80256, full token usage: 1.00   <- stuck here
+```
+
+Prefix caching was working perfectly (271 new tokens against 72k cached). The
+problem is that the pool ran out, and from then on every turn evicts and
+refills. That is what "it feels like 11 tok/s" actually was.
+
+**Speculative decoding's draft buffers were eating half the KV cache:**
+
+| profile | `max_total_num_tokens` |
+|---|---|
+| `mtp` (EAGLE 3/1/4), mem 0.86 | 80,511 |
+| `balanced` (no spec), mem 0.90 | **154,786** |
+
+The server advertises `context_length` 131072 either way, and `model-switch.py`
+pushes that number into every client — so under `mtp` the clients were promised
+131k of context that the server could not physically hold. A session could not
+reach its own advertised window without falling off a cliff at ~62% of it.
+
+Measured across depth, with the pool problem in view:
+
+| config | KV pool | 2k | 16k | 96k |
+|---|---|---|---|---|
+| **bf16 no spec** | **154,786** | 19.1 | **18.6** | **16.4** |
+| AWQ no spec | 447,433 | 15.6 | 15.3 | 13.8 |
+| AWQ + EAGLE | 371,961 | 27.1 | 18.0 | 5.5 |
+| bf16 + EAGLE | 80,511 | **36.2** | 20.4 | does not fit |
+
+So for long agent sessions the answer is **turn speculation off**, not change
+quantization: bf16 unspeculated is flat with depth, beats AWQ by ~19% everywhere,
+and holds more context than it advertises. Speculation remains the right choice
+only for short-context, latency-sensitive use, where it is nearly 2x.
+
+Untested, and the obvious way to get both: the spec buffers scale with
+`max_running_requests` (30 with spec, 67 without). On a single-user box, capping
+it to ~4 should shrink them a lot and might restore most of the pool while
+keeping speculation. It would not fix speculation being slower past ~32k (§1),
+so it only helps if short-context latency is what you care about.
+
+---
+
 ## 1. The main finding: speculation is a *loss* past ~16k context
 
 Unspeculated decode on this model is **flat with context** — GDN linear
