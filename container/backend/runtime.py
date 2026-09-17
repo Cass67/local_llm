@@ -375,6 +375,10 @@ def build_sglang_args(metadata: dict[str, Any], port: int) -> list[str]:  # noqa
         args += ["--mamba-ssm-dtype", str(cfg["mamba_ssm_dtype"])]
     if cfg.get("mamba_radix_cache_strategy"):
         args += ["--mamba-radix-cache-strategy", str(cfg["mamba_radix_cache_strategy"])]
+    # llama-server exposes /metrics unconditionally; sglang needs the flag. The
+    # Status page tok/s card and prom_export both read it, and lltop polls it.
+    if cfg.get("enable_metrics", True):
+        args.append("--enable-metrics")
     if cfg.get("disable_cuda_graph"):
         args.append("--disable-cuda-graph")
     flags = cfg.get("flags")
