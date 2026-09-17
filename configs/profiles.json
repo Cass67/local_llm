@@ -2772,7 +2772,7 @@
       }
     },
     "qwen3.8-27b-bf16-sglang": {
-      "default": "balanced",
+      "default": "mtp",
       "profiles": {
         "balanced": {
           "backend": "sglang",
@@ -2787,6 +2787,24 @@
           "served_model_name": "qwen3.8-27b",
           "visible_devices": "0,1,2,3",
           "reasoning_parser": "qwen3"
+        },
+        "mtp": {
+          "backend": "sglang",
+          "model_path": "/sglang-models/Qwen3.8-27B-bf16",
+          "tp_size": 4,
+          "context_length": 131072,
+          "mem_fraction_static": 0.86,
+          "attention_backend": "triton",
+          "mamba_ssm_dtype": "bfloat16",
+          "mamba_radix_cache_strategy": "extra_buffer",
+          "tool_call_parser": "qwen3_coder",
+          "served_model_name": "qwen3.8-27b",
+          "visible_devices": "0,1,2,3",
+          "reasoning_parser": "qwen3",
+          "spec_algorithm": "EAGLE",
+          "spec_num_steps": 3,
+          "spec_eagle_topk": 1,
+          "spec_num_draft_tokens": 4
         }
       }
     }
