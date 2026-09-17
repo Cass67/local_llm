@@ -33,6 +33,42 @@ The two differ by 1.5–2.3× under speculation and must never be averaged.
 
 ---
 
+## 0b. Read decode numbers with prefill in mind
+
+Every decode figure below is **decode only** — tokens per second once the prompt
+is digested. It is not what a user feels. Measured on the live server with a
+7.8k prompt and 200 tokens out:
+
+| | ttft | decode | **end to end** |
+|---|---|---|---|
+| thinking off | 7.69s | 26.3/s | **13.1/s** |
+| thinking on | 7.75s | 29.7/s | **13.8/s** |
+
+Prefill runs ~1000 tok/s and no dial in §2 moved it, so on a cold prompt it is
+roughly half the wall clock and the felt rate is about half the decode rate.
+A report of "50 tok/s" that turns out to be 13 in practice is this gap, not a
+regression — the first version of this document led with a decode number and
+was rightly disbelieved.
+
+The prefix cache is what closes it, and it works:
+
+```
+cold TTFT     6.43s
+exact repeat  0.23s
+same prefix   0.24s      hit rate 0.99
+```
+
+So in an append-only agent loop you pay full prefill once and then feel close to
+the decode rate. A client that resends a conversation which is *not* a clean
+prefix extension — reordered tool definitions, a regenerated system prompt, an
+injected timestamp — re-prefills everything every turn and feels ~2x slower for
+reasons that have nothing to do with any setting here. Check `cache_hit_rate` on
+`/metrics` before tuning anything else; a steady 0.0 under real traffic is a
+client problem, not a server one. (A single 0.0 right after a restart is just a
+cold cache.)
+
+---
+
 ## 1. The main finding: speculation is a *loss* past ~16k context
 
 Unspeculated decode on this model is **flat with context** — GDN linear
@@ -232,12 +268,13 @@ Measured on the live runner after the change, against the same profile before it
 
 | case | before | after |
 |---|---|---|
-| 16k echo (edit-shaped) | 31.6 | **50.1** (+59%) |
+| 16k echo (edit-shaped), decode only | 31.6 | **50.1** (+59%) |
 | 16k fresh | 20.4 | 22.0 (+8%) |
 | 2k fresh | 36.2 | 32.9 (−9%) |
 
 The 2k regression is the adaptive tradeoff and is the right trade: agent traffic
-lives at 10k+, not 2k. It went in as a `flags` passthrough because
+lives at 10k+, not 2k. Note these are decode-only figures — see §0b before
+quoting any of them as a user-visible speed. It went in as a `flags` passthrough because
 `build_sglang_args` has no named knob for either — see below.
 
 ## 5. Stack integration gaps
