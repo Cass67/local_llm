@@ -110,11 +110,54 @@ quantization: bf16 unspeculated is flat with depth, beats AWQ by ~19% everywhere
 and holds more context than it advertises. Speculation remains the right choice
 only for short-context, latency-sensitive use, where it is nearly 2x.
 
-Untested, and the obvious way to get both: the spec buffers scale with
-`max_running_requests` (30 with spec, 67 without). On a single-user box, capping
-it to ~4 should shrink them a lot and might restore most of the pool while
-keeping speculation. It would not fix speculation being slower past ~32k (§1),
-so it only helps if short-context latency is what you care about.
+A caution on the mechanism: `max_running_requests` is an **output**, not a dial.
+It is derived from the mamba state cache — the live server logs *"capped to 22 by
+the mamba state cache (max_mamba_cache_size=114, 5 state slots per request)"* —
+so capping it frees nothing. Capping it to 2 was measured and changed decode by
+0.2% (below). The pool is sized by `--mamba-full-memory-ratio` /
+`--max-mamba-cache-size`, and those are the real levers if you ever want the
+memory back.
+
+Note also that the 5 slots per request are **not** speculation: the live server
+runs unspeculated and still allocates 5, because `extra_buffer` keeps state
+snapshots so prefixes can be reused. And KV is not the hog either — all 154,786
+tokens cost 1.18 GB + 1.18 GB per card, since only 16 of 64 layers are full
+attention. Speculation shrank the KV pool as a *residual* after its own state
+took what it needed; "spec halves the KV cache" is a true observation and a
+misleading mechanism.
+
+---
+
+## 0d. Single-user tuning: the decode dials are exhausted
+
+Asked for maximum single-user throughput, with concurrency explicitly worthless.
+Everything below was measured against the deployed config (bf16, no spec,
+kv-splits 32, mem 0.90) at the depths that matter:
+
+| config | 16k | 96k |
+|---|---|---|
+| deployed | 18.58 | 16.37 |
+| `--max-running-requests 2 --num-continuous-decode-steps 4` | 18.60 | 16.33 |
+
+Identical. Consistent with §2: host and scheduler overhead are already invisible,
+so there is nothing left to reclaim there.
+
+`--enable-torch-compile` is **not usable**: with `--torch-compile-max-bs 2` it
+sat in "Capture target decode CUDA graph begin" for nine minutes without
+finishing, against 4.24s for the same capture uncompiled. Inductor is effectively
+hung on the GDN kernels. Killed, not measured.
+
+That leaves decode at 16-19 tok/s against the ~38 roofline, and the remaining gap
+is TP all-reduce plus kernel efficiency (§3). bf16 cannot drop below TP=4 — 54 GB
+does not fit on two 20 GB cards — so the only way to test fewer cards is 4-bit,
+and 4-bit is already 19% down before the split changes (§3a).
+
+**What actually governs the felt rate for a single user is prefill, and the prefix
+cache already solves it.** A cold 96k prompt is 117s of prefill against 16s of
+decode. In a real session you never pay that twice: the logs show real turns
+prefilling 271-537 new tokens against 72k cached, so TTFT is well under a second
+and the felt rate converges on the decode rate. Optimise the client's prefix
+stability, not the server.
 
 ---
 
