@@ -248,3 +248,67 @@ def test_spec_draft_adaptive_is_emitted_only_when_the_profile_asks_for_it():
 
     metadata["config"]["spec_draft_adaptive"] = True
     assert "--spec-draft-adaptive" in build_llama_server_args(metadata, port=8080)
+
+
+def test_build_sglang_args_maps_knobs_and_defaults_to_triton():
+    from backend.runtime import build_sglang_args
+
+    args = build_sglang_args(
+        {
+            "config": {
+                "backend": "sglang",
+                "model_path": "/sglang-models/Qwen3-Coder-30B-A3B",
+                "tp_size": 4,
+                "context_length": 32768,
+                "mem_fraction_static": 0.82,
+                "spec_algorithm": "NGRAM",
+                "spec_num_draft_tokens": 8,
+            }
+        },
+        port=8080,
+    )
+    joined = " ".join(args)
+    assert args[:3] == ["python", "-m", "sglang.launch_server"]
+    assert "--model-path /sglang-models/Qwen3-Coder-30B-A3B" in joined
+    assert "--tp-size 4" in joined
+    assert "--mem-fraction-static 0.82" in joined
+    assert "--speculative-algorithm NGRAM --speculative-num-draft-tokens 8" in joined
+    # AITER is CDNA-only and hard-asserts on RDNA, and there is no env var for it.
+    assert "--attention-backend triton" in joined
+    # llama.cpp flags must never leak into the sglang argv
+    assert "-ngl" not in args and "--tensor-split" not in args
+
+
+def test_sglang_container_spec_mounts_models_and_our_rccl():
+    from backend.runtime import DockerRunnerConfig, build_runner_container_spec
+
+    spec = build_runner_container_spec(
+        {
+            "config": {
+                "backend": "sglang",
+                "model_path": "/sglang-models/Qwen3-Coder-30B-A3B",
+                "tp_size": 4,
+                "visible_devices": "0,1,2,3",
+            }
+        },
+        DockerRunnerConfig(),
+    )
+    assert spec.command[:3] == ["python", "-m", "sglang.launch_server"]
+    assert spec.environment["HIP_VISIBLE_DEVICES"] == "0,1,2,3"
+    # stock librccl needs hostcall -> PCIe atomics, which card 3's slot lacks
+    assert spec.environment["LD_LIBRARY_PATH"] == "/opt/rccl/build"
+    assert any(b.endswith(":/sglang-models:ro") for b in spec.binds)
+
+
+def test_sglang_spec_with_models_dir_does_not_need_gguf_metadata():
+    """Production passes models_dir; the GGUF lookup must not fire for sglang."""
+    from pathlib import Path
+
+    from backend.runtime import DockerRunnerConfig, build_runner_container_spec
+
+    spec = build_runner_container_spec(
+        {"config": {"backend": "sglang", "model_path": "/sglang-models/M", "tp_size": 4}},
+        DockerRunnerConfig(),
+        models_dir=Path("/models"),
+    )
+    assert "--model-path /sglang-models/M" in " ".join(spec.command)

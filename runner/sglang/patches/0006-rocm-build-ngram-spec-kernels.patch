@@ -1,0 +1,54 @@
+Subject: [PATCH] sgl-kernel: build and register the ngram speculative kernels on ROCm
+
+`csrc/speculative/ngram_utils.cu` is in the CUDA and MUSA builds but not the
+ROCm one, and `reconstruct_indices_from_tree_mask` is registered in
+common_extension.cc and common_extension_musa.cc but not
+common_extension_rocm.cc. So `--speculative-algorithm NGRAM` initialises, loads
+weights, captures both the target and the target-verify CUDA graphs, and only
+then dies on the first decode:
+
+  AttributeError: '_OpNamespace' 'sgl_kernel' object has no attribute
+    'reconstruct_indices_from_tree_mask'
+
+The kernel itself is portable -- it compiles clean under hipcc for gfx1100 with
+no source changes, so this is purely a missing build/registration entry rather
+than a porting job.
+
+Measured on 4x RX 7900 XT (gfx1100), Qwen3-Coder-30B-A3B-Instruct bf16, TP=4,
+with --speculative-num-draft-tokens 8:
+
+  edit/echo prompt      ~114 tok/s   (vs ~39 without)   ~2.9x
+  novel generation      ~39 tok/s    (vs ~39 without)   neutral
+
+which is the expected shape for n-gram speculation: it pays on repeated or
+lightly-edited context and costs nothing on fresh generation.
+
+diff --git a/python/sglang/kernels/aot/csrc/common_extension_rocm.cc b/python/sglang/kernels/aot/csrc/common_extension_rocm.cc
+index c204b415ce..34ce63dd7f 100644
+--- a/python/sglang/kernels/aot/csrc/common_extension_rocm.cc
++++ b/python/sglang/kernels/aot/csrc/common_extension_rocm.cc
+@@ -134,6 +134,12 @@ TORCH_LIBRARY_EXPAND(sgl_kernel, m) {
+   m.def("qr_max_size", &qr_max_size);
+ #endif  // !SGL_IS_RDNA
+ 
++  m.def(
++      "reconstruct_indices_from_tree_mask(Tensor tree_mask, Tensor verified_seq_len, Tensor positions, "
++      "Tensor retrive_index, Tensor retrive_next_token, Tensor retrive_next_sibling, "
++      "int batch_size, int draft_token_num) -> ()");
++  m.impl("reconstruct_indices_from_tree_mask", torch::kCUDA, &reconstruct_indices_from_tree_mask);
++
+   /*
+    * From csrc/moe
+    */
+diff --git a/python/sglang/kernels/aot/setup_rocm.py b/python/sglang/kernels/aot/setup_rocm.py
+index 56c753ac07..edab3996c8 100644
+--- a/python/sglang/kernels/aot/setup_rocm.py
++++ b/python/sglang/kernels/aot/setup_rocm.py
+@@ -56,6 +56,7 @@ sources = [
+     "csrc/moe/moe_topk_softmax_kernels.cu",
+     "csrc/moe/moe_topk_sigmoid_kernels.cu",
+     "csrc/speculative/eagle_utils.cu",
++    "csrc/speculative/ngram_utils.cu",
+     "csrc/kvcacheio/transfer.cu",
+     "csrc/memory/weak_ref_tensor.cpp",
+     "csrc/elementwise/pos_enc.cu",

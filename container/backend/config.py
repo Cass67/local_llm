@@ -37,6 +37,10 @@ RUNNER_IMAGES = {
         "RUNNER_IMAGE_ROCMUNSLOTHSRC", "local-llm-runner-rocmunslothsrc:latest"
     ),
     "cuda": os.environ.get("RUNNER_IMAGE_CUDA", "local-llm-runner-cuda:latest"),
+    # SGLang, not llama.cpp: python -m sglang.launch_server, safetensors instead of
+    # GGUF, and its own flag vocabulary (--tp-size / --mem-fraction-static). Built by
+    # runner/sglang/Dockerfile; see build_sglang_args in runtime.py for the argv.
+    "sglang": os.environ.get("RUNNER_IMAGE_SGLANG", "local-llm-runner-sglang:rocm724"),
 }
 
 

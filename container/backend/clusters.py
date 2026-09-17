@@ -20,6 +20,7 @@ _VALID_BACKENDS = {
     "rocmunslothsrc",
     "vulkan",
     "cuda",
+    "sglang",
 }
 _SINGLE_VENDOR_BACKENDS = {
     "rocm": "amd",
@@ -28,6 +29,7 @@ _SINGLE_VENDOR_BACKENDS = {
     "rocmunsloth": "amd",
     "rocmunslothsrc": "amd",
     "cuda": "nvidia",
+    "sglang": "amd",
 }
 
 # Base port for cluster-allocated runner ports (8080 + cluster slot)

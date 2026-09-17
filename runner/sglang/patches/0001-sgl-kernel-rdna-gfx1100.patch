@@ -1,0 +1,194 @@
+diff --git a/python/sglang/kernels/aot/csrc/common_extension_rocm.cc b/python/sglang/kernels/aot/csrc/common_extension_rocm.cc
+index 22e15f8..c204b41 100644
+--- a/python/sglang/kernels/aot/csrc/common_extension_rocm.cc
++++ b/python/sglang/kernels/aot/csrc/common_extension_rocm.cc
+@@ -67,8 +67,12 @@ TORCH_LIBRARY_EXPAND(sgl_kernel, m) {
+   m.impl("dsv4_fused_q_indexer_rope_hadamard_quant", torch::kCUDA, &dsv4_fused_q_indexer_rope_hadamard_quant);
+ 
+   /*
+-   * From csrc/allreduce
++   * From csrc/allreduce -- custom/deterministic/quick all-reduce are CDNA-only
++   * (cross-GPU peer-IPC + wave64). Guarded out on RDNA (single-GPU); the .hip
++   * sources are also omitted from the RDNA build in setup_rocm.py, and multi-GPU
++   * all-reduce falls back to RCCL.
+    */
++#ifndef SGL_IS_RDNA
+   m.def(
+       "init_custom_ar(Tensor meta, Tensor rank_data, "
+       "str[] handles, int[] offsets, int rank, "
+@@ -128,6 +132,7 @@ TORCH_LIBRARY_EXPAND(sgl_kernel, m) {
+ 
+   // Max input size in bytes
+   m.def("qr_max_size", &qr_max_size);
++#endif  // !SGL_IS_RDNA
+ 
+   /*
+    * From csrc/moe
+diff --git a/python/sglang/kernels/aot/include/sgl_kernel_ops.h b/python/sglang/kernels/aot/include/sgl_kernel_ops.h
+index 9e3bb1d..603a956 100644
+--- a/python/sglang/kernels/aot/include/sgl_kernel_ops.h
++++ b/python/sglang/kernels/aot/include/sgl_kernel_ops.h
+@@ -52,6 +52,9 @@ using fptr_t = int64_t;
+  * From csrc/allreduce
+  */
+ #ifdef USE_ROCM
++// ROCM custom/deterministic/quick all-reduce: CDNA-only, guarded out on RDNA
++// (single-GPU). The .hip sources are also omitted from the RDNA build.
++#ifndef SGL_IS_RDNA
+ // ROCM custom allreduce
+ fptr_t init_custom_ar(
+     torch::Tensor& meta,
+@@ -78,6 +81,7 @@ torch::Tensor qr_get_handle(fptr_t _fa);
+ void qr_open_handles(fptr_t _fa, const std::vector<torch::Tensor>& handles);
+ void qr_all_reduce(fptr_t _fa, torch::Tensor& inp, torch::Tensor& out, int64_t quant_level, bool cast_bf2half = false);
+ int64_t qr_max_size();
++#endif  // !SGL_IS_RDNA
+ #else
+ // custom allreduce
+ fptr_t
+diff --git a/python/sglang/kernels/aot/include/utils.h b/python/sglang/kernels/aot/include/utils.h
+index c5a517c..abd2e57 100644
+--- a/python/sglang/kernels/aot/include/utils.h
++++ b/python/sglang/kernels/aot/include/utils.h
+@@ -342,7 +342,13 @@ inline bool getEnvEnablePDL() {
+ #ifndef USE_ROCM
+ #define WARP_SIZE 32
+ #else
+-#if defined(__GFX9__) || !defined(__HIP_DEVICE_COMPILE__)
++// ROCm: host and device passes must agree on the logical warp width. Historically
++// host code (__HIP_DEVICE_COMPILE__ undefined) always saw 64 while RDNA device code
++// saw 32, mismatching grid/block math in the MoE topk launchers. setup_rocm.py passes
++// SGL_ROCM_WARP_SIZE (64 on CDNA, 32 on RDNA) so both passes agree.
++#ifdef SGL_ROCM_WARP_SIZE
++#define WARP_SIZE SGL_ROCM_WARP_SIZE
++#elif defined(__GFX9__) || !defined(__HIP_DEVICE_COMPILE__)
+ #define WARP_SIZE 64
+ #else
+ #define WARP_SIZE 32
+diff --git a/python/sglang/kernels/aot/python/sgl_kernel/allreduce.py b/python/sglang/kernels/aot/python/sgl_kernel/allreduce.py
+index 17e9fe6..f8f734a 100644
+--- a/python/sglang/kernels/aot/python/sgl_kernel/allreduce.py
++++ b/python/sglang/kernels/aot/python/sgl_kernel/allreduce.py
+@@ -2,7 +2,30 @@ from typing import List, Optional, Tuple
+ 
+ import torch
+ 
+-if torch.version.hip is not None:
++
++def _has_custom_ar() -> bool:
++    """True if the custom all-reduce operators are compiled and registered.
++
++    The custom/deterministic/quick all-reduce ops are CDNA-only and are omitted
++    from the RDNA build (see sgl-kernel/setup_rocm.py). Probing the registered
++    ops instead of the device arch avoids initializing CUDA at import time:
++    eagerly calling torch.cuda.get_device_properties(0) here would force CUDA
++    init on device 0, which breaks fork-based multiprocessing and pins the
++    process to device 0 before CUDA_VISIBLE_DEVICES is honored. common_ops is
++    loaded before this module, so the registry is already populated.
++    """
++    try:
++        return hasattr(torch.ops.sgl_kernel, "init_custom_ar")
++    except Exception:
++        return False
++
++
++# CDNA ROCm builds compile the custom all-reduce ops; RDNA builds omit them
++# (multi-GPU all-reduce falls back to RCCL). CUDA always has them and is handled
++# by the final `else` branch, so gate the ROCm wrappers on hip + op presence.
++_HAS_CUSTOM_AR = torch.version.hip is not None and _has_custom_ar()
++
++if _HAS_CUSTOM_AR:
+     # ROCM custom allreduce
+     def init_custom_ar(
+         meta: torch.Tensor,
+@@ -92,6 +115,12 @@ if torch.version.hip is not None:
+     def qr_max_size() -> int:
+         return torch.ops.sgl_kernel.qr_max_size.default()
+ 
++elif torch.version.hip is not None:
++    # RDNA (e.g. gfx1151 / Strix Halo): the CDNA-only custom/deterministic/quick
++    # all-reduce ops are not built, so no wrappers are exposed here. Multi-GPU
++    # all-reduce falls back to RCCL; single-GPU never calls all-reduce.
++    pass
++
+ else:
+ 
+     def init_custom_ar(
+diff --git a/python/sglang/kernels/aot/setup_rocm.py b/python/sglang/kernels/aot/setup_rocm.py
+index 471882f..56c753a 100644
+--- a/python/sglang/kernels/aot/setup_rocm.py
++++ b/python/sglang/kernels/aot/setup_rocm.py
+@@ -40,10 +40,11 @@ include_dirs = [
+     root / "csrc",
+ ]
+ 
++# The custom multi-GPU all-reduce collectives (custom/deterministic/quick) are
++# CDNA-only (cross-GPU peer-IPC + wave64). Appended below for CDNA targets only;
++# on RDNA they are omitted and #ifdef'd out of registration via -DSGL_IS_RDNA, so
++# multi-GPU all-reduce falls back to RCCL.
+ sources = [
+-    "csrc/allreduce/custom_all_reduce.hip",
+-    "csrc/allreduce/deterministic_all_reduce.hip",
+-    "csrc/allreduce/quick_all_reduce.cu",
+     "csrc/common_extension_rocm.cc",
+     "csrc/elementwise/activation.cu",
+     "csrc/elementwise/deepseek_v4_topk.cu",
+@@ -75,12 +76,20 @@ if torch.cuda.is_available():
+ else:
+     print(f"Warning: torch.cuda not available. Using default target: {amdgpu_target}")
+ 
+-if amdgpu_target not in ["gfx942", "gfx950", "gfx1250"]:
++CDNA_TARGETS = ["gfx942", "gfx950", "gfx1250"]
++RDNA_TARGETS = ["gfx1100", "gfx1101", "gfx1151"]
++SUPPORTED_TARGETS = CDNA_TARGETS + RDNA_TARGETS
++
++if amdgpu_target not in SUPPORTED_TARGETS:
+     print(
+-        f"Warning: Unsupported GPU architecture detected '{amdgpu_target}'. Expected 'gfx942', 'gfx950', or 'gfx1250'."
++        f"Warning: Unsupported GPU architecture detected '{amdgpu_target}'. "
++        f"Supported: {SUPPORTED_TARGETS}."
+     )
+     sys.exit(1)
+ 
++is_cdna = amdgpu_target in CDNA_TARGETS
++is_rdna = amdgpu_target in RDNA_TARGETS
++
+ fp8_macro = (
+     "-DHIP_FP8_TYPE_FNUZ" if amdgpu_target == "gfx942" else "-DHIP_FP8_TYPE_E4M3"
+ )  # gfx950 and gfx1250 use E4M3
+@@ -90,7 +99,17 @@ fp8_macro = (
+ #   (leaves room for static shared allocations in the kernel).
+ # - gfx95x (MI350) and gfx1250: LDS is larger. Large dynamic budget wastes LDS
+ #   and pins occupancy to 1 block/CU. Keep it small (40KB) for better occupancy.
+-topk_dynamic_smem_bytes = 48 * 1024 if amdgpu_target == "gfx942" else 40 * 1024
++topk_dynamic_smem_bytes = (
++    48 * 1024 if (amdgpu_target == "gfx942" or is_rdna) else 40 * 1024
++)
++
++# CDNA-only custom multi-GPU all-reduce kernels (see the sources note above).
++if is_cdna:
++    sources += [
++        "csrc/allreduce/custom_all_reduce.hip",
++        "csrc/allreduce/deterministic_all_reduce.hip",
++        "csrc/allreduce/quick_all_reduce.cu",
++    ]
+ 
+ hipcc_flags = [
+     "-DNDEBUG",
+@@ -106,6 +125,16 @@ hipcc_flags = [
+     f"-DSGL_TOPK_DYNAMIC_SMEM_BYTES={topk_dynamic_smem_bytes}",
+ ]
+ 
++# Host and device passes must agree on the logical wave width (CDNA=64, RDNA=32);
++# WARP_SIZE in include/utils.h reads SGL_ROCM_WARP_SIZE. On RDNA, SGL_IS_RDNA also
++# #ifdef's the CDNA-only all-reduce ops out of the cxx-compiled registration TU so it
++# links against exactly the objects that were built.
++_rocm_arch_flags = [f"-DSGL_ROCM_WARP_SIZE={64 if is_cdna else 32}"]
++if is_rdna:
++    _rocm_arch_flags.append("-DSGL_IS_RDNA")
++hipcc_flags += _rocm_arch_flags
++cxx_flags += _rocm_arch_flags
++
+ ext_modules = [
+     CUDAExtension(
+         name="sgl_kernel.common_ops",

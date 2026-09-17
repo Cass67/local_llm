@@ -1,0 +1,42 @@
+Subject: [PATCH] jit: build HIP device code with -DNDEBUG so kernels don't need hostcall
+
+Device-side assert() pulls in ROCm's hostcall mechanism, and hostcall requires
+PCIe atomics. A GPU whose slot's root port does not advertise AtomicOpsCap
+cannot dispatch any kernel that contains an assert:
+
+  rocvirtual.cpp:3685: Pcie atomics not enabled, hostcall not supported
+  rocvirtual.cpp:4025: AQL dispatch failed!
+  ShaderName: sglang::store_kvcache<256, 256, 1, false, int>
+  -> hipLaunchKernel returns hipErrorIllegalState
+
+which surfaces as the useless "CUDA error: the operation cannot be performed in
+the present state" at kvcache.cuh:316, and the server never starts on that GPU.
+
+Measured on a 4x RX 7900 XT box: three cards hang off a PLX switch on CPU root
+port 00:01.0 (AtomicOpsCap: 32bit+ 64bit+ 128bitCAS+) and work; the fourth is on
+PCH root port 00:1d.0 (AtomicOpsCap: 32bit- 64bit- 128bitCAS-) and fails every
+kernel carrying an assert. store_kvcache has one (the index bound check at
+kvcache.cuh:209); silu_and_mul has none and runs fine on the same card, which is
+what isolates the mechanism.
+
+Note the host pass already gets -O3 but NOT -DNDEBUG, and the device pass is a
+separate flag list, so adding NDEBUG to DEFAULT_CFLAGS alone does nothing for
+device code -- it has to go on base_cuda_flags().
+
+This is the same trade the AOT build already makes: setup_rocm.py has had
+"-DNDEBUG" in hipcc_flags since forever. It only disables the debug bound check,
+which is a developer aid, not a correctness guarantee -- out-of-range indices go
+back to being an illegal memory access instead of a device assert.
+
+--- a/python/sglang/kernels/jit/utils/compile/toolchain.py
++++ b/python/sglang/kernels/jit/utils/compile/toolchain.py
+@@ -136,5 +136,8 @@ def base_cxx_flags() -> List[str]:
+
+ def base_cuda_flags() -> List[str]:
+     if is_hip_runtime():
+-        return ["-fPIC", "-D__HIP_PLATFORM_AMD__=1", "-fno-gpu-rdc"]
++        # -DNDEBUG: device assert() requires hostcall, hostcall requires PCIe
++        # atomics, and a GPU on a root port without AtomicOpsCap then cannot
++        # dispatch the kernel at all (AQL dispatch failed -> illegal state).
++        return ["-fPIC", "-D__HIP_PLATFORM_AMD__=1", "-fno-gpu-rdc", "-DNDEBUG"]
+     return ["-Xcompiler", "-fPIC"]

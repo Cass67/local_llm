@@ -1,0 +1,109 @@
+diff --git a/python/sglang/srt/layers/quantization/quark/schemes/quark_w4a4_mxfp4.py b/python/sglang/srt/layers/quantization/quark/schemes/quark_w4a4_mxfp4.py
+index f860a3f..e785305 100644
+--- a/python/sglang/srt/layers/quantization/quark/schemes/quark_w4a4_mxfp4.py
++++ b/python/sglang/srt/layers/quantization/quark/schemes/quark_w4a4_mxfp4.py
+@@ -82,15 +82,31 @@ def _dequant_mxfp4_to_bf16(
+     return w.to(torch.bfloat16)
+ 
+ 
++# aiter is optional -- absent from pyproject.toml, no published wheel -- so
++# is_hip() does not imply these kernels are importable, and neither does a
++# working `import aiter`: a version-skewed build can ship the module without
++# the symbol. This file is imported unconditionally at startup by the
++# quantization registry, so an unguarded import takes the server down before
++# any model is selected.
++_has_aiter_mxfp4 = False
+ if _is_hip:
+-    from aiter.ops.triton.gemm.fused.fused_gemm_afp4wfp4_split_cat import (
+-        fused_gemm_afp4wfp4_split_cat as _fused_gemm_afp4wfp4_split_cat_orig,
+-    )
+-    from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4 as _gemm_afp4wfp4_orig
+-    from aiter.ops.triton.gemm_afp4wfp4_pre_quant_atomic import (
+-        gemm_afp4wfp4_pre_quant as _gemm_afp4wfp4_pre_quant_orig,
+-    )
+-    from aiter.ops.triton.quant import dynamic_mxfp4_quant as _dynamic_mxfp4_quant_orig
++    try:
++        from aiter.ops.triton.gemm.fused.fused_gemm_afp4wfp4_split_cat import (
++            fused_gemm_afp4wfp4_split_cat as _fused_gemm_afp4wfp4_split_cat_orig,
++        )
++        from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4 as _gemm_afp4wfp4_orig
++        from aiter.ops.triton.gemm_afp4wfp4_pre_quant_atomic import (
++            gemm_afp4wfp4_pre_quant as _gemm_afp4wfp4_pre_quant_orig,
++        )
++        from aiter.ops.triton.quant import (
++            dynamic_mxfp4_quant as _dynamic_mxfp4_quant_orig,
++        )
++
++        _has_aiter_mxfp4 = True
++    except ImportError:
++        pass
++
++if _has_aiter_mxfp4:
+ 
+     def _aiter_gemm_afp4wfp4(
+         x: torch.Tensor,
+@@ -245,6 +261,12 @@ class QuarkW4A4MXFP4(QuarkLinearScheme):
+         self.is_checkpoint_mxfp4_serialized = is_checkpoint_mxfp4_serialized
+         self.dequantization_config = dequantization_config
+ 
++        if not _has_aiter_mxfp4:
++            raise NotImplementedError(
++                "The MXFP4 scheme requires aiter. Please make sure a compatible "
++                "aiter is installed on your AMD device."
++            )
++
+         if not self.is_checkpoint_mxfp4_serialized:
+             if not is_gfx95_supported():
+                 raise NotImplementedError(
+diff --git a/python/sglang/srt/layers/quantization/quark/schemes/quark_w4a4_mxfp4_moe.py b/python/sglang/srt/layers/quantization/quark/schemes/quark_w4a4_mxfp4_moe.py
+index 12243eb..84f56fb 100644
+--- a/python/sglang/srt/layers/quantization/quark/schemes/quark_w4a4_mxfp4_moe.py
++++ b/python/sglang/srt/layers/quantization/quark/schemes/quark_w4a4_mxfp4_moe.py
+@@ -69,8 +69,14 @@ _shuffle_moe_gfx1250 = (
+     and get_bool_env_var("SGLANG_MOE_SHUFFLE_GFX1250", "true")
+ )
+ 
++# aiter is optional, so is_hip() does not imply this kernel is importable, and
++# a version-skewed build can ship the module without the symbol. This file is
++# imported unconditionally at startup by the quantization registry.
+ if _is_hip:
+-    from aiter.ops.triton.quant import dynamic_mxfp4_quant
++    try:
++        from aiter.ops.triton.quant import dynamic_mxfp4_quant
++    except ImportError:
++        dynamic_mxfp4_quant = None
+ else:
+     dynamic_mxfp4_quant = None
+ 
+diff --git a/python/sglang/srt/layers/quantization/quark_int4fp8_moe.py b/python/sglang/srt/layers/quantization/quark_int4fp8_moe.py
+index 2813260..bffc679 100644
+--- a/python/sglang/srt/layers/quantization/quark_int4fp8_moe.py
++++ b/python/sglang/srt/layers/quantization/quark_int4fp8_moe.py
+@@ -27,7 +27,13 @@ _is_hip = is_hip()
+ 
+ 
+ if _is_hip:
+-    from aiter.ops.shuffle import shuffle_weight
++    # aiter is optional, so is_hip() does not imply this kernel is importable,
++    # and a version-skewed build can ship the module without the symbol. This
++    # file is imported unconditionally at startup by the quantization registry.
++    try:
++        from aiter.ops.shuffle import shuffle_weight
++    except ImportError:
++        shuffle_weight = None
+ 
+     ON_GFX950 = "gfx950" in torch.cuda.get_device_properties("cuda").gcnArchName
+ 
+@@ -145,6 +151,12 @@ class QuarkInt4Fp8MoEMethod(FusedMoEMethodBase):
+                 "The quark_int4fp8_moe online quantization scheme is only supported on AMD GPUs."
+             )
+ 
++        if shuffle_weight is None:
++            raise NotImplementedError(
++                "The quark_int4fp8_moe online quantization scheme requires aiter. "
++                "Please make sure a compatible aiter is installed on your AMD device."
++            )
++
+     def get_weight_loader(self, layer, original_weight_loader):
+         def online_int4_fp8_weight_loader(
+             param: torch.nn.Parameter,
