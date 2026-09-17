@@ -2786,7 +2786,11 @@
           "tool_call_parser": "qwen3_coder",
           "served_model_name": "qwen3.8-27b",
           "visible_devices": "0,1,2,3",
-          "reasoning_parser": "qwen3"
+          "reasoning_parser": "qwen3",
+          "flags": [
+            "--triton-attention-num-kv-splits",
+            "32"
+          ]
         },
         "mtp": {
           "backend": "sglang",
@@ -2804,12 +2808,7 @@
           "spec_algorithm": "EAGLE",
           "spec_num_steps": 3,
           "spec_eagle_topk": 1,
-          "spec_num_draft_tokens": 4,
-          "flags": [
-            "--speculative-adaptive",
-            "--triton-attention-num-kv-splits",
-            "32"
-          ]
+          "spec_num_draft_tokens": 4
         },
         "ngram": {
           "backend": "sglang",
