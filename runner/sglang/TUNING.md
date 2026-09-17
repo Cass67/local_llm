@@ -121,15 +121,82 @@ fabric plus kernel efficiency.
 
 Untested, in rough order of expected value:
 
-1. **A 4-bit AWQ of this checkpoint.** AWQ has a real ROCm path (README §5).
-   Cutting weight traffic ~4× attacks the actual bottleneck, and a ~15 GB model
-   would also fit on two cards, removing the 4-way all-reduce entirely. This is
-   the single largest lever on the list and the only one that can plausibly
-   double bs=1 decode.
-2. **`--cuda-graph-max-bs-decode`.** Decode graphs are captured only to bs=8
+1. **`--cuda-graph-max-bs-decode`.** Decode graphs are captured only to bs=8
    while `max_running_requests` is 48 — any batch above 8 decodes eager. Matters
    for concurrency, not for a single user.
-3. **`--num-continuous-decode-steps`** (default 1) and `--enable-torch-compile`.
+2. **`--num-continuous-decode-steps`** (default 1) and `--enable-torch-compile`.
+
+4-bit weights are **not** on this list any more: measured and rejected in §3a.
+
+### 3a. AWQ: repacked, served, and rejected
+
+Settled 2026-09-17 by building the checkpoint and measuring it. **4-bit AWQ is
+~18% slower than bf16 on this hardware.** sglang says so itself at startup:
+*"awq quantization is not fully optimized yet. The speed can be slower than
+non-quantized models."* It is right.
+
+| | bf16 (nospec) | AWQ 4-bit |
+|---|---|---|
+| 2k fresh | 19.1 | 15.6 |
+| 16k fresh | 18.6 | 15.3 |
+
+The bandwidth argument in §3 was sound; the kernel does not cash it in. ROCm's
+AWQ path is **dequantize-then-GEMM** — `awq_kernels.py` branches on `is_hip()`
+to a Triton `awq_dequantize`, which expands int4 back into a full-size fp16
+matrix that a normal GEMM then reads. There is no fused int4 GEMM on ROCm, so
+the 2.85× saving in weight traffic is paid back as a full fp16 write plus read
+plus dequant overhead. Quantization only helps here if the GEMM consumes int4
+directly, and on gfx1100 nothing does.
+
+The one real benefit is memory, not speed: freeing ~36 GB of weights took the KV
+cache from 80k to **414k tokens** at ctx 65536. If a context far beyond 131072
+ever matters more than 18% of decode, this is the lever.
+
+#### Getting there (all of it reusable)
+
+No `quant_method: awq` checkpoint of Qwen3.8-27B exists — every AWQ-named repo
+is `compressed-tensors` (routed to Marlin, NVIDIA PTX) or `quark` int4/MXFP4
+(no matching scheme, no FP4 hardware). The ecosystem moved to llm-compressor,
+whose format is exactly the one ROCm cannot use.
+
+`scripts/ct-to-awq.py` repacks compressed-tensors `pack-quantized` W4A16 into
+AutoAWQ GEMM layout. It is a pure format transform — same int4 numbers, no
+calibration, no requantization, no quality change. It is the exact inverse of
+`compressed_tensors`' own `AutoAWQConverter`, which doubles as the oracle:
+`--self-test` round-trips through *their* code and requires bit-identical
+weights, scales and zero points.
+
+Two traps worth keeping:
+
+- **The skip list is matched by plain substring** (`is_layer_skipped_awq`), and
+  the source `ignore` list names the bare `linear_attn` module even though its
+  `in_proj_qkv` child *is* quantized. Deriving the list from that config
+  silently unquantizes layers. The script verifies the list against the real
+  tensors and refuses to write a checkpoint that does not partition cleanly.
+- **`weight_zero_point` is packed along dim 0**, unlike `weight_packed`.
+
+#### The bug that made it look broken
+
+An fp16 model with GDN layers dies during its own startup warmup:
+
+```
+RuntimeError: Index put requires the source and destination dtypes match,
+got BFloat16 for the destination and Half for the source.
+```
+
+`configs/mamba_utils.py:68` hardcodes the conv-state dtype:
+
+```python
+conv_dtype = dtype_map.get(envs.SGLANG_MAMBA_CONV_DTYPE.get(), torch.bfloat16)
+```
+
+It never consults the model dtype. `--mamba-ssm-dtype` covers the SSM state on
+the following lines but conv states are **env-var only**, so the fix is
+`SGLANG_MAMBA_CONV_DTYPE=float16`. AWQ requires fp16, which is how this surfaced.
+It presents as "loads, serves, then falls over on the first request", because
+the failing warmup runs after the port opens and the HTTP layer reports only a
+downstream `asyncio.CancelledError`. Worth reporting upstream: any fp16 hybrid
+Mamba/GDN model hits it on any backend.
 
 ### Closed off — tested and dead
 
