@@ -1,0 +1,67 @@
+Subject: [PATCH] sgl-kernel: drop the device printf in build_tree_efficient on RDNA
+
+Device-side printf pulls in ROCm's hostcall, and hostcall requires PCIe atomics.
+A GPU whose root port does not advertise AtomicOpsCap cannot dispatch any kernel
+containing one -- the launch fails outright:
+
+  ShaderName : build_tree_efficient(long*, long*, ...)
+  rocvirtual.cpp:3685  Pcie atomics not enabled, hostcall not supported
+  rocvirtual.cpp:4025  AQL dispatch failed!
+  -> hipLaunchKernel returns hipErrorIllegalState
+
+which surfaces far away as
+
+  torch.AcceleratorError: HIP error: the operation cannot be performed in the
+  present state
+
+inside set_mamba_track_indices_from_reqs, and takes out EAGLE/MTP speculative
+decoding entirely on that machine.
+
+Note -DNDEBUG does NOT cover this: it removes assert() but not printf(). The
+message is purely diagnostic -- the offending token is skipped by the following
+`continue` either way -- so compiling it out costs a warning, not behaviour.
+
+Measured on 4x RX 7900 XT (gfx1100), Qwen3.8-27B bf16, TP=4, EAGLE steps 3 /
+eagle-topk 1 / draft tokens 4, using the checkpoint's in-file MTP head:
+
+  before: EAGLE dies on the first request
+  after : accept len 2.80 / 4, 41.0 tok/s vs 19.2 without speculation (2.13x)
+
+diff --git a/python/sglang/kernels/aot/csrc/speculative/eagle_utils.cu b/python/sglang/kernels/aot/csrc/speculative/eagle_utils.cu
+index 06524e773a..18f0136f67 100644
+--- a/python/sglang/kernels/aot/csrc/speculative/eagle_utils.cu
++++ b/python/sglang/kernels/aot/csrc/speculative/eagle_utils.cu
+@@ -86,9 +86,16 @@ __global__ void build_tree_efficient(
+         }
+       }
+       if (parent_position == draft_token_num) {
++#ifndef SGL_IS_RDNA
++        // Device printf pulls in ROCm's hostcall, which requires PCIe atomics.
++        // A GPU on a root port without AtomicOpsCap then cannot dispatch this
++        // kernel at all ("AQL dispatch failed" -> hipErrorIllegalState), which
++        // takes out EAGLE/MTP entirely. The message is purely diagnostic and
++        // the token is skipped either way, so drop it rather than the feature.
+         printf(
+             "WARNING: invalid eagle tree!!! Detected a token with no parent token selected. "
+             "Please check if the logprob has nan. The token will be ignored to keep proceeding.\n");
++#endif
+         continue;
+       }
+ 
+@@ -173,9 +180,16 @@ __global__ void build_tree_efficient_partial_packed(
+         }
+       }
+       if (parent_position == draft_token_num) {
++#ifndef SGL_IS_RDNA
++        // Device printf pulls in ROCm's hostcall, which requires PCIe atomics.
++        // A GPU on a root port without AtomicOpsCap then cannot dispatch this
++        // kernel at all ("AQL dispatch failed" -> hipErrorIllegalState), which
++        // takes out EAGLE/MTP entirely. The message is purely diagnostic and
++        // the token is skipped either way, so drop it rather than the feature.
+         printf(
+             "WARNING: invalid eagle tree!!! Detected a token with no parent token selected. "
+             "Please check if the logprob has nan. The token will be ignored to keep proceeding.\n");
++#endif
+         continue;
+       }
+ 
