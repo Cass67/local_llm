@@ -15,7 +15,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -592,9 +592,19 @@ def http_json_or_text(url: str, timeout: float = 0.8, max_bytes: int = 4096) -> 
     try:
         with urlopen(request, timeout=timeout) as response:
             body = response.read(max_bytes).decode("utf-8", errors="replace").strip()
+    except HTTPError as exc:
+        # Distinguish "this server has no such endpoint" from a transport
+        # failure: sglang runners have no /slots, and re-asking every poll
+        # fills their log with 404s.
+        return f"absent: {exc.code}" if exc.code == 404 else "unreachable: HTTPError"
     except (OSError, URLError) as exc:
         return f"unreachable: {exc.__class__.__name__}"
     return body or "ok"
+
+
+# Ports whose runner has no /slots (sglang rather than llama-server). Probed
+# once, then skipped -- otherwise every poll logs a 404 on the runner side.
+_NO_SLOTS_PORTS: set[int] = set()
 
 
 def parse_slots(body: str) -> list[dict[str, Any]]:
@@ -673,13 +683,48 @@ def summarize_models(models_body: str) -> str:
     return ", ".join(ids) if ids else models_body[:120]
 
 
+def parse_sglang_metrics(body: str) -> dict[str, Any]:
+    """live tok/s and running requests from sglang's /metrics.
+
+    llama-server reports these per slot on /slots; sglang has no /slots but
+    exposes sglang:gen_throughput and sglang:num_running_reqs instead.
+    """
+    out: dict[str, Any] = {"live_tps": None, "active_slots": "n/a", "total_slots": "n/a"}
+    if body.startswith(("unreachable:", "absent:")):
+        return out
+    for line in body.splitlines():
+        if line.startswith("#"):
+            continue
+        name, _, value = line.rpartition(" ")
+        try:
+            number = float(value)
+        except ValueError:
+            continue
+        if name.startswith("sglang:gen_throughput"):
+            out["live_tps"] = number
+        elif name.startswith("sglang:num_running_reqs"):
+            out["active_slots"] = int(number)
+    return out
+
+
 def collect_runner_api(port: int, tracker: TpsTracker) -> dict[str, Any]:
     base = f"http://127.0.0.1:{port}"
     health = http_json_or_text(f"{base}/health")
     models = summarize_models(http_json_or_text(f"{base}/v1/models"))
-    slots_body = http_json_or_text(f"{base}/slots", max_bytes=1024 * 1024)
-    if slots_body.startswith("unreachable:"):
-        tps: dict[str, Any] = {"live_tps": None, "active_slots": "n/a", "total_slots": "n/a"}
+    if port in _NO_SLOTS_PORTS:
+        slots_body = "absent: 404"
+    else:
+        slots_body = http_json_or_text(f"{base}/slots", max_bytes=1024 * 1024)
+        if slots_body.startswith("absent:"):
+            _NO_SLOTS_PORTS.add(port)
+    if slots_body.startswith("absent:"):
+        # sglang: no /slots, but its prometheus metrics carry the same two
+        # numbers llama-server's slots give us.
+        tps: dict[str, Any] = parse_sglang_metrics(
+            http_json_or_text(f"{base}/metrics", max_bytes=256 * 1024)
+        )
+    elif slots_body.startswith("unreachable:"):
+        tps = {"live_tps": None, "active_slots": "n/a", "total_slots": "n/a"}
     else:
         tps = tracker.update(parse_slots(slots_body))
     return {"health": health, "models": models, "tps": tps}
