@@ -2754,7 +2754,6 @@
           "attention_backend": "triton",
           "visible_devices": "0,1,2,3",
           "tool_call_parser": "qwen3_coder",
-          "reasoning_parser": "qwen3",
           "served_model_name": "qwen3-coder-30b-a3b"
         },
         "ngram": {
@@ -2768,7 +2767,6 @@
           "spec_num_draft_tokens": 8,
           "visible_devices": "0,1,2,3",
           "tool_call_parser": "qwen3_coder",
-          "reasoning_parser": "qwen3",
           "served_model_name": "qwen3-coder-30b-a3b"
         }
       }
