@@ -11,6 +11,7 @@ Backend = Literal[
     "rocmunslothsrc",
     "vulkan",
     "cuda",
+    "sglang",
 ]
 # Derived from Backend, longest first so "-rocmmainmtp" is stripped before "-rocmmain"
 # and "-rocmunsloth" before "-rocm". Hand-listing these went stale as backends were added, which
@@ -24,6 +25,7 @@ _BACKEND_LABELS = {
     "rocmunslothsrc": "ROCmUnslothSrc",
     "vulkan": "Vulkan",
     "cuda": "CUDA",
+    "sglang": "SGLang",
 }
 
 

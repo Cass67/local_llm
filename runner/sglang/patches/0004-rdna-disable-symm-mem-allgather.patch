@@ -1,0 +1,54 @@
+diff --git a/python/sglang/srt/layers/logits_processor.py b/python/sglang/srt/layers/logits_processor.py
+index 6aac6eb..3992024 100644
+--- a/python/sglang/srt/layers/logits_processor.py
++++ b/python/sglang/srt/layers/logits_processor.py
+@@ -58,6 +58,7 @@ from sglang.srt.model_executor.forward_batch_info import (
+     ForwardMode,
+ )
+ from sglang.srt.runtime_context import get_exec, get_parallel
++from sglang.srt.utils.common import is_rdna_supported
+ from sglang.srt.utils.common import (
+     is_cpu,
+     is_npu,
+@@ -446,7 +447,15 @@ class LogitsProcessor(nn.Module):
+             max_tokens=triton_symm_mem_ag.recommended_max_tokens(
+                 include_prefill=False, floor=128
+             ),
+-            enabled=self.do_tensor_parallel_all_gather and not self.use_attn_tp_group,
++            # RDNA (consumer Radeon) has no multi-GPU symmetric memory: RCCL
++            # reports "Symmetric memory is not supported. cuMemEnable 0" and
++            # torch.distributed._symmetric_memory.rendezvous() aborts the
++            # scheduler during CUDA graph capture. Fall back to the NCCL path.
++            enabled=(
++                self.do_tensor_parallel_all_gather
++                and not self.use_attn_tp_group
++                and not is_rdna_supported()
++            ),
+             skip_entry_sync=True,
+         )
+ 
+diff --git a/python/sglang/srt/utils/common.py b/python/sglang/srt/utils/common.py
+index 5509adf..21a6316 100644
+--- a/python/sglang/srt/utils/common.py
++++ b/python/sglang/srt/utils/common.py
+@@ -1061,6 +1061,20 @@ def is_gfx95_supported():
+         return False
+ 
+ 
++@lru_cache(maxsize=1)
++def is_rdna_supported():
++    """Whether the device is an AMD RDNA GPU (consumer Radeon, wave32).
++
++    Covers gfx11xx (RDNA3/3.5) and gfx12xx (RDNA4). False on every non-HIP
++    build, so callers do not need their own is_hip().
++    """
++    if torch.version.hip:
++        gcn_arch = torch.cuda.get_device_properties(0).gcnArchName
++        return any(gfx in gcn_arch for gfx in ["gfx11", "gfx12"])
++    else:
++        return False
++
++
+ @lru_cache(maxsize=1)
+ def is_gfx942_supported():
+     """

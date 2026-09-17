@@ -6,6 +6,7 @@ container spec from accepted metadata without touching Docker or live services.
 
 import http.client
 import json
+import os
 import socket
 import time
 from dataclasses import dataclass, field
@@ -89,7 +90,7 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
         # per-message tok/s) unreachable from a browser on the LAN. A --host in the
         # profile flags still wins: raw flags are appended last.
         "--host",
-        "0.0.0.0",  # noqa: S104
+        "0.0.0.0",  # noqa: S104  # nosec B104 - runner is LAN-facing by design
         # Live throughput for the Status page. latest-metrics.json only sees requests
         # that go through the mgmt chat proxy, so sweeps and anything aimed straight
         # at the runner port left the tok/s card frozen; /metrics counts every request.
@@ -309,12 +310,70 @@ def build_llama_server_args(metadata: dict[str, Any], port: int) -> list[str]:  
     return args
 
 
+def build_sglang_args(metadata: dict[str, Any], port: int) -> list[str]:  # noqa: C901
+    """Build `python -m sglang.launch_server` argv.
+
+    SGLang shares almost nothing with llama-server: it takes a *directory* of
+    safetensors rather than a .gguf file, and its own flag vocabulary. Only the
+    knobs that mean something here are mapped; anything else goes through
+    `flags` verbatim, same as the llama.cpp path.
+
+    Defaults are the ones measured on gfx1100 (see runner/sglang/README):
+    triton attention, because the HIP default is AITER which is CDNA-only and
+    hard-asserts on RDNA, and there is no env var for it.
+    """
+    cfg = _config(metadata)
+    args = [
+        "python",
+        "-m",
+        "sglang.launch_server",
+        "--model-path",
+        # Profiles carry the safetensors directory as a profile knob, so prefer
+        # cfg; fall back to the accepted-model metadata like the llama.cpp path.
+        str(cfg.get("model_path") or _model_path(metadata)),
+        "--host",
+        "0.0.0.0",  # noqa: S104  # nosec B104 - runner is LAN-facing by design
+        "--port",
+        str(port),
+        # AITER is CDNA-only; on RDNA the default backend asserts at startup.
+        "--attention-backend",
+        str(cfg.get("attention_backend") or "triton"),
+    ]
+    if cfg.get("tp_size"):
+        args += ["--tp-size", str(cfg["tp_size"])]
+    if cfg.get("pp_size"):
+        args += ["--pp-size", str(cfg["pp_size"])]
+    if cfg.get("context_length"):
+        args += ["--context-length", str(cfg["context_length"])]
+    if cfg.get("mem_fraction_static"):
+        # Speculative decoding needs headroom: 0.90 segfaults the scheduler at
+        # init on a 30B/TP=4, 0.82 is fine.
+        args += ["--mem-fraction-static", str(cfg["mem_fraction_static"])]
+    if cfg.get("quantization"):
+        args += ["--quantization", str(cfg["quantization"])]
+    if cfg.get("load_format"):
+        args += ["--load-format", str(cfg["load_format"])]
+    if cfg.get("spec_algorithm"):
+        args += ["--speculative-algorithm", str(cfg["spec_algorithm"])]
+        if cfg.get("spec_num_draft_tokens"):
+            args += ["--speculative-num-draft-tokens", str(cfg["spec_num_draft_tokens"])]
+    if cfg.get("disable_cuda_graph"):
+        args.append("--disable-cuda-graph")
+    flags = cfg.get("flags")
+    if flags:
+        args += [str(f) for f in flags] if isinstance(flags, list) else str(flags).split()
+    return args
+
+
 def build_runner_container_spec(  # noqa: C901
     metadata: dict[str, Any], config: DockerRunnerConfig, models_dir: Path | None = None
 ) -> DockerContainerSpec:
     """Build a Docker container spec for the project-owned runner."""
     if models_dir:
-        if not (metadata.get("model_path") or metadata.get("path")):
+        # sglang carries its model dir as a profile knob and lives on its own
+        # mount, so the GGUF-cache lookup neither applies nor resolves.
+        _is_sglang = str(_config(metadata).get("backend") or "") == "sglang"
+        if not _is_sglang and not (metadata.get("model_path") or metadata.get("path")):
             metadata = {**metadata, "model_path": _model_path(metadata, models_dir)}
         cfg = _config(metadata)
         if cfg.get("mtp_enabled") and not cfg.get("mtp_draft_model"):
@@ -407,10 +466,27 @@ def build_runner_container_spec(  # noqa: C901
         elif visible_devices:
             environment["HIP_VISIBLE_DEVICES"] = visible_devices
 
+    if backend == "sglang":
+        # Our RCCL build, with device asserts compiled out. Stock librccl needs
+        # hostcall, hostcall needs PCIe atomics, and the card on the PCH root
+        # port has none -- so any collective kernel fails to dispatch there and
+        # TP>1 including that card dies. See runner/sglang/README.
+        rccl = str(_config(metadata).get("rccl_lib_path") or "/opt/rccl/build")
+        environment["LD_LIBRARY_PATH"] = rccl
+        # sglang serves safetensors directories, which are far too large to sit
+        # alongside the GGUFs on the models cache volume, so they get their own
+        # mount. Profiles reference them as /sglang-models/<dir>.
+        sglang_models = os.environ.get("SGLANG_MODELS_DIR", "/mnt/spare/sglang-models")
+        binds.append(f"{sglang_models}:/sglang-models:ro")
+
     return DockerContainerSpec(
         name=config.name,
         image=config.image,
-        command=build_llama_server_args(metadata, port=config.port),
+        command=(
+            build_sglang_args(metadata, port=config.port)
+            if backend == "sglang"
+            else build_llama_server_args(metadata, port=config.port)
+        ),
         ports={f"{config.port}/tcp": config.port},
         devices=devices,
         device_requests=device_requests,
