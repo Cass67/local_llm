@@ -373,6 +373,8 @@ def build_sglang_args(metadata: dict[str, Any], port: int) -> list[str]:  # noqa
         args += ["--max-mamba-cache-size", str(cfg["max_mamba_cache_size"])]
     if cfg.get("mamba_ssm_dtype"):
         args += ["--mamba-ssm-dtype", str(cfg["mamba_ssm_dtype"])]
+    if cfg.get("mamba_radix_cache_strategy"):
+        args += ["--mamba-radix-cache-strategy", str(cfg["mamba_radix_cache_strategy"])]
     if cfg.get("disable_cuda_graph"):
         args.append("--disable-cuda-graph")
     flags = cfg.get("flags")
