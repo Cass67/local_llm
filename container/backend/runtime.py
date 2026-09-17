@@ -357,6 +357,14 @@ def build_sglang_args(metadata: dict[str, Any], port: int) -> list[str]:  # noqa
         args += ["--speculative-algorithm", str(cfg["spec_algorithm"])]
         if cfg.get("spec_num_draft_tokens"):
             args += ["--speculative-num-draft-tokens", str(cfg["spec_num_draft_tokens"])]
+        # EAGLE (alias NEXTN) drives a checkpoint's in-file MTP head; the Qwen3.8
+        # cookbook recipe is steps 3 / topk 1 / draft tokens 4.
+        if cfg.get("spec_num_steps"):
+            args += ["--speculative-num-steps", str(cfg["spec_num_steps"])]
+        if cfg.get("spec_eagle_topk"):
+            args += ["--speculative-eagle-topk", str(cfg["spec_eagle_topk"])]
+        if cfg.get("spec_draft_model_path"):
+            args += ["--speculative-draft-model-path", str(cfg["spec_draft_model_path"])]
     # Without --tool-call-parser a harness receives tool calls as raw text
     # instead of structured tool_calls; qwen3_coder decodes this checkpoint's
     # <function=..>/<parameter=..> block, hermes expects bare JSON and silently
