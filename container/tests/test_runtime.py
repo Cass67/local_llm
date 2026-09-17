@@ -312,3 +312,25 @@ def test_sglang_spec_with_models_dir_does_not_need_gguf_metadata():
         models_dir=Path("/models"),
     )
     assert "--model-path /sglang-models/M" in " ".join(spec.command)
+
+
+def test_build_sglang_args_emits_tool_call_parser_for_agent_harnesses():
+    """Without --tool-call-parser a harness gets raw text, not tool_calls."""
+    from backend.runtime import build_sglang_args
+
+    joined = " ".join(
+        build_sglang_args(
+            {
+                "config": {
+                    "model_path": "/sglang-models/M",
+                    "tool_call_parser": "qwen3_coder",
+                    "reasoning_parser": "qwen3",
+                    "served_model_name": "qwen3-coder-30b-a3b",
+                }
+            },
+            port=8080,
+        )
+    )
+    assert "--tool-call-parser qwen3_coder" in joined
+    assert "--reasoning-parser qwen3" in joined
+    assert "--served-model-name qwen3-coder-30b-a3b" in joined

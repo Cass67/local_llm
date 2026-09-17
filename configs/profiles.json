@@ -2752,7 +2752,10 @@
           "context_length": 32768,
           "mem_fraction_static": 0.9,
           "attention_backend": "triton",
-          "visible_devices": "0,1,2,3"
+          "visible_devices": "0,1,2,3",
+          "tool_call_parser": "qwen3_coder",
+          "reasoning_parser": "qwen3",
+          "served_model_name": "qwen3-coder-30b-a3b"
         },
         "ngram": {
           "backend": "sglang",
@@ -2763,7 +2766,10 @@
           "attention_backend": "triton",
           "spec_algorithm": "NGRAM",
           "spec_num_draft_tokens": 8,
-          "visible_devices": "0,1,2,3"
+          "visible_devices": "0,1,2,3",
+          "tool_call_parser": "qwen3_coder",
+          "reasoning_parser": "qwen3",
+          "served_model_name": "qwen3-coder-30b-a3b"
         }
       }
     }
