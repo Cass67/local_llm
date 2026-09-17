@@ -357,6 +357,22 @@ def build_sglang_args(metadata: dict[str, Any], port: int) -> list[str]:  # noqa
         args += ["--speculative-algorithm", str(cfg["spec_algorithm"])]
         if cfg.get("spec_num_draft_tokens"):
             args += ["--speculative-num-draft-tokens", str(cfg["spec_num_draft_tokens"])]
+    # Without --tool-call-parser a harness receives tool calls as raw text
+    # instead of structured tool_calls; qwen3_coder decodes this checkpoint's
+    # <function=..>/<parameter=..> block, hermes expects bare JSON and silently
+    # fails to parse. Per the sglang cookbook for the Qwen3 family.
+    if cfg.get("tool_call_parser"):
+        args += ["--tool-call-parser", str(cfg["tool_call_parser"])]
+    if cfg.get("reasoning_parser"):
+        args += ["--reasoning-parser", str(cfg["reasoning_parser"])]
+    # The model id a client must send defaults to the full --model-path; naming
+    # it keeps router rules and harness configs short.
+    if cfg.get("served_model_name"):
+        args += ["--served-model-name", str(cfg["served_model_name"])]
+    if cfg.get("max_mamba_cache_size"):
+        args += ["--max-mamba-cache-size", str(cfg["max_mamba_cache_size"])]
+    if cfg.get("mamba_ssm_dtype"):
+        args += ["--mamba-ssm-dtype", str(cfg["mamba_ssm_dtype"])]
     if cfg.get("disable_cuda_graph"):
         args.append("--disable-cuda-graph")
     flags = cfg.get("flags")
