@@ -2785,7 +2785,8 @@
           "mamba_radix_cache_strategy": "extra_buffer",
           "tool_call_parser": "qwen3_coder",
           "served_model_name": "qwen3.8-27b",
-          "visible_devices": "0,1,2,3"
+          "visible_devices": "0,1,2,3",
+          "reasoning_parser": "qwen3"
         }
       }
     }
