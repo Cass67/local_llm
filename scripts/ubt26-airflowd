@@ -21,12 +21,26 @@ hwmon_by_name() {
   return 1
 }
 
-# Chassis channels and the pwm the BIOS holds them at. The floor matters: ch5
-# idles at 218 under the BIOS curve, so taking manual control at the ch1-4
-# floor of 150 would make it *quieter* under load, which is the opposite of
-# the point. ch6 has no fan; ch7 is already pinned at 255 by the BIOS and has
-# nothing left to give, so both are left alone.
-CHANNELS=(1:150 2:150 3:150 4:150 5:218)
+# Chassis channels as name:floor:skew. The floor matters: ch5 idles at 218
+# under the BIOS curve, so taking manual control at the ch1-4 floor of 150
+# would make it *quieter* under load, which is the opposite of the point. ch6
+# has no fan; ch7 is already pinned at 255 by the BIOS and has nothing left to
+# give, so both are left alone.
+#
+# skew exists to stop the three FRONT fans (ch1, ch3, ch4) beating. Driven to
+# the same pwm they settle within ~18 rpm of each other, and their blade-pass
+# tones drift in and out of phase at a couple of Hz -- a slow "wub-wub" that
+# sounds exactly like a fan ramping up and down even though pwm and rpm are
+# both dead flat. Nothing is hunting; it is an interference beat, and it comes
+# back every time all three land on the same pwm. Separating them by ~200 rpm
+# pushes the beat far above the range the ear tracks. Confirmed by ear
+# 2026-09-19: 125/153/190 killed it where 153/153/153 throbbed.
+# Fields are channel:floor:skew:idle. "idle" is the pwm to hold when the GPUs
+# are cold, or "bios" to hand that channel back. Only the front trio is held:
+# ch2 and ch5 are not part of the beat and the BIOS idles them much lower
+# (ch2 ~73 pwm / 433 rpm), so holding them at their load floor just makes the
+# box louder at idle for no reason.
+CHANNELS=(1:150:-28:72 2:150:0:bios 3:150:0:88 4:150:+37:104 5:218:0:bios)
 
 TEMP_LOW=${TEMP_LOW:-70}    # below this, hand the fans back to the BIOS
 TEMP_HIGH=${TEMP_HIGH:-90}  # at or above this, full tilt
@@ -52,6 +66,43 @@ max_gpu_temp() {
   echo "$hi"
 }
 
+# Write a channel's pwm with its skew applied, clamped to a sane range.
+set_pwm() {
+  local n="$1" pwm="$2" skew="$3"
+  pwm=$((pwm + skew))
+  # ch1 stalls below pwm 68 (measured 2026-09-19: 0 rpm at 60 and 64, 754 rpm
+  # at 68). A stalled fan reads as pleasantly quiet and is easy to mistake for
+  # a good setting, so clamp above the stall point rather than near it.
+  ((pwm < 72)) && pwm=72
+  ((pwm > 255)) && pwm=255
+  echo 1 > "$NCT/pwm${n}_enable" 2>/dev/null || true
+  echo "$pwm" > "$NCT/pwm${n}" 2>/dev/null || true
+}
+
+# Idle used to hand the channels back to the BIOS with pwm_enable=5, which put
+# all three front fans on the same pwm again and brought the beat straight
+# back. Hold staggered idle values instead. These are absolute pwm and already
+# encode the stagger, so skew is NOT applied on top of them -- they are
+# re-centred below the BIOS's flat 153 so that de-beating does not cost extra
+# noise. ~100 rpm of separation is plenty; the beat only needs to be pushed
+# above the few-Hz range the ear tracks as a throb. Nothing is lost: the BIOS curve here
+# is keyed to the CPU and does not actually move these channels -- measured
+# 2026-09-19, package temp went 32C -> 44C with ch1/3/4 sitting flat at 153.
+idle_hold() {
+  local ch n floor skew idle
+  for ch in "${CHANNELS[@]}"; do
+    IFS=: read -r n floor skew idle <<<"$ch"
+    if [[ "$idle" == bios ]]; then
+      echo 5 > "$NCT/pwm${n}_enable" 2>/dev/null || true
+    else
+      set_pwm "$n" "$idle" 0
+    fi
+  done
+}
+
+# Only for exit: if this daemon is not running, the BIOS must have the fans
+# back, beat or no beat. Latched manual pwm with nothing watching temperature
+# is the genuinely dangerous state.
 release() {
   local ch
   for ch in "${CHANNELS[@]}"; do
@@ -63,6 +114,7 @@ release() {
 trap 'release; log "released to BIOS curve"' EXIT INT TERM
 
 manual=0
+idle_hold
 while :; do
   temp=$(max_gpu_temp)
   if ((temp >= TEMP_LOW)); then
@@ -70,16 +122,15 @@ while :; do
       frac=$(( (temp - TEMP_LOW) * 100 / (TEMP_HIGH - TEMP_LOW) ))
     fi
     for ch in "${CHANNELS[@]}"; do
-      n=${ch%%:*} floor=${ch##*:}
+      IFS=: read -r n floor skew idle <<<"$ch"
       pwm=$(( floor + (255 - floor) * frac / 100 ))
-      echo 1 > "$NCT/pwm${n}_enable" 2>/dev/null || true
-      echo "$pwm" > "$NCT/pwm${n}" 2>/dev/null || true
+      set_pwm "$n" "$pwm" "$skew"
     done
     if ((manual == 0)); then log "engaged at ${temp}C"; fi
     manual=1
   elif ((manual == 1 && temp < TEMP_REARM_T)); then
-    release
-    log "back to BIOS at ${temp}C"
+    idle_hold
+    log "back to staggered idle floor at ${temp}C"
     manual=0
   fi
   sleep "$INTERVAL"
