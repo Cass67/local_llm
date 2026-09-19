@@ -1,0 +1,12 @@
+[Unit]
+Description=Re-apply the GPU fan floor (the SMU drops it on re-init)
+
+[Timer]
+# The boot run races the SMU coming up; the script retries, but re-apply
+# shortly after boot as a backstop and then periodically, so a later SMU
+# re-init cannot leave the cards back at the stock target of 65 for hours.
+OnBootSec=3min
+OnUnitInactiveSec=10min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Hold a fan floor on the GPUs (no zero-rpm cycling)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+# Deliberately NOT RemainAfterExit: the timer re-triggers this unit, and a
+# oneshot left "active (exited)" would make every re-trigger a silent no-op.
+ExecStart=/usr/local/bin/gpu-fan-floor
+
+[Install]
+WantedBy=multi-user.target
