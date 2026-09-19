@@ -1,0 +1,63 @@
+#!/bin/sh
+# Stop the GPU fans buzzing up and down under bursty inference load.
+#
+# pwm1_enable is stuck at 2 (driver PID), so the fan is governed by
+# fan_target_temperature, NOT by the curve. With the target below the temp the
+# card actually runs at, the PID is permanently saturated chasing an
+# unreachable target and modulates against every burst -- that is the buzz.
+# Setting the target ABOVE the working range (85C here; cards run 45-88C) pins
+# three of four cards flat at minimum pwm and narrows the hot one a lot.
+#
+# The curve still matters as the ceiling above the target, and min_pwm is the
+# floor. fan_zero_rpm_enable is literal on this kernel: 0 keeps the fan
+# spinning, 1 lets it stop. (An older note claimed the opposite; it is wrong.)
+#
+# Note: rpm/pwm read 0 on all cards at once when a card power-gates between
+# bursts. That is stale SMU telemetry, not the fan stopping -- recovery to
+# ~1700 rpm within one 5s sample is not physically possible.
+#
+# PCI addresses move across kernels, so walk every card instead of pinning one.
+#
+# The SMU silently discards these writes if they land while it is still
+# resuming, which is exactly what happens when this runs at boot: on
+# 2026-09-18 every card read back the intended values for a moment and was
+# back at the stock target of 65 (the hunting condition) hours later, with no
+# GPU reset in the journal. So verify the readback and retry, and let the
+# timer re-apply periodically to cover a later SMU re-init.
+set -eu
+
+MIN_PWM=${MIN_PWM:-35}
+TARGET_TEMP=${TARGET_TEMP:-85}
+
+apply_card() {
+	F="$1"
+	for p in "0 25 55" "1 60 55" "2 75 55" "3 88 55" "4 95 100"; do
+		echo "$p" > "$F/fan_curve"
+	done
+	echo c > "$F/fan_curve"
+	echo "$MIN_PWM" > "$F/fan_minimum_pwm"; echo c > "$F/fan_minimum_pwm"
+	echo 2000 > "$F/acoustic_target_rpm_threshold"; echo c > "$F/acoustic_target_rpm_threshold"
+	echo "$TARGET_TEMP" > "$F/fan_target_temperature"; echo c > "$F/fan_target_temperature"
+	echo 0 > "$F/fan_zero_rpm_enable"; echo c > "$F/fan_zero_rpm_enable"
+}
+
+rc=0
+for F in /sys/bus/pci/devices/*/gpu_od/fan_ctrl; do
+	[ -d "$F" ] || continue
+	n=0
+	while :; do
+		apply_card "$F"
+		got_t=$(sed -n 2p "$F/fan_target_temperature")
+		got_p=$(sed -n 2p "$F/fan_minimum_pwm")
+		[ "$got_t" = "$TARGET_TEMP" ] && [ "$got_p" = "$MIN_PWM" ] && break
+		n=$((n + 1))
+		if [ "$n" -ge 10 ]; then
+			echo "$F: FAILED to stick, target=$got_t min_pwm=$got_p (wanted $TARGET_TEMP/$MIN_PWM)" >&2
+			rc=1
+			break
+		fi
+		sleep 3
+	done
+	echo "$F: target=$(sed -n 2p "$F/fan_target_temperature") min_pwm=$(sed -n 2p "$F/fan_minimum_pwm") retries=$n"
+done
+exit "$rc"
