@@ -385,6 +385,42 @@ services:
       --backend te=cpu --diffusion-fa --offload-to-cpu --rng cpu
       --cfg-scale 1.0 --steps 4 --video-frames 49 --fps 24 -W 640 -H 384
 
+  # ── stable-diffusion.cpp: reference conditioning (MiniMax-H3 Ref2VA) ─────────
+  # Not started by default: this holds ~30 GB RSS like sdcpp-video does, and the
+  # host has 60 GB total, so the two H3 instances cannot both be resident. Run
+  # `docker compose stop sdcpp-video` first, then
+  # `docker compose --profile ref2va up -d sdcpp-ref2va`.
+  # Shares sdcpp-video's VAEs and text encoder; only the denoiser differs.
+  sdcpp-ref2va:
+    profiles: ["ref2va"]
+    image: local-llm-sdcpp:latest
+    container_name: sdcpp-ref2va
+    network_mode: host
+    restart: unless-stopped
+    shm_size: 1g
+    group_add:
+      - "${RENDER_GROUP:-991}"
+      - "${VIDEO_GROUP:-44}"
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    environment:
+      HIP_VISIBLE_DEVICES: "${SDCPP_REF2VA_GPU:-0}"
+    volumes:
+      - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/MiniMax-H3:/models:ro
+      - ${SDCPP_OUTPUT_DIR:-${HOME}/h3out}:/work
+    # cfg 1.0 for the same reason as sdcpp-video: H3 is distilled and cfg-free,
+    # and anything above 1.0 kills the process outright.
+    command: >
+      sd-server --listen-ip 0.0.0.0 --listen-port ${SDCPP_REF2VA_PORT:-3012}
+      --serve-html-path /ui/index.html
+      --diffusion-model /models/minimax_h3_ref2va_pruned-Q4_K_M.gguf
+      --vae /models/vae/minimax_h3_video_vae_fp16.safetensors
+      --audio-vae /models/vae/minimax_h3_audio_vae_fp32.safetensors
+      --llm /models/qwen3vl_32b_minimax_h3-Q4_K_M.gguf
+      --backend te=cpu --diffusion-fa --offload-to-cpu --rng cpu
+      --cfg-scale 1.0 --steps 4 --video-frames 49 --fps 24 -W 640 -H 384
+
   # ── stable-diffusion.cpp: image generation (Qwen-Image 2.1) ──────────────────
   # Second sd-server instance on its own GPU. Behind Caddy at :3001/images.
   sdcpp-image:
