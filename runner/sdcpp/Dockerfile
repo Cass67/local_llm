@@ -1,6 +1,6 @@
 # local-llm-sdcpp
 # Project-owned stable-diffusion.cpp image, ROCm/HIP backend.
-# Serves MiniMax-H3 (video+audio) and Qwen-Image (stills) via sd-server.
+# Serves MiniMax-H3 (video+audio) and Qwen-Image 2.1 (stills) via sd-server.
 ARG SDCPP_REF=master
 
 # ── WebUI ────────────────────────────────────────────────────────────────────
