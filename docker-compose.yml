@@ -417,7 +417,7 @@ services:
       --vae /models/vae/qwen_image_2.1_vae_bf16.safetensors
       --llm /models/Qwen3VL-8B-Instruct-Q8_0.gguf
       --llm_vision /models/mmproj-Qwen3VL-8B-Instruct-F16.gguf
-      --backend te=cpu --diffusion-fa
+      --backend te=cpu --diffusion-fa --offload-to-cpu
       --cfg-scale 6.0 --sampling-method euler
       --steps 20 -W 1024 -H 1024
 
