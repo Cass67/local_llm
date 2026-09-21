@@ -350,6 +350,11 @@ services:
       context: .
       dockerfile: runner/sdcpp/Dockerfile
       network: host
+      args:
+        # Pin the ref: the Dockerfile clones inside a RUN, so with a floating
+        # "master" the layer cache never invalidates and a rebuild silently
+        # reuses whatever sd.cpp was current at the first build.
+        SDCPP_REF: ${SDCPP_REF:-6dcb5bbd4278aa8f6d851f7515e87555f8e757b7}
     image: local-llm-sdcpp:latest
     container_name: sdcpp-video
     network_mode: host
@@ -380,7 +385,7 @@ services:
       --backend te=cpu --diffusion-fa --offload-to-cpu --rng cpu
       --cfg-scale 1.0 --steps 4 --video-frames 49 --fps 24 -W 640 -H 384
 
-  # ── stable-diffusion.cpp: image generation (Qwen-Image) ──────────────────────
+  # ── stable-diffusion.cpp: image generation (Qwen-Image 2.1) ──────────────────
   # Second sd-server instance on its own GPU. Behind Caddy at :3001/images.
   sdcpp-image:
     image: local-llm-sdcpp:latest
@@ -399,17 +404,21 @@ services:
     environment:
       HIP_VISIBLE_DEVICES: "${SDCPP_IMAGE_GPU:-1}"
     volumes:
-      - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/Qwen-Image:/models:ro
+      - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/Qwen-Image-2.1:/models:ro
       - ${SDCPP_OUTPUT_DIR:-${HOME}/h3out}:/work
-    # cfg 2.5 is correct for Qwen-Image -- the cfg-1.0 rule is H3-specific.
+    # cfg 6.0 is correct for Qwen-Image 2.1 -- the cfg-1.0 rule is H3-specific,
+    # and 2.5 was the pre-2.1 Qwen-Image value. No --flow-shift: 2.1 picks the
+    # flow schedule from the resolution on its own. --llm_vision loads the mmproj
+    # so the image-editing path (reference images) works.
     command: >
       sd-server --listen-ip 0.0.0.0 --listen-port ${SDCPP_IMAGE_PORT:-3011}
       --serve-html-path /ui/index.html
-      --diffusion-model /models/Qwen_Image-Q6_K.gguf
-      --vae /models/split_files/vae/qwen_image_vae.safetensors
-      --llm /models/Qwen2.5-VL-7B-Instruct.Q8_0.gguf
+      --diffusion-model /models/qwen_image_2.1-Q8_0.gguf
+      --vae /models/vae/qwen_image_2.1_vae_bf16.safetensors
+      --llm /models/Qwen3VL-8B-Instruct-Q8_0.gguf
+      --llm_vision /models/mmproj-Qwen3VL-8B-Instruct-F16.gguf
       --backend te=cpu --diffusion-fa --offload-to-cpu
-      --cfg-scale 2.5 --sampling-method euler --flow-shift 3
+      --cfg-scale 6.0 --sampling-method euler
       --steps 20 -W 1024 -H 1024
 
   prometheus:
