@@ -2787,7 +2787,7 @@
      "repetition_penalty": 1,
      "spec_type": "draft-mtp,ngram-mod",
      "split_mode": "layer",
-     "temperature": 1.0,
+     "temperature": 0.3,
      "tensor_split": "1,1,1",
      "threads_http": 2,
      "timeout": 600,
