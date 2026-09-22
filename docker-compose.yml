@@ -450,8 +450,6 @@ services:
     network_mode: host
     restart: unless-stopped
     shm_size: 1g
-    depends_on:
-      - sdcpp-video
     group_add:
       - "${RENDER_GROUP:-991}"
       - "${VIDEO_GROUP:-44}"
