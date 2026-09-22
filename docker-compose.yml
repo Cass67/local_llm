@@ -342,8 +342,23 @@ services:
   # Prometheus scrapes llama-server's /metrics (inference counters) and mgmt's
   # /api/metrics (GPU + host telemetry); Grafana graphs both on one time axis.
   # Host network so 127.0.0.1:<runner port> resolves the same way mgmt sees it.
+  # GPU placement. Every sd.cpp service is fully VRAM-resident: the old
+  # `--backend te=cpu --offload-to-cpu` pair kept all weights in host RAM and
+  # cost H3 2x (75s -> 36.8s for 640x384/25 frames once moved).
+  #
+  # --auto-fit only ever spills GPU -> RAM, never GPU -> GPU, so on two cards it
+  # still chose "te=cpu,vae=cpu". The explicit --backend is what puts the text
+  # encoder on the second card. Card sets must stay disjoint: HIP indices are a
+  # permutation of rocm-smi order, so which physical card an index lands on is
+  # unknown, but distinct indices are guaranteed to be distinct cards.
+  #   sdcpp-image  -> 0,3    sdcpp-video / sdcpp-ref2va -> 1,2
+  #
+  # Qwen-Image 2.1 needs the second card for headroom, not for capacity: its
+  # 16.75 GB fits one card, but that left only ~3.7 GB and VAE decode OOM'd into
+  # spatial tiling on every job. Moving the 8.8 GB text encoder off fixed it.
+
   # ── stable-diffusion.cpp: video generation (MiniMax-H3) ──────────────────────
-  # sd-server pinned to one model, one GPU. H3 generates video with a native
+  # sd-server pinned to one model, two GPUs. H3 generates video with a native
   # joint-diffused stereo audio track. Behind Caddy at :3001/video.
   sdcpp-video:
     build:
@@ -368,7 +383,7 @@ services:
       - /dev/dri
     environment:
       # HIP enumerates in reverse of rocm-smi; this is the HIP index, not the card number.
-      HIP_VISIBLE_DEVICES: "${SDCPP_VIDEO_GPU:-0}"
+      HIP_VISIBLE_DEVICES: "${SDCPP_VIDEO_GPU:-1,2}"
     volumes:
       - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/MiniMax-H3:/models:ro
       - ${SDCPP_OUTPUT_DIR:-${HOME}/h3out}:/work
@@ -382,14 +397,14 @@ services:
       --vae /models/vae/minimax_h3_video_vae_fp16.safetensors
       --audio-vae /models/vae/minimax_h3_audio_vae_fp32.safetensors
       --llm /models/qwen3vl_32b_minimax_h3-Q4_K_M.gguf
-      --backend te=cpu --diffusion-fa --offload-to-cpu --rng cpu
+      --backend "diffusion=ROCm0,te=ROCm1,vae=ROCm0"
+      --diffusion-fa --rng cpu
       --cfg-scale 1.0 --steps 4 --video-frames 49 --fps 24 -W 640 -H 384
 
   # ── stable-diffusion.cpp: reference conditioning (MiniMax-H3 Ref2VA) ─────────
-  # Not started by default: this holds ~30 GB RSS like sdcpp-video does, and the
-  # host has 60 GB total, so the two H3 instances cannot both be resident. Run
-  # `docker compose stop sdcpp-video` first, then
-  # `docker compose --profile ref2va up -d sdcpp-ref2va`.
+  # Not started by default: it wants the same two cards as sdcpp-video, and the
+  # 33.9 GB of weights fill them. Run `docker compose stop sdcpp-video` first,
+  # then `docker compose --profile ref2va up -d sdcpp-ref2va`.
   # Shares sdcpp-video's VAEs and text encoder; only the denoiser differs.
   sdcpp-ref2va:
     profiles: ["ref2va"]
@@ -405,7 +420,7 @@ services:
       - /dev/kfd
       - /dev/dri
     environment:
-      HIP_VISIBLE_DEVICES: "${SDCPP_REF2VA_GPU:-0}"
+      HIP_VISIBLE_DEVICES: "${SDCPP_REF2VA_GPU:-1,2}"
     volumes:
       - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/MiniMax-H3:/models:ro
       - ${SDCPP_OUTPUT_DIR:-${HOME}/h3out}:/work
@@ -418,7 +433,8 @@ services:
       --vae /models/vae/minimax_h3_video_vae_fp16.safetensors
       --audio-vae /models/vae/minimax_h3_audio_vae_fp32.safetensors
       --llm /models/qwen3vl_32b_minimax_h3-Q4_K_M.gguf
-      --backend te=cpu --diffusion-fa --offload-to-cpu --rng cpu
+      --backend "diffusion=ROCm0,te=ROCm1,vae=ROCm0"
+      --diffusion-fa --rng cpu
       --cfg-scale 1.0 --steps 4 --video-frames 49 --fps 24 -W 640 -H 384
 
   # ── stable-diffusion.cpp: image generation (Qwen-Image 2.1) ──────────────────
@@ -438,7 +454,7 @@ services:
       - /dev/kfd
       - /dev/dri
     environment:
-      HIP_VISIBLE_DEVICES: "${SDCPP_IMAGE_GPU:-1}"
+      HIP_VISIBLE_DEVICES: "${SDCPP_IMAGE_GPU:-0,3}"
     volumes:
       - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/Qwen-Image-2.1:/models:ro
       - ${SDCPP_OUTPUT_DIR:-${HOME}/h3out}:/work
@@ -453,7 +469,8 @@ services:
       --vae /models/vae/qwen_image_2.1_vae_bf16.safetensors
       --llm /models/Qwen3VL-8B-Instruct-Q8_0.gguf
       --llm_vision /models/mmproj-Qwen3VL-8B-Instruct-F16.gguf
-      --backend te=cpu --diffusion-fa --offload-to-cpu
+      --backend "diffusion=ROCm0,te=ROCm1,vae=ROCm0"
+      --diffusion-fa
       --cfg-scale 6.0 --sampling-method euler
       --steps 20 -W 1024 -H 1024
 
