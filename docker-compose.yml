@@ -359,8 +359,13 @@ services:
   #
   # The LLM owns cards 0,1,2 (cluster 7900s-3card-unslothsrc), so sdcpp-image
   # gets card3 alone and video/ref2va overlap the LLM and stay on-demand.
-  # One card means Qwen-Image 2.1's VAE decode falls back to spatial tiling,
-  # which the step bench measured at ~1.5s of a 240s job -- not worth a card.
+  #
+  # sdcpp-image runs --vae-tiling because on one card it has to. Qwen-Image 2.1's
+  # weights pin 15484 MB of the 20464 MB card, VAE decode at 1024x1024 wants
+  # 10310 MB, and only 4214 MB is left -- a 2.5x shortfall, not a near miss. The
+  # flag makes it tile up front instead of attempting a decode that cannot fit,
+  # erroring, and retrying. Same wall clock (233.98s vs 233.53s) with no ERROR
+  # lines, and no visible seams in the output.
 
   # ── stable-diffusion.cpp: video generation (MiniMax-H3) ──────────────────────
   # sd-server pinned to one model, two GPUs. H3 generates video with a native
@@ -478,7 +483,7 @@ services:
       --vae /models/vae/qwen_image_2.1_vae_bf16.safetensors
       --llm /models/Qwen3VL-8B-Instruct-Q8_0.gguf
       --llm_vision /models/mmproj-Qwen3VL-8B-Instruct-F16.gguf
-      --diffusion-fa
+      --vae-tiling --diffusion-fa
       --cfg-scale 6.0 --sampling-method dpm++2m
       --steps 16 -W 1024 -H 1024
 
