@@ -348,14 +348,19 @@ services:
   #
   # --auto-fit only ever spills GPU -> RAM, never GPU -> GPU, so on two cards it
   # still chose "te=cpu,vae=cpu". The explicit --backend is what puts the text
-  # encoder on the second card. Card sets must stay disjoint: HIP indices are a
-  # permutation of rocm-smi order, so which physical card an index lands on is
-  # unknown, but distinct indices are guaranteed to be distinct cards.
-  #   sdcpp-image  -> 0,3    sdcpp-video / sdcpp-ref2va -> 1,2
+  # encoder on the second card.
   #
-  # Qwen-Image 2.1 needs the second card for headroom, not for capacity: its
-  # 16.75 GB fits one card, but that left only ~3.7 GB and VAE decode OOM'd into
-  # spatial tiling on every job. Moving the 8.8 GB text encoder off fixed it.
+  # Cards are pinned with ROCR_VISIBLE_DEVICES, not HIP_VISIBLE_DEVICES, because
+  # ROCR is the one rocminfo honours and so the one we can actually verify. The
+  # measured index -> card map on this box is neither rocm-smi order nor its
+  # reverse -- re-measure it after any hardware change:
+  #   ROCR 0 -> card2 (0000:0b)   ROCR 2 -> card0 (0000:05)
+  #   ROCR 1 -> card1 (0000:08)   ROCR 3 -> card3 (0000:13)
+  #
+  # The LLM owns cards 0,1,2 (cluster 7900s-3card-unslothsrc), so sdcpp-image
+  # gets card3 alone and video/ref2va overlap the LLM and stay on-demand.
+  # One card means Qwen-Image 2.1's VAE decode falls back to spatial tiling,
+  # which the step bench measured at ~1.5s of a 240s job -- not worth a card.
 
   # ── stable-diffusion.cpp: video generation (MiniMax-H3) ──────────────────────
   # sd-server pinned to one model, two GPUs. H3 generates video with a native
@@ -383,7 +388,7 @@ services:
       - /dev/dri
     environment:
       # HIP enumerates in reverse of rocm-smi; this is the HIP index, not the card number.
-      HIP_VISIBLE_DEVICES: "${SDCPP_VIDEO_GPU:-1,2}"
+      ROCR_VISIBLE_DEVICES: "${SDCPP_VIDEO_GPU:-0,1}"
     volumes:
       - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/MiniMax-H3:/models:ro
       - ${SDCPP_OUTPUT_DIR:-${HOME}/h3out}:/work
@@ -420,7 +425,7 @@ services:
       - /dev/kfd
       - /dev/dri
     environment:
-      HIP_VISIBLE_DEVICES: "${SDCPP_REF2VA_GPU:-1,2}"
+      ROCR_VISIBLE_DEVICES: "${SDCPP_REF2VA_GPU:-0,1}"
     volumes:
       - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/MiniMax-H3:/models:ro
       - ${SDCPP_OUTPUT_DIR:-${HOME}/h3out}:/work
@@ -454,7 +459,7 @@ services:
       - /dev/kfd
       - /dev/dri
     environment:
-      HIP_VISIBLE_DEVICES: "${SDCPP_IMAGE_GPU:-0,3}"
+      ROCR_VISIBLE_DEVICES: "${SDCPP_IMAGE_GPU:-3}"
     volumes:
       - ${SDCPP_MODELS_DIR:-/mnt/spare/models}/Qwen-Image-2.1:/models:ro
       - ${SDCPP_OUTPUT_DIR:-${HOME}/h3out}:/work
@@ -475,7 +480,6 @@ services:
       --vae /models/vae/qwen_image_2.1_vae_bf16.safetensors
       --llm /models/Qwen3VL-8B-Instruct-Q8_0.gguf
       --llm_vision /models/mmproj-Qwen3VL-8B-Instruct-F16.gguf
-      --backend "diffusion=ROCm0,te=ROCm1,vae=ROCm0"
       --diffusion-fa
       --cfg-scale 6.0 --sampling-method dpm++2m
       --steps 16 -W 1024 -H 1024
