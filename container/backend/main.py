@@ -117,6 +117,32 @@ async def traces_redirect(request: Request):
     return RedirectResponse(f"{request.url.scheme}://{host}:3004/")
 
 
+# The UI header links to /images, /video and /llama, but those are Caddy-only
+# routes on :3001. Served from this app's own port the SPA loads fine and every
+# one of those links 404s as {"detail":"Not Found"}, which looks like the
+# sd.cpp containers are down when they are not. Bounce them the same way /chat
+# already does.
+@app.get("/images/")
+@app.get("/images")
+async def images_redirect(request: Request):
+    host = request.url.hostname or "192.168.2.1"
+    return RedirectResponse(f"{request.url.scheme}://{host}:3001/images")
+
+
+@app.get("/video/")
+@app.get("/video")
+async def video_redirect(request: Request):
+    host = request.url.hostname or "192.168.2.1"
+    return RedirectResponse(f"{request.url.scheme}://{host}:3001/video")
+
+
+@app.get("/llama/")
+@app.get("/llama")
+async def llama_redirect(request: Request):
+    host = request.url.hostname or "192.168.2.1"
+    return RedirectResponse(f"{request.url.scheme}://{host}:3001/llama")
+
+
 class _UIStatics(StaticFiles):
     """Serve hashed assets as immutable, but never let index.html be cached.
 
