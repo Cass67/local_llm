@@ -462,6 +462,12 @@ services:
     # and 2.5 was the pre-2.1 Qwen-Image value. No --flow-shift: 2.1 picks the
     # flow schedule from the resolution on its own. --llm_vision loads the mmproj
     # so the image-editing path (reference images) works.
+    #
+    # dpm++2m/16 is benchmarked, not inherited: step cost is a flat 15.0 s/it and
+    # sampler choice is time-neutral, so this is euler/20 quality for 20% less
+    # wall clock (240s vs 300s at 1024x1024), confirmed on two seeds. Below 12
+    # steps the model stops rendering text correctly -- 8 steps gave "QWWEN 2 2.1"
+    # -- so this is close to the floor, not a free lunch.
     command: >
       sd-server --listen-ip 0.0.0.0 --listen-port ${SDCPP_IMAGE_PORT:-3011}
       --serve-html-path /ui/index.html
@@ -471,8 +477,8 @@ services:
       --llm_vision /models/mmproj-Qwen3VL-8B-Instruct-F16.gguf
       --backend "diffusion=ROCm0,te=ROCm1,vae=ROCm0"
       --diffusion-fa
-      --cfg-scale 6.0 --sampling-method euler
-      --steps 20 -W 1024 -H 1024
+      --cfg-scale 6.0 --sampling-method dpm++2m
+      --steps 16 -W 1024 -H 1024
 
   prometheus:
     image: prom/prometheus:v3.1.0
