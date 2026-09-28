@@ -1,7 +1,7 @@
-From cc0984be62bd0f3528eb4c7739126e77fb76938d Mon Sep 17 00:00:00 2001
+From 1ec7aba906ca3f06136685d66a8bce23b7b90505 Mon Sep 17 00:00:00 2001
 From: Ryan Monsurate <ryanmonsurate@users.noreply.github.com>
-Date: Thu, 27 Aug 2026 13:28:27 -0700
-Subject: [PATCH 1/7] gguf-py : register the qwen4exp NextN tensors
+Date: Mon, 28 Sep 2026 23:14:41 +0100
+Subject: [PATCH 1/8] gguf-py : register the qwen4exp NextN tensors
 
 Adds the MTP head's own hyper-connection mixer tensor names and lists the
 NextN tensors under the qwen4exp architecture.
@@ -10,10 +10,10 @@ NextN tensors under the qwen4exp architecture.
  1 file changed, 17 insertions(+)
 
 diff --git a/gguf-py/gguf/constants.py b/gguf-py/gguf/constants.py
-index d3a639f37..40bae295d 100644
+index 9a7a5e5b..946e0274 100644
 --- a/gguf-py/gguf/constants.py
 +++ b/gguf-py/gguf/constants.py
-@@ -1184,6 +1184,11 @@ class MODEL_TENSOR(IntEnum):
+@@ -1198,6 +1198,11 @@ class MODEL_TENSOR(IntEnum):
      NEXTN_HNORM            = auto()
      NEXTN_SHARED_HEAD_HEAD = auto()
      NEXTN_SHARED_HEAD_NORM = auto()
@@ -25,7 +25,7 @@ index d3a639f37..40bae295d 100644
      # eagle3
      FC                     = auto()  # feature fusion layer
      D2T                    = auto()  # draft to target vocabulary mapping
-@@ -1967,6 +1972,9 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
+@@ -1985,6 +1990,9 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
      MODEL_TENSOR.NEXTN_HNORM:               "blk.{bid}.nextn.hnorm",
      MODEL_TENSOR.NEXTN_SHARED_HEAD_HEAD:    "blk.{bid}.nextn.shared_head_head",
      MODEL_TENSOR.NEXTN_SHARED_HEAD_NORM:    "blk.{bid}.nextn.shared_head_norm",
@@ -35,7 +35,7 @@ index d3a639f37..40bae295d 100644
      MODEL_TENSOR.FC:                        "fc",
      MODEL_TENSOR.DSPARK_MARKOV_W1:          "markov_w1",
      MODEL_TENSOR.DSPARK_MARKOV_W2:          "markov_w2",
-@@ -2951,6 +2959,15 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
+@@ -2982,6 +2990,15 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
          MODEL_TENSOR.PLE_NORM_QUERY,
          MODEL_TENSOR.PLE_NORM_CONV,
          MODEL_TENSOR.PLE_CONV1D,

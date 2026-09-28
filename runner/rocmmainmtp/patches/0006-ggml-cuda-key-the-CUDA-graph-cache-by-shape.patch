@@ -1,7 +1,7 @@
-From 6c93d4b65e185d65a091ca6815b51d2eb5c5649b Mon Sep 17 00:00:00 2001
+From 6e99f1c2112fde13d352ea2a8b05a4e547109db9 Mon Sep 17 00:00:00 2001
 From: danielhanchen <danielhanchen@gmail.com>
-Date: Sun, 30 Aug 2026 08:02:22 +0000
-Subject: [PATCH 6/7] ggml-cuda: key the CUDA graph cache by shape
+Date: Mon, 28 Sep 2026 23:14:41 +0100
+Subject: [PATCH 6/8] ggml-cuda: key the CUDA graph cache by shape
 
 The graph cache is keyed on cgraph->nodes[0] alone, so two evaluations
 that share a first node but differ in shape collide on one entry. Warmup
@@ -38,10 +38,10 @@ Q8_0 is byte identical with no throughput change.
  2 files changed, 51 insertions(+), 14 deletions(-)
 
 diff --git a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
-index 7d14ce906..b8d784fc7 100644
+index 5363dd00..448758cb 100644
 --- a/ggml/src/ggml-cuda/common.cuh
 +++ b/ggml/src/ggml-cuda/common.cuh
-@@ -1459,13 +1459,18 @@ struct ggml_backend_cuda_context {
+@@ -1456,13 +1456,18 @@ struct ggml_backend_cuda_context {
      int curr_stream_no = 0;
  
  #ifdef USE_CUDA_GRAPH
@@ -64,7 +64,7 @@ index 7d14ce906..b8d784fc7 100644
          const int64_t time_now = ggml_time_us();
  
          // sweep every 5s, evicting cuda graphs unused for >=10s
-@@ -1480,9 +1485,19 @@ struct ggml_backend_cuda_context {
+@@ -1477,9 +1482,19 @@ struct ggml_backend_cuda_context {
              }
          }
  
@@ -87,10 +87,10 @@ index 7d14ce906..b8d784fc7 100644
          it->second->last_used_time = time_now;
          return it->second.get();
 diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
-index 0e6601f03..020cd8c18 100644
+index b50d05d5..4c1fa882 100644
 --- a/ggml/src/ggml-cuda/ggml-cuda.cu
 +++ b/ggml/src/ggml-cuda/ggml-cuda.cu
-@@ -2584,14 +2584,36 @@ static bool ggml_cuda_graph_check_compability(ggml_cgraph * cgraph) {
+@@ -2585,14 +2585,36 @@ static bool ggml_cuda_graph_check_compability(ggml_cgraph * cgraph) {
      return use_cuda_graph;
  }
  
@@ -130,7 +130,7 @@ index 0e6601f03..020cd8c18 100644
      ggml_cuda_graph * graph = cuda_ctx->cuda_graph(graph_key);
  
      if (cgraph->uid != 0 &&
-@@ -2630,7 +2652,7 @@ static bool ggml_cuda_graph_update_required(ggml_backend_cuda_context * cuda_ctx
+@@ -2631,7 +2653,7 @@ static bool ggml_cuda_graph_update_required(ggml_backend_cuda_context * cuda_ctx
      return res;
  }
  
@@ -139,7 +139,7 @@ index 0e6601f03..020cd8c18 100644
      ggml_cuda_graph * graph = cuda_ctx->cuda_graph(graph_key);
  
  #if CUDART_VERSION >= 12000
-@@ -4178,7 +4200,7 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph
+@@ -4198,7 +4220,7 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph
      return 0;
  }
  
@@ -148,7 +148,7 @@ index 0e6601f03..020cd8c18 100644
      bool graph_evaluated_or_captured = false;
  
      // flag used to determine whether it is an integrated_gpu
-@@ -4397,7 +4419,7 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
+@@ -4417,7 +4439,7 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
  }
  
  #ifdef USE_CUDA_GRAPH
@@ -157,7 +157,7 @@ index 0e6601f03..020cd8c18 100644
      ggml_cuda_graph * graph = cuda_ctx->cuda_graph(graph_key);
  
      if (graph->graph == nullptr) {
-@@ -4420,7 +4442,7 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend,
+@@ -4440,7 +4462,7 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend,
  
      bool use_cuda_graph             = false;
      bool cuda_graph_update_required = false;
@@ -166,7 +166,7 @@ index 0e6601f03..020cd8c18 100644
  
  #ifdef USE_CUDA_GRAPH
      graph_key = ggml_cuda_graph_get_key(cgraph);
-@@ -4523,7 +4545,7 @@ static void ggml_backend_cuda_graph_optimize(ggml_backend_t backend, ggml_cgraph
+@@ -4610,7 +4632,7 @@ static void ggml_backend_cuda_graph_optimize(ggml_backend_t backend, ggml_cgraph
      }
  
  #ifdef USE_CUDA_GRAPH
