@@ -7,7 +7,7 @@
 # with 0008 but runs prefill at roughly half unsloth's rate.
 #
 # The recipe is taken from unslothai/llama.cpp .github/workflows/unsloth-prebuilt-rocm.yml and
-# the release body of the tag we run (b10909-mix-bea84f7), which lists every merged PR at an
+# the release body of the tag we run (b11160-mix-a6922cc), which lists every merged PR at an
 # exact commit. Two deliberate departures from their CI:
 #
 #   1. MINIMAL PR SET. Their release merges 13 PRs; we take only unslothai#144 (the qwen4exp
@@ -30,11 +30,11 @@
 # exactly the ABI mismatch this avoids.
 FROM ubuntu:24.04 AS build
 
-ARG LLAMA_CPP_TAG=b10909
+ARG LLAMA_CPP_TAG=b11160
 ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG UNSLOTH_REPO=https://github.com/unslothai/llama.cpp.git
-# PRs merged from unslothai/llama.cpp, in order. Head commits per the b10909-mix release body:
-#   144 MTP for Qwen3.8-Flash-Next                        a9e9c3c   -- our weights need it
+# PRs merged from unslothai/llama.cpp, in order. Head commits per the b11160-mix release body:
+#   144 MTP for Qwen3.8-Flash-Next                        ca14269   -- our weights need it
 #   137 batched readahead for lazily read gather tables   4e1865e   -- see note below
 # 137 only bites when the PLE is read lazily from a mapping, i.e. the mmap/paged config, not
 # the `-ot per_layer_token_embd=CPU --load-mode none` one where the table is wired in RAM.

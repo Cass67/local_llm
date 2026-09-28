@@ -1,7 +1,7 @@
-From fbc8b2ff26c4f09e8ac16ff82d14c01377f9da79 Mon Sep 17 00:00:00 2001
+From 717be6aaae40b99289eea989802abcde21d83527 Mon Sep 17 00:00:00 2001
 From: Ryan Monsurate <ryanmonsurate@users.noreply.github.com>
-Date: Thu, 27 Aug 2026 16:20:54 -0700
-Subject: [PATCH 3/7] convert : export the qwen4exp NextN/MTP draft head
+Date: Mon, 28 Sep 2026 23:14:41 +0100
+Subject: [PATCH 3/8] convert : export the qwen4exp NextN/MTP draft head
 
 The MTP block is one trunk-shaped block (dense attention + MoE wrapped in
 hyper-connections) plus a head-level combiner, so once _QwenMtpMixin renames
@@ -24,7 +24,7 @@ for the MTP block, which attends densely.
  2 files changed, 68 insertions(+), 10 deletions(-)
 
 diff --git a/conversion/qwen4exp.py b/conversion/qwen4exp.py
-index 168796d61..5de299346 100644
+index 168796d6..5de29934 100644
 --- a/conversion/qwen4exp.py
 +++ b/conversion/qwen4exp.py
 @@ -1,6 +1,6 @@
@@ -129,7 +129,7 @@ index 168796d61..5de299346 100644
          self.gguf_writer.add_ple_layers(ple_layers)
          self.gguf_writer.add_ple_ngram_size(hp["ngram_size"])
 diff --git a/gguf-py/gguf/tensor_mapping.py b/gguf-py/gguf/tensor_mapping.py
-index d2dfeece5..eed2ffd60 100644
+index d2dfeece..eed2ffd6 100644
 --- a/gguf-py/gguf/tensor_mapping.py
 +++ b/gguf-py/gguf/tensor_mapping.py
 @@ -2803,6 +2803,16 @@ class TensorNameMap:

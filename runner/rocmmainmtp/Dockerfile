@@ -32,6 +32,15 @@
 #           replaced that ctor to seed its EMA vectors. Merged: master's signature, fork's body.
 #           Re-contexted at the 43f3dda bump: master renamed dparams' n_past to pos0.
 #
+# Re-contexted again at the b11239 (66e665c) bump: master reworked qwen4exp's tensor load, so
+# 0002 and 0005 were re-derived rather than fuzzed in. The whole series is regenerated against
+# that commit, so `git am` applies it strictly -- 0007 previously needed fuzz, which git am
+# does not do, and a fuzzed hunk is how a member lands in the wrong struct.
+#   0002 -- the load loop now passes TENSOR_ALLOW_RESHAPE for the hc/ple gammas (they load as
+#           [n_embd, hc]); the MTP flag argument is OR-ed onto it rather than replacing it.
+#   0005 -- same for the trunk-level hc_head_norm, which the draft-only probe marks
+#           TENSOR_NOT_REQUIRED.
+#
 # Why the sidecar decides the build, and why no re-export escapes it: master's qwen4exp NextN
 # block expects nextn.shared_head_{head,norm}; unsloth's exporter emits nextn.hc_head_{norm,
 # down,up} instead -- the hyper-connection mixer qwen4exp has in place of a final output norm.
@@ -46,7 +55,7 @@
 # Master declares -sm tensor unsupported for qwen4exp; use layer split.
 FROM rocm/dev-ubuntu-24.04:7.2 AS build
 
-ARG LLAMA_CPP_REF=43f3dda6237a453a587a8f00230d52decfeaa8e5
+ARG LLAMA_CPP_REF=66e665c4276ee46f3ec9872dd7e5a496842bc44f
 ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG AMDGPU_TARGETS=gfx1100
 # hipcc peaks several GB per TU; -j$(nproc) OOM-kills the clang backend on this 60 GB box.

@@ -19,7 +19,7 @@
 # Pinned to a sha rather than the master branch so a rebuild is reproducible.
 FROM rocm/dev-ubuntu-24.04:7.2 AS build
 
-ARG LLAMA_CPP_REF=3466812d1f06728effe7c0f3c0671117f461672d
+ARG LLAMA_CPP_REF=66e665c4276ee46f3ec9872dd7e5a496842bc44f
 ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG AMDGPU_TARGETS=gfx1100
 # hipcc peaks several GB per TU; -j$(nproc) OOM-kills the clang backend on this 60 GB box

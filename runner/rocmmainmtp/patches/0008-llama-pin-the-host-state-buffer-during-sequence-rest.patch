@@ -1,7 +1,7 @@
-From 4457f5c4ed3745f6725c22aaddde21b48e044688 Mon Sep 17 00:00:00 2001
+From c23246e197131d6a0bb06ccf3b1fe2310ba6ad8c Mon Sep 17 00:00:00 2001
 From: Cass <getcass@gmail.com>
-Date: Sat, 12 Sep 2026 13:20:24 +0100
-Subject: [PATCH] llama: pin the host state buffer during sequence restore
+Date: Mon, 28 Sep 2026 23:14:41 +0100
+Subject: [PATCH 8/8] llama: pin the host state buffer during sequence restore
 
 Works around a ROCm runtime defect: an async H2D copy whose source is pageable
 host memory faults when 2+ devices are active in one process.
@@ -41,10 +41,10 @@ is the entire blast radius.
  2 files changed, 51 insertions(+), 8 deletions(-)
 
 diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
-index 5ae3b8d..f784fd1 100644
+index 4c1fa882..7bec0bc0 100644
 --- a/ggml/src/ggml-cuda/ggml-cuda.cu
 +++ b/ggml/src/ggml-cuda/ggml-cuda.cu
-@@ -4828,10 +4828,6 @@ void ggml_backend_cuda_get_device_memory(int device, size_t * free, size_t * tot
+@@ -4941,10 +4941,6 @@ void ggml_backend_cuda_get_device_memory(int device, size_t * free, size_t * tot
  }
  
  bool ggml_backend_cuda_register_host_buffer(void * buffer, size_t size) {
@@ -55,7 +55,7 @@ index 5ae3b8d..f784fd1 100644
  #if CUDART_VERSION >= 11010 || defined(GGML_USE_MUSA) || defined(GGML_USE_HIP)
      cudaError_t err = cudaHostRegister(buffer, size, cudaHostRegisterPortable | cudaHostRegisterReadOnly);
      if (err != cudaSuccess) {
-@@ -4851,10 +4847,6 @@ bool ggml_backend_cuda_register_host_buffer(void * buffer, size_t size) {
+@@ -4964,10 +4960,6 @@ bool ggml_backend_cuda_register_host_buffer(void * buffer, size_t size) {
  }
  
  void ggml_backend_cuda_unregister_host_buffer(void * buffer) {
@@ -67,7 +67,7 @@ index 5ae3b8d..f784fd1 100644
      if (err != cudaSuccess) {
          // clear the error
 diff --git a/src/llama-context.cpp b/src/llama-context.cpp
-index 6334f3c..cf062c5 100644
+index 88851c6c..8ebbda03 100644
 --- a/src/llama-context.cpp
 +++ b/src/llama-context.cpp
 @@ -1,6 +1,7 @@
@@ -78,7 +78,7 @@ index 6334f3c..cf062c5 100644
  #include "llama-arch.h"
  #include "llama-graph.h"
  #include "llama-impl.h"
-@@ -3098,7 +3099,57 @@ size_t llama_context::state_seq_get_data(llama_seq_id seq_id, uint8_t * dst, siz
+@@ -3185,7 +3186,57 @@ size_t llama_context::state_seq_get_data(llama_seq_id seq_id, uint8_t * dst, siz
      }
  }
  
@@ -137,5 +137,5 @@ index 6334f3c..cf062c5 100644
      if (flags & LLAMA_STATE_SEQ_FLAGS_ON_DEVICE) {
          // create a temporary io to read the magic and the src seq_id
 -- 
-2.55.0
+2.53.0
 

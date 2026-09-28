@@ -1,7 +1,7 @@
-From 425a0f68a6b8b5ad96803253c6cba1ed586b5ee5 Mon Sep 17 00:00:00 2001
+From f7241d1569e649bf320367ba25abe22aec6b7617 Mon Sep 17 00:00:00 2001
 From: Marshall <assistant@llama.cpp>
-Date: Sun, 23 Aug 2026 22:30:18 +0100
-Subject: [PATCH 7/7] speculative: size drafts from measured acceptance
+Date: Mon, 28 Sep 2026 23:14:41 +0100
+Subject: [PATCH 7/8] speculative: size drafts from measured acceptance
  (--spec-draft-adaptive)
 
 A fixed --spec-draft-n-max can only be right for one kind of content.
@@ -65,10 +65,10 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
  3 files changed, 102 insertions(+), 5 deletions(-)
 
 diff --git a/common/arg.cpp b/common/arg.cpp
-index 015196ca1..b4249ae89 100644
+index 2acac3b5..9c4a8fea 100644
 --- a/common/arg.cpp
 +++ b/common/arg.cpp
-@@ -4164,6 +4164,13 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+@@ -4143,6 +4143,13 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
              params.speculative.draft.n_max = value;
          }
      ).set_spec().set_examples({LLAMA_EXAMPLE_SPECULATIVE, LLAMA_EXAMPLE_LOOKUP, LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_SPEC_DRAFT_N_MAX"));
@@ -83,10 +83,10 @@ index 015196ca1..b4249ae89 100644
          {"--spec-draft-n-min"}, "N",
          string_format("minimum number of draft tokens to use for speculative decoding (default: %d)", params.speculative.draft.n_min),
 diff --git a/common/common.h b/common/common.h
-index 63d0badd0..c316f6427 100644
+index 45b15def..4068b313 100644
 --- a/common/common.h
 +++ b/common/common.h
-@@ -341,6 +341,9 @@ struct common_params_speculative_draft {
+@@ -343,6 +343,9 @@ struct common_params_speculative_draft {
      ggml_type cache_type_k = GGML_TYPE_F16; // KV cache data type for the K
      ggml_type cache_type_v = GGML_TYPE_F16; // KV cache data type for the V
  
@@ -97,7 +97,7 @@ index 63d0badd0..c316f6427 100644
      common_cpu_params cpuparams_batch;
  
 diff --git a/common/speculative.cpp b/common/speculative.cpp
-index 70dcb2e41..944562458 100644
+index 22d006c4..ce5a7751 100644
 --- a/common/speculative.cpp
 +++ b/common/speculative.cpp
 @@ -159,7 +159,74 @@ struct common_speculative_impl {
@@ -176,15 +176,15 @@ index 70dcb2e41..944562458 100644
  
      virtual ~common_speculative_impl() = default;
  
-@@ -195,6 +262,7 @@ struct common_speculative_impl_draft_simple : public common_speculative_impl {
-         }
+@@ -201,6 +268,7 @@ struct common_speculative_impl_draft_simple : public common_speculative_impl {
+         zeros.assign(llama_model_n_embd_inp(llama_get_model(ctx_dft)), 0.0f);
  
          SPC_TRC("%s", "adding speculative implementation 'draft-simple'\n");
 +        adaptive_n = this->params.adaptive;
          SPC_TRC("- n_max=%d, n_min=%d, p_min=%f\n", this->params.n_max, this->params.n_min, this->params.p_min);
          SPC_TRC("- gpu_layers=%d, cache_k=%s, cache_v=%s, ctx_tgt=%s, ctx_dft=%s, devices=[%s]\n",
                  this->params.n_gpu_layers,
-@@ -319,6 +387,8 @@ struct common_speculative_impl_draft_simple : public common_speculative_impl {
+@@ -348,6 +416,8 @@ struct common_speculative_impl_draft_simple : public common_speculative_impl {
  
                  auto * smpl = smpls[seq_id].get();
  
@@ -193,7 +193,7 @@ index 70dcb2e41..944562458 100644
                  common_sampler_sample(smpl, ctx_dft, i_batch, true);
                  ++i_batch;
  
-@@ -348,7 +418,7 @@ struct common_speculative_impl_draft_simple : public common_speculative_impl {
+@@ -377,7 +447,7 @@ struct common_speculative_impl_draft_simple : public common_speculative_impl {
  
                  result.push_back(id);
  
@@ -202,7 +202,7 @@ index 70dcb2e41..944562458 100644
                      (dp.n_max > 0 && dp.n_max <= (int) result.size())) {
                      drafting[seq_id] = false;
                      n_drafting--;
-@@ -458,6 +528,7 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
+@@ -488,6 +558,7 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
          , params(params.draft)
      {
          SPC_TRC("%s", "adding speculative implementation 'draft-eagle3'\n");
@@ -210,7 +210,7 @@ index 70dcb2e41..944562458 100644
          SPC_TRC("- n_max=%d, n_min=%d, p_min=%f, backend_sampling=%d\n", params.draft.n_max, params.draft.n_min, params.draft.p_min, (int) params.draft.backend_sampling);
  
          auto * ctx_tgt = this->params.ctx_tgt;
-@@ -779,6 +850,8 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
+@@ -792,6 +863,8 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
  
                  auto * smpl = smpls[seq_id].get();
  
@@ -219,7 +219,7 @@ index 70dcb2e41..944562458 100644
                  common_sampler_sample(smpl, ctx_dft, i_batch, true);
                  // pre-norm hidden state of this position becomes g_embd for the next step
                  const float * prenorm = llama_get_embeddings_nextn_ith(ctx_dft, i_batch);
-@@ -810,7 +883,7 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
+@@ -823,7 +896,7 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
  
                  result.push_back(id);
  
@@ -228,7 +228,7 @@ index 70dcb2e41..944562458 100644
                      drafting[seq_id] = false;
                      n_drafting--;
                      continue;
-@@ -992,6 +1065,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1007,6 +1080,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
          }
  
          LOG_INF("%s: adding speculative implementation '%s'\n", __func__, common_speculative_type_to_str(type).c_str());
@@ -236,7 +236,7 @@ index 70dcb2e41..944562458 100644
          LOG_INF("%s: - n_max=%d, n_min=%d, p_min=%.2f\n", __func__, this->params.n_max, this->params.n_min, this->params.p_min);
          LOG_INF("%s: - block_size=%d, mask_token_id=%d, n_extract=%u, sample_from_anchor=%s\n", __func__,
                  block_size, mask_token_id, target_layer_ids_n, sample_from_anchor ? "true" : "false");
-@@ -1070,6 +1144,8 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1078,6 +1152,8 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
      }
  
      void begin(llama_seq_id seq_id, const llama_tokens & prompt) override {
@@ -245,7 +245,7 @@ index 70dcb2e41..944562458 100644
          if (seq_id < 0 || seq_id >= (llama_seq_id) n_seq) {
              return;
          }
-@@ -1193,7 +1269,10 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1200,7 +1276,10 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
  
              const int32_t n = (int32_t) dp.pos0;
  
@@ -256,8 +256,8 @@ index 70dcb2e41..944562458 100644
 +            const int32_t n_draft = adaptive_n_draft(seq_id, params.n_max, params.n_min);
  
              const int32_t n_block_tokens = n_draft + (is_dspark && sample_from_anchor ? 0 : 1);
-             i_block_beg[seq_id] = batch.n_tokens;
-@@ -1371,6 +1450,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+             i_block_beg[seq_id] = batch.size();
+@@ -1378,6 +1457,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
          n_mtp_layers = std::max(1, (int) llama_model_n_layer_nextn(llama_get_model(ctx_dft)));
  
          SPC_TRC("%s", "adding speculative implementation 'draft-mtp'\n");
@@ -265,7 +265,7 @@ index 70dcb2e41..944562458 100644
          SPC_TRC("- n_max=%d, n_min=%d, p_min=%.2f, n_embd=%d, backend_sampling=%d\n", this->params.n_max, this->params.n_min, this->params.p_min, n_embd, (int) this->params.backend_sampling);
          SPC_TRC("- gpu_layers=%d, cache_k=%s, cache_v=%s, ctx_tgt=%s, ctx_dft=%s, devices=[%s]\n",
                  this->params.n_gpu_layers,
-@@ -1458,6 +1538,8 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -1455,6 +1535,8 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
      }
  
      void begin(llama_seq_id seq_id, const llama_tokens & prompt) override {
@@ -274,7 +274,7 @@ index 70dcb2e41..944562458 100644
          const int32_t N = (int32_t) prompt.size();
          if (N <= 0) {
              return;
-@@ -1662,6 +1744,10 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -1648,6 +1730,10 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
  
                  auto * smpl = smpls[seq_id].get();
  
@@ -285,7 +285,7 @@ index 70dcb2e41..944562458 100644
                  common_sampler_sample(smpl, ctx_dft, i_last[seq_id], true);
                  const float * h_row = llama_get_embeddings_nextn_ith(ctx_dft, i_last[seq_id]);
  
-@@ -1691,7 +1777,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -1677,7 +1763,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
  
                  result.push_back(id);
  
@@ -294,7 +294,7 @@ index 70dcb2e41..944562458 100644
                      drafting[seq_id] = false;
                      n_drafting--;
                      continue;
-@@ -2899,6 +2985,7 @@ void common_speculative_accept(common_speculative * spec, llama_seq_id seq_id, u
+@@ -2911,6 +2997,7 @@ void common_speculative_accept(common_speculative * spec, llama_seq_id seq_id, u
              impl->n_acc_tokens += n_accepted;
          }
  
