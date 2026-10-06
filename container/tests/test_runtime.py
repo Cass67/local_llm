@@ -343,6 +343,8 @@ def test_build_runner_container_spec_strata_runs_its_runner_with_own_mounts(tmp_
             "backend": "strata",
             "visible_devices": "0,1,2,3",
             "context": 131072,
+            "temperature": 1.0,
+            "top_k": 20,
             "strata_args": ["--pack", "/strata-data/packs/p", "--kv", "int8"],
         },
     }
@@ -363,6 +365,8 @@ def test_build_runner_container_spec_strata_runs_its_runner_with_own_mounts(tmp_
         "strata-flashnext",
         "--layer-split",
         "auto",
+        "--sampling",
+        '{"temperature": 1.0, "top_k": 20}',
         "--",
         "--pack",
         "/strata-data/packs/p",

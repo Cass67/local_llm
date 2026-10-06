@@ -397,6 +397,17 @@ def build_sglang_args(metadata: dict[str, Any], port: int) -> list[str]:  # noqa
 
 STRATA_MODELS_DIR = os.environ.get("STRATA_MODELS_DIR", "/mnt/hfcache/strata-ud-q4kxl")
 STRATA_DATA_DIR = os.environ.get("STRATA_DATA_DIR", "/mnt/spare/build/strata-data")
+# profile keys server.py's `sampling` block accepts (sampling_defaults_from_config), same names
+_STRATA_SAMPLING = (
+    "temperature",
+    "top_p",
+    "top_k",
+    "min_p",
+    "presence_penalty",
+    "repetition_penalty",
+    "frequency_penalty",
+    "penalty_last_n",
+)
 
 
 def build_strata_args(metadata: dict[str, Any], port: int) -> list[str]:
@@ -413,6 +424,10 @@ def build_strata_args(metadata: dict[str, Any], port: int) -> list[str]:
     ctx = cfg.get("ctx") or cfg.get("context") or metadata.get("context")
     if ctx and "--max-context" not in engine:
         engine += ["--max-context", str(ctx)]
+    # The profile's sampling knobs become server.py's `sampling` defaults. Without them a request
+    # that names no sampling runs GREEDY on Strata (llama-server would use the profile's), and the
+    # agents send none: greedy agent loops re-issued the same tool call turn after turn.
+    sampling = {k: cfg[k] for k in _STRATA_SAMPLING if cfg.get(k) is not None}
     return [
         "/opt/strata/venv/bin/python",
         "/opt/strata/strata-runner.py",
@@ -422,6 +437,8 @@ def build_strata_args(metadata: dict[str, Any], port: int) -> list[str]:
         str(cfg.get("served_model_name") or metadata.get("alias") or "strata"),
         "--layer-split",
         str(cfg.get("layer_split") or "auto"),
+        "--sampling",
+        json.dumps(sampling),
         "--",
         *engine,
     ]
