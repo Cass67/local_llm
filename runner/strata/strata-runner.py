@@ -34,6 +34,8 @@ cfg = {
     "tokenizer": str(Path(args[args.index("--pack") + 1]) / "tokenizer"),
     "model_name": a.model_name,
     "backend": "hip",
+    # the engine's own log (placement, RAM tier, errors) into `docker logs` and mgmt's log view
+    "log": "/dev/stdout",
     "args": args,
     "env": {"STRATA_HIPBLASLT_TUNING": str(SRC / "tools/hip/gfx1100-hipblaslt-100200.txt")},
     # setup.py's rocm_root: the SDK root's lib first, then the gfx110X family's libraries
