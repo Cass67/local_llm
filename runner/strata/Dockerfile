@@ -52,6 +52,18 @@ RUN set -e; cd /opt/strata/src; \
     cmake --build build-hip --target strata -j"$BUILD_JOBS"; \
     mkdir -p engine && cp build-hip/strata engine/strata && rm -rf build-hip
 
+# The image encoder, on the CPU (setup's build_vision_cpu: AMD has no GPU encoder yet). tools/vision
+# builds llama.cpp's mtmd at the commit the engine's ggml is pinned to; it reads only the text model's
+# vocabulary (vocab_only), so a mmproj (~0.9 GB) is all the RAM it takes.
+ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
+RUN set -e; git init -q /opt/strata/llama; cd /opt/strata/llama; \
+    git fetch -q --depth 1 https://github.com/ggml-org/llama.cpp.git "$LLAMA_CPP_COMMIT"; git checkout -q FETCH_HEAD; \
+    cd /opt/strata/src; export PATH="/opt/strata/venv/bin:$PATH"; \
+    cmake -S tools/vision -B build-vision -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DLLAMA_DIR=/opt/strata/llama -DSTRATA_VISION_CUDA=OFF; \
+    cmake --build build-vision --target strata-vision -j"$BUILD_JOBS"; \
+    cp build-vision/bin/strata-vision engine/strata-vision; rm -rf build-vision /opt/strata/llama
+
 COPY strata-runner.py /opt/strata/strata-runner.py
 
 ENTRYPOINT []

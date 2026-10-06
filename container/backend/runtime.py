@@ -439,6 +439,8 @@ def build_strata_args(metadata: dict[str, Any], port: int) -> list[str]:
         str(cfg.get("layer_split") or "auto"),
         "--sampling",
         json.dumps(sampling),
+        # the profile's mmproj, as for llama-server: images on (Strata reads them on the CPU)
+        *(["--vision-mmproj", str(cfg["mmproj"])] if cfg.get("mmproj") else []),
         "--",
         *engine,
     ]
