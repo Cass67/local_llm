@@ -149,9 +149,6 @@ def _resolve_runner_url(body: bytes) -> str:
         port = active[0].get("port")
         if isinstance(port, int):
             return f"http://127.0.0.1:{port}/v1"
-    external = active_runners.list_external()
-    if external:
-        return str(external[0]["url"]).rstrip("/")
     return config.RUNNER_URL
 
 

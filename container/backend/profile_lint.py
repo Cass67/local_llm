@@ -91,6 +91,10 @@ KNOWN_FIELDS: set[str] = {
     "numa",
     "flags",
     "quant",
+    # strata (runner/strata, build_strata_args)
+    "strata_args",
+    "layer_split",
+    "served_model_name",
 }
 
 _SPEC_NEEDS_DRAFT_GGUF = {"draft-dflash", "draft-simple", "draft-eagle3"}

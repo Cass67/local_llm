@@ -93,20 +93,15 @@ async def v1_models():
     routed_ctx: list[int] = []
     routed_vision: list[bool] = []
 
-    external = active_runners.list_external()
-    for source in (active_runners.list_active(), external, list_desired()):
+    for source in (active_runners.list_active(), list_desired()):
         for entry in source:
             alias = str(entry.get("model") or "")
             family = str(entry.get("family") or alias)
             if not alias or alias in seen:
                 continue
             seen.add(alias)
-            if source is external:  # not an mgmt profile: the server's own window
-                ctx = entry.get("context_window")
-                vision = bool(entry.get("vision"))
-            else:
-                ctx = _context_window_for(family, entry.get("profile"))
-                vision = _vision_for(family, entry.get("profile"))
+            ctx = _context_window_for(family, entry.get("profile"))
+            vision = _vision_for(family, entry.get("profile"))
             rec: dict = {"id": alias, "object": "model", "owned_by": "local_llm"}
             if ctx:
                 rec["context_window"] = ctx
