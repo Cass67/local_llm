@@ -395,7 +395,7 @@ def build_sglang_args(metadata: dict[str, Any], port: int) -> list[str]:  # noqa
     return args
 
 
-STRATA_MODELS_DIR = os.environ.get("STRATA_MODELS_DIR", "/mnt/hfcache/strata-ud-q4kxl")
+STRATA_MODELS_DIR = os.environ.get("STRATA_MODELS_DIR", "/mnt/hfcache")
 STRATA_DATA_DIR = os.environ.get("STRATA_DATA_DIR", "/mnt/spare/build/strata-data")
 # profile keys server.py's `sampling` block accepts (sampling_defaults_from_config), same names
 _STRATA_SAMPLING = (
