@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Container entrypoint: mgmt's argv -> the JSON config Strata's serve/server.py reads, then exec.
 
-    strata-runner.py --port P --model-name NAME [--layer-split auto] -- <engine args>
+    strata-runner.py --port P --model-name NAME [--layer-split S] [--sampling JSON] -- <engine args>
 
 The engine args are the profile's `strata_args` (--pack, --native, --max-context, ...). The GPUs
 come from HIP_VISIBLE_DEVICES, which mgmt sets from the cluster; server.py hands the same list on.
@@ -20,6 +20,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--port", type=int, required=True)
 ap.add_argument("--model-name", required=True)
 ap.add_argument("--layer-split", default="auto")
+ap.add_argument("--sampling", default="{}", help="server.py's `sampling` defaults, as JSON")
 ap.add_argument("engine_args", nargs=argparse.REMAINDER)
 a = ap.parse_args()
 args = a.engine_args[1:] if a.engine_args[:1] == ["--"] else a.engine_args
@@ -37,6 +38,8 @@ cfg = {
     # the engine's own log (placement, RAM tier, errors) into `docker logs` and mgmt's log view
     "log": "/dev/stdout",
     "args": args,
+    # defaults for requests that name no sampling: without them server.py samples greedy
+    "sampling": json.loads(a.sampling),
     "env": {"STRATA_HIPBLASLT_TUNING": str(SRC / "tools/hip/gfx1100-hipblaslt-100200.txt")},
     # setup.py's rocm_root: the SDK root's lib first, then the gfx110X family's libraries
     "lib_dirs": [
