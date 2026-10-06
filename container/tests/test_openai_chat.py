@@ -182,3 +182,57 @@ async def test_v1_chat_stream_returns_503_when_runner_is_down(tmp_path, monkeypa
 
     assert response.status_code == 503
     assert response.json()["detail"] == "runner unavailable"
+
+
+@pytest.mark.asyncio
+async def test_v1_chat_stream_passes_runner_error_through(tmp_path, monkeypatch):
+    import backend.config as cfg
+
+    monkeypatch.setattr(cfg, "RUNS_DIR", tmp_path)
+    monkeypatch.setattr(cfg, "RUNNER_URL", "http://runner.test:8080/v1")
+    refusal = b'{"error": {"type": "invalid_request_error", "message": "cannot read images"}}'
+
+    class Refused:
+        status_code = 400
+        headers = {"content-type": "application/json"}
+
+        async def aread(self):
+            return refusal
+
+    class RefusingStreamContext:
+        async def __aenter__(self):
+            return Refused()
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return None
+
+    class FakeUpstreamClient:
+        def __init__(self, *_, **__):
+            pass
+
+        async def aclose(self):
+            return None
+
+        def stream(self, _method, _url, **_kwargs):
+            return RefusingStreamContext()
+
+    monkeypatch.setattr("backend.routes.chat.httpx.AsyncClient", FakeUpstreamClient)
+
+    from backend.main import app
+
+    with patch("backend.routes.chat.active_runners.runner_url_for_model", return_value=None):
+        with patch("backend.routes.chat.active_runners.list_active", return_value=[]):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    "/v1/chat/completions",
+                    json={
+                        "model": "qwen",
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "stream": True,
+                    },
+                )
+
+    # the runner's status and body, not an empty 200 stream a client retries forever
+    assert response.status_code == 400
+    assert response.content == refusal

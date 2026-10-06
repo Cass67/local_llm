@@ -93,7 +93,7 @@ def _prepare_runner_payload(body: bytes) -> bytes:
     return json.dumps(payload).encode("utf-8") if changed else body
 
 
-async def _preopen_stream(body: bytes, headers: dict, generation) -> tuple:
+async def _preopen_stream(body: bytes, headers: dict, generation) -> tuple | Response:
     """Open the upstream stream before the response starts.
 
     Once StreamingResponse begins emitting, the status is fixed at 200, so a dead
@@ -111,6 +111,19 @@ async def _preopen_stream(body: bytes, headers: dict, generation) -> tuple:
         await client.aclose()
         tracing.close_generation(generation, "", error="runner unavailable")
         raise HTTPException(503, "runner unavailable") from None
+    if upstream.status_code != 200:
+        # The runner's own refusal (Strata's 400 for an image sent to a text-only model) goes back
+        # as-is. Inside the stream it became an empty 200 with no finish_reason, which agents retry
+        # without end.
+        content = await upstream.aread()
+        await ctx.__aexit__(None, None, None)
+        await client.aclose()
+        tracing.close_generation(generation, "", error=f"HTTP {upstream.status_code}")
+        return Response(
+            content=content,
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type", "application/json"),
+        )
     return client, ctx, upstream
 
 
@@ -210,6 +223,8 @@ async def proxy_chat_completions(request: Request):  # noqa: C901  # pre-existin
         req_start = time.perf_counter()
 
         preopened = None if reload_cluster else await _preopen_stream(body, headers, generation)
+        if isinstance(preopened, Response):
+            return preopened
 
         async def stream_runner():  # noqa: C901  # pre-existing complexity
             # Notify the client and reload if the cluster was idle-unloaded
