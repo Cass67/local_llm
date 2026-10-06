@@ -41,6 +41,9 @@ RUNNER_IMAGES = {
     # GGUF, and its own flag vocabulary (--tp-size / --mem-fraction-static). Built by
     # runner/sglang/Dockerfile; see build_sglang_args in runtime.py for the argv.
     "sglang": os.environ.get("RUNNER_IMAGE_SGLANG", "local-llm-runner-sglang:rocm724"),
+    # Strata, not llama.cpp: a Flash-Next-only engine (runner/strata/Dockerfile); see
+    # build_strata_args in runtime.py for the argv.
+    "strata": os.environ.get("RUNNER_IMAGE_STRATA", "local-llm-runner-strata:latest"),
 }
 
 

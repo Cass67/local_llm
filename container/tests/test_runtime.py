@@ -334,3 +334,40 @@ def test_build_sglang_args_emits_tool_call_parser_for_agent_harnesses():
     assert "--tool-call-parser qwen3_coder" in joined
     assert "--reasoning-parser qwen3" in joined
     assert "--served-model-name qwen3-coder-30b-a3b" in joined
+
+
+def test_build_runner_container_spec_strata_runs_its_runner_with_own_mounts(tmp_path):
+    metadata = {
+        "alias": "strata-flashnext",
+        "config": {
+            "backend": "strata",
+            "visible_devices": "0,1,2,3",
+            "context": 131072,
+            "strata_args": ["--pack", "/strata-data/packs/p", "--kv", "int8"],
+        },
+    }
+    config = DockerRunnerConfig(image="local-llm-runner-strata:latest", port=8088)
+
+    # models_dir given: a strata profile has no GGUF in the HF cache, so no lookup may run
+    spec = build_runner_container_spec(metadata, config, models_dir=tmp_path)
+
+    assert spec.environment["HIP_VISIBLE_DEVICES"] == "0,1,2,3"
+    # mounted at their host paths: the pack records the shards' absolute paths
+    assert all(b.split(":")[0] == b.split(":")[1] for b in spec.binds)
+    assert len(spec.binds) == 2
+    assert spec.command[1:] == [
+        "/opt/strata/strata-runner.py",
+        "--port",
+        "8088",
+        "--model-name",
+        "strata-flashnext",
+        "--layer-split",
+        "auto",
+        "--",
+        "--pack",
+        "/strata-data/packs/p",
+        "--kv",
+        "int8",
+        "--max-context",
+        "131072",
+    ]

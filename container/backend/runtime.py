@@ -395,6 +395,38 @@ def build_sglang_args(metadata: dict[str, Any], port: int) -> list[str]:  # noqa
     return args
 
 
+STRATA_MODELS_DIR = os.environ.get("STRATA_MODELS_DIR", "/mnt/hfcache/strata-ud-q4kxl")
+STRATA_DATA_DIR = os.environ.get("STRATA_DATA_DIR", "/mnt/spare/build/strata-data")
+
+
+def build_strata_args(metadata: dict[str, Any], port: int) -> list[str]:
+    """Build the Strata runner's argv (runner/strata).
+
+    Strata is not llama-server: its serve/server.py reads a JSON config, which the image's
+    strata-runner.py writes from this argv. The engine flags are the profile's `strata_args`
+    verbatim (host paths: STRATA_MODELS_DIR and STRATA_DATA_DIR mount as-is); the context
+    comes from the profile's ctx, the same key /v1/models advertises, so the two cannot drift.
+    """
+    cfg = _config(metadata)
+    engine = cfg.get("strata_args") or []
+    engine = [str(f) for f in engine] if isinstance(engine, list) else str(engine).split()
+    ctx = cfg.get("ctx") or cfg.get("context") or metadata.get("context")
+    if ctx and "--max-context" not in engine:
+        engine += ["--max-context", str(ctx)]
+    return [
+        "/opt/strata/venv/bin/python",
+        "/opt/strata/strata-runner.py",
+        "--port",
+        str(port),
+        "--model-name",
+        str(cfg.get("served_model_name") or metadata.get("alias") or "strata"),
+        "--layer-split",
+        str(cfg.get("layer_split") or "auto"),
+        "--",
+        *engine,
+    ]
+
+
 def build_runner_container_spec(  # noqa: C901
     metadata: dict[str, Any], config: DockerRunnerConfig, models_dir: Path | None = None
 ) -> DockerContainerSpec:
@@ -402,8 +434,8 @@ def build_runner_container_spec(  # noqa: C901
     if models_dir:
         # sglang carries its model dir as a profile knob and lives on its own
         # mount, so the GGUF-cache lookup neither applies nor resolves.
-        _is_sglang = str(_config(metadata).get("backend") or "") == "sglang"
-        if not _is_sglang and not (metadata.get("model_path") or metadata.get("path")):
+        _own_mount = str(_config(metadata).get("backend") or "") in ("sglang", "strata")
+        if not _own_mount and not (metadata.get("model_path") or metadata.get("path")):
             metadata = {**metadata, "model_path": _model_path(metadata, models_dir)}
         cfg = _config(metadata)
         if cfg.get("mtp_enabled") and not cfg.get("mtp_draft_model"):
@@ -514,15 +546,23 @@ def build_runner_container_spec(  # noqa: C901
         # the runner is in fact still compiling) and can trip sglang's watchdog.
         cache_dir = os.environ.get("SGLANG_CACHE_DIR", "/mnt/spare/sglang-cache")
         binds.append(f"{cache_dir}:/root/.cache:rw")
+    elif backend == "strata":
+        # The Unsloth GGUF shards (read in place: experts stream from them) and setup's
+        # prepared data (the pack, the MTP draft layer). Neither fits the HF cache layout,
+        # and both mount at their host paths: the pack records the shards' absolute paths.
+        binds.append(f"{STRATA_MODELS_DIR}:{STRATA_MODELS_DIR}:ro")
+        binds.append(f"{STRATA_DATA_DIR}:{STRATA_DATA_DIR}:ro")
 
+    if backend == "sglang":
+        command = build_sglang_args(metadata, port=config.port)
+    elif backend == "strata":
+        command = build_strata_args(metadata, port=config.port)
+    else:
+        command = build_llama_server_args(metadata, port=config.port)
     return DockerContainerSpec(
         name=config.name,
         image=config.image,
-        command=(
-            build_sglang_args(metadata, port=config.port)
-            if backend == "sglang"
-            else build_llama_server_args(metadata, port=config.port)
-        ),
+        command=command,
         ports={f"{config.port}/tcp": config.port},
         devices=devices,
         device_requests=device_requests,
