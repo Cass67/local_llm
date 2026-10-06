@@ -21,6 +21,7 @@ ap.add_argument("--port", type=int, required=True)
 ap.add_argument("--model-name", required=True)
 ap.add_argument("--layer-split", default="auto")
 ap.add_argument("--sampling", default="{}", help="server.py's `sampling` defaults, as JSON")
+ap.add_argument("--vision-mmproj", help="the image encoder's mmproj: images on, read on the CPU")
 ap.add_argument("engine_args", nargs=argparse.REMAINDER)
 a = ap.parse_args()
 args = a.engine_args[1:] if a.engine_args[:1] == ["--"] else a.engine_args
@@ -51,6 +52,15 @@ if len(gpus) > 1:
     cfg["gpu"], cfg["layer_split"] = gpus, a.layer_split
 elif gpus:
     cfg["gpu"] = gpus[0]
+
+if a.vision_mmproj:
+    # setup's CPU encoder settings (VISION["cpu"]); "model" is read for its vocabulary only
+    cfg["vision"] = {
+        "exe": str(SRC / "engine" / "strata-vision"),
+        "mmproj": a.vision_mmproj,
+        "model": args[args.index("--native") + 1],
+        "max_tokens": 300,
+    }
 
 conf = Path("/opt/strata/strata-runner.json")
 conf.write_text(json.dumps(cfg, indent=1))
