@@ -93,6 +93,7 @@ KNOWN_FIELDS: set[str] = {
     "quant",
     # strata (runner/strata, build_strata_args)
     "strata_args",
+    "strata_env",
     "layer_split",
     "served_model_name",
 }
