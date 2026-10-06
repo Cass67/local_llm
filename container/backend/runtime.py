@@ -441,6 +441,8 @@ def build_strata_args(metadata: dict[str, Any], port: int) -> list[str]:
         json.dumps(sampling),
         # the profile's mmproj, as for llama-server: images on (Strata reads them on the CPU)
         *(["--vision-mmproj", str(cfg["mmproj"])] if cfg.get("mmproj") else []),
+        # server.py's own run-config keys (reasoning_loop_recovery, repeat_stop_tokens, ...)
+        *(["--server", json.dumps(cfg["strata_server"])] if cfg.get("strata_server") else []),
         "--",
         *engine,
     ]

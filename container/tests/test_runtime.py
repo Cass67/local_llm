@@ -347,6 +347,7 @@ def test_build_runner_container_spec_strata_runs_its_runner_with_own_mounts(tmp_
             "top_k": 20,
             "strata_env": {"STRATA_SPLIT_OWN": 1},
             "mmproj": "/models/mmproj.gguf",
+            "strata_server": {"reasoning_loop_recovery": "recover"},
             "strata_args": ["--pack", "/strata-data/packs/p", "--kv", "int8"],
         },
     }
@@ -372,6 +373,8 @@ def test_build_runner_container_spec_strata_runs_its_runner_with_own_mounts(tmp_
         '{"temperature": 1.0, "top_k": 20}',
         "--vision-mmproj",
         "/models/mmproj.gguf",
+        "--server",
+        '{"reasoning_loop_recovery": "recover"}',
         "--",
         "--pack",
         "/strata-data/packs/p",
