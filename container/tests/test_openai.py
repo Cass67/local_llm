@@ -58,5 +58,6 @@ async def test_v1_models_only_router_sentinel_when_nothing_running(temp_state):
             "object": "model",
             "owned_by": "local_llm",
             "max_tokens": output_limit(None),
+            "input": ["text"],
         }
     ]

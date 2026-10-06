@@ -325,6 +325,18 @@ def is_running(cluster: ClusterDef) -> bool:
     return _runner_for(cluster).is_running()
 
 
+def list_external() -> list[dict[str, Any]]:
+    """Model servers mgmt does not launch (the Strata engine), from /state/external_runners.json:
+    [{"model": alias, "url": "http://127.0.0.1:3300/v1", "context_window": N, "vision": bool}]."""
+    try:
+        data = json.loads((config.STATE_DIR / "external_runners.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [e for e in data if isinstance(e, dict) and e.get("model") and e.get("url")]
+
+
 def runner_url_for_model(model_id: str) -> str | None:
     """Return http://127.0.0.1:PORT/v1 for whichever active cluster hosts model_id."""
     for entry in list_active():
@@ -332,6 +344,9 @@ def runner_url_for_model(model_id: str) -> str | None:
             port = entry.get("port")
             if isinstance(port, int):
                 return f"http://127.0.0.1:{port}/v1"
+    for entry in list_external():
+        if entry["model"] == model_id:
+            return str(entry["url"]).rstrip("/")
     return None
 
 
