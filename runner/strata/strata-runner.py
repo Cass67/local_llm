@@ -66,5 +66,10 @@ os.execv(  # noqa: S606  # nosec B606 - replace this process with the server
         str(conf),
         "--port",
         str(a.port),
+        # LAN-facing like the llama.cpp runners: the web dashboard at http://ubt26:<port>/. Bound
+        # beyond loopback, server.py trusts this PC's name and LAN addresses as Host headers;
+        # STRATA_ALLOWED_HOSTS (strata_env) adds others.
+        "--host",
+        "0.0.0.0",  # noqa: S104  # nosec B104
     ],
 )
