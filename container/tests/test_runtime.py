@@ -345,6 +345,7 @@ def test_build_runner_container_spec_strata_runs_its_runner_with_own_mounts(tmp_
             "context": 131072,
             "temperature": 1.0,
             "top_k": 20,
+            "strata_env": {"STRATA_SPLIT_OWN": 1},
             "strata_args": ["--pack", "/strata-data/packs/p", "--kv", "int8"],
         },
     }
@@ -354,6 +355,7 @@ def test_build_runner_container_spec_strata_runs_its_runner_with_own_mounts(tmp_
     spec = build_runner_container_spec(metadata, config, models_dir=tmp_path)
 
     assert spec.environment["HIP_VISIBLE_DEVICES"] == "0,1,2,3"
+    assert spec.environment["STRATA_SPLIT_OWN"] == "1"
     # mounted at their host paths: the pack records the shards' absolute paths
     assert all(b.split(":")[0] == b.split(":")[1] for b in spec.binds)
     assert len(spec.binds) == 2

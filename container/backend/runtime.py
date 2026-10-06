@@ -569,6 +569,8 @@ def build_runner_container_spec(  # noqa: C901
         # and both mount at their host paths: the pack records the shards' absolute paths.
         binds.append(f"{STRATA_MODELS_DIR}:{STRATA_MODELS_DIR}:ro")
         binds.append(f"{STRATA_DATA_DIR}:{STRATA_DATA_DIR}:ro")
+        # Strata's own switches are environment variables (STRATA_SPLIT_OWN, STRATA_*_TIMING, ...)
+        environment.update({str(k): str(v) for k, v in (cfg.get("strata_env") or {}).items()})
 
     if backend == "sglang":
         command = build_sglang_args(metadata, port=config.port)
