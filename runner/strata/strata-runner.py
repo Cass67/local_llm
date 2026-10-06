@@ -61,6 +61,11 @@ if a.vision_mmproj:
         "model": args[args.index("--native") + 1],
         "max_tokens": 300,
     }
+    # and the engine's side, as setup adds it with images: --vision and VISION["cpu"]["reserve_mib"]
+    if "--vision" not in args:
+        args += ["--vision"]
+    if "--vram-reserve-mib" not in args:
+        args += ["--vram-reserve-mib", "700"]
 
 conf = Path("/opt/strata/strata-runner.json")
 conf.write_text(json.dumps(cfg, indent=1))
