@@ -22,6 +22,7 @@ ap.add_argument("--model-name", required=True)
 ap.add_argument("--layer-split", default="auto")
 ap.add_argument("--sampling", default="{}", help="server.py's `sampling` defaults, as JSON")
 ap.add_argument("--vision-mmproj", help="the image encoder's mmproj: images on, read on the CPU")
+ap.add_argument("--server", default="{}", help="extra server.py run-config keys, as JSON")
 ap.add_argument("engine_args", nargs=argparse.REMAINDER)
 a = ap.parse_args()
 args = a.engine_args[1:] if a.engine_args[:1] == ["--"] else a.engine_args
@@ -66,6 +67,9 @@ if a.vision_mmproj:
         args += ["--vision"]
     if "--vram-reserve-mib" not in args:
         args += ["--vram-reserve-mib", "700"]
+
+# e.g. {"reasoning_loop_recovery": "recover"}: server.py's opt-ins, off unless the profile sets them
+cfg.update(json.loads(a.server))
 
 conf = Path("/opt/strata/strata-runner.json")
 conf.write_text(json.dumps(cfg, indent=1))

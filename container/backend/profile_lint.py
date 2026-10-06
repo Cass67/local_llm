@@ -94,6 +94,7 @@ KNOWN_FIELDS: set[str] = {
     # strata (runner/strata, build_strata_args)
     "strata_args",
     "strata_env",
+    "strata_server",
     "layer_split",
     "served_model_name",
 }
