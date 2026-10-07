@@ -15,21 +15,29 @@
 FROM ubuntu:24.04
 
 ARG STRATA_REPO=https://github.com/Niko1221/Strata.git
-ARG STRATA_REF=82f46a8
+ARG STRATA_REF=v0.1.40.2
 ARG ROCM_VERSION=7.10.0a20251120
 ARG ROCM_INDEX=https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/
+# Set to a TheRock tarball to take ROCm from it instead of the pip wheels (rocmunslothsrc does the same): e.g.
+# ROCm 10.0.0, whose hipBLASLt 1.4.1 matches tools/hip/gfx1100-hipblaslt-100401.txt (small-chunk rows, #1289)
+ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 ARG GPU_TARGETS=gfx1100
 # hipcc peaks several GB per TU; -j$(nproc) OOM-kills the clang backend on this 60 GB box.
 ARG BUILD_JOBS=8
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential ca-certificates git python3 python3-venv \
+      build-essential ca-certificates curl git python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m venv /opt/strata/venv \
-    && /opt/strata/venv/bin/pip install --quiet --disable-pip-version-check \
-       --index-url "$ROCM_INDEX" "rocm[libraries,devel]==${ROCM_VERSION}"
+RUN set -e; python3 -m venv /opt/strata/venv; \
+    if [ -n "$ROCM_TARBALL" ]; then \
+      mkdir -p /opt/rocm && curl -fsSL "$ROCM_TARBALL" | tar -xzf - -C /opt/rocm; \
+      test -x /opt/rocm/llvm/bin/clang++; \
+    else \
+      /opt/strata/venv/bin/pip install --quiet --disable-pip-version-check \
+        --index-url "$ROCM_INDEX" "rocm[libraries,devel]==${ROCM_VERSION}"; \
+    fi
 
 RUN git clone -q "$STRATA_REPO" /opt/strata/src \
     && git -C /opt/strata/src checkout -q "$STRATA_REF" \
@@ -39,8 +47,9 @@ RUN git clone -q "$STRATA_REPO" /opt/strata/src \
 # setup.py's build_engine_hip, without its download of the llama.cpp sources: CMake fetches the
 # revision it pins.
 RUN set -e; cd /opt/strata/src; \
-    root=$(/opt/strata/venv/bin/rocm-sdk path --root); \
-    libs=$(ls -d /opt/strata/venv/lib/python3*/site-packages/_rocm_sdk_libraries_gfx110X_dgpu); \
+    if [ -d /opt/rocm/lib ]; then root=/opt/rocm; libs=/opt/rocm; else \
+      root=$(/opt/strata/venv/bin/rocm-sdk path --root); \
+      libs=$(ls -d /opt/strata/venv/lib/python3*/site-packages/_rocm_sdk_libraries_gfx110X_dgpu); fi; \
     export PATH="/opt/strata/venv/bin:$root/bin:$root/llvm/bin:$PATH" ROCM_PATH="$root" HIP_PATH="$root" \
            HIP_PLATFORM=amd LD_LIBRARY_PATH="$root/lib:$libs/lib"; \
     cmake -S . -B build-hip -G Ninja -DCMAKE_BUILD_TYPE=Release \

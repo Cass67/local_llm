@@ -31,6 +31,39 @@ if "--pack" not in args:
 
 site = next(VENV.glob("lib/python3*/site-packages"))
 gpus = [int(g) for g in os.environ.get("HIP_VISIBLE_DEVICES", "").split(",") if g.strip()]
+# ROCm from a TheRock tarball (/opt/rocm) or the pip wheels (setup.py's rocm_root: the SDK root's
+# lib, then the gfx110X family's libraries)
+if Path("/opt/rocm/lib").is_dir():
+    ROOT, LIB_DIRS = Path("/opt/rocm"), ["/opt/rocm/lib"]
+else:
+    ROOT = site / "_rocm_sdk_devel"
+    LIB_DIRS = [str(ROOT / "lib"), str(site / "_rocm_sdk_libraries_gfx110X_dgpu/lib")]
+
+
+def hipblaslt_version():
+    """setup.py's hipblaslt_version: 1.4.1 -> 100401, from the header of the engine's ROCm."""
+    v = {}
+    for h in ROOT.glob("include/hipblaslt/hipblaslt-version.h"):
+        for line in h.read_text().splitlines():
+            f = line.split()
+            # MAJOR/MINOR/PATCH only: ROCm 10's header also has a TWEAK that is a commit hash
+            if (
+                len(f) == 3
+                and f[0] == "#define"
+                and f[1]
+                in ("HIPBLASLT_VERSION_MAJOR", "HIPBLASLT_VERSION_MINOR", "HIPBLASLT_VERSION_PATCH")
+            ):
+                v[f[1].rsplit("_", 1)[-1]] = int(f[2])
+    return (
+        v["MAJOR"] * 100000 + v["MINOR"] * 100 + v["PATCH"]
+        if {"MAJOR", "MINOR", "PATCH"} <= v.keys()
+        else None
+    )
+
+
+# the tuning table only for the hipBLASLt it was calibrated with (the engine refuses any other)
+_t = SRC / f"tools/hip/gfx1100-hipblaslt-{hipblaslt_version()}.txt"
+TABLE = str(_t) if _t.is_file() else None
 cfg = {
     "exe": str(SRC / "engine" / "strata"),
     "cwd": str(SRC),
@@ -42,12 +75,8 @@ cfg = {
     "args": args,
     # defaults for requests that name no sampling: without them server.py samples greedy
     "sampling": json.loads(a.sampling),
-    "env": {"STRATA_HIPBLASLT_TUNING": str(SRC / "tools/hip/gfx1100-hipblaslt-100200.txt")},
-    # setup.py's rocm_root: the SDK root's lib first, then the gfx110X family's libraries
-    "lib_dirs": [
-        str(site / "_rocm_sdk_devel/lib"),
-        str(site / "_rocm_sdk_libraries_gfx110X_dgpu/lib"),
-    ],
+    "env": {"STRATA_HIPBLASLT_TUNING": TABLE} if TABLE else {},
+    "lib_dirs": LIB_DIRS,
 }
 if len(gpus) > 1:
     cfg["gpu"], cfg["layer_split"] = gpus, a.layer_split
