@@ -15,7 +15,7 @@
 FROM ubuntu:24.04
 
 ARG STRATA_REPO=https://github.com/Niko1221/Strata.git
-ARG STRATA_REF=v0.1.40.2
+ARG STRATA_REF=v0.1.41
 ARG ROCM_VERSION=7.10.0a20251120
 ARG ROCM_INDEX=https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/
 # Set to a TheRock tarball to take ROCm from it instead of the pip wheels (rocmunslothsrc does the same): e.g.
