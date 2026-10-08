@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -46,14 +47,15 @@ async def objectives():
 async def start_sweep(req: SweepRequest):
     if req.objective not in _OBJECTIVES:
         raise HTTPException(status_code=422, detail=f"objective must be one of {_OBJECTIVES}")
+    total = math.prod(len(v) for v in req.grid.values())
+    if total > sweep.MAX_COMBOS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{total} combinations exceeds the {sweep.MAX_COMBOS} cap",
+        )
     combos = sweep.expand_grid(req.grid)
     if not combos:
         raise HTTPException(status_code=422, detail="grid is empty")
-    if len(combos) > sweep.MAX_COMBOS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"{len(combos)} combinations exceeds the {sweep.MAX_COMBOS} cap",
-        )
     if sweep.base_profile_config(req.family, req.base_profile) is None:
         raise HTTPException(status_code=404, detail="base profile not found")
     job = sweep.create(**req.model_dump())

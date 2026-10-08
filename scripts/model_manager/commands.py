@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import stat
 import subprocess  # noqa: S404 # nosec: B404
 import sys
@@ -380,8 +381,19 @@ def _ensure_hf_cli(host: str) -> bool:
         return False
 
 
+_SAFE_REPO = re.compile(r"[\w.-]+/[\w.-]+")
+_SAFE_FILE = re.compile(r"[\w.+][\w.+/-]*")
+
+
+def _safe_hf_file(name: str) -> bool:
+    return bool(_SAFE_FILE.fullmatch(name)) and ".." not in name.split("/")
+
+
 def _download_on_host(host: str, repo: str, hf_file: str) -> bool:
     """Download model to remote host using hf CLI."""
+    if not _SAFE_REPO.fullmatch(repo) or (hf_file and not _safe_hf_file(hf_file)):
+        print(f"  refusing unsafe repo/file name: {repo!r} {hf_file!r}")
+        return False
     repo_dir = repo.replace("/", "--")
     if hf_file:
         result = subprocess.run(  # noqa: S603 # nosec: B603
@@ -390,9 +402,9 @@ def _download_on_host(host: str, repo: str, hf_file: str) -> bool:
                 *SSH_OPTS,
                 host,
                 "find ~/.cache/huggingface/hub/models--"
-                + repo_dir
+                + shlex.quote(repo_dir)
                 + " -name "
-                + repr(hf_file)
+                + shlex.quote(hf_file)
                 + r" \( -type f -o -type l \) -print -quit | grep -q .",
             ],
             capture_output=True,
@@ -422,8 +434,10 @@ def _download_on_host(host: str, repo: str, hf_file: str) -> bool:
         timeout=15,
     )
 
-    include_arg = f" --include {hf_file}" if hf_file else ""
-    download_cmd = 'export PATH="$HOME/.local/bin:$PATH" && hf download ' + repo + include_arg
+    include_arg = f" --include {shlex.quote(hf_file)}" if hf_file else ""
+    download_cmd = (
+        'export PATH="$HOME/.local/bin:$PATH" && hf download ' + shlex.quote(repo) + include_arg
+    )
     print(f"  downloading {repo}...")
     try:
         result = subprocess.run(  # noqa: S603 # nosec: B603
