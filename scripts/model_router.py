@@ -45,6 +45,8 @@ PREFER_IDLE: bool = False
 # Log the decision the rules would make without acting on it, so rules can be
 # tuned against real traffic before ENABLED is flipped on.
 SHADOW: bool = False
+# Prompt excerpts in /route/log are readable by any client that can reach the router.
+LOG_PROMPTS: bool = os.environ.get("ROUTER_LOG_PROMPTS") == "1"
 
 
 def _reload_config() -> None:
@@ -107,6 +109,8 @@ _DECISION_LOG_MAX = 200
 
 
 def _log_decision(entry: dict) -> None:
+    if not LOG_PROMPTS:
+        entry = {k: v for k, v in entry.items() if k != "prompt"}
     _decision_log.append({"ts": time.time(), **entry})
     if len(_decision_log) > _DECISION_LOG_MAX:
         del _decision_log[: len(_decision_log) - _DECISION_LOG_MAX]

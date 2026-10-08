@@ -1068,12 +1068,16 @@ update_local_model_references() {
 
   python3 - "$repo_root" "$repo" "$old_file" "$new_file" <<'PY'
 import pathlib
+import re
 import sys
 
 repo_root = pathlib.Path(sys.argv[1])
 repo = sys.argv[2]
 old_file = sys.argv[3]
 new_file = sys.argv[4]
+if not re.fullmatch(r"[\w.+/-]+", new_file):
+    print(f"refusing unsafe filename: {new_file!r}", file=sys.stderr)
+    sys.exit(1)
 candidate_files = [
     repo_root / "scripts" / "oc-local",
     repo_root / "scripts" / "bench-mtp-remote.sh",

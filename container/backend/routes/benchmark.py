@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import shutil
 import subprocess  # noqa: S404 # nosec B404
 import time
@@ -499,6 +500,9 @@ async def list_active_jobs():
     }
 
 
+_RUN_ID_RE = re.compile(r"web-\d+-[0-9a-f]{8}")
+
+
 def _cancel_run(run_id: str) -> None:
     """Kill the benchmark subprocess tree for run_id and reap its docker containers.
 
@@ -522,7 +526,7 @@ def _cancel_run(run_id: str) -> None:
 @router.post("/runs/{benchmark_type}/jobs/{job_id}/cancel")
 async def cancel_benchmark_job(benchmark_type: str, job_id: str):
     """Kill a running benchmark job and clean up any containers it spawned."""
-    if "/" in job_id or ".." in job_id:
+    if not _RUN_ID_RE.fullmatch(job_id):
         raise HTTPException(status_code=400, detail="invalid job id")
     await asyncio.to_thread(_cancel_run, job_id)
     job = _JOBS.get(job_id)
