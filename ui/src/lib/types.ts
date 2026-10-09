@@ -8,6 +8,7 @@ export const BACKENDS = [
 	"rocmunsloth",
 	"vulkan",
 	"cuda",
+	"strata",
 ] as const;
 
 export type Backend = (typeof BACKENDS)[number];
@@ -20,6 +21,7 @@ export const BACKEND_LABELS: Record<Backend, string> = {
 	rocmunsloth: "ROCmUnsloth",
 	vulkan: "Vulkan",
 	cuda: "CUDA",
+	strata: "Strata",
 };
 
 export interface ModelProfile {
