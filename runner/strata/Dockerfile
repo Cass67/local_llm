@@ -39,8 +39,12 @@ RUN set -e; python3 -m venv /opt/strata/venv; \
         --index-url "$ROCM_INDEX" "rocm[libraries,devel]==${ROCM_VERSION}"; \
     fi
 
+# Our patches on the tag. 0001: --pipeline-windows on three or more layer-split stages (the 4x 7900 XT split, +14%
+# decode at 4K, +27% at 32K, greedy-exact) and the HIP drafter's own gr_read scratch; inert without the flag.
+COPY patches/ /opt/strata/patches/
 RUN git clone -q "$STRATA_REPO" /opt/strata/src \
     && git -C /opt/strata/src checkout -q "$STRATA_REF" \
+    && git -C /opt/strata/src -c user.email=build@local -c user.name=build am --keep-non-patch /opt/strata/patches/*.patch \
     && /opt/strata/venv/bin/pip install --quiet --disable-pip-version-check \
        -r /opt/strata/src/requirements.txt
 
