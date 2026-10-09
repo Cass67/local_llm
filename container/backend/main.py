@@ -143,6 +143,13 @@ async def llama_redirect(request: Request):
     return RedirectResponse(f"{request.url.scheme}://{host}:3001/llama")
 
 
+@app.get("/strata/")
+@app.get("/strata")
+async def strata_redirect(request: Request):
+    host = request.url.hostname or "192.168.2.1"
+    return RedirectResponse(f"{request.url.scheme}://{host}:3001/strata")
+
+
 class _UIStatics(StaticFiles):
     """Serve hashed assets as immutable, but never let index.html be cached.
 

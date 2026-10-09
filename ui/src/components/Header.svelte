@@ -1,14 +1,31 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { fetchClusters } from "../lib/api";
+	import type { ClusterInfo } from "../lib/types";
 
 	let currentRoute = $state(location.hash.replace("#", "") || "/architecture");
+	let clusters = $state<ClusterInfo[]>([]);
+	const active = $derived(clusters.find((c) => c.active));
+
+	async function refresh() {
+		try {
+			clusters = (await fetchClusters()).clusters;
+		} catch {
+			clusters = [];
+		}
+	}
 
 	onMount(() => {
 		function update() {
 			currentRoute = location.hash.replace("#", "") || "/architecture";
 		}
 		window.addEventListener("hashchange", update);
-		return () => window.removeEventListener("hashchange", update);
+		refresh();
+		const timer = setInterval(refresh, 15000);
+		return () => {
+			window.removeEventListener("hashchange", update);
+			clearInterval(timer);
+		};
 	});
 </script>
 
@@ -24,7 +41,12 @@
 		<a href="#/tuning" class:active={currentRoute === "/tuning"}>Tuning</a>
 		<a href="#/coding" class:active={currentRoute === "/coding"}>Coding</a>
 		<a href="/chat/">Chat</a>
-		<a href="/llama">llama.cpp</a>
+		{#if active && active.backend !== "strata"}
+			<a href="/llama">llama.cpp</a>
+		{/if}
+		{#if active?.backend === "strata"}
+			<a href="/strata">Strata</a>
+		{/if}
 		<a href="/images">Images</a>
 		<a href="/video">Video</a>
 		<a href="/traces/" target="_blank" rel="noreferrer">Traces</a>
