@@ -382,4 +382,6 @@ def test_build_runner_container_spec_strata_runs_its_runner_with_own_mounts(tmp_
         "int8",
         "--max-context",
         "131072",
+        "--pipeline-windows",
+        "2",
     ]

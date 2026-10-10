@@ -424,6 +424,11 @@ def build_strata_args(metadata: dict[str, Any], port: int) -> list[str]:
     ctx = cfg.get("ctx") or cfg.get("context") or metadata.get("context")
     if ctx and "--max-context" not in engine:
         engine += ["--max-context", str(ctx)]
+    # Overlapped verify windows on a layer split (+21-39% code, +8-14% prose decode on 2-4x 7900 XT,
+    # greedy-identical). Upstream keeps it opt-in; the engine turns it off itself, with a log line,
+    # where it cannot run (one GPU, --batch slots, no draft layer). A profile's own value wins.
+    if "--pipeline-windows" not in engine:
+        engine += ["--pipeline-windows", "2"]
     # The profile's sampling knobs become server.py's `sampling` defaults. Without them a request
     # that names no sampling runs GREEDY on Strata (llama-server would use the profile's), and the
     # agents send none: greedy agent loops re-issued the same tool call turn after turn.
