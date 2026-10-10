@@ -15,7 +15,7 @@
 FROM ubuntu:24.04
 
 ARG STRATA_REPO=https://github.com/Niko1221/Strata.git
-ARG STRATA_REF=v0.1.41
+ARG STRATA_REF=v0.1.42
 ARG ROCM_VERSION=7.10.0a20251120
 ARG ROCM_INDEX=https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/
 # Set to a TheRock tarball to take ROCm from it instead of the pip wheels (rocmunslothsrc does the same): e.g.
@@ -39,12 +39,8 @@ RUN set -e; python3 -m venv /opt/strata/venv; \
         --index-url "$ROCM_INDEX" "rocm[libraries,devel]==${ROCM_VERSION}"; \
     fi
 
-# Our patches on the tag. 0001: --pipeline-windows on three or more layer-split stages (the 4x 7900 XT split, +14%
-# decode at 4K, +27% at 32K, greedy-exact) and the HIP drafter's own gr_read scratch; inert without the flag.
-COPY patches/ /opt/strata/patches/
 RUN git clone -q "$STRATA_REPO" /opt/strata/src \
     && git -C /opt/strata/src checkout -q "$STRATA_REF" \
-    && git -C /opt/strata/src -c user.email=build@local -c user.name=build am --keep-non-patch /opt/strata/patches/*.patch \
     && /opt/strata/venv/bin/pip install --quiet --disable-pip-version-check \
        -r /opt/strata/src/requirements.txt
 
