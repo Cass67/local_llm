@@ -177,3 +177,38 @@ def render(sample: dict[str, Any] | None) -> str:
     )
 
     return "\n".join(lines) + "\n"
+
+
+# Strata's /metrics is a JSON status blob, not Prometheus text. Re-emit it under the
+# llama-server names so the existing dashboard panels pick Strata up unchanged.
+# `totals` resets on engine restart; rate() treats that as a counter reset.
+def render_strata(runners: list[tuple[str, dict[str, Any] | None]]) -> str:
+    rows: dict[str, list[str | None]] = {}
+
+    def add(name: str, instance: str, value: Any) -> None:
+        if isinstance(value, (int, float)):
+            rows.setdefault(name, []).append(_line(name, {"instance": instance}, float(value)))
+
+    for instance, status in runners:
+        add("strata:up", instance, 1 if status else 0)
+        if not status:
+            continue
+        totals = status.get("totals") or {}
+        live = status.get("live") or {}
+        add("llamacpp:prompt_tokens_total", instance, totals.get("prompt_tokens"))
+        add("llamacpp:tokens_predicted_total", instance, totals.get("output_tokens"))
+        add("llamacpp:spec_decode_num_draft_tokens_total", instance, totals.get("drafts_offered"))
+        add(
+            "llamacpp:spec_decode_num_accepted_tokens_total",
+            instance,
+            totals.get("drafts_accepted"),
+        )
+        add("llamacpp:requests_processing", instance, 0 if live.get("state") == "idle" else 1)
+        add("llamacpp:requests_deferred", instance, live.get("queued"))
+
+    lines: list[str] = []
+    for name, metric_rows in rows.items():
+        kind = "counter" if name.endswith("_total") else "gauge"
+        lines.append(f"# TYPE {name} {kind}")
+        lines.extend(r for r in metric_rows if r)
+    return "\n".join(lines) + "\n"
