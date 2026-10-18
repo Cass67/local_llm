@@ -385,21 +385,30 @@ def idle_check(timeout_s: float) -> None:
 
 def restart_running_for_profile(family: str, profile: str) -> list[str]:
     """Relaunch any cluster currently running family+profile so a profile edit takes effect."""
+    running = [
+        e for e in list_active() if e.get("family") == family and e.get("profile") == profile
+    ]
+    if not running:
+        return []
     accepted_path = config.ACCEPTED_DIR / f"{family}.json"
-    if not accepted_path.exists() or accepted_path.is_symlink():
-        return []
-    try:
-        accepted = json.loads(accepted_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return []
+    accepted = None
+    if accepted_path.exists() and not accepted_path.is_symlink():
+        try:
+            accepted = json.loads(accepted_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            pass
     if not isinstance(accepted, dict):
+        logging.warning(
+            "profile edit for %s/%s not applied to running clusters: %s missing or unreadable",
+            family,
+            profile,
+            accepted_path,
+        )
         return []
 
     clusters = {c.id: c for c in list_clusters()}
     restarted: list[str] = []
-    for entry in list_active():
-        if entry.get("family") != family or entry.get("profile") != profile:
-            continue
+    for entry in running:
         cluster = clusters.get(str(entry.get("cluster_id") or ""))
         if not cluster:
             continue
