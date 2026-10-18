@@ -272,7 +272,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(up{job=\"llama-runner\"})",
+          "expr": "sum(up{job=\"llama-runner\"}) + (sum(strata:up) or vector(0))",
           "legendFormat": "runners"
         }
       ],

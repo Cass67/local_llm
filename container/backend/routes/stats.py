@@ -281,6 +281,23 @@ async def prometheus_metrics():
     return Response(content=prom_export.render(_last_gpu_sample), media_type="text/plain")
 
 
+@router.get("/strata-metrics")
+async def strata_metrics():
+    """Running Strata clusters' JSON status re-emitted as llama-server Prometheus metrics."""
+    ports = [e["port"] for e in active_runners.list_active() if e.get("backend") == "strata"]
+    runners: list[tuple[str, dict[str, Any] | None]] = []
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        for port in ports:
+            try:
+                resp = await client.get(f"http://127.0.0.1:{port}/metrics")
+                resp.raise_for_status()
+                status = resp.json()
+            except (httpx.HTTPError, ValueError):
+                status = None
+            runners.append((f"127.0.0.1:{port}", status))
+    return Response(content=prom_export.render_strata(runners), media_type="text/plain")
+
+
 @router.get("/gpu-status")
 async def gpu_status():
     """Latest GPU sample: per-runner fdinfo occupancy, per-card sysfs, host system."""
