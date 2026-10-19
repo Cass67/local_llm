@@ -12,6 +12,10 @@ HOST_MODELS_CACHE_DIR = Path(os.environ.get("HOST_MODELS_CACHE_DIR", str(MODELS_
 DOCKER_SOCKET = Path(os.environ.get("DOCKER_SOCKET", "/var/run/docker.sock"))
 LLAMA_SERVER_PORT = int(os.environ.get("LLAMA_SERVER_PORT", "8080"))
 RUNNER_URL = os.environ.get("RUNNER_URL", f"http://127.0.0.1:{LLAMA_SERVER_PORT}/v1").rstrip("/")
+# Strata 0.2+ refuses a LAN bind without an API key; a fixed dummy one, sent to every runner
+# (servers started without a key ignore it). runner/strata/strata-runner.py sets the same key.
+RUNNER_API_KEY = "local-llm"
+RUNNER_AUTH = {"Authorization": f"Bearer {RUNNER_API_KEY}"}
 RUNNER_IMAGES = {
     "vulkan": os.environ.get("RUNNER_IMAGE_VULKAN", "local-llm-runner-vulkan:latest"),
     "mixed_vulkan": os.environ.get("RUNNER_IMAGE_VULKAN", "local-llm-runner-vulkan:latest"),

@@ -100,6 +100,10 @@ if a.vision_mmproj:
 # e.g. {"reasoning_loop_recovery": "recover"}: server.py's opt-ins, off unless the profile sets them
 cfg.update(json.loads(a.server))
 
+# 0.2+ refuses a non-loopback bind without a key: a fixed dummy one that mgmt sends
+# (RUNNER_API_KEY in container/backend/config.py)
+cfg["api_key"] = "local-llm"
+
 conf = Path("/opt/strata/strata-runner.json")
 conf.write_text(json.dumps(cfg, indent=1))
 print("strata-runner:", json.dumps(cfg), flush=True)
@@ -114,9 +118,10 @@ os.execv(  # noqa: S606  # nosec B606 - replace this process with the server
         str(conf),
         "--port",
         str(a.port),
-        # Loopback: 0.2.0 refuses any wider bind without an API key, and mgmt and the router reach
-        # it on the host network anyway. The web dashboard is only at http://127.0.0.1:<port>/.
+        # LAN-facing like the llama.cpp runners: the dashboard at http://ubt26:<port>/ (enter the
+        # key under API key). Bound beyond loopback, server.py trusts this PC's name and LAN
+        # addresses as Host headers; STRATA_ALLOWED_HOSTS (strata_env) adds others.
         "--host",
-        "127.0.0.1",
+        "0.0.0.0",  # noqa: S104  # nosec B104
     ],
 )

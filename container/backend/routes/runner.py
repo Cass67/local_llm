@@ -22,7 +22,7 @@ def _runner_base() -> str:
 @router.get("/health")
 async def runner_health():
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0, headers=config.RUNNER_AUTH) as client:
             resp = await client.get(f"{_runner_base()}/health")
             resp.raise_for_status()
             return resp.json()

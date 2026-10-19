@@ -81,7 +81,7 @@ def _auth_headers(endpoint: dict[str, Any]) -> dict[str, str]:
     api_key = endpoint.get("api_key")
     if isinstance(api_key, str) and api_key:
         return {"Authorization": f"Bearer {api_key}"}
-    return {}
+    return config.RUNNER_AUTH
 
 
 def _model_ids(payload: Any) -> list[str]:

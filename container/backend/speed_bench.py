@@ -142,7 +142,9 @@ def _chat(port: int, model: str, messages: list[dict], max_tokens: int, timeout:
         "cache_prompt": False,
     }
     with httpx.Client(timeout=timeout) as client:
-        resp = client.post(f"http://127.0.0.1:{port}/v1/chat/completions", json=body)
+        resp = client.post(
+            f"http://127.0.0.1:{port}/v1/chat/completions", json=body, headers=config.RUNNER_AUTH
+        )
         resp.raise_for_status()
         return resp.json()
 

@@ -157,7 +157,7 @@ def judge_response(
         "temperature": 0,
     }
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=timeout, headers=config.RUNNER_AUTH) as client:
             response = client.post(f"{judge_url.rstrip('/')}/chat/completions", json=body)
             response.raise_for_status()
             payload = response.json()
