@@ -15,7 +15,7 @@
 FROM ubuntu:24.04
 
 ARG STRATA_REPO=https://github.com/Niko1221/Strata.git
-ARG STRATA_REF=v0.1.45
+ARG STRATA_REF=v0.2.0-beta
 ARG ROCM_VERSION=7.10.0a20251120
 ARG ROCM_INDEX=https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/
 # Set to a TheRock tarball to take ROCm from it instead of the pip wheels (rocmunslothsrc does the same): e.g.
@@ -42,7 +42,7 @@ RUN set -e; python3 -m venv /opt/strata/venv; \
 RUN git clone -q "$STRATA_REPO" /opt/strata/src \
     && git -C /opt/strata/src checkout -q "$STRATA_REF" \
     && /opt/strata/venv/bin/pip install --quiet --disable-pip-version-check \
-       -r /opt/strata/src/requirements.txt
+       -r /opt/strata/src/requirements.txt -r /opt/strata/src/requirements-build.txt
 
 # setup.py's build_engine_hip, without its download of the llama.cpp sources: CMake fetches the
 # revision it pins.
