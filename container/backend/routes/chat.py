@@ -216,7 +216,10 @@ async def proxy_chat_completions(request: Request):  # noqa: C901  # pre-existin
                     active_runners.touch(str(cluster_id))
                 break
 
-    headers = {"Content-Type": request.headers.get("content-type", "application/json")}
+    headers = {
+        "Content-Type": request.headers.get("content-type", "application/json"),
+        **config.RUNNER_AUTH,
+    }
 
     if _is_stream_request(body):
         generation = tracing.open_generation(body, stream=True)

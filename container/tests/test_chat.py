@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import backend.routes.chat as chat_routes
 import pytest
+from backend import config
 from backend.main import app
 from httpx import ASGITransport, AsyncClient, Response
 
@@ -33,7 +34,7 @@ async def test_chat_proxy_strips_provider_prefix_from_model(tmp_path, monkeypatc
 
         async def post(self, url, content, headers):
             assert url == "http://runner.test:18080/v1/chat/completions"
-            assert headers == {"Content-Type": "application/json"}
+            assert headers == {"Content-Type": "application/json", **config.RUNNER_AUTH}
             captured["body"] = json.loads(content)
             return Response(200, json={"choices": [{"message": {"content": "ok"}}]})
 

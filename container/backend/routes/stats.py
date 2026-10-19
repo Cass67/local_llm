@@ -197,7 +197,7 @@ async def _runner_throughput(runners: list[dict[str, Any]]) -> dict[str, dict[st
         if not container or not port:
             return
         try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
+            async with httpx.AsyncClient(timeout=2.0, headers=config.RUNNER_AUTH) as client:
                 resp = await client.get(f"http://127.0.0.1:{port}/metrics")
             if resp.status_code != 200:
                 return
@@ -286,7 +286,7 @@ async def strata_metrics():
     """Running Strata clusters' JSON status re-emitted as llama-server Prometheus metrics."""
     ports = [e["port"] for e in active_runners.list_active() if e.get("backend") == "strata"]
     runners: list[tuple[str, dict[str, Any] | None]] = []
-    async with httpx.AsyncClient(timeout=3.0) as client:
+    async with httpx.AsyncClient(timeout=3.0, headers=config.RUNNER_AUTH) as client:
         for port in ports:
             try:
                 resp = await client.get(f"http://127.0.0.1:{port}/metrics")

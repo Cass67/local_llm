@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from . import config
 from .benchmark_store import BenchmarkStore
 from .clusters import ClusterDef
 from .power import PowerSampler, tokens_per_watt
@@ -49,7 +50,9 @@ def chat_once(
     }
     started = time.perf_counter()
     with httpx.Client(timeout=timeout) as client:
-        response = client.post(f"http://127.0.0.1:{port}/v1/chat/completions", json=body)
+        response = client.post(
+            f"http://127.0.0.1:{port}/v1/chat/completions", json=body, headers=config.RUNNER_AUTH
+        )
         response.raise_for_status()
         payload = response.json()
     elapsed = max(time.perf_counter() - started, 0.001)

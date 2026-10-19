@@ -67,7 +67,7 @@ def _wait_ready(runner: DockerRunner, port: int, timeout: float = 120.0, on_poll
         conn: http.client.HTTPConnection | None = None
         try:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
-            conn.request("GET", "/v1/models")
+            conn.request("GET", "/v1/models", headers=config.RUNNER_AUTH)
             resp = conn.getresponse()
             if resp.status == 200:
                 return True
