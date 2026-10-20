@@ -129,7 +129,7 @@ services:
       OPENAI_API_KEY: "local-llm"
       ENABLE_OLLAMA_API: "False"
       WEBUI_AUTH: "False"
-      DEFAULT_MODELS: "router"
+      DEFAULT_MODELS: "maya-glm53-flash-s24"
       WEBUI_URL: "/chat/"
       LOCAL_LLM_BACK_URL: "/ui/"
       ENABLE_EVALUATION_ARENA_MODELS: "False"
