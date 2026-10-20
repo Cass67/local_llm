@@ -1,0 +1,33 @@
+diff --git a/serve/server.py b/serve/server.py
+index d1c3703..04403d6 100644
+--- a/serve/server.py
++++ b/serve/server.py
+@@ -2519,7 +2519,7 @@ class StreamJob:
+     sleeps mid-answer reconnects and carries on instead of losing it.  Only POST /v1/strata/cancel (the app's Stop)
+     cancels it - a dropped connection does not."""
+ 
+-    ORPHAN_S = 300   # a running answer nobody has read for this long (the page was closed) is cancelled
++    ORPHAN_S = 1800  # a running answer nobody has read for this long (the page was closed) is cancelled
+ 
+     def __init__(self, jid: str, chunks, cancel: threading.Event):
+         self.id, self.cancel = jid, cancel
+diff --git a/serve/web/app.js b/serve/web/app.js
+index 5fbb3ac..85e6065 100644
+--- a/serve/web/app.js
++++ b/serve/web/app.js
+@@ -1848,13 +1848,13 @@ async function answer(resumeJob = null) {
+       }
+     }
+   };
+-  // reconnect to the running answer by id (every 2 s for up to 10 minutes, at once when the page is shown again)
++  // reconnect to the running answer by id (every 2 s for up to 30 minutes, at once when the page is shown again)
+   const follow = async (gone) => {
+     const t0 = Date.now();
+     setHint(resumeJob ? "Taking the answer back up…" : "Connection lost - reconnecting to the answer…");
+     for (;;) {
+       if (controller.signal.aborted) throw new DOMException("stopped", "AbortError");
+-      if (Date.now() - t0 > 600000) throw gone;
++      if (Date.now() - t0 > 1800000) throw gone;
+       try {
+         const r2 = await fetch(`v1/strata/stream?id=${encodeURIComponent(jobId)}&from=${nRecv}`,
+                                {headers: headers(false), signal: controller.signal});

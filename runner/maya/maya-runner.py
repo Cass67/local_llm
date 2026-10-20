@@ -75,7 +75,11 @@ cfg = {
 cfg.update(json.loads(a.server))
 # a LAN bind wants a key: the fixed dummy one mgmt sends (RUNNER_API_KEY in backend/config.py)
 cfg["api_key"] = "local-llm"
-
+# maya_server's `shared`: defaults for requests that leave them out (max_tokens, ...). server.py
+# reads them only from this file, which the web app's "share with other apps" also writes.
+shared = cfg.pop("shared", None)
+if shared:
+    Path("/opt/maya/maya-runner.shared-settings.json").write_text(json.dumps(shared, indent=1))
 conf = Path("/opt/maya/maya-runner.json")
 conf.write_text(json.dumps(cfg, indent=1))
 print("maya-runner:", json.dumps(cfg), flush=True)
