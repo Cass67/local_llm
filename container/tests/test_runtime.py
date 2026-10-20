@@ -1,6 +1,11 @@
 """Tests for project-owned Docker runner command generation."""
 
-from backend.runtime import DockerRunnerConfig, build_llama_server_args, build_runner_container_spec
+from backend.runtime import (
+    DockerRunnerConfig,
+    build_llama_server_args,
+    build_maya_args,
+    build_runner_container_spec,
+)
 
 
 def test_build_llama_server_args_includes_model_runtime_and_mtp_flags():
@@ -426,3 +431,28 @@ def test_build_runner_container_spec_maya_runs_its_runner_with_card_order(tmp_pa
         "--max-context",
         "32768",
     ]
+
+
+def test_build_maya_args_mmproj_turns_images_on():
+    metadata = {
+        "alias": "maya-glm53-flash",
+        "config": {
+            "backend": "maya",
+            "mmproj": "/mnt/hfcache/maya/vision/mmproj-GLM-5.3-Flash-F16.gguf",
+            "maya_vision_model": "/mnt/hfcache/maya/vision/GLM-5.3-Flash-vocab.gguf",
+            "maya_args": ["--glm-pack", "/mnt/hfcache/maya/Maya-S24/pack"],
+        },
+    }
+
+    argv = build_maya_args(metadata, 8089)
+
+    sep = argv.index("--")
+    assert argv[sep - 4 : sep] == [
+        "--vision-mmproj",
+        "/mnt/hfcache/maya/vision/mmproj-GLM-5.3-Flash-F16.gguf",
+        "--vision-model",
+        "/mnt/hfcache/maya/vision/GLM-5.3-Flash-vocab.gguf",
+    ]
+    assert "--vision-mmproj" not in build_maya_args(
+        {"alias": "m", "config": {"backend": "maya"}}, 8089
+    )
