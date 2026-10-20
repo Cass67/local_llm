@@ -41,11 +41,11 @@
 		<a href="#/tuning" class:active={currentRoute === "/tuning"}>Tuning</a>
 		<a href="#/coding" class:active={currentRoute === "/coding"}>Coding</a>
 		<a href="/chat/">Chat</a>
-		{#if active && active.backend !== "strata"}
+		{#if active && active.backend !== "strata" && active.backend !== "maya"}
 			<a href="/llama">llama.cpp</a>
 		{/if}
-		{#if active?.backend === "strata"}
-			<a href="/strata">Strata</a>
+		{#if active?.backend === "strata" || active?.backend === "maya"}
+			<a href="/strata">{active.backend === "maya" ? "Maya" : "Strata"}</a>
 		{/if}
 		<a href="/images">Images</a>
 		<a href="/video">Video</a>

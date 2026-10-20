@@ -385,3 +385,44 @@ def test_build_runner_container_spec_strata_runs_its_runner_with_own_mounts(tmp_
         "--pipeline-windows",
         "2",
     ]
+
+
+def test_build_runner_container_spec_maya_runs_its_runner_with_card_order(tmp_path):
+    metadata = {
+        "alias": "maya-glm53-flash",
+        "config": {
+            "backend": "maya",
+            "visible_devices": "0,1,2,3",
+            "context": 32768,
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "maya_gpus": [3, 0, 1, 2],
+            "maya_env": {"MAYA_GLM_RESERVE_MB": 1024},
+            "maya_args": ["--glm-pack", "/mnt/hfcache/maya/Maya-S24/pack", "--kv-streaming", "on"],
+        },
+    }
+    config = DockerRunnerConfig(image="local-llm-runner-maya:latest", port=8089)
+
+    # models_dir given: a maya profile has no GGUF in the HF cache, so no lookup may run
+    spec = build_runner_container_spec(metadata, config, models_dir=tmp_path)
+
+    assert spec.environment["MAYA_GLM_RESERVE_MB"] == "1024"
+    assert [b.split(":")[0] for b in spec.binds] == ["/mnt/hfcache/maya"]
+    assert spec.command[1:] == [
+        "/opt/maya/maya-runner.py",
+        "--port",
+        "8089",
+        "--model-name",
+        "maya-glm53-flash",
+        "--sampling",
+        '{"temperature": 1.0, "top_p": 0.95}',
+        "--gpus",
+        "3,0,1,2",
+        "--",
+        "--glm-pack",
+        "/mnt/hfcache/maya/Maya-S24/pack",
+        "--kv-streaming",
+        "on",
+        "--max-context",
+        "32768",
+    ]
