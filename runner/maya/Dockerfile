@@ -52,5 +52,10 @@ RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
 
 COPY maya-runner.py /opt/maya/maya-runner.py
 
+# The dashboard (http://ubt26:<port>/) defaults its API key to the runner's fixed dummy one, so the chat
+# works without entering it under About > Settings; a key entered there still wins.
+RUN grep -q 'store.get("apikey", "")' /opt/maya/src/serve/web/app.js \
+    && sed -i 's/store.get("apikey", "")/store.get("apikey", "local-llm")/' /opt/maya/src/serve/web/app.js
+
 ENTRYPOINT []
 CMD ["/opt/maya/venv/bin/python", "/opt/maya/maya-runner.py", "--help"]
