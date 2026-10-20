@@ -40,7 +40,8 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 # Open upstream PRs measured on this box (2026-10-20, Maya-S24, 4x 7900 XT): #138 cuts a prompt shorter than one
 # chunk per card into one chunk per card (MAYA_GLM_PREFILL_SHORT=1; 8K prompt 604 -> 827 tok/s). Drop each when it
 # lands upstream. 0002 is local: an answer nobody reads (a phone's locked screen) is kept 30 min, not 5, and the
-# web chat reconnects for as long.
+# web chat reconnects for as long. 0003 lets gfx1100 run the fused int8 prompt experts upstream keeps to gfx1151
+# (prompts +5-13%; with the profile's MAYA_GLM_PREFILL_ATTN=wmma2 + MAYA_GLM_PREFILL_CHUNK=2048: +12-31%).
 COPY patches /opt/maya/patches
 RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
 
