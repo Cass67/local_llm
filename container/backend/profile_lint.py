@@ -100,6 +100,7 @@ KNOWN_FIELDS: set[str] = {
     "maya_env",
     "maya_server",
     "maya_gpus",
+    "maya_vision_model",
     "layer_split",
     "served_model_name",
 }

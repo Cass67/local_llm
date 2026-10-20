@@ -463,7 +463,7 @@ def build_maya_args(metadata: dict[str, Any], port: int) -> list[str]:
     config that the image's maya-runner.py writes from this argv. The engine flags are the profile's
     `maya_args` verbatim (pack paths under MAYA_MODELS_DIR, mounted as-is); the context comes from
     the profile's ctx. `maya_gpus` fixes the split's card order (KFD indices, the slow card first),
-    which the cluster's device list cannot express.
+    which the cluster's device list cannot express. `mmproj` + `maya_vision_model` turn images on.
     """
     cfg = _config(metadata)
     engine = cfg.get("maya_args") or []
@@ -484,6 +484,17 @@ def build_maya_args(metadata: dict[str, Any], port: int) -> list[str]:
         json.dumps(sampling),
         *(["--gpus", ",".join(str(g) for g in gpus)] if gpus else []),
         *(["--server", json.dumps(cfg["maya_server"])] if cfg.get("maya_server") else []),
+        # the profile's mmproj, as for llama-server: images on (Maya's CPU encoder + its vocab GGUF)
+        *(
+            [
+                "--vision-mmproj",
+                str(cfg["mmproj"]),
+                "--vision-model",
+                str(cfg.get("maya_vision_model") or ""),
+            ]
+            if cfg.get("mmproj")
+            else []
+        ),
         "--",
         *engine,
     ]

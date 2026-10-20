@@ -58,6 +58,16 @@ RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
     cmake --build build-hip --target maya -j"$BUILD_JOBS"; \
     mkdir -p engine && cp build-hip/maya engine/maya && rm -rf build-hip
 
+# The image encoder (docs/AMD_MAYA.md "CPU image encoder on Linux": HIP has no GPU vision path): llama.cpp mtmd
+# with Maya's GLM-5.3-Flash patch, CPU only, static. Patched after the engine build so the engine's MMQ sources stay
+# stock. Images are on when the profile sets mmproj (+ maya_vision_model, the vocab GGUF).
+RUN set -e; cd /opt/maya/src; \
+    /opt/maya/venv/bin/python tools/vision/glm5next_patch.py third_party/llama.cpp; \
+    cmake -S tools/vision -B build-vision-cpu -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DLLAMA_DIR=/opt/maya/src/third_party/llama.cpp -DSTRATA_VISION_CUDA=OFF; \
+    cmake --build build-vision-cpu --target maya-vision -j"$BUILD_JOBS"; \
+    cp build-vision-cpu/bin/maya-vision engine/maya-vision && rm -rf build-vision-cpu
+
 COPY maya-runner.py /opt/maya/maya-runner.py
 
 # The dashboard (http://ubt26:<port>/) defaults its API key to the runner's fixed dummy one, so the chat

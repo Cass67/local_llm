@@ -2,11 +2,13 @@
 """Container entrypoint: mgmt's argv -> the JSON config Maya's serve/server.py reads, then exec.
 
     maya-runner.py --port P --model-name NAME [--gpus 3,0,1,2] [--sampling JSON] [--server JSON] \
-        -- <engine args>
+        [--vision-mmproj GGUF --vision-model GGUF] -- <engine args>
 
 The engine args are the profile's `maya_args` (--glm-pack, --expert-profile, --max-context, ...).
 The GPUs are --gpus (the profile's `maya_gpus`: the split's ORDER matters, the x4 card first), else
 HIP_VISIBLE_DEVICES as mgmt sets it from the cluster. server.py hands the list on to the engine.
+--vision-mmproj/--vision-model (the profile's mmproj + maya_vision_model) turn images on through the
+image's CPU encoder (HIP has no GPU one).
 """
 
 import argparse
@@ -25,9 +27,13 @@ ap.add_argument("--model-name", required=True)
 ap.add_argument("--gpus", default="", help="KFD indices in split order, e.g. 3,0,1,2")
 ap.add_argument("--sampling", default="{}", help="server.py's `sampling` defaults, as JSON")
 ap.add_argument("--server", default="{}", help="extra server.py run-config keys, as JSON")
+ap.add_argument("--vision-mmproj", default="", help="the GLM mmproj GGUF: images on")
+ap.add_argument("--vision-model", default="", help="the vocab GGUF maya-vision tokenizes with")
 ap.add_argument("engine_args", nargs=argparse.REMAINDER)
 a = ap.parse_args()
 args = a.engine_args[1:] if a.engine_args[:1] == ["--"] else a.engine_args
+if bool(a.vision_mmproj) != bool(a.vision_model):
+    sys.exit("maya-runner: images need both --vision-mmproj and --vision-model")
 if "--glm-pack" not in args:
     sys.exit("maya-runner: the engine args need --glm-pack <dir>")
 
@@ -72,6 +78,13 @@ cfg = {
     "lib_dirs": [str(ROCM / "lib")],
     "gpu": gpus if len(gpus) > 1 else (gpus[0] if gpus else 0),
 }
+if a.vision_mmproj:
+    cfg["vision"] = {
+        "exe": str(SRC / "engine" / "maya-vision"),
+        "mmproj": a.vision_mmproj,
+        "model": a.vision_model,
+        "gpu": False,
+    }
 cfg.update(json.loads(a.server))
 # a LAN bind wants a key: the fixed dummy one mgmt sends (RUNNER_API_KEY in backend/config.py)
 cfg["api_key"] = "local-llm"
