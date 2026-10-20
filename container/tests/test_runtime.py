@@ -412,7 +412,11 @@ def test_build_runner_container_spec_maya_runs_its_runner_with_card_order(tmp_pa
     spec = build_runner_container_spec(metadata, config, models_dir=tmp_path)
 
     assert spec.environment["MAYA_GLM_RESERVE_MB"] == "1024"
-    assert [b.split(":")[0] for b in spec.binds] == ["/mnt/hfcache/maya"]
+    assert spec.binds == [
+        "/mnt/hfcache/maya:/mnt/hfcache/maya:ro",
+        "/mnt/hfcache/maya-slots:/mnt/hfcache/maya-slots:rw",
+    ]
+    assert spec.environment["MAYA_GLM_SLOT_DIR"] == "/mnt/hfcache/maya-slots"
     assert spec.command[1:] == [
         "/opt/maya/maya-runner.py",
         "--port",

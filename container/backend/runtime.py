@@ -454,6 +454,8 @@ def build_strata_args(metadata: dict[str, Any], port: int) -> list[str]:
 
 
 MAYA_MODELS_DIR = os.environ.get("MAYA_MODELS_DIR", "/mnt/hfcache/maya")
+# conversations Maya sets aside on the SSD (MAYA_GLM_SLOT_DIR): writable, unlike the read-only pack
+MAYA_SLOTS_DIR = os.environ.get("MAYA_SLOTS_DIR", "/mnt/hfcache/maya-slots")
 
 
 def build_maya_args(metadata: dict[str, Any], port: int) -> list[str]:
@@ -630,6 +632,9 @@ def build_runner_container_spec(  # noqa: C901
     elif backend == "maya":
         # the GGUF shards and the pack beside them (it records the shards' paths), mounted as-is
         binds.append(f"{MAYA_MODELS_DIR}:{MAYA_MODELS_DIR}:ro")
+        # its default <pack>/slots sits on that read-only mount: every set-aside conversation failed
+        binds.append(f"{MAYA_SLOTS_DIR}:{MAYA_SLOTS_DIR}:rw")
+        environment["MAYA_GLM_SLOT_DIR"] = MAYA_SLOTS_DIR
         # Maya's switches are env vars (MAYA_GLM_*: server.py maps them to STRATA_GLM_*)
         environment.update({str(k): str(v) for k, v in (cfg.get("maya_env") or {}).items()})
 
