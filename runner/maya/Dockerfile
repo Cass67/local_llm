@@ -11,7 +11,7 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/Cass67/project-maya.git
-ARG MAYA_REF=45995155fc4b3e3a2e280c0cbc6c54f61d314e39
+ARG MAYA_REF=df3a109e7c24f52a46a0bfc648c49c46f6b91c0b
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -38,8 +38,8 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
     git fetch -q --depth 1 https://github.com/ggml-org/llama.cpp.git "$LLAMA_CPP_COMMIT"; git checkout -q FETCH_HEAD
 
 # Open upstream PRs measured on this box (2026-10-20, Maya-S24, 4x 7900 XT): #138 cuts a prompt shorter than one
-# chunk per card into one chunk per card (MAYA_GLM_PREFILL_SHORT=1; 8K prompt 604 -> 827 tok/s), #199 the prompt's
-# KDA recurrence over 4 blocks a head. Drop each when it lands upstream.
+# chunk per card into one chunk per card (MAYA_GLM_PREFILL_SHORT=1; 8K prompt 604 -> 827 tok/s). Drop each when it
+# lands upstream.
 COPY patches /opt/maya/patches
 RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
 
