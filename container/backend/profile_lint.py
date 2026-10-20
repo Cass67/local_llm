@@ -95,6 +95,11 @@ KNOWN_FIELDS: set[str] = {
     "strata_args",
     "strata_env",
     "strata_server",
+    # maya (runner/maya, build_maya_args)
+    "maya_args",
+    "maya_env",
+    "maya_server",
+    "maya_gpus",
     "layer_split",
     "served_model_name",
 }
@@ -478,7 +483,8 @@ def _lint_vram(
             _finding(
                 "warn",
                 "context",
-                f"estimated {total} MB of {vram_mb} MB VRAM — under 15% headroom, and the estimate runs low; measure before trusting it.",
+                f"estimated {total} MB of {vram_mb} MB VRAM — under 15% headroom, "
+                "and the estimate runs low; measure before trusting it.",
             )
         ]
     return []

@@ -453,6 +453,42 @@ def build_strata_args(metadata: dict[str, Any], port: int) -> list[str]:
     ]
 
 
+MAYA_MODELS_DIR = os.environ.get("MAYA_MODELS_DIR", "/mnt/hfcache/maya")
+
+
+def build_maya_args(metadata: dict[str, Any], port: int) -> list[str]:
+    """Build the Maya runner's argv (runner/maya).
+
+    Maya is a Strata fork, so the same shape as build_strata_args: its serve/server.py reads a JSON
+    config that the image's maya-runner.py writes from this argv. The engine flags are the profile's
+    `maya_args` verbatim (pack paths under MAYA_MODELS_DIR, mounted as-is); the context comes from
+    the profile's ctx. `maya_gpus` fixes the split's card order (KFD indices, the slow card first),
+    which the cluster's device list cannot express.
+    """
+    cfg = _config(metadata)
+    engine = cfg.get("maya_args") or []
+    engine = [str(f) for f in engine] if isinstance(engine, list) else str(engine).split()
+    ctx = cfg.get("ctx") or cfg.get("context") or metadata.get("context")
+    if ctx and "--max-context" not in engine:
+        engine += ["--max-context", str(ctx)]
+    sampling = {k: cfg[k] for k in _STRATA_SAMPLING if cfg.get(k) is not None}
+    gpus = cfg.get("maya_gpus")
+    return [
+        "/opt/maya/venv/bin/python",
+        "/opt/maya/maya-runner.py",
+        "--port",
+        str(port),
+        "--model-name",
+        str(cfg.get("served_model_name") or metadata.get("alias") or "maya"),
+        "--sampling",
+        json.dumps(sampling),
+        *(["--gpus", ",".join(str(g) for g in gpus)] if gpus else []),
+        *(["--server", json.dumps(cfg["maya_server"])] if cfg.get("maya_server") else []),
+        "--",
+        *engine,
+    ]
+
+
 def build_runner_container_spec(  # noqa: C901
     metadata: dict[str, Any], config: DockerRunnerConfig, models_dir: Path | None = None
 ) -> DockerContainerSpec:
@@ -460,7 +496,7 @@ def build_runner_container_spec(  # noqa: C901
     if models_dir:
         # sglang carries its model dir as a profile knob and lives on its own
         # mount, so the GGUF-cache lookup neither applies nor resolves.
-        _own_mount = str(_config(metadata).get("backend") or "") in ("sglang", "strata")
+        _own_mount = str(_config(metadata).get("backend") or "") in ("sglang", "strata", "maya")
         if not _own_mount and not (metadata.get("model_path") or metadata.get("path")):
             metadata = {**metadata, "model_path": _model_path(metadata, models_dir)}
         cfg = _config(metadata)
@@ -580,11 +616,18 @@ def build_runner_container_spec(  # noqa: C901
         binds.append(f"{STRATA_DATA_DIR}:{STRATA_DATA_DIR}:ro")
         # Strata's own switches are environment variables (STRATA_SPLIT_OWN, STRATA_*_TIMING, ...)
         environment.update({str(k): str(v) for k, v in (cfg.get("strata_env") or {}).items()})
+    elif backend == "maya":
+        # the GGUF shards and the pack beside them (it records the shards' paths), mounted as-is
+        binds.append(f"{MAYA_MODELS_DIR}:{MAYA_MODELS_DIR}:ro")
+        # Maya's switches are env vars (MAYA_GLM_*: server.py maps them to STRATA_GLM_*)
+        environment.update({str(k): str(v) for k, v in (cfg.get("maya_env") or {}).items()})
 
     if backend == "sglang":
         command = build_sglang_args(metadata, port=config.port)
     elif backend == "strata":
         command = build_strata_args(metadata, port=config.port)
+    elif backend == "maya":
+        command = build_maya_args(metadata, port=config.port)
     else:
         command = build_llama_server_args(metadata, port=config.port)
     return DockerContainerSpec(

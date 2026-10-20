@@ -48,6 +48,8 @@ RUNNER_IMAGES = {
     # Strata, not llama.cpp: a Flash-Next-only engine (runner/strata/Dockerfile); see
     # build_strata_args in runtime.py for the argv.
     "strata": os.environ.get("RUNNER_IMAGE_STRATA", "local-llm-runner-strata:latest"),
+    # Project Maya, a Strata fork for GLM-5.3-Flash (runner/maya/Dockerfile); see build_maya_args.
+    "maya": os.environ.get("RUNNER_IMAGE_MAYA", "local-llm-runner-maya:latest"),
 }
 
 
