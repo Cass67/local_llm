@@ -37,6 +37,12 @@ RUN git init -q /opt/maya/src && cd /opt/maya/src \
 RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/third_party/llama.cpp; \
     git fetch -q --depth 1 https://github.com/ggml-org/llama.cpp.git "$LLAMA_CPP_COMMIT"; git checkout -q FETCH_HEAD
 
+# Open upstream PRs measured on this box (2026-10-20, Maya-S24, 4x 7900 XT): #138 cuts a prompt shorter than one
+# chunk per card into one chunk per card (MAYA_GLM_PREFILL_SHORT=1; 8K prompt 604 -> 827 tok/s), #199 the prompt's
+# KDA recurrence over 4 blocks a head. Drop each when it lands upstream.
+COPY patches /opt/maya/patches
+RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
+
 # maya.py's build_engine for HIP (one architecture, no tests)
 RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
     export PATH="$root/bin:$root/llvm/bin:$PATH" ROCM_PATH="$root" HIP_PATH="$root" HIP_PLATFORM=amd \
