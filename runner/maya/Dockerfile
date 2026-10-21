@@ -3,15 +3,16 @@
 # tiered across VRAM, pinned RAM and the GGUF on NVMe. Serves a layer split over the 4x 7900 XT.
 #
 # Same toolchain as runner/strata: TheRock's ROCm 10.0.0 tarball, whose hipBLASLt 1.4.1 (100401) is
-# what tools/hip/gfx1100-glm-hipblaslt-100401.txt was tuned on. That table is upstream PR
-# mw00/project-maya#292; until it lands MAYA_REF points at the fork branch carrying it.
+# what tools/hip/gfx1100-glm-hipblaslt-100401.txt was tuned on (#292, in v1.1.19 with #290: the NextN
+# split's drafting backup taken at setup - a low MAYA_GLM_RESERVE_MB failed without it).
 #
 # Not llama-server: the container runs maya-runner.py, which turns mgmt's argv into the JSON config
 # serve/server.py reads. See build_maya_args in container/backend/runtime.py.
 FROM ubuntu:24.04
 
-ARG MAYA_REPO=https://github.com/Cass67/project-maya.git
-ARG MAYA_REF=df3a109e7c24f52a46a0bfc648c49c46f6b91c0b
+ARG MAYA_REPO=https://github.com/mw00/project-maya.git
+# v1.1.19
+ARG MAYA_REF=3bf6867d344212166c09d2a5fe086b9ab90ac2fb
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -41,7 +42,9 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 # chunk per card into one chunk per card (MAYA_GLM_PREFILL_SHORT=1; 8K prompt 604 -> 827 tok/s). Drop each when it
 # lands upstream. 0002 is local: an answer nobody reads (a phone's locked screen) is kept 30 min, not 5, and the
 # web chat reconnects for as long. 0003 lets gfx1100 run the fused int8 prompt experts upstream keeps to gfx1151
-# (prompts +5-13%; with the profile's MAYA_GLM_PREFILL_ATTN=wmma2 + MAYA_GLM_PREFILL_CHUNK=2048: +12-31%).
+# (prompts +5-13%; with the profile's MAYA_GLM_PREFILL_ATTN=wmma2 + MAYA_GLM_PREFILL_CHUNK=2048: +12-31%). 0004 sets
+# aside conversations with pictures too (slots keyed by img_hash): one with a screenshot in it read all ~225K tokens again
+# after every stop, restart or other chat in between.
 COPY patches /opt/maya/patches
 RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
 
