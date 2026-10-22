@@ -4,7 +4,8 @@
     maya-runner.py --port P --model-name NAME [--gpus 3,0,1,2] [--sampling JSON] [--server JSON] \
         [--vision-mmproj GGUF --vision-model GGUF] -- <engine args>
 
-The engine args are the profile's `maya_args` (--glm-pack, --expert-profile, --max-context, ...).
+The engine args are the profile's `maya_args` (--glm-pack, --expert-profile, --max-context, ...);
+DeepSeek-V4.1-Flash's (--pack <model>/maya-ds4, --tp, --dspark, ...) run its own engine, maya-ds4.
 The GPUs are --gpus (the profile's `maya_gpus`: the split's ORDER matters, the x4 card first), else
 HIP_VISIBLE_DEVICES as mgmt sets it from the cluster. server.py hands the list on to the engine.
 --vision-mmproj/--vision-model (the profile's mmproj + maya_vision_model) turn images on through the
@@ -34,8 +35,14 @@ a = ap.parse_args()
 args = a.engine_args[1:] if a.engine_args[:1] == ["--"] else a.engine_args
 if bool(a.vision_mmproj) != bool(a.vision_model):
     sys.exit("maya-runner: images need both --vision-mmproj and --vision-model")
-if "--glm-pack" not in args:
-    sys.exit("maya-runner: the engine args need --glm-pack <dir>")
+pack_flag = next((f for f in ("--glm-pack", "--pack") if f in args), None)
+if pack_flag is None:
+    sys.exit("maya-runner: the engine args need --glm-pack <dir> (GLM) or --pack <dir> (DeepSeek)")
+deepseek = pack_flag == "--pack"
+if deepseek and a.vision_mmproj:
+    sys.exit(
+        "maya-runner: images through the CPU encoder are GLM's; DeepSeek's need its pack's vision"
+    )
 
 gpus = [
     int(g) for g in (a.gpus or os.environ.get("HIP_VISIBLE_DEVICES", "")).split(",") if g.strip()
@@ -60,13 +67,14 @@ def hipblaslt_version():
 
 env = {}
 # the engine accepts a table only for its own hipBLASLt; others fall back to plain hipBLAS
+# (GLM's; maya-ds4 measures its own picks into the pack's lt-picks.txt)
 table = SRC / f"tools/hip/gfx1100-glm-hipblaslt-{hipblaslt_version()}.txt"
-if table.is_file():
+if table.is_file() and not deepseek:
     env["MAYA_HIPBLASLT_TUNING"] = str(table)
 cfg = {
-    "exe": str(SRC / "engine" / "maya"),
+    "exe": str(SRC / "engine" / ("maya-ds4" if deepseek else "maya")),
     "cwd": str(SRC),
-    "tokenizer": str(Path(args[args.index("--glm-pack") + 1]) / "tokenizer"),
+    "tokenizer": str(Path(args[args.index(pack_flag) + 1]) / "tokenizer"),
     "model_name": a.model_name,
     "backend": "hip",
     # the engine's own log (placement, tiers, glm stat lines) into `docker logs` and mgmt's log view
