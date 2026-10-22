@@ -1,2 +1,7 @@
 # GPU runner containers must run as root to access /dev/dri, /dev/kfd, nvidia devices
 DS-0002
+# virtualenv < 21.14.9 (arbitrary code via crafted env name / interpreter path). Only pulled in through
+# swebench -> pre-commit for benchmarks; mgmt never creates virtualenvs. The fix needs packaging>=26.3,
+# which langfuse 2.x (<25) blocks: drop these once tracing.py moves to langfuse SDK v3.
+CVE-2026-113722
+CVE-2026-113725
