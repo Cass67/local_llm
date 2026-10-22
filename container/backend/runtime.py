@@ -456,6 +456,8 @@ def build_strata_args(metadata: dict[str, Any], port: int) -> list[str]:
 MAYA_MODELS_DIR = os.environ.get("MAYA_MODELS_DIR", "/mnt/hfcache/maya")
 # conversations Maya sets aside on the SSD (MAYA_GLM_SLOT_DIR): writable, unlike the read-only pack
 MAYA_SLOTS_DIR = os.environ.get("MAYA_SLOTS_DIR", "/mnt/hfcache/maya-slots")
+# DeepSeek's shards that do not fit beside the rest (Engram tables), symlinked from its folder
+MAYA_SPILL_DIR = os.environ.get("MAYA_SPILL_DIR", "/mnt/spare/build/maya-dsv41")
 
 
 def build_maya_args(metadata: dict[str, Any], port: int) -> list[str]:
@@ -635,6 +637,16 @@ def build_runner_container_spec(  # noqa: C901
         # its default <pack>/slots sits on that read-only mount: every set-aside conversation failed
         binds.append(f"{MAYA_SLOTS_DIR}:{MAYA_SLOTS_DIR}:rw")
         environment["MAYA_GLM_SLOT_DIR"] = MAYA_SLOTS_DIR
+        maya_args = cfg.get("maya_args") or []
+        maya_args = (
+            [str(f) for f in maya_args] if isinstance(maya_args, list) else maya_args.split()
+        )
+        if "--pack" in maya_args:
+            # DeepSeek (maya-ds4): the Engram shards' real home, and its pack writable - the engine
+            # keeps its learned expert profile, CPU-lane timings and hipBLASLt picks there
+            binds.append(f"{MAYA_SPILL_DIR}:{MAYA_SPILL_DIR}:ro")
+            pack = maya_args[maya_args.index("--pack") + 1]
+            binds.append(f"{pack}:{pack}:rw")
         # Maya's switches are env vars (MAYA_GLM_*: server.py maps them to STRATA_GLM_*)
         environment.update({str(k): str(v) for k, v in (cfg.get("maya_env") or {}).items()})
 

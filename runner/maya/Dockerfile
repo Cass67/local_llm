@@ -1,6 +1,7 @@
 # local-llm-runner-maya
 # mw00/project-maya: a Strata fork with its own engine for GLM-5.3-Flash (Maya-S24 here), the experts
-# tiered across VRAM, pinned RAM and the GGUF on NVMe. Serves a layer split over the 4x 7900 XT.
+# tiered across VRAM, pinned RAM and the GGUF on NVMe. Serves a layer split over the 4x 7900 XT. Also builds
+# maya-ds4, the engine for DeepSeek-V4.1-Flash (Maya-XS here); maya-runner.py picks one from the profile's args.
 #
 # Same toolchain as runner/strata: TheRock's ROCm 10.0.0 tarball, whose hipBLASLt 1.4.1 (100401) is
 # what tools/hip/gfx1100-glm-hipblaslt-100401.txt was tuned on (#292, in v1.1.19 with #290: the NextN
@@ -11,8 +12,8 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
-# v1.1.20
-ARG MAYA_REF=35bb2b22a2e2c65b91e24a41d4b026bfa4e89557
+# v1.1.23
+ARG MAYA_REF=8ceadd7d9ad325d638da3a49d2d602815b43495e
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -47,7 +48,8 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 COPY patches /opt/maya/patches
 RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
 
-# maya.py's build_engine for HIP (one architecture, no tests)
+# maya.py's build_engine for HIP (one architecture, no tests): GLM's engine and DeepSeek-V4.1-Flash's (maya-ds4;
+# v1.1.23 at least - v1.1.22's stops past 32K tokens on AMD)
 RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
     export PATH="$root/bin:$root/llvm/bin:$PATH" ROCM_PATH="$root" HIP_PATH="$root" HIP_PLATFORM=amd \
            LD_LIBRARY_PATH="$root/lib"; \
@@ -57,8 +59,8 @@ RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
       -DCMAKE_HIP_COMPILER="$root/llvm/bin/clang++" -DCMAKE_PREFIX_PATH="$root" \
       -DSTRATA_GGML_DIR=/opt/maya/src/third_party/llama.cpp \
       "-DCMAKE_HIP_FLAGS=--rocm-path=$root --rocm-device-lib-path=$root/lib/llvm/amdgcn/bitcode"; \
-    cmake --build build-hip --target maya -j"$BUILD_JOBS"; \
-    mkdir -p engine && cp build-hip/maya engine/maya && rm -rf build-hip
+    cmake --build build-hip --target maya maya-ds4 -j"$BUILD_JOBS"; \
+    mkdir -p engine && cp build-hip/maya build-hip/maya-ds4 engine/ && rm -rf build-hip
 
 # The image encoder (docs/AMD_MAYA.md "CPU image encoder on Linux": HIP has no GPU vision path): llama.cpp mtmd
 # with Maya's GLM-5.3-Flash patch, CPU only, static. Patched after the engine build so the engine's MMQ sources stay

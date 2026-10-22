@@ -437,6 +437,24 @@ def test_build_runner_container_spec_maya_runs_its_runner_with_card_order(tmp_pa
     ]
 
 
+def test_build_runner_container_spec_maya_deepseek_mounts_spill_and_writable_pack(tmp_path):
+    pack = "/mnt/hfcache/maya/dsv41/Maya-XS/maya-ds4"
+    metadata = {
+        "alias": "maya-dsv41-flash-xs",
+        "config": {"backend": "maya", "maya_args": ["--pack", pack, "--tp", "1"]},
+    }
+    config = DockerRunnerConfig(image="local-llm-runner-maya:latest", port=8089)
+
+    spec = build_runner_container_spec(metadata, config, models_dir=tmp_path)
+
+    assert spec.binds == [
+        "/mnt/hfcache/maya:/mnt/hfcache/maya:ro",
+        "/mnt/hfcache/maya-slots:/mnt/hfcache/maya-slots:rw",
+        "/mnt/spare/build/maya-dsv41:/mnt/spare/build/maya-dsv41:ro",
+        f"{pack}:{pack}:rw",
+    ]
+
+
 def test_build_maya_args_mmproj_turns_images_on():
     metadata = {
         "alias": "maya-glm53-flash",
