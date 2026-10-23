@@ -43,6 +43,8 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 # web chat reconnects for as long. 0004 (upstream #331, drop when it lands) sets
 # aside conversations with pictures too (slots keyed by img_hash): one with a screenshot in it read all ~225K tokens again
 # after every stop, restart or other chat in between.
+# 0005: upstream #354 (DeepSeek routed prompt experts on int8 MMQ, opt-in MAYA_DS4_EXPERT_MMQ=1) + IQ1_S in its
+# whitelist (Maya-XS experts are IQ1_S; the GLM MMQ path already takes IQ1_S). Drop when #354 lands with IQ1_S.
 COPY patches /opt/maya/patches
 RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
 
