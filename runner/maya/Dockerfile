@@ -12,8 +12,8 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
-# v1.1.23
-ARG MAYA_REF=8ceadd7d9ad325d638da3a49d2d602815b43495e
+# v1.1.25
+ARG MAYA_REF=94878e25e3860e22ea29b4fff506ade8c477a57b
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -39,10 +39,8 @@ RUN git init -q /opt/maya/src && cd /opt/maya/src \
 RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/third_party/llama.cpp; \
     git fetch -q --depth 1 https://github.com/ggml-org/llama.cpp.git "$LLAMA_CPP_COMMIT"; git checkout -q FETCH_HEAD
 
-# Open upstream PRs measured on this box (2026-10-20, Maya-S24, 4x 7900 XT): #138 cuts a prompt shorter than one
-# chunk per card into one chunk per card (MAYA_GLM_PREFILL_SHORT=1; 8K prompt 604 -> 827 tok/s). Drop each when it
-# lands upstream. 0002 is local: an answer nobody reads (a phone's locked screen) is kept 30 min, not 5, and the
-# web chat reconnects for as long. 0004 sets
+# 0002 is local: an answer nobody reads (a phone's locked screen) is kept 30 min, not 5, and the
+# web chat reconnects for as long. 0004 (upstream #331, drop when it lands) sets
 # aside conversations with pictures too (slots keyed by img_hash): one with a screenshot in it read all ~225K tokens again
 # after every stop, restart or other chat in between.
 COPY patches /opt/maya/patches
