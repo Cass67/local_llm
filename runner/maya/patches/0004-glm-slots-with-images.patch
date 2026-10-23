@@ -1,8 +1,8 @@
 diff --git a/src/program/generate.cpp b/src/program/generate.cpp
-index 24edc66..a942363 100644
+index 8439b07..50139c0 100644
 --- a/src/program/generate.cpp
 +++ b/src/program/generate.cpp
-@@ -1240,9 +1240,13 @@ static int glm_pack_generate(const Options& o) {
+@@ -1265,9 +1265,13 @@ static int glm_pack_generate(const Options& o) {
      // it does continue (slot_load) - chats, and an agent's side requests, that interleave no longer re-read each
      // other's prompts.  STRATA_GLM_SLOTS=<n> files (default 4, 0 off), for conversations of STRATA_GLM_SLOT_MIN tokens
      // or more (1024), in STRATA_GLM_SLOT_DIR (default <pack>/slots, emptied at start), at most STRATA_GLM_SLOT_GB on
@@ -17,7 +17,7 @@ index 24edc66..a942363 100644
      struct Slot {
          std::vector<int32_t> tokens;
          std::string path;                       // empty when the slot is a RAM buffer (slot_ram)
-@@ -1254,10 +1258,8 @@ static int glm_pack_generate(const Options& o) {
+@@ -1279,10 +1283,8 @@ static int glm_pack_generate(const Options& o) {
          // the end of a system prompt (slot_prefix): other chats start with it, so its conversation's later states
          // never supersede it - it goes only as the least recently used (#179)
          bool prefix = false;
@@ -29,7 +29,7 @@ index 24edc66..a942363 100644
      std::vector<Slot> slots;
      uint64_t slot_clock = 0, slot_seq = 0;
      bool snap_in_slot = false;   // the model's snapshot is one of the slots, unchanged since
-@@ -1284,7 +1286,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -1309,7 +1311,7 @@ static int glm_pack_generate(const Options& o) {
      // sizes) and whether the draft block is loaded.  The split itself is checked by slot_load (each part's layers).
      const std::string slot_identity = [&] {
          std::ostringstream id;
@@ -38,7 +38,7 @@ index 24edc66..a942363 100644
          std::error_code ec;
          for (const char* f : {"index.txt", "dense.bin", "native_experts.txt"})
              id << " " << f << ":" << (unsigned long long) fs::file_size(fs::path(o.glm_pack) / f, ec);
-@@ -1298,7 +1300,8 @@ static int glm_pack_generate(const Options& o) {
+@@ -1323,7 +1325,8 @@ static int glm_pack_generate(const Options& o) {
      }();
      constexpr uint64_t kMetaMagic = 0x3153534559414d47ull;   // "GMAYESS1"
      const auto meta_of = [](const std::string& bin) { return bin.substr(0, bin.size() - 4) + ".meta"; };
@@ -48,7 +48,7 @@ index 24edc66..a942363 100644
          const std::string tmp = path + ".tmp";
          {
              std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-@@ -1309,6 +1312,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -1334,6 +1337,7 @@ static int glm_pack_generate(const Options& o) {
              f.write((const char*) &bytes, 8);
              f.write((const char*) &nt, 8);
              f.write((const char*) toks.data(), (std::streamsize) (nt * sizeof(int32_t)));
@@ -56,7 +56,7 @@ index 24edc66..a942363 100644
              f.write((const char*) &kMetaMagic, 8);
              f.flush();
              if (!f) return false;
-@@ -1317,8 +1321,10 @@ static int glm_pack_generate(const Options& o) {
+@@ -1342,8 +1346,10 @@ static int glm_pack_generate(const Options& o) {
          fs::rename(tmp, path, ec);
          return !ec;
      };
@@ -69,7 +69,7 @@ index 24edc66..a942363 100644
          std::ifstream f(path, std::ios::binary);
          uint64_t m0 = 0, il = 0, nt = 0, m1 = 0;
          if (!f.read((char*) &m0, 8) || m0 != kMetaMagic || !f.read((char*) &il, 8) || il != slot_identity.size())
-@@ -1327,8 +1333,8 @@ static int glm_pack_generate(const Options& o) {
+@@ -1352,8 +1358,8 @@ static int glm_pack_generate(const Options& o) {
          if (!f.read(id.data(), (std::streamsize) il) || id != slot_identity) return false;
          if (!f.read((char*) &bytes, 8) || !f.read((char*) &nt, 8) || nt == 0 || nt > (uint64_t) o.max_context) return false;
          toks.resize(nt);
@@ -80,7 +80,7 @@ index 24edc66..a942363 100644
      };
      const auto slot_age_days = [](const std::string& p) {
          std::error_code ec;
-@@ -1353,7 +1359,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -1378,7 +1384,7 @@ static int glm_pack_generate(const Options& o) {
                                                   : std::filesystem::path(o.glm_pack) / "slots";
          std::error_code ec;
          std::filesystem::create_directories(slot_dir, ec);
@@ -89,7 +89,7 @@ index 24edc66..a942363 100644
          std::vector<Found> found;
          size_t refused = 0;
          for (const auto& de : std::filesystem::directory_iterator(slot_dir, ec)) {   // a previous run's slots
-@@ -1367,9 +1373,9 @@ static int glm_pack_generate(const Options& o) {
+@@ -1392,9 +1398,9 @@ static int glm_pack_generate(const Options& o) {
              }
              if (!is_meta) continue;                      // a .bin is judged by its .meta
              const std::string bin = p.substr(0, p.size() - 5) + ".bin";
@@ -101,15 +101,15 @@ index 24edc66..a942363 100644
                  found.push_back(std::move(fd));
              } else {
                  ++refused;
-@@ -1389,6 +1395,7 @@ static int glm_pack_generate(const Options& o) {
-         for (auto& fd : found) {
-             total += fd.bytes;
-             slots.push_back({std::move(fd.toks), fd.bin, fd.bytes, ++slot_clock});
+@@ -1417,6 +1423,7 @@ static int glm_pack_generate(const Options& o) {
+             // a system prompt's state (slot_prefix) goes only as the least recently used, after a restart too: the
+             // .meta has no flag for it, its tokens tell (no user turn)
+             slots.back().prefix = strata::core::is_system_prefix(slots.back().tokens, 154827);
 +            slots.back().img = fd.img;
          }
          if (slot_keep) {
              std::ostringstream m;
-@@ -1421,9 +1428,12 @@ static int glm_pack_generate(const Options& o) {
+@@ -1449,9 +1456,12 @@ static int glm_pack_generate(const Options& o) {
      };
      // the conversation in the model (its snapshot, snap_tokens) into a slot
      const auto slot_put = [&](const char* why) {
@@ -125,7 +125,7 @@ index 24edc66..a942363 100644
                  std::equal(slots[i].tokens.begin(), slots[i].tokens.end(), snap_tokens.begin()))
                  slot_drop(i);
          while (!slots.empty() && slots.size() >= (size_t) slot_max) slot_drop(slot_lru(SIZE_MAX));
-@@ -1440,6 +1450,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -1468,6 +1478,7 @@ static int glm_pack_generate(const Options& o) {
              }
              slots.push_back({snap_tokens, "", bytes, ++slot_clock});
              slots.back().data = buf;
@@ -133,7 +133,7 @@ index 24edc66..a942363 100644
              snap_in_slot = true;
              uint64_t total = 0;
              for (const auto& s : slots) total += s.bytes;
-@@ -1473,7 +1484,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -1501,7 +1512,7 @@ static int glm_pack_generate(const Options& o) {
          std::string e;
          const uint64_t bytes = model.slot_save(path + ".tmp", e);
          if (bytes == 0 || (std::filesystem::rename(path + ".tmp", path, ec), ec) ||
@@ -142,7 +142,7 @@ index 24edc66..a942363 100644
              std::filesystem::remove(path + ".tmp", ec);
              std::filesystem::remove(path, ec);
              std::fprintf(stderr, "glm slots: setting the conversation aside failed (%s)\n",
-@@ -1481,6 +1492,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -1509,6 +1520,7 @@ static int glm_pack_generate(const Options& o) {
              return;
          }
          slots.push_back({snap_tokens, path, bytes, ++slot_clock});
@@ -150,7 +150,7 @@ index 24edc66..a942363 100644
          snap_in_slot = true;
          uint64_t total = 0;
          for (const auto& s : slots) total += s.bytes;
-@@ -1500,11 +1512,12 @@ static int glm_pack_generate(const Options& o) {
+@@ -1528,11 +1540,12 @@ static int glm_pack_generate(const Options& o) {
      };
      // the longest slot this prompt continues, back in the model: the tokens it covers (0: none)
      const auto slot_take = [&](const std::vector<int32_t>& prompt) -> size_t {
@@ -165,7 +165,7 @@ index 24edc66..a942363 100644
                  best = i;
                  len = t.size();
              }
-@@ -1522,7 +1535,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -1550,7 +1563,7 @@ static int glm_pack_generate(const Options& o) {
              return 0;
          }
          snap_tokens = slots[best].tokens;
@@ -174,7 +174,7 @@ index 24edc66..a942363 100644
          snap_in_slot = true;
          slots[best].used = ++slot_clock;
          slots[best].anchor = false;
-@@ -1609,7 +1622,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -1637,7 +1650,7 @@ static int glm_pack_generate(const Options& o) {
      // checkpoints live with the model's state, so an unrelated conversation in between drops them, and another chat
      // with this system prompt read it all again (#179); the slot outlives that.  Once per system prompt.
      const auto slot_prefix = [&](const std::vector<int32_t>& prompt, size_t p) {
