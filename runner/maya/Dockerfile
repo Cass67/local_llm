@@ -12,8 +12,8 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
-# v1.1.25
-ARG MAYA_REF=94878e25e3860e22ea29b4fff506ade8c477a57b
+# v1.1.26
+ARG MAYA_REF=f26d8bab43f9b10f0475986b541dc46ada45285e
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -45,6 +45,8 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 # after every stop, restart or other chat in between.
 # 0005: upstream #354 (DeepSeek routed prompt experts on int8 MMQ, opt-in MAYA_DS4_EXPERT_MMQ=1) + IQ1_S in its
 # whitelist (Maya-XS experts are IQ1_S; the GLM MMQ path already takes IQ1_S). Drop when #354 lands with IQ1_S.
+# 0006: IQ2_XS routed experts (the IQ2_XS part of upstream #357, ported onto v1.1.25) - ISTA-DASLab's GSQ-RCO GGUFs
+# mix IQ1_M / IQ2_XXS / IQ2_XS experts. The CPU lane runs IQ2_XS through ggml-cpu's own dot.
 COPY patches /opt/maya/patches
 RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
 

@@ -23,7 +23,7 @@ index ec314a4..b1ec8e1 100644
  
    if(STRATA_ENABLE_HIP)
 diff --git a/src/ds4/ds4_iq.cu b/src/ds4/ds4_iq.cu
-index 0e8621b..8cfdfff 100644
+index 91b9248..4582117 100644
 --- a/src/ds4/ds4_iq.cu
 +++ b/src/ds4/ds4_iq.cu
 @@ -1,6 +1,12 @@
@@ -39,7 +39,7 @@ index 0e8621b..8cfdfff 100644
  
  #include <cuda_fp16.h>
  #if !defined(STRATA_USE_HIP)
-@@ -1233,7 +1239,276 @@ bool light_down(const SetArgs& a, cudaStream_t s) {
+@@ -1235,7 +1241,276 @@ bool light_down(const SetArgs& a, cudaStream_t s) {
      return light_set(a, false, s);
  }
  
@@ -316,7 +316,7 @@ index 0e8621b..8cfdfff 100644
      if (a.n_embd % 256 != 0 || a.n_ff % BN != 0) return false;
      SetArgs t = a;
      if (light_gate_up(a, s)) {   // the experts of a few rows; the tiles the others
-@@ -1248,6 +1523,9 @@ bool set_gate_up(const SetArgs& a, cudaStream_t s) {
+@@ -1250,6 +1525,9 @@ bool set_gate_up(const SetArgs& a, cudaStream_t s) {
  }
  
  bool set_down(const SetArgs& a, cudaStream_t s) {
@@ -327,12 +327,12 @@ index 0e8621b..8cfdfff 100644
      SetArgs t = a;
      if (light_down(a, s)) {
 diff --git a/src/ds4/ds4_iq.cuh b/src/ds4/ds4_iq.cuh
-index 843238f..78e1a4d 100644
+index 6a49ee9..6a3412b 100644
 --- a/src/ds4/ds4_iq.cuh
 +++ b/src/ds4/ds4_iq.cuh
-@@ -79,6 +79,20 @@ struct SetArgs {
-     int skip_le = 0;   // (the tiles) the experts of at most this many rows are left out: the light kernels took them
+@@ -80,6 +80,20 @@ struct SetArgs {
      int xh_vec = 0;    // (launch_set's: xh 16-byte aligned rows - the tensor-core tiles load 8 values at once)
+     int skip_ge = 0;   // (the tiles) > 0: the experts of at least this many rows are left out - the caller's GEMMs
  };
 +#if defined(STRATA_USE_HIP)
 +// Host metadata for a prompt set, valid only within this scope; nested calls restore their caller's metadata.
@@ -350,9 +350,9 @@ index 843238f..78e1a4d 100644
 +#endif
  bool set_gate_up(const SetArgs& a, cudaStream_t s);
  bool set_down(const SetArgs& a, cudaStream_t s);
- /// The light form alone (the set's experts of at most 16 rows; the others untouched), for any of these types and MXFP4
+ /// The busy experts' path (a prompt's experts of many rows): one expert's matrix - n rows of k values, row_bytes(k)
 diff --git a/src/ds4/ds4_model.cu b/src/ds4/ds4_model.cu
-index 8e623a3..9c6d3b3 100644
+index bdaa46e..c77f791 100644
 --- a/src/ds4/ds4_model.cu
 +++ b/src/ds4/ds4_model.cu
 @@ -14,6 +14,9 @@
@@ -363,9 +363,9 @@ index 8e623a3..9c6d3b3 100644
 +#include "ds4_iq.cuh"
 +#endif
  #include "ds4_gguf_cpu.hpp"
+ #include "ds4_iq.cuh"
  #include "ds4_kernels.cuh"
- #include "ds4_lt.hpp"
-@@ -4000,6 +4003,9 @@ struct Model::Impl {
+@@ -4183,6 +4186,9 @@ struct Model::Impl {
              for (int i = i0; i < j; ++i) max_rows = std::max(max_rows, b[i + 1] - b[i]);
              if (nrows > 0) {
                  x3::SetArgs sa;
