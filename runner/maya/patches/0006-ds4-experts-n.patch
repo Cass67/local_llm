@@ -1,0 +1,50 @@
+diff --git a/src/ds4/ds4_main.cpp b/src/ds4/ds4_main.cpp
+index 51b9d9f..7badaa7 100644
+--- a/src/ds4/ds4_main.cpp
++++ b/src/ds4/ds4_main.cpp
+@@ -91,7 +91,7 @@ void usage() {
+                  "maya-ds4 --pack <model>/maya-ds4 [--gpus 0,1,...] [--max-context N] [--reserve-mib N]\n"
+                  "           [--vram-experts F] [--cpu-threads N] [--expert-profile FILE|none] [--no-expert-cache] [--verbose]\n"
+                  "           [--tp N] [--threads on|off] [--prefill-chunk N] [--dspark on|off|none] [--dspark-conf F]\n"
+-                 "           [--vision on|off] [--mmap-experts on|off|auto]\n"
++                 "           [--vision on|off] [--mmap-experts on|off|auto] [--experts N]\n"
+                  "           (--ids I,J,... [--images FILE] [--n N] [--dump-logits FILE] | --ppl FILE | --serve\n"
+                  "           | --encode-image FILE.rgb --size WxH --dump-image OUT)\n");
+ }
+@@ -1160,7 +1160,8 @@ int main(int argc, char** argv) {
+         else if (a == "--mmap-experts") {
+             const std::string v = val("--mmap-experts");
+             o.mmap_experts = v == "on" ? 1 : v == "off" ? 0 : -1;
+-        } else if (a == "--images") images = val("--images");
++        } else if (a == "--experts") o.experts = std::max(1, std::atoi(val("--experts").c_str()));
++        else if (a == "--images") images = val("--images");
+         else if (a == "--encode-image") enc_rgb = val("--encode-image");
+         else if (a == "--dump-image") enc_out = val("--dump-image");
+         else if (a == "--size") {
+diff --git a/src/ds4/ds4_model.cu b/src/ds4/ds4_model.cu
+index 2352c4f..86a2180 100644
+--- a/src/ds4/ds4_model.cu
++++ b/src/ds4/ds4_model.cu
+@@ -2521,6 +2521,10 @@ struct Model::Impl {
+             l.name = l.mtp ? "mtp." + std::to_string(il - g.nl) + "." : "layers." + std::to_string(il) + ".";
+             l.n_exp = l.mtp ? g.d_n_exp : g.n_exp;
+             l.k_exp = l.mtp ? g.d_k : g.k_exp;
++            if (!l.mtp && o.experts > 0 && o.experts < l.k_exp) {   // --experts N: the router's top N (route renormalises)
++                if (il == 0) std::fprintf(stderr, "ds4: experts per token: %d of %d\n", o.experts, l.k_exp);
++                l.k_exp = o.experts;
++            }
+             l.ratio = g.ratios[(size_t) il];
+             if (l.mtp) {   // window attention only: no compressor, indexer or Engram
+                 if (l.ratio != 0 || l.n_exp <= 0 || l.k_exp <= 0 || l.k_exp > kPicks) {
+diff --git a/src/ds4/ds4_model.hpp b/src/ds4/ds4_model.hpp
+index 42fda06..5faf087 100644
+--- a/src/ds4/ds4_model.hpp
++++ b/src/ds4/ds4_model.hpp
+@@ -34,6 +34,7 @@ struct Options {
+     // the CPU lane's experts read in place from the model's files, the page cache keeping what fits, instead of
+     // copied into RAM: 1 on, 0 off, -1 (auto) where the RAM this process can get does not hold them
+     int mmap_experts = -1;
++    int experts = 0;                  // routed experts a token takes: the router's top n, renormalised (0: the model's)
+     bool dspark = true;              // load the DSpark drafter (the checkpoint's mtp.* blocks) for speculative decoding
+     float dspark_conf = 0.5f;         // a draft is verified while its confidence (sigmoid) is at least this
+     // tensor parallelism: runs of tp GPUs of one kind (the same memory) take the same layers, each a share of the
