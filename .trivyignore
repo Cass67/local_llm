@@ -5,3 +5,5 @@ DS-0002
 # which langfuse 2.x (<25) blocks: drop these once tracing.py moves to langfuse SDK v3.
 CVE-2026-113722
 CVE-2026-113725
+CVE-2026-113718
+CVE-2026-113723
