@@ -31,7 +31,11 @@ APT_PACKAGES=(
 # nct6775 drives the chassis fans (ubt26-airflowd), corsair_psu the PSU telemetry
 # (scripts/ubt26-psu-mon). Both load fine at runtime but are lost on reboot
 # unless persisted -- corsair_psu was missing from modules-load.d on ubt26.
-MODULES=(nct6775 corsair_psu)
+# nct6775 + airflowd are specific to ubt26's ASUS WS Z390 PRO (NCT6798D); other boards skip them.
+UBT26_BOARD=0
+grep -q "Z390" /sys/class/dmi/id/board_name 2>/dev/null && UBT26_BOARD=1
+MODULES=(corsair_psu)
+[[ $UBT26_BOARD == 1 ]] && MODULES=(nct6775 corsair_psu)
 GROUPS_NEEDED=(docker video render)
 
 MISSING=0
@@ -120,7 +124,9 @@ if [[ -e /dev/kfd && -d /dev/dri ]]; then ok "/dev/kfd and /dev/dri present"; el
 fi
 
 echo "== case-fan daemon =="
-if systemctl is-enabled ubt26-airflowd >/dev/null 2>&1; then ok "ubt26-airflowd enabled"; else
+if [[ $UBT26_BOARD == 0 ]]; then
+  ok "ubt26-airflowd skipped (not the Z390 board)"
+elif systemctl is-enabled ubt26-airflowd >/dev/null 2>&1; then ok "ubt26-airflowd enabled"; else
   miss "ubt26-airflowd not installed"
   if [[ $MODE == install ]]; then
     need_root

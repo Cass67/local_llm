@@ -48,7 +48,7 @@ It covers, and is the authoritative list:
 - **kernel modules**: `nct6775` (chassis fans) and `corsair_psu` (PSU telemetry),
   persisted to `/etc/modules-load.d/` — they load fine at runtime but are lost on
   reboot otherwise
-- **case-fan daemon**: installs `ubt26-airflowd` to `/usr/local/sbin` and enables
+- **case-fan daemon** (ASUS WS Z390 PRO only; skipped on other boards, incl. the T7910): installs `ubt26-airflowd` to `/usr/local/sbin` and enables
   the unit. The BIOS fan curve is CPU-keyed, so without this the chassis fans do
   not respond to GPU junction temp.
 
