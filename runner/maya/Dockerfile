@@ -13,7 +13,7 @@ FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
 # v1.1.27
-ARG MAYA_REF=4615f346d9311dd1ce9f5738ab04446f023a6e42
+ARG MAYA_REF=6afa525bbabc3a8f5fd165f89e9bc72155d9bd39
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
