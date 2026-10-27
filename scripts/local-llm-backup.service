@@ -3,11 +3,15 @@ Description=local_llm full backup (state, secrets, agent creds, langfuse, open-w
 Documentation=file:///home/cass/git/local_llm/docs/RECOVERY.md
 After=docker.service
 Requires=docker.service
+# /mnt/backup is a nofail mount; without this a missing disk means the archive
+# lands on the root disk under the empty mountpoint.
+RequiresMountsFor=/mnt/backup
 
 [Service]
 Type=oneshot
 # Root is required to read /var/lib/docker/volumes.
 User=root
+Environment=BACKUP_DEST=/mnt/backup/local_llm-backups
 ExecStart=/home/cass/git/local_llm/scripts/backup-full.sh
 # The archive holds .env and the tunnel credentials, so keep it off any
 # world-readable path; backup-full.sh also chmods it 0600.

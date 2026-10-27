@@ -65,11 +65,29 @@ are diagnostics only — the runner images carry their own ROCm userspace.
 it comes back with the OS. The model cache is separate and large:
 
 ```
-/mnt/hfcache      ext4   500G nvme, HF model cache
-/mnt/spare        ext4   scratch for large builds/downloads
+/              ext4  Samsung 870 EVO 1T (sda)    OS, /state, docker/containerd
+/mnt/hfcache   ext4  Sabrent 1T p1 (500G)        HF model cache
+/mnt/spare     ext4  Sabrent 1T p2 (454G)        large builds/downloads (strata-data, maya-dsv41)
+/mnt/models    ext4  Intel DC P3700 1.6T NVMe    model store (Maya weights + slots)
+/mnt/backup    ext4  Toshiba THNSNC512 512G      local backups (timer + one-off archives)
+/mnt/scratch   ext4  Samsung 870 EVO 500G        scratch: traces, quant intermediates, test restores
 ```
 
-`/tmp` is cleared on reboot — use `~/scratch` or `/mnt/spare` for big work.
+Every data disk mounts by UUID with `noatime,nofail`, so a dead disk never
+blocks boot. Find disks by serial (`/dev/disk/by-id/`), never `sdX`, which
+reorders between boots. A replacement disk gets a label and a single GPT partition:
+
+```bash
+D=/dev/disk/by-id/<disk>
+sudo sgdisk --zap-all $D && sudo sgdisk -n1:0:0 -t1:8300 -c1:<label> $D
+sudo mkfs.ext4 -m 0 -L <label> ${D}-part1
+echo "UUID=$(sudo blkid -s UUID -o value ${D}-part1) /mnt/<label> ext4 defaults,noatime,nofail 0 2" | sudo tee -a /etc/fstab
+```
+
+`/mnt/backup`'s bare mountpoint is `chattr +i`, so nothing can write to the root
+disk while the disk is missing. The backup unit also has `RequiresMountsFor`.
+
+`/tmp` is cleared on reboot — use `/mnt/scratch` for big work.
 
 ## 3. Clone and seed
 
@@ -112,6 +130,9 @@ bound to loopback:
 | 3008 | Prometheus | — |
 | 3005 | SearxNG | — |
 | 5433 | Postgres (Langfuse) | — |
+| 8000 | GitLab CE (LAN) | — (`http://gitlab.hehaw.net:8000`) |
+| 2222 | GitLab git-over-SSH | — |
+| 4567 | GitLab registry (TLS cert expired 2025-11-04) | — |
 
 The agent terminals bind `127.0.0.1` deliberately; reach them through :3001, not
 `host:3006`. Cloudflare proxies only a fixed port list, so any `host:<port>` link
@@ -131,13 +152,17 @@ hangs over the tunnel rather than failing fast.
 ## 6. Backups
 
 A daily timer (`local-llm-backup.timer`, 03:30 + up to 15m jitter, `Persistent=true`)
-runs `scripts/backup-full.sh` as root and writes to `/mnt/spare/local_llm-backups`,
+runs `scripts/backup-full.sh` as root and writes to `/mnt/backup/local_llm-backups`,
 keeping 14 archives. ~1 GB each, ~30s to make.
 
 The destination must not be the root disk — `/state`, the docker volumes, `.env`
-and the agent config all live on `nvme0n1`. `/mnt/spare` is `nvme1n1` and
-`sda` is being converted into the new root disk (docs/plans/boot-disk-swap-uefi.md),
-so `/mnt/spare` is the only valid destination.
+and the agent config all live there. `/mnt/backup` is a dedicated SSD. The unit
+has `RequiresMountsFor=/mnt/backup`, so the job fails if the disk is missing
+rather than writing to the root disk.
+
+`/mnt/backup` also holds one-off archives of the old Proxmox host's VMs (GitLab
+CE 18.2.1, networkchum data, PNETLab images + labs), each with a `.sha256` and,
+for GitLab, a README with restore steps.
 
 Contents, and why each is there:
 
@@ -149,6 +174,20 @@ Contents, and why each is there:
 | `state.tar` | `profiles.json`, profile snapshots, speed-bench (`runs/` excluded) |
 | `langfuse.sql` | `pg_dump`, **not** a file copy — a live data dir copies torn |
 | `open-webui.tar` | container is paused for the copy; the image has no `sqlite3`, so there is no online `.backup` |
+| `gitlab/` (beside the archives) | `gitlab-backup create` tar plus a config tar holding `gitlab.rb` + `gitlab-secrets.json`; without the secrets a restore loses CI variables, tokens and 2FA |
+
+GitLab restore: data lives in `/mnt/models/gitlab/{config,logs,data}`. On a fresh
+disk, extract the config tar to `/mnt/models/gitlab/`, set the backup's version
+in `container/Dockerfile.gitlab` (`scripts/gitlab-upgrade.sh` names its backups
+`gitlab-<ts>-<version>`), start it (`docker compose up -d --build gitlab`), copy the backup tar into
+`data/backups/`, then
+`docker exec gitlab sh -c 'gitlab-ctl stop puma; gitlab-ctl stop sidekiq; gitlab-backup restore BACKUP=gitlab-<ts>'`
+and restart the container. Only restore into the version that made the backup.
+
+GitLab upgrade: `scripts/gitlab-upgrade.sh <version>-ce.0` on ubt26, one required
+stop at a time (https://docs.gitlab.com/update/upgrade_paths/: latest patch of
+x.2, x.5, x.8, x.11). It backs up, waits for background migrations, and upgrades
+bundled PostgreSQL before a 19+ jump.
 
 Excluded on purpose: `/mnt/hfcache` (244 GB, re-downloadable) and `/state/runs`
 (benchmark history, not function).

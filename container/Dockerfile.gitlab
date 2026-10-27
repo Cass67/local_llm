@@ -1,0 +1,5 @@
+# GitLab CE. The version is changed here (or via scripts/gitlab-upgrade.sh).
+# Upgrades must step through the required stops, one at a time:
+# https://docs.gitlab.com/update/upgrade_paths/
+ARG GITLAB_VERSION=19.5.1-ce.0
+FROM gitlab/gitlab-ce:${GITLAB_VERSION}

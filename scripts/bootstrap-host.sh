@@ -37,6 +37,7 @@ grep -q "Z390" /sys/class/dmi/id/board_name 2>/dev/null && UBT26_BOARD=1
 MODULES=(corsair_psu)
 [[ $UBT26_BOARD == 1 ]] && MODULES=(nct6775 corsair_psu)
 GROUPS_NEEDED=(docker video render)
+DATA_MOUNTS=(/mnt/hfcache /mnt/spare /mnt/models /mnt/backup /mnt/scratch)
 
 MISSING=0
 ok() { printf '  \033[32mok\033[0m       %s\n' "$1"; }
@@ -116,6 +117,17 @@ for m in "${MODULES[@]}"; do
       $SUDO modprobe "$m" || true
     fi
   fi
+done
+
+# Data disks are check-only: formatting is never automated. Layout and fstab
+# lines are in docs/RECOVERY.md step 2.
+echo "== data disks mounted (nofail in fstab) =="
+for mnt in "${DATA_MOUNTS[@]}"; do
+  if ! mountpoint -q "$mnt"; then
+    miss "$mnt not mounted (see docs/RECOVERY.md step 2)"
+  elif ! awk -v m="$mnt" '$2 == m && $4 ~ /nofail/' /etc/fstab | grep -q .; then
+    miss "$mnt in fstab without nofail (a dead disk would block boot)"
+  else ok "$mnt"; fi
 done
 
 echo "== GPU visible =="

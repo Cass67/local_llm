@@ -525,6 +525,33 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
 
+  # ── GitLab CE ───────────────────────────────────────────────────────────────
+  # LAN only: http://gitlab.hehaw.net:8000, git over SSH on :2222, registry :4567.
+  # Not network_mode: host -- the bundled sshd (22), prometheus (9090) and
+  # exporters would collide with the host's. IPv4 only; the tunnel has no route.
+  # Data is on the P3700 (power-loss protection, for its postgres). gitlab.rb
+  # under config/ is the live config. Backups: scripts/backup-full.sh.
+  # Version pinned in container/Dockerfile.gitlab; upgrade with
+  # scripts/gitlab-upgrade.sh, which steps the upgrade path with a backup first.
+  gitlab:
+    build:
+      context: ./container
+      dockerfile: Dockerfile.gitlab
+      network: host
+    image: local-llm-gitlab:latest
+    container_name: gitlab
+    hostname: gitlab.hehaw.net
+    restart: unless-stopped
+    shm_size: 256m
+    ports:
+      - "0.0.0.0:8000:8000"
+      - "0.0.0.0:2222:22"
+      - "0.0.0.0:4567:4567"
+    volumes:
+      - ${GITLAB_DIR:-/mnt/models/gitlab}/config:/etc/gitlab
+      - ${GITLAB_DIR:-/mnt/models/gitlab}/logs:/var/log/gitlab
+      - ${GITLAB_DIR:-/mnt/models/gitlab}/data:/var/opt/gitlab
+
 volumes:
   open-webui:
   caddy-data:

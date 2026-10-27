@@ -9,8 +9,8 @@
 #   /mnt/hfcache      244G of models -- re-downloadable, and it would dominate
 #   /state/runs       benchmark artifacts -- history, not function
 #
-# Everything here lives on the root disk (nvme0n1), so the destination must be
-# another spindle. /mnt/spare is nvme1n1 -- use that.
+# Everything here lives on the root disk, so the destination must be another
+# disk. /mnt/backup is the dedicated backup SSD (see docs/RECOVERY.md).
 #
 # Needs root to read the docker volume dirs. Run under sudo or via the timer.
 # Restore with scripts/restore-full.sh.
@@ -24,8 +24,9 @@ STATE="${LOCAL_LLM_STATE_DIR:-$OWNER_HOME/.local/share/local_llm}"
 AGENTS="${AGENTS_CONFIG_DIR:-$OWNER_HOME/.config/local_llm/agents}"
 CFD="$OWNER_HOME/.cloudflared"
 VOLUMES="/var/lib/docker/volumes"
+GITLAB_DIR="${GITLAB_DIR:-/mnt/models/gitlab}"
 
-DEST="${BACKUP_DEST:-/mnt/spare/local_llm-backups}"
+DEST="${BACKUP_DEST:-/mnt/backup/local_llm-backups}"
 KEEP="${BACKUP_KEEP:-14}"
 STOP_WEBUI=1
 
@@ -132,6 +133,27 @@ if [[ ${#OLD[@]} -eq 0 ]]; then
 else
   for f in "${OLD[@]}"; do
     rm -f "$f"
+    say "pruned $(basename "$f")"
+  done
+fi
+
+# GitLab's own backup is 1-2 GB, so it sits beside the archive in $DEST/gitlab
+# rather than inside it. gitlab-backup leaves out gitlab.rb and
+# gitlab-secrets.json, and a restore without the secrets loses CI variables,
+# tokens and 2FA -- hence the config tar next to each one.
+if docker ps --format '{{.Names}}' | grep -qx gitlab; then
+  echo "== gitlab =="
+  GL="$DEST/gitlab"
+  mkdir -p "$GL"
+  docker exec gitlab gitlab-backup create STRATEGY=copy CRON=1 BACKUP="gitlab-$TS" >/dev/null
+  mv "$GITLAB_DIR/data/backups/gitlab-${TS}_gitlab_backup.tar" "$GL/"
+  tar -C "$GITLAB_DIR" -cf "$GL/gitlab-$TS-config.tar" config
+  chmod 0600 "$GL/gitlab-${TS}_gitlab_backup.tar" "$GL/gitlab-$TS-config.tar"
+  say "$GL/gitlab-${TS}_gitlab_backup.tar ($(du -sh "$GL/gitlab-${TS}_gitlab_backup.tar" | cut -f1)) + config"
+  mapfile -t OLD < <(find "$GL" -maxdepth 1 -name 'gitlab-*_gitlab_backup.tar' -printf '%T@ %p\n' |
+    sort -rn | tail -n "+$((KEEP + 1))" | cut -d' ' -f2-)
+  for f in "${OLD[@]}"; do
+    rm -f "$f" "${f%_gitlab_backup.tar}-config.tar"
     say "pruned $(basename "$f")"
   done
 fi
