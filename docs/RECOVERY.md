@@ -27,6 +27,10 @@ GITHUB_TOKEN=          # update checks; unauthenticated is 60 req/h and runs out
 LANGFUSE_SECRET_KEY=   # tracing
 LANGFUSE_PUBLIC_KEY=
 LANGFUSE_PUBLIC_URL=
+LANGFUSE_DB_PASSWORD=     # Postgres role; lose it and Langfuse cannot reach its DB
+LANGFUSE_NEXTAUTH_SECRET= # rotating logs everyone out
+LANGFUSE_SALT=            # hashes API keys; losing it invalidates every key
+GRAFANA_ADMIN_PASSWORD=   # Grafana admin login
 AGENTS_REPO_DIR=       # host dir mounted into the agent containers
 ```
 

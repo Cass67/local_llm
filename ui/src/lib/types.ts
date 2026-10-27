@@ -1,4 +1,4 @@
-// Mirrors the Backend literal in container/backend/model_variants.py. Keep in sync: an
+// Mirrors _VALID_BACKENDS in container/backend/clusters.py (guarded by test_ui_backends.py). Keep in sync: an
 // unknown name silently falls back to the rocm image in runner_image_for_backend(), so a
 // stale list here means a runner you cannot pick rather than an error.
 export const BACKENDS = [
@@ -6,8 +6,10 @@ export const BACKENDS = [
 	"rocmmain",
 	"rocmmainmtp",
 	"rocmunsloth",
+	"rocmunslothsrc",
 	"vulkan",
 	"cuda",
+	"sglang",
 	"strata",
 	"maya",
 ] as const;
@@ -20,8 +22,10 @@ export const BACKEND_LABELS: Record<Backend, string> = {
 	rocmmain: "ROCmMain",
 	rocmmainmtp: "ROCmMainMTP",
 	rocmunsloth: "ROCmUnsloth",
+	rocmunslothsrc: "ROCmUnslothSrc",
 	vulkan: "Vulkan",
 	cuda: "CUDA",
+	sglang: "SGLang",
 	strata: "Strata",
 	maya: "Maya",
 };

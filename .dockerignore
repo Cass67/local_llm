@@ -1,0 +1,13 @@
+# Allowlist for the repo-root build contexts (container/Dockerfile, Dockerfile.router,
+# runner/sdcpp/Dockerfile). A new COPY source must be re-included here.
+*
+!container/pyproject.toml
+!container/backend
+!container/ui-dist
+!container/entrypoint.sh
+!scripts
+!runner
+!agents
+**/__pycache__
+**/.pytest_cache
+**/node_modules
