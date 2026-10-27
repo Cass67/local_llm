@@ -1,8 +1,8 @@
 diff --git a/serve/server.py b/serve/server.py
-index d1c3703..04403d6 100644
+index 828c95b..183e6a1 100644
 --- a/serve/server.py
 +++ b/serve/server.py
-@@ -2519,7 +2519,7 @@ class StreamJob:
+@@ -3439,7 +3439,7 @@ class StreamJob:
      sleeps mid-answer reconnects and carries on instead of losing it.  Only POST /v1/strata/cancel (the app's Stop)
      cancels it - a dropped connection does not."""
  
@@ -11,11 +11,11 @@ index d1c3703..04403d6 100644
  
      def __init__(self, jid: str, chunks, cancel: threading.Event):
          self.id, self.cancel = jid, cancel
-diff --git a/serve/web/app.js b/serve/web/app.js
-index 5fbb3ac..85e6065 100644
---- a/serve/web/app.js
-+++ b/serve/web/app.js
-@@ -1848,13 +1848,13 @@ async function answer(resumeJob = null) {
+diff --git a/serve/web/chats.js b/serve/web/chats.js
+index 51b057c..34bb78a 100644
+--- a/serve/web/chats.js
++++ b/serve/web/chats.js
+@@ -442,13 +442,13 @@ export async function answer(resumeJob = null) {
        }
      }
    };

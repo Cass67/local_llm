@@ -12,8 +12,8 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
-# v1.1.27
-ARG MAYA_REF=6afa525bbabc3a8f5fd165f89e9bc72155d9bd39
+# v1.1.32
+ARG MAYA_REF=73c166e4d4438cf5cafa180aa89bc4f1ff86eb93
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -43,8 +43,16 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 # web chat reconnects for as long. 0004 (upstream #331, drop when it lands) sets
 # aside conversations with pictures too (slots keyed by img_hash): one with a screenshot in it read all ~225K tokens again
 # after every stop, restart or other chat in between.
-# 0005: upstream #354 (DeepSeek routed prompt experts on int8 MMQ, opt-in MAYA_DS4_EXPERT_MMQ=1) + IQ1_S in its
-# whitelist (Maya-XS experts are IQ1_S; the GLM MMQ path already takes IQ1_S). Drop when #354 lands with IQ1_S.
+# 0006: maya-ds4 --experts N (port of Strata 3dd11c6d): the router's top N of 6, weights renormalised.
+# 0007: #476's pull clock on HIP (wall_clock64) and DS4_IQ1S_ROWS.
+# 0008: maya-ds4 takes itself out of the kernel's NUMA balancing (set_mempolicy MPOL_LOCAL before any thread):
+# on the 2-socket T7910 its hinting faults stalled the launch thread and the CPU lane (+10% decode).
+# Needs CapAdd SYS_NICE (runtime.py) - also what lets the lane's per-node mbind work at all.
+# 0010: the CPU lane's down jobs read each token's h from a stack copy: read in place, a one- or two-expert call
+# (~40% of decode's) had 80 jobs over both sockets stalling on the row both nodes' gate/up just wrote - 200+ us
+# a job against 15 (one-expert call 0.67 -> 0.25 ms; k6 story decode +6%). DS4_ACT_COPY=0 reads in place.
+# 0011: upstream PR #550 (open): no landing on an expert with a pending swap-in, and each stream synced before its
+# host-mapped tab_set pairs are rewritten (our expert-cache swaps publish through them). Drop when #550 lands.
 COPY patches /opt/maya/patches
 RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
 
@@ -76,8 +84,8 @@ COPY maya-runner.py /opt/maya/maya-runner.py
 
 # The dashboard (http://ubt26:<port>/) defaults its API key to the runner's fixed dummy one, so the chat
 # works without entering it under About > Settings; a key entered there still wins.
-RUN grep -q 'store.get("apikey", "")' /opt/maya/src/serve/web/app.js \
-    && sed -i 's/store.get("apikey", "")/store.get("apikey", "local-llm")/' /opt/maya/src/serve/web/app.js
+RUN grep -q 'store.get("apikey", "")' /opt/maya/src/serve/web/lib.js \
+    && sed -i 's/store.get("apikey", "")/store.get("apikey", "local-llm")/' /opt/maya/src/serve/web/lib.js /opt/maya/src/serve/web/settings.js
 
 ENTRYPOINT []
 CMD ["/opt/maya/venv/bin/python", "/opt/maya/maya-runner.py", "--help"]
