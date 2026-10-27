@@ -105,3 +105,22 @@ node_modules/
 # SPEED-Bench harness scratch output
 speed-bench-qualitative.json
 bench-speed-bench.tsv
+*.jks
+*.keystore
+*.tfstate
+*.tfstate.*
+kubeconfig
+*.kubeconfig
+.htpasswd
+.git-credentials
+id_ecdsa
+id_ecdsa.*
+id_dsa
+id_dsa.*
+# Placeholder env templates are meant to be committed (the hook allows them too).
+!.env.sample
+!.env.template
+
+# Python bytecode and caches.
+*.py[cod]
+

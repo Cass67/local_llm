@@ -11,48 +11,45 @@ repos:
           bash -lc '
             status=0
             for f in "$@"; do
-              case "$f" in
-                .env|.env.*|*.env|*env*|*.local|*.secret|*.secrets|*.token|*.tokens)
-                  printf "refusing risky path=%s\n" "$f"
-                  status=1
-                  ;;
-                *.pem|*.key|*.p12|*.pfx|*.crt|*.csr|*.ovpn|*.asc|*.kdbx|*.sqlite|*.sqlite3)
-                  printf "refusing risky path=%s\n" "$f"
-                  status=1
-                  ;;
-                *.db|*.rdb|*.bak|*.backup|*.gpg|*.age|id_rsa|id_rsa.*|id_ed25519|id_ed25519.*)
-                  printf "refusing risky path=%s\n" "$f"
-                  status=1
-                  ;;
-                known_hosts|authorized_keys|auth.json|auth.json.*|credentials|credentials.*)
-                  printf "refusing risky path=%s\n" "$f"
-                  status=1
-                  ;;
-                secrets|secrets.*|.npmrc|.pypirc|.netrc|.docker/config.json|.envrc|.aws/*|.ssh/*)
-                  printf "refusing risky path=%s\n" "$f"
-                  status=1
-                  ;;
-                .gnupg/*|.config/*|Library/Keychains/*|history.jsonl|sessions/*|log/*)
-                  printf "refusing risky path=%s\n" "$f"
-                  status=1
-                  ;;
-                Library/Application\ Support/Google/Chrome/*)
-                  printf "refusing risky path=%s\n" "$f"
-                  status=1
-                  ;;
-                Library/Application\ Support/Chromium/*)
-                  printf "refusing risky path=%s\n" "$f"
-                  status=1
-                  ;;
-                Library/Application\ Support/BraveSoftware/*)
-                  printf "refusing risky path=%s\n" "$f"
-                  status=1
-                  ;;
-                Library/Application\ Support/Firefox/*)
-                  printf "refusing risky path=%s\n" "$f"
-                  status=1
+              b=${f##*/}
+              case "$b" in
+                .env.example|.env.sample|.env.template)
+                  # Placeholder templates are meant to be committed, at any depth;
+                  # the *env* globs below would otherwise block them.
+                  continue
                   ;;
               esac
+              risky=0
+              # Name patterns are checked against the basename as well as the
+              # full path, so deploy/id_rsa is caught like id_rsa.
+              for p in "$b" "$f"; do
+                case "$p" in
+                  .env|.env.*|*.env|*env*|*.local|*.secret|*.secrets|*.token|*.tokens) risky=1 ;;
+                  *.pem|*.key|*.p12|*.pfx|*.crt|*.csr|*.ovpn|*.asc|*.kdbx) risky=1 ;;
+                  *.jks|*.keystore) risky=1 ;;
+                  *.sqlite|*.sqlite3|*.db|*.rdb|*.bak|*.backup|*.gpg|*.age) risky=1 ;;
+                  *.tfstate|*.tfstate.*|kubeconfig|*.kubeconfig|.htpasswd) risky=1 ;;
+                  id_rsa|id_rsa.*|id_ed25519|id_ed25519.*) risky=1 ;;
+                  id_ecdsa|id_ecdsa.*|id_dsa|id_dsa.*) risky=1 ;;
+                  known_hosts|authorized_keys|auth.json|auth.json.*) risky=1 ;;
+                  credentials|credentials.*) risky=1 ;;
+                  secrets|secrets.*|.npmrc|.pypirc|.netrc|.envrc|.git-credentials) risky=1 ;;
+                  history.jsonl) risky=1 ;;
+                esac
+              done
+              # Directory patterns match at any depth, like the .gitignore template.
+              case "/$f" in
+                */.docker/config.json|*/.aws/*|*/.ssh/*|*/.gnupg/*|*/.config/*) risky=1 ;;
+                */Library/Keychains/*|*/sessions/*|*/log/*) risky=1 ;;
+                */Library/Application\ Support/Google/Chrome/*) risky=1 ;;
+                */Library/Application\ Support/Chromium/*) risky=1 ;;
+                */Library/Application\ Support/BraveSoftware/*) risky=1 ;;
+                */Library/Application\ Support/Firefox/*) risky=1 ;;
+              esac
+              if [ "$risky" -eq 1 ]; then
+                printf "refusing risky path=%s\n" "$f"
+                status=1
+              fi
             done
             exit "$status"
           ' --
@@ -115,11 +112,12 @@ repos:
       - id: bandit
         name: bandit
         entry: >-
-          bash -lc 'if [ -n "${VIRTUAL_ENV:-}" ] && [ -x
-          "$VIRTUAL_ENV/bin/bandit" ]; then "$VIRTUAL_ENV/bin/bandit" -q
+          bash -lc 'if [ -f bandit.yaml ]; then conf="-c bandit.yaml"; else
+          conf=""; fi; if [ -n "${VIRTUAL_ENV:-}" ] && [ -x
+          "$VIRTUAL_ENV/bin/bandit" ]; then "$VIRTUAL_ENV/bin/bandit" -q $conf
           "$@"; elif [ -x ./.venv/bin/bandit ]; then ./.venv/bin/bandit -q
-          "$@"; elif [ -x ./venv/bin/bandit ]; then ./venv/bin/bandit -q
-          "$@"; else bandit -q "$@"; fi' --
+          $conf "$@"; elif [ -x ./venv/bin/bandit ]; then ./venv/bin/bandit
+          -q $conf "$@"; else bandit -q $conf "$@"; fi' --
         language: system
         files: \.pyi?$
         # B101 (assert_used) fires on every pytest assert, which makes this hook
@@ -151,10 +149,15 @@ repos:
       - id: pip-audit
         name: pip audit
         entry: >-
-          bash -lc 'if [ -f container/pyproject.toml ]; then
-          pip-audit --path container/pyproject.toml;
-          elif [ -f pyproject.toml ]; then pip-audit; else
-          echo "no Python dependency manifest found, skipping pip-audit"; fi'
+          bash -lc 'if [ ! -f requirements.txt ] && [ ! -f pyproject.toml ];
+          then echo "no Python dependency manifest found, skipping pip-audit";
+          elif [ -n "${VIRTUAL_ENV:-}" ] && [ -x
+          "$VIRTUAL_ENV/bin/pip-audit" ]; then "$VIRTUAL_ENV/bin/pip-audit"
+          -r requirements.txt; elif [ -x ./.venv/bin/pip-audit ]; then
+          ./.venv/bin/pip-audit -r requirements.txt; elif [ -x
+          ./venv/bin/pip-audit ]; then ./venv/bin/pip-audit -r
+          requirements.txt; elif [ -f requirements.txt ]; then pip-audit -r
+          requirements.txt; elif [ -f pyproject.toml ]; then pip-audit; fi' --
         language: system
         pass_filenames: false
 # repo-guard:python:end
@@ -179,7 +182,8 @@ repos:
         files: \.(sh|bash)$
 # repo-guard:bash:end
 
-# repo-guard:javascript:start
+# Local: svelte-check replaces repo-guard's eslint/prettier, which would lint and
+# rewrite the built container/ui-dist bundle. Outside the markers so --upgrade keeps it.
   - repo: local
     hooks:
       - id: svelte-check
@@ -207,7 +211,6 @@ repos:
         language: system
         files: \.test\.(ts|tsx|mts|cts)$
         pass_filenames: false
-# repo-guard:javascript:end
 
 # repo-guard:containers:start
   - repo: local
@@ -215,17 +218,13 @@ repos:
       - id: trivy-fs
         name: trivy filesystem scan
         entry: >-
-          bash -lc 'trivy fs --severity HIGH,CRITICAL --exit-code 1
-          --skip-dirs container/.venv --skip-dirs ui/node_modules --skip-dirs .git
-          --skip-version-check --timeout 3m .'
+          bash -lc 'trivy fs --severity HIGH,CRITICAL --exit-code 1 .'
         language: system
         pass_filenames: false
       - id: trivy-config
         name: trivy config scan
         entry: >-
-          bash -lc 'trivy config --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore
-          --skip-dirs container/.venv --skip-dirs ui/node_modules --skip-dirs .git
-          --skip-version-check --timeout 3m .'
+          bash -lc 'trivy config --severity HIGH,CRITICAL --exit-code 1 .'
         language: system
         pass_filenames: false
 # repo-guard:containers:end
