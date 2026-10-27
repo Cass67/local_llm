@@ -458,6 +458,8 @@ MAYA_MODELS_DIR = os.environ.get("MAYA_MODELS_DIR", "/mnt/hfcache/maya")
 MAYA_SLOTS_DIR = os.environ.get("MAYA_SLOTS_DIR", "/mnt/hfcache/maya-slots")
 # DeepSeek's shards that do not fit beside the rest (Engram tables), symlinked from its folder
 MAYA_SPILL_DIR = os.environ.get("MAYA_SPILL_DIR", "/mnt/spare/build/maya-dsv41")
+# the T7910's weights disk (P3600): bigger DeepSeek quants and Engram tables
+MAYA_WEIGHTS_DIR = os.environ.get("MAYA_WEIGHTS_DIR", "/mnt/models")
 
 
 def build_maya_args(metadata: dict[str, Any], port: int) -> list[str]:
@@ -645,6 +647,7 @@ def build_runner_container_spec(  # noqa: C901
             # DeepSeek (maya-ds4): the Engram shards' real home, and its pack writable - the engine
             # keeps its learned expert profile, CPU-lane timings and hipBLASLt picks there
             binds.append(f"{MAYA_SPILL_DIR}:{MAYA_SPILL_DIR}:ro")
+            binds.append(f"{MAYA_WEIGHTS_DIR}:{MAYA_WEIGHTS_DIR}:ro")
             pack = maya_args[maya_args.index("--pack") + 1]
             binds.append(f"{pack}:{pack}:rw")
         # Maya's switches are env vars (MAYA_GLM_*: server.py maps them to STRATA_GLM_*)
