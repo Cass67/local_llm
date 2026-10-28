@@ -12,8 +12,8 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
-# v1.1.35
-ARG MAYA_REF=e16dec85abf8801a4cfc086ee4814071a3ff54a2
+# v1.1.36
+ARG MAYA_REF=f031a23b9682551e744e29d0e9f8d527df49f282
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -40,19 +40,12 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
     git fetch -q --depth 1 https://github.com/ggml-org/llama.cpp.git "$LLAMA_CPP_COMMIT"; git checkout -q FETCH_HEAD
 
 # 0002 is local: an answer nobody reads (a phone's locked screen) is kept 30 min, not 5, and the
-# web chat reconnects for as long. 0004 (upstream #331, drop when it lands) sets
-# aside conversations with pictures too (slots keyed by img_hash): one with a screenshot in it read all ~225K tokens again
-# after every stop, restart or other chat in between.
+# web chat reconnects for as long.
 # 0006: maya-ds4 --experts N (port of Strata 3dd11c6d): the router's top N of 6, weights renormalised.
 # 0007: #476's pull clock on HIP (wall_clock64) and DS4_IQ1S_ROWS.
-# 0008: maya-ds4 takes itself out of the kernel's NUMA balancing (set_mempolicy MPOL_LOCAL before any thread):
-# on the 2-socket T7910 its hinting faults stalled the launch thread and the CPU lane (+10% decode).
-# Needs CapAdd SYS_NICE (runtime.py) - also what lets the lane's per-node mbind work at all.
-# 0010: the CPU lane's down jobs read each token's h from a stack copy: read in place, a one- or two-expert call
-# (~40% of decode's) had 80 jobs over both sockets stalling on the row both nodes' gate/up just wrote - 200+ us
-# a job against 15 (one-expert call 0.67 -> 0.25 ms; k6 story decode +6%). DS4_ACT_COPY=0 reads in place.
-# 0011: upstream PR #550 (open): no landing on an expert with a pending swap-in, and each stream synced before its
-# host-mapped tab_set pairs are rewritten (our expert-cache swaps publish through them). Drop when #550 lands.
+# 0012: full GLM-5.3 (llama.cpp arch glm-dsa) on the GLM engine - roped MLA, the token indexer (top-k 2048),
+# plain residual, NextN MTP, batched prompt path; generated from the glm-dsa-port branch (git diff v1.1.36..).
+# The ds4 NUMA (MPOL_LOCAL, needs CapAdd SYS_NICE - runtime.py) and down-act-copy patches landed in v1.1.36 (#562, #561).
 COPY patches /opt/maya/patches
 RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
 

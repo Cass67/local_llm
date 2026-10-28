@@ -71,10 +71,23 @@ index a5afaf8..e1f2e92 100644
      bool moe_defer_wait_ = false;                            // (fast_moe's cpu_wait = false: the caller waits)
      // ... its routed experts, once the router and the shared expert's gate / up have run: the token path's own
 diff --git a/include/strata/kernels/glm_batch.hpp b/include/strata/kernels/glm_batch.hpp
-index 8ad3130..df261c3 100644
+index 8ad3130..4d6cce7 100644
 --- a/include/strata/kernels/glm_batch.hpp
 +++ b/include/strata/kernels/glm_batch.hpp
-@@ -123,7 +123,7 @@ void head_rows(const float* R, const float* w, float eps, int T, int n_embd, flo
+@@ -101,8 +101,11 @@ void mla_attn_f16q(const uint16_t* q16, const uint16_t* lat, const int* cells, c
+ /// The same attention with Q in F32 on wave32 WMMA intrinsics (gfx11/gfx12): the FP32 query and softmax probability
+ /// are each split into FP16 high + residual, both products through WMMA with F32 accumulation and online softmax.
+ /// n_head % 16 == 0, kv_lora 512. lat_q8 expands INT8 codes with one FP16 scale per 32 values as they are loaded.
++/// q_pe non-null (glm-dsa): each score also adds q_pe[t][h] . kpe[cell] (n_rot F32 values; head h at q_pe + q_pe_hs * h,
++/// token t n_head * q_pe_hs further) before the scale.
+ void mla_attn_wmma2(const float* q_abs, const uint16_t* lat, const int* cells, const int* n_sel, int n_sel_max,
+-                    int n_head, int kv_lora, float scale, int T, float* ctx, cudaStream_t s, bool lat_q8 = false);
++                    int n_head, int kv_lora, float scale, int T, float* ctx, cudaStream_t s, bool lat_q8 = false,
++                    const float* q_pe = nullptr, int q_pe_hs = 0, const float* kpe = nullptr, int n_rot = 0);
+ /// True on the current device where mla_attn_wmma2 runs (gfx11/gfx12); mla_wmma2_default() is true on gfx12 (RDNA4) and gfx1151 (Strix Halo),
+ /// where the prompt path prefers it over mla_attn_f16q.
+ bool mla_wmma2_supported();
+@@ -123,7 +126,7 @@ void head_rows(const float* R, const float* w, float eps, int T, int n_embd, flo
  /// out16[t] = [rms(emb[t]) * enorm, rms(h[t]) * hnorm] in FP16 (eh_proj's input, 2 n_embd per row).
  void mtp_in_rows(const float* emb, const float* h, const float* enorm, const float* hnorm, float eps, int T, int n_embd,
                   void* out16, cudaStream_t s);
@@ -100,7 +113,7 @@ index b945405..958f696 100644
 +
  }  // namespace strata::kernels
 diff --git a/include/strata/kernels/glm_fast.hpp b/include/strata/kernels/glm_fast.hpp
-index c83d4c2..14b8e9e 100644
+index c83d4c2..594bb71 100644
 --- a/include/strata/kernels/glm_fast.hpp
 +++ b/include/strata/kernels/glm_fast.hpp
 @@ -18,6 +18,8 @@
@@ -139,7 +152,7 @@ index c83d4c2..14b8e9e 100644
  };
  /// Router (sigmoid + bias, stable top-k, normalised weights - router_sigmoid's arithmetic), the plan
  /// lookup in `tab`, the request publish, and the shared expert's swiglu + q8_1.
-@@ -443,13 +445,37 @@ bool rows_experts(int gu_type, int d_type, const uint8_t* base, size_t stride, s
+@@ -443,13 +445,42 @@ bool rows_experts(int gu_type, int d_type, const uint8_t* base, size_t stride, s
                    const int* row_tok, const float* x, int n_tok, int n_embd, int n_ff, float limit, int rlo, int rhi,
                    void* xq_scratch, void* hq_scratch, float* out, int ld, cudaStream_t s);
 
@@ -156,10 +169,15 @@ index c83d4c2..14b8e9e 100644
 +    int idx_key = 128;
 +    int p = 0;
 +    float base = 8000000.0f, eps = 1e-5f, ln_eps = 0.0f;
++    // T rows (the prompt path): row t at position p + t, its inputs/outputs a row apart (kv_raw kv_lora + n_rot wide);
++    // qr_q may then be null, qr16 (optional) takes qr's FP16
++    int T = 1;
++    uint16_t* qr16 = nullptr;
 +};
 +void dsa_rope_prep(const DsaRopePrepArgs& a, cudaStream_t s);
-+/// ggml rope NORM on the first n_rot floats of n_head heads (head h at x + stride * h), at position pos.
-+void rope_heads(float* x, int n_rot, int stride, int n_head, int pos, float base, cudaStream_t s);
++/// ggml rope NORM on the first n_rot floats of n_head heads (head h at x + stride * h), at position pos; T rows ld floats
++/// apart, row t at pos + t.
++void rope_heads(float* x, int n_rot, int stride, int n_head, int pos, float base, cudaStream_t s, int T = 1, int ld = 0);
 +/// glm-dsa's absorbed MLA for one token: q heads of [nope (qk_nope) | rope (n_rot)] k_mla apart; scores q_abs . latent +
 +/// q_pe . k_pe over the cells (nullptr: every position 0 .. n_sel-1, the dense NextN block), / sqrt(qk_nope + n_rot);
 +/// out_h = wv_b_h . ctx as q8_1.  scratch: n_head x (kv_lora + v_head).
@@ -1710,7 +1728,7 @@ index 2723edc..6049f04 100644
      gf::MvJob o = {ow.q, FT->head_xq, FT->head_x, tail->sc_ + tail->sc_logits, nullptr, 1.0f, ow.type, g.n_embd,
                     g.n_vocab};
 diff --git a/src/core/glm_pack_test.cpp b/src/core/glm_pack_test.cpp
-index bfe8a42..d8f6b9b 100644
+index bfe8a42..a6eda35 100644
 --- a/src/core/glm_pack_test.cpp
 +++ b/src/core/glm_pack_test.cpp
 @@ -6,12 +6,14 @@
@@ -1728,7 +1746,7 @@ index bfe8a42..d8f6b9b 100644
  #include <string>
  #include <vector>
 
-@@ -24,6 +26,17 @@ int main(int argc, char** argv) {
+@@ -24,9 +26,21 @@ int main(int argc, char** argv) {
      const int n_tok = std::atoi(argv[2]);
      const char* out_path = argc > 3 ? argv[3] : nullptr;
 
@@ -1745,8 +1763,13 @@ index bfe8a42..d8f6b9b 100644
 +
      strata::core::Glm5Model model;
      std::string err;
-     if (!model.load_pack_env(pack, 4096, err)) {
-@@ -91,6 +104,19 @@ int main(int argc, char** argv) {
+-    if (!model.load_pack_env(pack, 4096, err)) {
++    const int64_t max_ctx = getenv("GLM_TEST_CTX") ? std::atoll(getenv("GLM_TEST_CTX")) : 4096;
++    if (!model.load_pack_env(pack, max_ctx, err)) {
+         std::fprintf(stderr, "glm_pack_test: %s\n", err.c_str());
+         return 1;
+     }
+@@ -91,6 +105,19 @@ int main(int argc, char** argv) {
          std::fprintf(stderr, "glm_pack_test: warmed (%s passes)\n", wv);
      }
      std::vector<float> all;
@@ -1766,7 +1789,7 @@ index bfe8a42..d8f6b9b 100644
      // GLM_TEST_PREFILL=k: the first k positions through the batched prompt path (model.prefill), the rest through
      // the token path as usual - the recorded rows then start at position k (compare against a plain run's tail)
      int t_first = 0;
-@@ -137,9 +163,139 @@ int main(int argc, char** argv) {
+@@ -137,9 +164,139 @@ int main(int argc, char** argv) {
                      std::fprintf(stderr, "glm_pack_test: mtp at %d: %s\n", t, err.c_str());
                      return 1;
                  }
@@ -1907,10 +1930,37 @@ index bfe8a42..d8f6b9b 100644
      // GLM_TEST_TIME=<n>: then n more tokens token by token, twice: the time a token costs (with and without a DFlash
      // drafter loaded, STRATA_GLM_DFLASH, the same forward)
 diff --git a/src/core/glm_prefill.cu b/src/core/glm_prefill.cu
-index 85076b6..134b49c 100644
+index 85076b6..3d9b71d 100644
 --- a/src/core/glm_prefill.cu
 +++ b/src/core/glm_prefill.cu
-@@ -592,6 +592,7 @@ struct Glm5Model::PrefillState {
+@@ -234,11 +234,11 @@ DsaBufs carve_dsa(Carve& c, size_t T, const Glm5Geometry& g, int max_pools) {
+     b.qr_raw = c.take<float>(T * g.q_lora);
+     b.qr = c.take<float>(T * g.q_lora);
+     b.qr16 = c.take<uint16_t>(T * g.q_lora);
+-    b.kv_raw = c.take<float>(T * g.kv_lora);
++    b.kv_raw = c.take<float>(T * (g.kv_lora + (g.dsa ? g.n_rot : 0)));   // (glm-dsa: + k_pe)
+     b.ik_raw = c.take<float>(T * g.idx_key);
+     b.ig_raw = c.take<float>(T * g.idx_key);
+     b.iw = c.take<float>(T * g.idx_heads);
+-    b.q = c.take<float>(T * (size_t) g.n_head * g.qk_nope);
++    b.q = c.take<float>(T * (size_t) g.n_head * (g.dsa ? g.k_mla() : g.qk_nope));
+     b.iq = c.take<float>(T * (size_t) g.idx_heads * g.idx_key);
+     b.cells = c.take<int>(T * (size_t) g.n_sel_max());
+     b.n_sel = c.take<int>(T);
+@@ -549,6 +549,12 @@ void x3_run_set(const X3Lane& L, const uint8_t* wbase, int n_exp, size_t stride,
+ }
+
+ // y[i] += a[i] (the waiting part's weighted sum into the working part's ffn rows)
++// glm-dsa: row t's selection size, min(top-k, its visible positions)
++__global__ void dsa_nsel_kernel(int* __restrict__ n_sel, int p0, int T, int top_k) {
++    const int t = blockIdx.x * blockDim.x + threadIdx.x;
++    if (t < T) n_sel[t] = min(top_k, p0 + t + 1);
++}
++
+ __global__ void add_f32_kernel(float* __restrict__ y, const float* __restrict__ a, int64_t n) {
+     for (int64_t i = blockIdx.x * (int64_t) blockDim.x + threadIdx.x; i < n; i += (int64_t) gridDim.x * blockDim.x)
+         y[i] += a[i];
+@@ -592,6 +598,7 @@ struct Glm5Model::PrefillState {
      float *pre = nullptr, *post = nullptr, *comb = nullptr, *ss = nullptr, *mix = nullptr;
      uint16_t* x16 = nullptr;
      int* iota = nullptr;
@@ -1918,17 +1968,7 @@ index 85076b6..134b49c 100644
      // KV streaming: one layer's latent cache in position order, staged from its host copy - what the prompt attention
      // reads (a chunk's selections can name any position, so the slots' window does not hold them).  The copy runs on
      // kv_ss once the attention before has read the stage (kv_free), while the layers in between compute; the layer it
-@@ -1046,6 +1047,9 @@ static constexpr size_t kPfWorkspace = (size_t) 16 << 20;   // cuBLAS
- // ---------------------------------------------------------------- setup
- bool Glm5Model::prefill_setup(std::string& err) {
-     (void) err;
-+    // Never send the full model through Flash's mHC/NoPE prompt path.
-+    // Its batched FFN + token-attention path remains opt-in until validated.
-+    if (g_.dsa && getenv("STRATA_GLM_DSA_PREFILL") == nullptr) return true;
-     if (getenv("STRATA_GLM_NO_PREFILL") != nullptr) return true;
-     if (prefill_mode() != "auto" && std::atoll(prefill_mode().c_str()) <= 0) {
-         std::fprintf(stderr, "glm prefill: --prefill %s: the prompt runs token by token\n", prefill_mode().c_str());
-@@ -1101,7 +1105,7 @@ bool Glm5Model::prefill_setup(std::string& err) {
+@@ -1101,7 +1108,7 @@ bool Glm5Model::prefill_setup(std::string& err) {
                       why.substr(0, 400).c_str());
          return true;
      }
@@ -1937,7 +1977,7 @@ index 85076b6..134b49c 100644
          std::fprintf(stderr, "glm prefill: geometry not covered by the batched kernels - token by token\n");
          return true;
      }
-@@ -1476,15 +1480,16 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
+@@ -1476,6 +1483,7 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
      a.take<float>(T);
      a.take<float>(T * 24);
      a.take<int>(T * (size_t) g.n_exp_used);      // iota
@@ -1945,9 +1985,7 @@ index 85076b6..134b49c 100644
      a.take<uint8_t>(kv_stage);
      size_t uni = 0;
      const size_t ts = std::min<size_t>(T, mixer_sub(T, g, has_kda, has_dsa, has_dense, has_moe, max_pools, sub_env));
-     if (has_kda) { Carve k; carve_kda(k, ts, g); uni = std::max(uni, k.off); }
--    if (has_dsa) { Carve d; carve_dsa(d, ts, g, max_pools); uni = std::max(uni, d.off); }
-+    if (has_dsa && !g.dsa) { Carve d; carve_dsa(d, ts, g, max_pools); uni = std::max(uni, d.off); }
+@@ -1484,7 +1492,7 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
      if (has_dense) { Carve d; carve_dense(d, ts, g); uni = std::max(uni, d.off); }
      if (has_moe) { Carve m; carve_moe(m, T, (size_t) shexp_sub(sub_env), g); uni = std::max(uni, m.off); }
      // the NextN block's cache fill (the last half) carves 4 n_embd + 1.5 n_embd rows of its own
@@ -1956,7 +1994,7 @@ index 85076b6..134b49c 100644
      return {a.off, uni};
  }
 
-@@ -1560,6 +1565,7 @@ bool Glm5Model::prefill_carve(int Tn, int64_t end) {
+@@ -1560,6 +1568,7 @@ bool Glm5Model::prefill_carve(int Tn, int64_t end) {
      S->ss = a.take<float>(T);
      S->mix = a.take<float>(T * 24);
      S->iota = a.take<int>(T * (size_t) g.n_exp_used);
@@ -1964,7 +2002,7 @@ index 85076b6..134b49c 100644
      S->kv_stage = stage > 0 ? a.take<uint8_t>(stage) : nullptr;
      S->uni = S->arena + a.off;
      blas_ck(cublasSetWorkspace(S->blas, S->ws, S->ws_bytes), "set workspace");
-@@ -2093,6 +2099,14 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2093,6 +2102,14 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
      // the mHC read half for the whole chunk: (write half of the previous block,) mix dots, gates, x / x16
      const auto hc_read = [&](const float* block_out, const uint16_t* fn, const float* scale, const float* base,
                               const float* norm) {
@@ -1979,35 +2017,116 @@ index 85076b6..134b49c 100644
          gb::hc_update(block_out, S->R, S->post, S->comb, S->ss, T, E, s);
          sgemm_bf16(fn, 24, 4 * E, S->R, 4 * E, S->mix, 24, T, 1.0f);
          gb::HcFinishArgs h;
-@@ -2494,7 +2508,26 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2462,6 +2479,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+     if (!kv_prefetch(kv_dsa_from(l0_))) return false;   // (the layers before the first DSA layer run meanwhile)
+     prestage(next_moe(l0_));   // (the dense layers before the first MoE one run meanwhile)
+     for (auto& t : S->tr) t.on = false;
++    bool dsa_sel = false;   // (glm-dsa: this chunk's rows hold a full indexer layer's selection)
+     for (int il = l0_; il < l1_; ++il) {
+         progress_at("the prompt: layer", il);   // a layer is the serve watchdog's heartbeat (issue #40)
+         progress_beat();
+@@ -2494,7 +2512,99 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
          uint16_t* const lat = kv_host != nullptr ? (uint16_t*) S->kv_stage : (uint16_t*) (state_ + dsa_lat_[(size_t) il]);
 
          // ---- the mixer, in sub-batches of S->sub tokens (the recurrences carry their state across)
 -        for (int t0 = 0; t0 < T; t0 += S->sub) {
-+        if (g.dsa) {
-+            // Keep the already-validated roped MLA/indexer arithmetic while batching
-+            // the dense/shared/routed FFNs below. Each row owns its selection across
-+            // full/shared layers; a single F->cells would reuse the last row's top-k.
-+            struct Restore {
-+                FastState* f;
-+                float *x, *mixer;
-+                int* cells;
-+                int n_sel;
-+                ~Restore() { f->x = x; f->mixer = mixer; f->cells = cells; f->dsa_n_sel = n_sel; }
-+            } restore{F, F->x, F->mixer, F->cells, F->dsa_n_sel};
-+            for (int t = 0; t < T; ++t) {
-+                F->x = S->x + (size_t) t * E;
-+                F->mixer = S->mixer + (size_t) t * E;
-+                F->cells = S->dsa_cells + (size_t) t * g.idx_top_k;
-+                F->dsa_n_sel = std::min<int64_t>(g.idx_top_k, p0 + t + 1);
-+                gf::quantize_q8_1(F->x, F->xq, E, s);
-+                if (!fast_dsa_rope(il, p0 + t, err)) return false;
++        if (g.dsa) for (int t0 = 0; t0 < T; t0 += S->sub) {
++            // glm-dsa: fast_dsa_rope's arithmetic over sub-batches of rows - the projections as GEMMs, the absorbed
++            // products as strided-batched FP32 GEMMs, the attention on wmma2 with the k_pe term.  A row keeps its
++            // selection in S->dsa_cells from its part's last full indexer layer (split bounds land on full layers).
++            const int tn = std::min(S->sub, T - t0);
++            const float* xs = S->x + (size_t) t0 * E;
++            const uint16_t* x16 = S->x16 + (size_t) t0 * E;
++            float* mixer = S->mixer + (size_t) t0 * E;
++            const int pt = (int) (p0 + t0), KS = g.idx_top_k, HQ = g.n_head * g.k_mla();
++            const bool full = g.indexer_full[(size_t) il] != 0;
++            if (!full && !dsa_sel) {
++                err = "glm prefill: glm-dsa layer " + std::to_string(il) + " shares an indexer selection this part never made";
++                return false;
 +            }
++            Carve c{S->uni};
++            DsaBufs B = carve_dsa(c, (size_t) tn, g, S->max_pools);
++            int* const cells = S->dsa_cells + (size_t) t0 * KS;
++            hgemm_q(Ly.q_a, g.q_lora, E, x16, E, B.qr_raw, g.q_lora, tn, 0.0f);
++            hgemm_q(Ly.kv_a, g.kv_lora + g.n_rot, E, x16, E, B.kv_raw, g.kv_lora + g.n_rot, tn, 0.0f);
++            if (full) {
++                sgemm_bf16(Ly.idx_k, g.idx_key, E, xs, E, B.ik_raw, g.idx_key, tn, 1.0f);
++                sgemm_bf16(Ly.idx_proj, g.idx_heads, E, xs, E, B.iw, g.idx_heads, tn,
++                           1.0f / std::sqrt((float) (g.idx_key * g.idx_heads)));
++            }
++            float* const kpe = state_ + dsa_kpe_[(size_t) il];
++            float* const ik = state_ + dsa_pool_[(size_t) il];
++            gf::DsaRopePrepArgs d;
++            d.qr_raw = B.qr_raw;
++            d.q_a_norm = Ly.q_a_norm;
++            d.qr = B.qr;
++            d.qr16 = B.qr16;
++            d.q_lora = g.q_lora;
++            d.kv_raw = B.kv_raw;
++            d.kv_norm = Ly.kv_a_norm;
++            d.lat = lat;
++            d.kpe = kpe;
++            d.kv_lora = g.kv_lora;
++            d.n_rot = g.n_rot;
++            d.ik_raw = full ? B.ik_raw : nullptr;
++            d.k_norm_w = Ly.k_norm_w;
++            d.k_norm_b = Ly.k_norm_b;
++            d.ik = ik;
++            d.idx_key = g.idx_key;
++            d.p = pt;
++            d.T = tn;
++            d.base = g.rope_base;
++            d.eps = g.norm_eps;
++            d.ln_eps = g.idx_ln_eps;
++            gf::dsa_rope_prep(d, s);
++            hgemm_q(Ly.q_b, HQ, g.q_lora, B.qr16, g.q_lora, B.q, HQ, tn, 0.0f);
++            gf::rope_heads(B.q + g.qk_nope, g.n_rot, g.k_mla(), g.n_head, pt, g.rope_base, s, tn, HQ);
++            S->mark("dsa_proj", s);
++            if (full) {
++                // the token path's selection (a token is its own pool): every position while they fit the top-k, in
++                // order; past it the stable top-k of the scores (gb::dsa_select's rows take dsa_select's top_pools)
++                if (pt + tn > KS) {
++                    sgemm_bf16(Ly.idx_q_b, g.idx_heads * g.idx_key, g.q_lora, B.qr, g.q_lora, B.iq,
++                               g.idx_heads * g.idx_key, tn, 1.0f);
++                    gf::rope_heads(B.iq, g.n_rot, g.idx_key, g.idx_heads, pt, g.rope_base, s, tn, g.idx_heads * g.idx_key);
++                    gb::dsa_score(B.iq, ik, B.iw, g.idx_key, g.idx_heads, pt, 1, tn, pt + tn, B.score, B.score_ld, s);
++                }
++                gb::dsa_select(B.score, B.score_ld, pt, 1, KS, 0, tn, KS, cells, B.n_sel, s);
++                dsa_sel = true;
++                S->mark("dsa_index", s);
++            }
++            dsa_nsel_kernel<<<(tn + 255) / 256, 256, 0, s>>>(B.n_sel, pt, tn, KS);
++            // q_abs[t][h] = wk_b[h] (kv_lora x qk_nope) . q_nope[t][h]
++            gb::bf16_to_f32(Ly.k_b, S->w32, (int64_t) g.n_head * g.kv_lora * g.qk_nope, s);
++            blas_ck(cublasSgemmStridedBatched(S->blas, CUBLAS_OP_T, CUBLAS_OP_N, g.kv_lora, tn, g.qk_nope, &one, S->w32,
++                                              g.qk_nope, (long long) g.kv_lora * g.qk_nope, B.q, HQ, g.k_mla(), &zero,
++                                              B.q_abs, g.n_head * g.kv_lora, g.kv_lora, g.n_head),
++                    "dsa q_abs");
++            S->mark("dsa_qabs", s);
++#if defined(STRATA_USE_HIP)
++            gb::mla_attn_wmma2(B.q_abs, lat, cells, B.n_sel, KS, g.n_head, g.kv_lora,
++                               1.0f / std::sqrt((float) (g.qk_nope + g.n_rot)), tn, B.ctx, s, false, B.q + g.qk_nope,
++                               g.k_mla(), kpe, g.n_rot);
++#else
++            err = "glm prefill: the glm-dsa prompt attention is HIP only";
++            return false;
++#endif
++            S->mark("dsa_attn", s);
++            // out[t][h] = wv_b[h] (v_head x kv_lora) . ctx[t][h]
++            gb::bf16_to_f32(Ly.v_b, S->w32, (int64_t) g.n_head * g.v_head * g.kv_lora, s);
++            blas_ck(cublasSgemmStridedBatched(S->blas, CUBLAS_OP_T, CUBLAS_OP_N, g.v_head, tn, g.kv_lora, &one, S->w32,
++                                              g.kv_lora, (long long) g.v_head * g.kv_lora, B.ctx, g.n_head * g.kv_lora,
++                                              g.kv_lora, &zero, B.attn, g.n_head * g.v_head, g.v_head, g.n_head),
++                    "dsa mla out");
++            gb::f32_to_f16(B.attn, B.attn16, (int64_t) tn * g.n_head * g.v_head, s);
++            if (!skip_output)
++                hgemm_q(Ly.out, E, g.n_head * g.v_head, B.attn16, g.n_head * g.v_head, mixer, E, tn, 0.0f);
++            if (glmfast::prefill_submit()) glmfast::submit_queued(s);
 +        } else for (int t0 = 0; t0 < T; t0 += S->sub) {
              const int tn = std::min(S->sub, T - t0);
              const float* xs = S->x + (size_t) t0 * E;
              const uint16_t* x16 = S->x16 + (size_t) t0 * E;
-@@ -3413,7 +3446,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3413,7 +3523,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
              return blas_dev[dev] - 1;
  #endif
          }();
@@ -2016,7 +2135,7 @@ index 85076b6..134b49c 100644
                                mmq::to_f16_supported(Ly.d_type) && S->w16_elems >= (int64_t) 2 * nff * E + E;
          const auto run_blas_q = [&](const uint8_t* blob, int a, int nrows, int r0) {
              namespace x3 = strata::kernels::exl3;
-@@ -3468,8 +3501,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3468,8 +3578,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
              else if (use_blas) run_set_q(wbase, n_exp, stride, d_bounds, hb, r0);
              else run_set(wbase, n_exp, stride, d_bounds, hb, r0);
          };
@@ -2027,7 +2146,7 @@ index 85076b6..134b49c 100644
              return false;
          }
          // the disk-only experts (staged last, ascending): their indices in the reader's order - inside the segment
-@@ -3976,7 +4009,10 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3976,7 +4086,10 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
      }
      // the last layer's write half: R = post x ffn + comb . R
      if (!tail_skip) {
@@ -2039,7 +2158,7 @@ index 85076b6..134b49c 100644
          S->mark("hc", s);
      }
      // ---- the NextN block's caches for these positions (the half that carries it): position p reads h_p and the
-@@ -4001,63 +4037,75 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -4001,63 +4114,75 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
                  else
                      tt->to_float(pack_emb_src_ + (size_t) next_ids[t] * row_b, S->emb_h + (size_t) t * E, E);
              }
@@ -2171,7 +2290,7 @@ index 85076b6..134b49c 100644
          }
      }
      S->collect();
-@@ -4516,7 +4564,8 @@ bool Glm5Model::prefill_run(const std::vector<int32_t>& tokens, std::string& err
+@@ -4516,7 +4641,8 @@ bool Glm5Model::prefill_run(const std::vector<int32_t>& tokens, std::string& err
          }
          // the embedding lands in x (free until the first layer's gates write it) and fans out to the 4 streams
          cudaMemcpyAsync(S->x, S->emb_h, (size_t) T * E * sizeof(float), cudaMemcpyHostToDevice, fast_->cs);
@@ -2244,11 +2363,78 @@ index 3af089a..0bfa0bc 100644
      const WSlot& ow = m->ws_map_.at("output.weight");
      if (m->head_split_ready()) {
          if (!m->win_head_split(t, sl, hx, lg, err)) return false;
+diff --git a/src/kernels/cuda/dsa_topk.cuh b/src/kernels/cuda/dsa_topk.cuh
+index b3fc18e..8411615 100644
+--- a/src/kernels/cuda/dsa_topk.cuh
++++ b/src/kernels/cuda/dsa_topk.cuh
+@@ -7,7 +7,7 @@
+ //      top-th largest - and how many of the keys equal to it are taken;
+ //   2. one pass in pool order (each thread a contiguous run, exclusive scans for the offsets) collects the winners:
+ //      every key above the cut-off and the first `need` equal to it - the lower indices, as the rank loop chose;
+-//   3. a bitonic sort of the <= 1024 winners, packed as (key << 32) | ~index, descending.
++//   3. a bitonic sort of the <= kMaxTop winners, packed as (key << 32) | ~index, descending.
+ #pragma once
+
+ #include <cuda_runtime.h>
+@@ -20,16 +20,18 @@ __device__ __forceinline__ unsigned score_key(float f) {
+     return (u & 0x80000000u) ? ~u : (u | 0x80000000u);
+ }
+
+-// cells[r * kpool + m] = p * kpool + m for the top `top` pools p of sc[0, n_vis) in rank order; 1 <= top <= 1024,
++// cells[r * kpool + m] = p * kpool + m for the top `top` pools p of sc[0, n_vis) in rank order; 1 <= top <= kMaxTop,
+ // top <= n_vis, blockDim.x == 1024.  Every thread of the block must call it.  (static: each kernel file that includes
+ // this gets its own copy - an external symbol would be defined twice at link time)
++// glm-dsa takes the top 2048 positions (a token is its own pool); Flash's pools stay under 1024
++constexpr int kMaxTop = 2048;
+ static __device__ void select_top_pools(const float* __restrict__ sc, int n_vis, int top, int kpool, int* __restrict__ cells) {
+     constexpr int NT = 1024;
+     __shared__ unsigned s_hist[256];
+     __shared__ unsigned s_prefix, s_mask;
+     __shared__ int s_need;
+     __shared__ int s_gt[NT], s_eq[NT];
+-    __shared__ unsigned long long s_win[NT];
++    __shared__ unsigned long long s_win[kMaxTop];
+     const int tid = threadIdx.x;
+     if (tid == 0) {
+         s_prefix = 0u;
 diff --git a/src/kernels/cuda/glm_batch.cu b/src/kernels/cuda/glm_batch.cu
-index b91fdff..ce6e4d2 100644
+index b91fdff..4f1398d 100644
 --- a/src/kernels/cuda/glm_batch.cu
 +++ b/src/kernels/cuda/glm_batch.cu
-@@ -1941,11 +1941,11 @@ __global__ void __launch_bounds__(256) mtp_in_rows_kernel(const float* __restric
+@@ -1781,8 +1781,10 @@ __device__ __forceinline__ int mla2_wmma_row(int i, int hi) {
+ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
+         const float* __restrict__ q_abs, const uint16_t* __restrict__ lat,
+         const int* __restrict__ cells_all, const int* __restrict__ n_sel_arr,
+-        int n_sel_max, int n_head, float scale, float* __restrict__ ctx, bool q8) {
++        int n_sel_max, int n_head, float scale, float* __restrict__ ctx, bool q8,
++        const float* __restrict__ q_pe, int q_pe_hs, const float* __restrict__ kpe, int n_rot) {
+     __shared__ __align__(16) _Float16 sl[16][512];
++    __shared__ float sqpe[16][64];   // glm-dsa: the 16 heads' roped query part (n_rot <= 64)
+     __shared__ __align__(16) _Float16 ph[16][16], pl[16][16];
+     __shared__ float scores[8][16][16], qi[8][16];
+     __shared__ float sm[16], denom[16], rescale[16];
+@@ -1809,6 +1811,9 @@ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
+         }
+     mla2_f8 acc[4] = {};
+     if (tid < 16) { sm[tid] = -INFINITY; denom[tid] = 0; }
++    if (q_pe != nullptr)
++        for (int i = tid; i < 16 * n_rot; i += 256)
++            sqpe[i / n_rot][i % n_rot] = q_pe[((size_t)t * n_head + h0 + i / n_rot) * q_pe_hs + i % n_rot];
+     for (int s0 = 0; s0 < ns; s0 += 16) {
+         __syncthreads();
+         if (tid < 16) cells[tid] = s0 + tid < ns ? cl[s0 + tid] : -1;
+@@ -1837,6 +1842,10 @@ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
+         float v = 0;
+ #pragma unroll
+         for (int w = 0; w < 8; ++w) v += scores[w][r][col];
++        if (q_pe != nullptr && cells[col] >= 0) {
++            const float* kr = kpe + (size_t)cells[col] * n_rot;
++            for (int e = 0; e < n_rot; ++e) v += sqpe[r][e] * kr[e];
++        }
+         v = cells[col] < 0 ? -INFINITY : v * scale;
+         float m = v;
+ #pragma unroll
+@@ -1941,11 +1950,11 @@ __global__ void __launch_bounds__(256) mtp_in_rows_kernel(const float* __restric
                                                            __half* __restrict__ out) {
      __shared__ float sred[32];
      const int t = blockIdx.x, tid = threadIdx.x;
@@ -2262,7 +2448,7 @@ index b91fdff..ce6e4d2 100644
          if (i >= per) break;
          const int e = tid + i * (int) blockDim.x;
          a[i] = emb[(size_t) t * E + e];
-@@ -1957,7 +1957,7 @@ __global__ void __launch_bounds__(256) mtp_in_rows_kernel(const float* __restric
+@@ -1957,7 +1966,7 @@ __global__ void __launch_bounds__(256) mtp_in_rows_kernel(const float* __restric
      sb = block_sum(sb, sred);
      const float ia = rsqrtf(sa / (float) E + eps), ib = rsqrtf(sb / (float) E + eps);
  #pragma unroll
@@ -2271,7 +2457,7 @@ index b91fdff..ce6e4d2 100644
          if (i >= per) break;
          const int e = tid + i * (int) blockDim.x;
          out[(size_t) t * 2 * E + e] = __float2half(a[i] * ia * enorm[e]);
-@@ -1969,11 +1969,11 @@ __global__ void __launch_bounds__(256) rms_rows_kernel(const float* __restrict__
+@@ -1969,11 +1978,11 @@ __global__ void __launch_bounds__(256) rms_rows_kernel(const float* __restrict__
                                                         int E, float* __restrict__ x, __half* __restrict__ x16) {
      __shared__ float sred[32];
      const int t = blockIdx.x, tid = threadIdx.x;
@@ -2285,7 +2471,7 @@ index b91fdff..ce6e4d2 100644
          if (i >= per) break;
          const int e = tid + i * (int) blockDim.x;
          v[i] = in[(size_t) t * E + e];
-@@ -1982,7 +1982,7 @@ __global__ void __launch_bounds__(256) rms_rows_kernel(const float* __restrict__
+@@ -1982,7 +1991,7 @@ __global__ void __launch_bounds__(256) rms_rows_kernel(const float* __restrict__
      ss = block_sum(ss, sred);
      const float inv = rsqrtf(ss / (float) E + eps);
  #pragma unroll
@@ -2294,6 +2480,29 @@ index b91fdff..ce6e4d2 100644
          if (i >= per) break;
          const int e = tid + i * (int) blockDim.x;
          const float xv = v[i] * inv * w[e];
+@@ -2614,14 +2623,20 @@ bool mla_wmma2_supported() { const int a = mla_wmma2_arch(); return a == 1 || a
+ bool mla_wmma2_default() { const int a = mla_wmma2_arch(); return a == 1 || a == 4; }
+
+ void mla_attn_wmma2(const float* q_abs, const uint16_t* lat, const int* cells, const int* n_sel, int n_sel_max,
+-                    int n_head, int kv_lora, float scale, int T, float* ctx, cudaStream_t s, bool lat_q8) {
++                    int n_head, int kv_lora, float scale, int T, float* ctx, cudaStream_t s, bool lat_q8,
++                    const float* q_pe, int q_pe_hs, const float* kpe, int n_rot) {
+     if (T <= 0) return;
+     if (kv_lora != 512 || n_head % 16 != 0) {
+         std::fprintf(stderr, "glm_batch mla_attn_wmma2: kv_lora %d / n_head %d unsupported\n", kv_lora, n_head);
+         return;
+     }
+     const dim3 grid((unsigned) T, (unsigned) (n_head / 16));
+-    mla_attn_wmma2_kernel<<<grid, 256, 0, s>>>(q_abs, lat, cells, n_sel, n_sel_max, n_head, scale, ctx, lat_q8);
++    if (q_pe != nullptr && (n_rot <= 0 || n_rot > 64 || kpe == nullptr)) {
++        std::fprintf(stderr, "glm_batch mla_attn_wmma2: n_rot %d unsupported\n", n_rot);
++        return;
++    }
++    mla_attn_wmma2_kernel<<<grid, 256, 0, s>>>(q_abs, lat, cells, n_sel, n_sel_max, n_head, scale, ctx, lat_q8, q_pe,
++                                               q_pe_hs, kpe, n_rot);
+     check("mla_attn_wmma2");
+ }
+ #endif
 diff --git a/src/kernels/cuda/glm_dsa.cu b/src/kernels/cuda/glm_dsa.cu
 index f9dd608..1525dff 100644
 --- a/src/kernels/cuda/glm_dsa.cu
@@ -2347,7 +2556,7 @@ index f9dd608..1525dff 100644
 
  }  // namespace strata::kernels
 diff --git a/src/kernels/cuda/glm_fast.cu b/src/kernels/cuda/glm_fast.cu
-index 268563c..02df6e5 100644
+index 268563c..d97fa28 100644
 --- a/src/kernels/cuda/glm_fast.cu
 +++ b/src/kernels/cuda/glm_fast.cu
 @@ -6,6 +6,7 @@
@@ -2402,7 +2611,7 @@ index 268563c..02df6e5 100644
          const int e = tid + 1024 * i;
          if (e >= n) break;
          const float xv = v[i] * inv * w[e];
-@@ -7003,4 +7004,169 @@ void argmax_join(const int* a, const int* b, int c0, int* out, cudaStream_t s) {
+@@ -7003,4 +7004,180 @@ void argmax_join(const int* a, const int* b, int c0, int* out, cudaStream_t s) {
      launch_check("argmax_join");
  }
 
@@ -2424,7 +2633,15 @@ index 268563c..02df6e5 100644
 +__global__ void __launch_bounds__(1024) dsa_rope_prep_kernel(DsaRopePrepArgs a) {
 +    __shared__ float sred[32];
 +    __shared__ float sy[1024];
-+    const int tid = threadIdx.x, lane = tid & 31;
++    const int tid = threadIdx.x, lane = tid & 31, t = blockIdx.y;
++    a.p += t;   // (a prompt row: its inputs and outputs a row further)
++    if (a.qr_raw != nullptr) {
++        a.qr_raw += (size_t) t * a.q_lora;
++        a.qr += (size_t) t * a.q_lora;
++        if (a.qr16 != nullptr) a.qr16 += (size_t) t * a.q_lora;
++    }
++    a.kv_raw += (size_t) t * (a.kv_lora + a.n_rot);
++    if (a.ik_raw != nullptr) a.ik_raw += (size_t) t * a.idx_key;
 +    if (blockIdx.x == 0) {   // qr = rms(qr_raw) * w, and its q8_1
 +        if (a.qr_raw == nullptr) return;   // a batched NextN cache fill needs only the latent/k_pe
 +        float ss = 0.0f;
@@ -2433,7 +2650,8 @@ index 268563c..02df6e5 100644
 +        for (int e = tid; e < a.q_lora; e += blockDim.x) {
 +            const float xv = a.qr_raw[e] * inv * a.q_a_norm[e];
 +            a.qr[e] = xv;
-+            q8_1_store_warp(xv, (block_q8_1*) a.qr_q + e / 32, lane);
++            if (a.qr_q != nullptr) q8_1_store_warp(xv, (block_q8_1*) a.qr_q + e / 32, lane);
++            if (a.qr16 != nullptr) a.qr16[e] = __half_as_ushort(__float2half(xv));
 +        }
 +    } else if (blockIdx.x == 1) {   // the latent (normed, FP16 cache row p) and k_pe (roped, NOT normed, F32 row p)
 +        float ss = 0.0f;
@@ -2468,11 +2686,13 @@ index 268563c..02df6e5 100644
 +    }
 +}
 +
-+__global__ void rope_heads_kernel(float* __restrict__ x, int n_rot, int stride, int n_head, int pos, float base) {
++__global__ void rope_heads_kernel(float* __restrict__ x, int n_rot, int stride, int n_head, int pos, float base,
++                                  int ld) {
 +    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
 +    if (idx >= n_head * (n_rot / 2)) return;
 +    const int h = idx / (n_rot / 2), i = idx % (n_rot / 2);
-+    float* xh = x + (size_t) stride * h + 2 * i;
++    pos += blockIdx.y;
++    float* xh = x + (size_t) ld * blockIdx.y + (size_t) stride * h + 2 * i;
 +    float y0, y1;
 +    rope_pair(xh[0], xh[1], i, n_rot, pos, base, y0, y1);
 +    xh[0] = y0;
@@ -2547,13 +2767,13 @@ index 268563c..02df6e5 100644
 +}  // namespace
 +
 +void dsa_rope_prep(const DsaRopePrepArgs& a, cudaStream_t s) {
-+    dsa_rope_prep_kernel<<<a.ik_raw != nullptr ? 3 : 2, 1024, 0, s>>>(a);
++    dsa_rope_prep_kernel<<<dim3(a.ik_raw != nullptr ? 3 : 2, (unsigned) a.T), 1024, 0, s>>>(a);
 +    launch_check("dsa_rope_prep");
 +}
 +
-+void rope_heads(float* x, int n_rot, int stride, int n_head, int pos, float base, cudaStream_t s) {
++void rope_heads(float* x, int n_rot, int stride, int n_head, int pos, float base, cudaStream_t s, int T, int ld) {
 +    const int n = n_head * (n_rot / 2);
-+    rope_heads_kernel<<<(n + 255) / 256, 256, 0, s>>>(x, n_rot, stride, n_head, pos, base);
++    rope_heads_kernel<<<dim3((n + 255) / 256, (unsigned) T), 256, 0, s>>>(x, n_rot, stride, n_head, pos, base, ld);
 +    launch_check("rope_heads");
 +}
 +
@@ -2573,10 +2793,10 @@ index 268563c..02df6e5 100644
 +
  }  // namespace strata::kernels::glmf
 diff --git a/src/program/generate.cpp b/src/program/generate.cpp
-index 9d35854..ee74a50 100644
+index 1892e8a..a393390 100644
 --- a/src/program/generate.cpp
 +++ b/src/program/generate.cpp
-@@ -2229,7 +2229,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -2236,7 +2236,7 @@ static int glm_pack_generate(const Options& o) {
                               (unsigned long long) (model.mtp_rounds_ - rounds0),
                               (double) n_spec / (double) (model.mtp_rounds_ - rounds0), lens.c_str());
              }
