@@ -54,6 +54,34 @@ repos:
             exit "$status"
           ' --
         language: system
+      - id: large-files
+        name: large files and model weights
+        entry: |-
+          bash -lc '
+            # One bad git add of weights or a backup bloats history for good.
+            max_kb=${REPO_GUARD_MAX_FILE_KB:-5120}
+            status=0
+            for f in "$@"; do
+              # LFS files are pointers in git but full size on disk.
+              case "$(git check-attr filter -- "$f")" in
+                *": filter: lfs") continue ;;
+              esac
+              case "${f##*/}" in
+                *.gguf|*.safetensors|*.ckpt|*.pt|*.pth|*.onnx|*.ggml) ;;
+                *.qcow2|*.vmdk|*.vdi|*.iso|*.zst|*.7z|*.rar|*.tar) ;;
+                *)
+                  if [ ! -f "$f" ]; then continue; fi
+                  kb=$(( ($(wc -c <"$f") + 1023) / 1024 ))
+                  if [ "$kb" -le "$max_kb" ]; then continue; fi
+                  ;;
+              esac
+              printf "refusing large or binary-artifact file=%s " "$f"
+              printf "(limit %s KiB via REPO_GUARD_MAX_FILE_KB; use Git LFS)\n" "$max_kb"
+              status=1
+            done
+            exit "$status"
+          ' --
+        language: system
       - id: merge-conflict
         name: merge conflict markers
         entry: >-
@@ -228,3 +256,52 @@ repos:
         language: system
         pass_filenames: false
 # repo-guard:containers:end
+
+# repo-guard:osv:start
+  - repo: local
+    hooks:
+      - id: osv-scanner
+        name: osv-scanner (dependency vulnerabilities)
+        entry: >-
+          bash -lc 'args=(); for f in "$@"; do args+=(-L "$f"); done;
+          osv-scanner scan source "${args[@]}"' --
+        language: system
+        files: |
+          (?x)(^|/)(
+            package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|
+            bun\.lock|deno\.lock|composer\.lock|Gemfile\.lock|go\.mod|Cargo\.lock|
+            uv\.lock|poetry\.lock|Pipfile\.lock|pdm\.lock|requirements[^/]*\.txt|
+            gradle\.lockfile|mix\.lock|pubspec\.lock|packages\.lock\.json
+          )$
+# repo-guard:osv:end
+
+# repo-guard:semgrep:start
+  - repo: local
+    hooks:
+      - id: semgrep
+        name: semgrep (SAST)
+        entry: >-
+          bash -lc 'cfg=p/default; for c in .semgrep.yml .semgrep.yaml; do if [
+          -e "$c" ]; then cfg=$c; break; fi; done; semgrep scan --config "$cfg"
+          --error --metrics off --quiet --disable-version-check "$@"' --
+        language: system
+        types_or: [
+          python, go, javascript, jsx, ts, tsx, shell, c, c++, rust, swift,
+          ruby, java, php, dockerfile, terraform,
+        ]
+# repo-guard:semgrep:end
+
+# repo-guard:actions:start
+  - repo: local
+    hooks:
+      - id: actionlint
+        name: actionlint
+        entry: actionlint
+        language: system
+        files: ^\.github/workflows/[^/]+\.ya?ml$
+      - id: zizmor
+        name: zizmor (workflow security)
+        entry: zizmor --offline --no-progress
+        language: system
+        files: ^\.github/(workflows/[^/]+|actions/.+/action)\.ya?ml$
+# repo-guard:actions:end
