@@ -70,11 +70,11 @@ fi
 
 echo "building $cur_tag -> $new_tag"
 
-docker build --network host \
+docker buildx build --network host \
   --build-arg "UNSLOTH_TAG=$new_tag" \
   --build-arg "UNSLOTH_ASSET=$new_asset" \
   --label "unsloth.tag=$new_tag" \
-  -t "$IMAGE" "$DIR"
+  --output "type=image,name=$IMAGE,compression=zstd,compression-level=3" "$DIR" # (build-runner.sh: why zstd)
 
 echo
 docker run --rm "$IMAGE" llama-server --version 2>&1 | grep -i version
