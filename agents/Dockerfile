@@ -89,4 +89,6 @@ RUN set -eu; \
       fs.writeFileSync("/opt/ttyd/index.html", page.replace("</body>", patch + "</body>"));'
 
 WORKDIR /work
+# compose runs this as ${LOCAL_LLM_UID} via user:
+# nosemgrep
 ENTRYPOINT ["/usr/bin/tini", "--"]

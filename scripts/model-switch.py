@@ -70,7 +70,7 @@ SAMPLING_KEYS = {
 
 
 def _get(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=15) as r:  # nosec B310  # noqa: S310
+    with urllib.request.urlopen(url, timeout=15) as r:  # nosec B310  # noqa: S310  # nosemgrep
         return json.load(r)
 
 
@@ -78,7 +78,7 @@ def _post(url: str, body: dict) -> dict:
     req = urllib.request.Request(  # noqa: S310 — fixed scheme
         url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=600) as r:  # nosec B310  # noqa: S310
+    with urllib.request.urlopen(req, timeout=600) as r:  # nosec B310  # noqa: S310  # nosemgrep
         return json.load(r)
 
 

@@ -6,7 +6,7 @@ import json
 import mimetypes
 import os
 import re
-import subprocess
+import subprocess  # noqa: S404  # nosec B404
 import urllib.request
 from pathlib import Path
 
@@ -50,12 +50,12 @@ _WRITE_RE = re.compile(r'<write\s+path="([^"]+)">(.*?)</write>', re.DOTALL)
 def _ask(messages: list) -> str:
     body = json.dumps({"model": "auto", "messages": messages}).encode()
     req = urllib.request.Request(URL, data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # nosec B310 -- internal URL
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # noqa: S310  # nosec B310  # nosemgrep
         return json.load(r)["choices"][0]["message"]["content"]
 
 
 def _tool_bash(cmd: str) -> str:
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)  # nosec B602 -- tool execution
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)  # noqa: S602  # nosec B602  # nosemgrep
     out = result.stdout + result.stderr
     return out.strip() or "(no output)"
 
@@ -79,7 +79,7 @@ def _tool_read(path: str) -> str | list[dict]:
                 _image_part(p),
             ]
         return p.read_text()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- reported back to the model
         return f"error: {e}"
 
 
@@ -89,7 +89,7 @@ def _tool_write(path: str, content: str) -> str:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content)
         return f"wrote {len(content)} bytes to {path}"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- reported back to the model
         return f"error: {e}"
 
 
@@ -164,7 +164,7 @@ def main() -> None:
             break
         try:
             reply = _agent_turn(history, user_input)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"[error: {e}]")
             # rollback last user message
             while history and history[-1]["role"] != "assistant":

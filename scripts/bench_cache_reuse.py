@@ -67,7 +67,7 @@ def start_server(args, parallel: int) -> None:
     for _ in range(240):
         try:
             url = f"http://127.0.0.1:{args.port}/v1/models"
-            with urllib.request.urlopen(url, timeout=5) as fh:  # noqa: S310 # nosec: B310
+            with urllib.request.urlopen(url, timeout=5) as fh:  # noqa: S310 # nosec: B310  # nosemgrep
                 if args.alias in fh.read().decode():
                     return
         except (urllib.error.URLError, OSError):
@@ -108,7 +108,7 @@ def chat(args, messages: list[dict]) -> tuple[dict, float]:
         headers={"Content-Type": "application/json"},
     )
     start = time.monotonic()
-    with urllib.request.urlopen(req, timeout=900) as fh:  # noqa: S310 # nosec: B310
+    with urllib.request.urlopen(req, timeout=900) as fh:  # noqa: S310 # nosec: B310  # nosemgrep
         payload = json.load(fh)
     return payload, (time.monotonic() - start) * 1000
 

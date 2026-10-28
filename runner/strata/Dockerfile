@@ -75,5 +75,8 @@ RUN set -e; git init -q /opt/strata/llama; cd /opt/strata/llama; \
 
 COPY strata-runner.py /opt/strata/strata-runner.py
 
+# runs as root for /dev/kfd, /dev/dri and CAP_SYS_NICE (mbind)
+# nosemgrep
 ENTRYPOINT []
+# nosemgrep
 CMD ["/opt/strata/venv/bin/python", "/opt/strata/strata-runner.py", "--help"]

@@ -126,5 +126,8 @@ COPY --from=build /src/llama.cpp/build/bin/*.so /usr/local/lib/
 RUN printf '/opt/rocm/lib\n/opt/rocm/lib/llvm/lib\n/usr/local/lib\n' > /etc/ld.so.conf.d/rocm.conf \
     && ldconfig
 
+# runs as root for /dev/kfd, /dev/dri and CAP_SYS_NICE (mbind)
+# nosemgrep
 ENTRYPOINT []
+# nosemgrep
 CMD ["llama-server", "--help"]

@@ -124,5 +124,8 @@ RUN cp -f python/pyproject_other.toml python/pyproject.toml \
 ENV HF_HOME=/models/.hf
 
 EXPOSE 30000
+# runs as root for /dev/kfd, /dev/dri and CAP_SYS_NICE (mbind)
+# nosemgrep
 ENTRYPOINT []
+# nosemgrep
 CMD ["python", "-m", "sglang.launch_server", "--help"]

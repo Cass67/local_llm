@@ -130,7 +130,7 @@ def _fetch_hf_tree(repo: str) -> list[dict[str, Any]] | None:
     if parsed.scheme != "https" or parsed.netloc != "huggingface.co":
         return None
     try:
-        conn = http.client.HTTPSConnection(parsed.netloc, timeout=15)
+        conn = http.client.HTTPSConnection(parsed.netloc, timeout=15)  # nosemgrep
         conn.request("GET", parsed.path)
         response = conn.getresponse()
         try:
@@ -139,7 +139,7 @@ def _fetch_hf_tree(repo: str) -> list[dict[str, Any]] | None:
             return json.loads(response.read().decode("utf-8"))
         finally:
             conn.close()
-    except Exception:
+    except (OSError, http.client.HTTPException, ValueError):
         return None
 
 

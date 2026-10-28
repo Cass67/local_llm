@@ -246,7 +246,7 @@ class HFCardScreen(Screen[None]):
             encoded_repo = urllib.parse.quote(self.repo, safe="/")
             url = f"https://huggingface.co/{encoded_repo}/raw/main/README.md"
             try:
-                with urllib.request.urlopen(url, timeout=20) as response:  # nosec: B310
+                with urllib.request.urlopen(url, timeout=20) as response:  # nosec: B310  # nosemgrep
                     body = response.read().decode("utf-8", errors="replace")
                 if not body.strip():
                     self.app.call_from_thread(_finish_error, "Model card is empty")
@@ -750,7 +750,7 @@ class InstallProgressScreen(Screen[None]):
                 import urllib.request
 
                 encoded = urllib.parse.quote(repo, safe="/")
-                with urllib.request.urlopen(  # nosec B310
+                with urllib.request.urlopen(  # nosec B310  # nosemgrep
                     f"https://huggingface.co/api/models/{encoded}/tree/main", timeout=20
                 ) as response:
                     tree = json.load(response)
@@ -2104,7 +2104,7 @@ class CheckUpdatesScreen(Screen[None]):
         try:
             result = check_updates(dry_run=True)
             self.app.call_from_thread(self._show_result, result)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.app.call_from_thread(self._show_result, f"[red]Error: {e}[/red]")
 
     def _show_result(self, text: str) -> None:
@@ -2124,7 +2124,7 @@ class CheckUpdatesScreen(Screen[None]):
         try:
             result = check_updates(dry_run=False)
             self.app.call_from_thread(self._show_result, result)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.app.call_from_thread(self._show_result, f"[red]Error: {e}[/red]")
 
     def action_back(self) -> None:

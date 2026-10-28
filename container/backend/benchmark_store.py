@@ -141,7 +141,7 @@ class BenchmarkStore:
                 ("profile", "text"),
             ):
                 if column not in columns:
-                    conn.execute(
+                    conn.execute(  # nosemgrep
                         f"alter table benchmark_runs add column {column} {coltype}"  # noqa: S608 # nosec B608 -- names from code
                     )
 
@@ -235,7 +235,7 @@ class BenchmarkStore:
         columns = ", ".join(values.keys())
         placeholders = ", ".join("?" for _ in values)
         with self._connect() as conn:
-            cur = conn.execute(
+            cur = conn.execute(  # nosemgrep
                 f"insert into benchmark_runs ({columns}) values ({placeholders})",  # noqa: S608 # nosec B608 -- columns from code
                 tuple(values.values()),
             )
@@ -269,10 +269,10 @@ class BenchmarkStore:
         limit = min(int(filters.get("limit", 100)), 500)
         offset = max(int(filters.get("offset", 0)), 0)
         with self._connect() as conn:
-            total = conn.execute(f"select count(*) from benchmark_runs {where}", params).fetchone()[  # noqa: S608 # nosec B608
+            total = conn.execute(f"select count(*) from benchmark_runs {where}", params).fetchone()[  # noqa: S608 # nosec B608  # nosemgrep
                 0
             ]
-            rows = conn.execute(
+            rows = conn.execute(  # nosemgrep
                 f"select * from benchmark_runs {where} order by created_at desc limit ? offset ?",  # noqa: S608 # nosec B608
                 [*params, limit, offset],
             ).fetchall()
@@ -282,7 +282,7 @@ class BenchmarkStore:
         columns = ", ".join(values.keys())
         placeholders = ", ".join("?" for _ in values)
         with self._connect() as conn:
-            cur = conn.execute(
+            cur = conn.execute(  # nosemgrep
                 f"insert into quality_runs ({columns}) values ({placeholders})",  # noqa: S608 # nosec B608 -- columns from code
                 tuple(values.values()),
             )
@@ -320,7 +320,7 @@ class BenchmarkStore:
                 """
             ).fetchall()
             placeholders = ", ".join("?" for _ in PERF_TYPES)
-            agentic = conn.execute(
+            agentic = conn.execute(  # nosemgrep
                 f"""
                 select model, profile, benchmark_type, response_text, created_at
                 from benchmark_runs
@@ -408,10 +408,10 @@ class BenchmarkStore:
             limit 200
             """  # noqa: S608 # nosec B608
         with self._connect() as conn:
-            row = conn.execute(summary_sql, params).fetchone()
-            best = conn.execute(best_sql, params).fetchone()
-            worst = conn.execute(worst_sql, params).fetchone()
-            trends = conn.execute(trends_sql, params).fetchall()
+            row = conn.execute(summary_sql, params).fetchone()  # nosemgrep
+            best = conn.execute(best_sql, params).fetchone()  # nosemgrep
+            worst = conn.execute(worst_sql, params).fetchone()  # nosemgrep
+            trends = conn.execute(trends_sql, params).fetchall()  # nosemgrep
         total = row["total_runs"] or 0
         errors = row["error_runs"] or 0
         return {

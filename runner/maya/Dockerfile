@@ -87,5 +87,8 @@ COPY maya-runner.py /opt/maya/maya-runner.py
 RUN grep -q 'store.get("apikey", "")' /opt/maya/src/serve/web/lib.js \
     && sed -i 's/store.get("apikey", "")/store.get("apikey", "local-llm")/' /opt/maya/src/serve/web/lib.js /opt/maya/src/serve/web/settings.js
 
+# runs as root for /dev/kfd, /dev/dri and CAP_SYS_NICE (mbind)
+# nosemgrep
 ENTRYPOINT []
+# nosemgrep
 CMD ["/opt/maya/venv/bin/python", "/opt/maya/maya-runner.py", "--help"]

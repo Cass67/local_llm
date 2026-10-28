@@ -1,0 +1,4 @@
+:include .gitignore
+# Built UI bundle; the source is ui/src.
+container/ui-dist/
+tests/

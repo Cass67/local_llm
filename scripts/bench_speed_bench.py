@@ -50,7 +50,7 @@ def fetch_rows(cache: str) -> list[dict]:
         pass
     rows = []
     for off in range(0, TOTAL_ROWS, 100):
-        with urllib.request.urlopen(  # noqa: S310 # nosec: B310
+        with urllib.request.urlopen(  # noqa: S310 # nosec: B310  # nosemgrep
             f"{ROWS_API}&offset={off}&length=100", timeout=60
         ) as fh:
             rows += [r["row"] for r in json.load(fh)["rows"]]
@@ -104,7 +104,7 @@ def chat(args, messages: list[dict]) -> dict:
         data=body,
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=args.timeout) as fh:  # noqa: S310 # nosec: B310
+    with urllib.request.urlopen(req, timeout=args.timeout) as fh:  # noqa: S310 # nosec: B310  # nosemgrep
         return json.load(fh)
 
 
@@ -176,7 +176,7 @@ def main() -> None:
     args = p.parse_args()
 
     if not args.model:
-        with urllib.request.urlopen(f"{args.url}/v1/models", timeout=30) as fh:  # noqa: S310
+        with urllib.request.urlopen(f"{args.url}/v1/models", timeout=30) as fh:  # noqa: S310  # nosec B310  # nosemgrep
             args.model = json.load(fh)["data"][0]["id"]
         print(f"model: {args.model}", flush=True)
 

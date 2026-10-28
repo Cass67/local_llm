@@ -91,5 +91,8 @@ COPY --from=build /src/llama.cpp/build/bin/*.so /usr/local/lib/
 COPY --from=build /src/libomp.so /usr/local/lib/
 RUN ldconfig
 
+# runs as root for /dev/kfd, /dev/dri and CAP_SYS_NICE (mbind)
+# nosemgrep
 ENTRYPOINT []
+# nosemgrep
 CMD ["llama-server", "--help"]

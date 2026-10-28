@@ -44,7 +44,7 @@ def chat(url: str, messages: list, max_tokens: int, tools: list | None = None) -
         headers={"Content-Type": "application/json"},
     )
     t0 = time.monotonic()
-    with urllib.request.urlopen(req, timeout=3600) as r:  # nosec B310
+    with urllib.request.urlopen(req, timeout=3600) as r:  # nosec B310  # nosemgrep
         resp = json.load(r)
     resp["_wall_s"] = time.monotonic() - t0
     return resp
@@ -74,7 +74,7 @@ def haystack(dirs: list[str], chars: int, seed: int) -> str:
         for p in Path(d).rglob("*")
         if p.suffix in {".md", ".cpp", ".cu", ".py", ".hpp"}
     )
-    random.Random(seed).shuffle(files)
+    random.Random(seed).shuffle(files)  # nosec B311 -- reproducible sampling
     out, n = [], 0
     for p in files:
         t = p.read_text(errors="replace")
@@ -88,7 +88,7 @@ def haystack(dirs: list[str], chars: int, seed: int) -> str:
 def run_niah(a, emit):
     for depth in NIAH_DEPTHS:
         for pos in NIAH_POSITIONS:
-            rng = random.Random(depth * 10 + int(pos * 10))
+            rng = random.Random(depth * 10 + int(pos * 10))  # nosec B311
             keys = {
                 f"project {w}": f"{rng.randrange(100000, 999999)}"
                 for w in ("amber", "basalt", "cobalt", "dune")
@@ -154,7 +154,7 @@ def run_humaneval(a, emit):
             f.write(prog)
         try:
             ok = (
-                subprocess.run([sys.executable, f.name], capture_output=True, timeout=20).returncode
+                subprocess.run([sys.executable, f.name], capture_output=True, timeout=20).returncode  # nosec B603
                 == 0
             )  # nosec B603
         except subprocess.TimeoutExpired:

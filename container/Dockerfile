@@ -48,4 +48,6 @@ ENV LLAMA_CPP_DIR=/llama.cpp
 ENV MODELS_CACHE_DIR=/models
 ENV LLAMA_SERVER_PORT=8080
 
+# mounts docker.sock, so a non-root USER buys nothing
+# nosemgrep
 ENTRYPOINT ["/app/entrypoint.sh"]

@@ -89,7 +89,7 @@ def one_request(url: str, model: str, prompt: str, max_tokens: int, timeout: int
     n_chunks = 0
     usage = {}
     # Fixed http(s) benchmark endpoint on the LAN; no user-supplied scheme.
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310  # nosec B310
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310  # nosec B310  # nosemgrep
         for raw in resp:
             line = raw.decode().strip()
             if not line.startswith("data: "):

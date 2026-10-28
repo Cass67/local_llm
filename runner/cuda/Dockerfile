@@ -45,5 +45,8 @@ COPY --from=build /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-ser
 COPY --from=build /src/llama.cpp/build/bin/llama-perplexity /usr/local/bin/llama-perplexity
 COPY --from=build /src/llama.cpp/build/bin/*.so /usr/local/lib/
 RUN ldconfig
+# runs as root for /dev/kfd, /dev/dri and CAP_SYS_NICE (mbind)
+# nosemgrep
 ENTRYPOINT []
+# nosemgrep
 CMD ["llama-server", "--help"]

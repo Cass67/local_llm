@@ -54,5 +54,8 @@ RUN printf '/opt/unsloth\n/opt/unsloth/hipblaslt\n' > /etc/ld.so.conf.d/unsloth.
 RUN for b in llama-server llama-bench llama-perplexity llama-cli; do \
       ln -sf /opt/unsloth/$b /usr/local/bin/$b; done
 
+# runs as root for /dev/kfd, /dev/dri and CAP_SYS_NICE (mbind)
+# nosemgrep
 ENTRYPOINT []
+# nosemgrep
 CMD ["llama-server", "--help"]

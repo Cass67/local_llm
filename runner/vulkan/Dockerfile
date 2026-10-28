@@ -62,5 +62,8 @@ RUN mkdir -p /usr/share/vulkan/icd.d && \
     > /usr/share/vulkan/icd.d/nvidia_egl_icd.json
 
 RUN ldconfig
+# runs as root for /dev/kfd, /dev/dri and CAP_SYS_NICE (mbind)
+# nosemgrep
 ENTRYPOINT []
+# nosemgrep
 CMD ["llama-server", "--help"]

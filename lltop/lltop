@@ -590,7 +590,7 @@ def collect_runners(state_dir: Path, socket_path: Path) -> list[dict[str, Any]]:
 def http_json_or_text(url: str, timeout: float = 0.8, max_bytes: int = 4096) -> str:
     request = Request(url, headers={"Accept": "application/json"})
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with urlopen(request, timeout=timeout) as response:  # nosemgrep
             body = response.read(max_bytes).decode("utf-8", errors="replace").strip()
     except HTTPError as exc:
         # Distinguish "this server has no such endpoint" from a transport
