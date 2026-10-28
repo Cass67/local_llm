@@ -1,17 +1,18 @@
 diff --git a/src/ds4/ds4_main.cpp b/src/ds4/ds4_main.cpp
-index bc02b3e..3968428 100644
+index c3ab670..43ac916 100644
 --- a/src/ds4/ds4_main.cpp
 +++ b/src/ds4/ds4_main.cpp
-@@ -99,7 +99,7 @@ void usage() {
+@@ -98,7 +98,8 @@ void usage() {
                   "           [--vram-experts F] [--cpu-threads N] [--expert-profile FILE|none] [--no-expert-cache] [--verbose]\n"
                   "           [--tp N] [--threads on|off] [--prefill-chunk N] [--dspark on|off|none] [--dspark-conf F]\n"
                   "           [--suffix-draft N]\n"
--                 "           [--vision on|off] [--mmap-experts on|off|auto]\n"
+-                 "           [--vision on|off] [--mmap-experts on|off|auto] [--parallel N (--serve: N conversations at once)]\n"
 +                 "           [--vision on|off] [--mmap-experts on|off|auto] [--experts N]\n"
++                 "           [--parallel N (--serve: N conversations at once)]\n"
                   "           [--ablate DIRECTION.gguf|ADAPTER.gguf [--ablate-layer N] [--ablate-scale F]]\n"
                   "           (--ids I,J,... [--images FILE] [--n N] [--dump-logits FILE] | --ppl FILE | --serve\n"
                   "           | --encode-image FILE.rgb --size WxH --dump-image OUT)\n");
-@@ -1425,7 +1425,8 @@ int main(int argc, char** argv) {
+@@ -1909,7 +1910,8 @@ int main(int argc, char** argv) {
          else if (a == "--mmap-experts") {
              const std::string v = val("--mmap-experts");
              o.mmap_experts = v == "on" ? 1 : v == "off" ? 0 : -1;
@@ -22,10 +23,10 @@ index bc02b3e..3968428 100644
          else if (a == "--dump-image") enc_out = val("--dump-image");
          else if (a == "--size") {
 diff --git a/src/ds4/ds4_model.cu b/src/ds4/ds4_model.cu
-index 2167ed5..cd5d398 100644
+index cf95dfa..ffedc7a 100644
 --- a/src/ds4/ds4_model.cu
 +++ b/src/ds4/ds4_model.cu
-@@ -3125,6 +3125,10 @@ struct Model::Impl {
+@@ -3174,6 +3174,10 @@ struct Model::Impl {
              l.name = l.mtp ? "mtp." + std::to_string(il - g.nl) + "." : "layers." + std::to_string(il) + ".";
              l.n_exp = l.mtp ? g.d_n_exp : g.n_exp;
              l.k_exp = l.mtp ? g.d_k : g.k_exp;
@@ -37,7 +38,7 @@ index 2167ed5..cd5d398 100644
              if (l.mtp) {   // window attention only: no compressor, indexer or Engram
                  if (l.ratio != 0 || l.n_exp <= 0 || l.k_exp <= 0 || l.k_exp > kPicks) {
 diff --git a/src/ds4/ds4_model.hpp b/src/ds4/ds4_model.hpp
-index f757a98..58272a8 100644
+index 66d82a0..2eb8688 100644
 --- a/src/ds4/ds4_model.hpp
 +++ b/src/ds4/ds4_model.hpp
 @@ -34,6 +34,7 @@ struct Options {

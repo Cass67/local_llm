@@ -1,8 +1,8 @@
 diff --git a/src/ds4/ds4_main.cpp b/src/ds4/ds4_main.cpp
-index 44bcb2e..bc02b3e 100644
+index c3ab670..e441c23 100644
 --- a/src/ds4/ds4_main.cpp
 +++ b/src/ds4/ds4_main.cpp
-@@ -51,6 +51,9 @@
+@@ -53,6 +53,9 @@
  #else
  #include <unistd.h>
  #include <cerrno>
@@ -12,7 +12,7 @@ index 44bcb2e..bc02b3e 100644
  #endif
  
  namespace {
-@@ -1336,6 +1339,17 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
+@@ -1834,6 +1837,17 @@ int check_multi(strata::ds4::Model& m, const std::vector<int>& ids, int n) {
  
  int main(int argc, char** argv) {
      strata::platform::env_aliases();   // (MAYA_* settings under their older names too)
@@ -30,3 +30,32 @@ index 44bcb2e..bc02b3e 100644
      // cuBLAS gives the same bits run after run only with one stream active or with its workspace pinned (its notes on
      // reproducibility): the chunked prompt path's GEMMs run beside the copy and hc streams, and without this each
      // process could pick other kernels - a long prompt's logits differing from one start to the next.  Before any
+diff --git a/src/ds4/ds4_os.hpp b/src/ds4/ds4_os.hpp
+index c61df02..a79748d 100644
+--- a/src/ds4/ds4_os.hpp
++++ b/src/ds4/ds4_os.hpp
+@@ -5,6 +5,8 @@
+ #pragma once
+ 
+ #include <algorithm>
++#include <atomic>
++#include <cerrno>
+ #include <cstdint>
+ #include <cstring>
+ #include <cstdio>
+@@ -417,7 +419,14 @@ inline void* anon_alloc(size_t bytes, int node, int nodes) {
+     if (node >= 0 && nodes > 1) {
+         unsigned long mask[4] = {0, 0, 0, 0};
+         mask[node / 64] = 1ul << (node % 64);
+-        syscall(SYS_mbind, m, bytes, 1 /* MPOL_PREFERRED */, mask, 256, 0);
++        if (syscall(SYS_mbind, m, bytes, 1 /* MPOL_PREFERRED */, mask, 256, 0) != 0) {
++            // (said once: without it the per-node copies land wherever first touch puts them and nothing shows it -
++            //  Docker's default seccomp profile refuses mbind to a container without CAP_SYS_NICE)
++            static std::atomic<bool> said{false};
++            if (!said.exchange(true))
++                std::fprintf(stderr, "ds4: mbind to NUMA node %d failed (%s): the RAM copies do not prefer their node "
++                                     "(a container needs SYS_NICE)\n", node, std::strerror(errno));
++        }
+     }
+     return m;
+ #endif
