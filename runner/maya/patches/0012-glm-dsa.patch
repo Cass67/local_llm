@@ -1,0 +1,2376 @@
+diff --git a/.gitattributes b/.gitattributes
+index 6a91134..0c1ca7a 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -12,6 +12,9 @@ third_party/wheels/** -text
+ data/glm5-synth-dumps/** -text
+ data/glm5-synth.gguf -text
+ data/glm5-synth-dumps12/** -text
++data/glm-dsa-synth-llama-logprobs.npy -text
++data/glm-dsa-synth.gguf -text
++data/glm-dsa-synth-dumps/** -text
+ data/glm5-big-dumps/** -text
+ 
+ # a patch applied at configure time (CMakeLists.txt, the MMQ sources): byte for byte
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a1f2c80..ae6dc53 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -814,6 +814,11 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+   target_link_libraries(glm_model_test PRIVATE ${_strata_gpu_glm_libs} ${_strata_gpu_runtime_target})
+   add_test(NAME glm_model_test COMMAND glm_model_test --selftest)
+   set_tests_properties(glm_model_test PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
++  add_executable(glm_dsa_model_test src/core/glm_dsa_model_test.cpp)
++  target_include_directories(glm_dsa_model_test PRIVATE ${_strata_gpu_include_directories})
++  target_link_libraries(glm_dsa_model_test PRIVATE ${_strata_gpu_glm_libs} ${_strata_gpu_runtime_target})
++  add_test(NAME glm_dsa_model_test COMMAND glm_dsa_model_test --selftest)
++  set_tests_properties(glm_dsa_model_test PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+ 
+   # the 45-layer big fixture: its 1.2 GB GGUF is generated into the build tree by a ctest
+   # fixture (far too large to commit); the f64 expectation IS committed (data/glm5-big-dumps)
+diff --git a/include/strata/core/glm_model.hpp b/include/strata/core/glm_model.hpp
+index a5afaf8..bb4fc82 100644
+--- a/include/strata/core/glm_model.hpp
++++ b/include/strata/core/glm_model.hpp
+@@ -83,7 +83,16 @@ struct Glm5Geometry {
+     float w_scale = 1.0f;
+     int norm_w = 1;
+     float swiglu_exp = 10.0f, swiglu_shexp = 10.0f;
++    // glm-dsa (GLM-5.3, ref/glm_dsa.py): roped MLA (q_pe/k_pe of n_rot dims beside the nope part), a
++    // token indexer (kpool 1, no tail) roped on its first n_rot dims, shared indexer layers reusing the
++    // last full layer's selection, a plain residual (hc 1), no SwiGLU clamps.  idx_ln_eps: the indexer
++    // key's LayerNorm eps (glm5-next uses norm_eps; llama.cpp runs glm-dsa's with 0)
++    bool dsa = false;
++    int n_rot = 0;
++    float rope_base = 10000.0f;
++    float idx_ln_eps = 1e-5f;
+ 
++    int k_mla() const { return qk_nope + n_rot; }      // a q_b head's width: [nope | rope]
+     int d_inner() const { return kda_head_dim * n_head; }
+     int top_pools_max() const { return idx_top_k / idx_kpool; }
+     int n_sel_max() const { return idx_top_k + (idx_select_tail ? idx_kpool - 1 : 0); }
+@@ -323,6 +332,7 @@ private:
+ 
+     // per-layer state offsets, in floats into state_ (-1: the layer has no such state)
+     std::vector<int64_t> kda_S_, kda_conv_, dsa_lat_, dsa_ik_, dsa_ig_, dsa_pool_;
++    std::vector<int64_t> dsa_kpe_;                // glm-dsa: the roped k_pe cache (n_rot per cell)
+ 
+ public:
+     // ---- per-weight serving slots (strata::core::WSlot below): F32 pointers for the
+@@ -570,6 +580,11 @@ public:
+     bool fast_token(int32_t token, std::string& err);
+     bool fast_layers(int64_t p, bool hop_in, std::string& err);
+     bool fast_dsa(int il, int64_t p, std::string& err);     // one DSA mixer (x -> mixer)
++    bool fast_dsa_rope(int il, int64_t p, std::string& err);   // glm-dsa's mixer (roped MLA, token indexer)
++    bool fast_layers_dsa(int64_t p, std::string& err);         // glm-dsa's plain-residual layer loop
++    // the residual's layout: glm5-next's 4 mHC streams, glm-dsa's one (embedding in; output_norm + q8_1 out)
++    void embed_res(const float* emb, float* R, cudaStream_t s) const;
++    void head_res(const float* R, float* x, void* xq, cudaStream_t s) const;
+     bool fast_moe(int il, bool& pf_pending, std::string& err, bool cpu_wait = true);   // one MoE FFN (x -> ffn)
+     bool moe_defer_wait_ = false;                            // (fast_moe's cpu_wait = false: the caller waits)
+     // ... its routed experts, once the router and the shared expert's gate / up have run: the token path's own
+diff --git a/include/strata/kernels/glm_dsa.hpp b/include/strata/kernels/glm_dsa.hpp
+index b945405..958f696 100644
+--- a/include/strata/kernels/glm_dsa.hpp
++++ b/include/strata/kernels/glm_dsa.hpp
+@@ -60,4 +60,11 @@ void glm_mla_attention(const float* q_abs, const float* latents, const int* cell
+                        int kv_lora, int n_head, int v_head, int qk_nope, int T, int n_sel, float* out,
+                        void* stream);
+ 
++/// The same with glm-dsa's (GLM-5.3) rope part: each score gains q_pe_h . k_pe_cell and the scale
++/// becomes 1/sqrt(qk_nope + n_rot).  q_pe holds head h of token t at q_pe + q_pe_stride*(h + n_head*t)
++/// (the roped tail of the q_b projection); k_pe is the cache, n_rot floats per cell.
++void glm_mla_attention_pe(const float* q_abs, const float* q_pe, int q_pe_stride, const float* latents,
++                          const float* k_pe, int n_rot, const int* cells, const float* wv_b, int kv_lora,
++                          int n_head, int v_head, int qk_nope, int T, int n_sel, float* out, void* stream);
++
+ }  // namespace strata::kernels
+diff --git a/include/strata/kernels/glm_fast.hpp b/include/strata/kernels/glm_fast.hpp
+index c83d4c2..14b8e9e 100644
+--- a/include/strata/kernels/glm_fast.hpp
++++ b/include/strata/kernels/glm_fast.hpp
+@@ -18,6 +18,8 @@
+ namespace strata::kernels::glmf {
+ 
+ constexpr int kTypeF32 = 0;
++/// The widest n_embd the routing structs below carry (GLM-5.3-Flash 4096, GLM-5.3 6144).
++constexpr int kMaxEmbd = 8192;
+ constexpr int kTypeBF16 = 30;
+ 
+ /// y[r] = alpha * (W_r . x) + (bias ? bias[r] : 0) for r in [0, n_out).  Quantized types read
+@@ -309,7 +311,7 @@ struct MoeDev {
+ struct CpuAnswer {
+     volatile unsigned int seq;
+     unsigned int pad[3];
+-    float part[4096];
++    float part[kMaxEmbd];
+ };
+ constexpr int kRingSize = 64;
+ /// LOOKAHEAD: a route may also carry the top-k of the next (up to) kAhead layers' routers applied to its FFN input.
+@@ -338,7 +340,7 @@ struct MoeRequest {
+     int win_n;                   // a batched verify window's tokens (0: not one): their CPU lanes may run at once
+     int win_rows;                // ... a batched rows step's group instead (STRATA_GLM_GROUP_EXPERTS): win the row,
+     int pad_;                    //     win_n the rows; their CPU lanes merged on this part's own pool
+-    float x[4096];               // the FFN input, written only when cpu_mask != 0
++    float x[kMaxEmbd];           // the FFN input, written only when cpu_mask != 0
+ };
+ /// The host's answer to a request with misses.
+ struct MoeResponse {
+@@ -349,7 +351,7 @@ struct MoeResponse {
+     int upd_key[64];
+     unsigned long long upd_val[64];
+     int cpu;                          // 1: cpu_part (host-mapped, below) holds the missed experts' weighted sum
+-    float cpu_part[4096];
++    float cpu_part[kMaxEmbd];
+ };
+ /// Router (sigmoid + bias, stable top-k, normalised weights - router_sigmoid's arithmetic), the plan
+ /// lookup in `tab`, the request publish, and the shared expert's swiglu + q8_1.
+@@ -443,13 +445,37 @@ bool rows_experts(int gu_type, int d_type, const uint8_t* base, size_t stride, s
+                   const int* row_tok, const float* x, int n_tok, int n_embd, int n_ff, float limit, int rlo, int rhi,
+                   void* xq_scratch, void* hq_scratch, float* out, int ld, cudaStream_t s);
+ 
++/// glm-dsa (GLM-5.3, ref/glm_dsa.py), after the first projections, at position p: qr = rms(qr_raw) * q_a_norm (+ q8_1),
++/// the latent rms(kv_raw[:kv_lora]) * kv_norm into the FP16 cache row p, k_pe = rope(kv_raw[kv_lora:]) (NOT normed) into
++/// the F32 cache row p, and - ik_raw non-null, a full indexer layer - the indexer key layer_norm(ik_raw) * w + b (eps
++/// ln_eps), roped on its first n_rot dims, into the F32 key cache row p (a token is its own pool).
++struct DsaRopePrepArgs {
++    const float* qr_raw = nullptr; const float* q_a_norm = nullptr; float* qr = nullptr; void* qr_q = nullptr;
++    int q_lora = 2048;
++    const float* kv_raw = nullptr; const float* kv_norm = nullptr; uint16_t* lat = nullptr; float* kpe = nullptr;
++    int kv_lora = 512, n_rot = 64;
++    const float* ik_raw = nullptr; const float* k_norm_w = nullptr; const float* k_norm_b = nullptr; float* ik = nullptr;
++    int idx_key = 128;
++    int p = 0;
++    float base = 8000000.0f, eps = 1e-5f, ln_eps = 0.0f;
++};
++void dsa_rope_prep(const DsaRopePrepArgs& a, cudaStream_t s);
++/// ggml rope NORM on the first n_rot floats of n_head heads (head h at x + stride * h), at position pos.
++void rope_heads(float* x, int n_rot, int stride, int n_head, int pos, float base, cudaStream_t s);
++/// glm-dsa's absorbed MLA for one token: q heads of [nope (qk_nope) | rope (n_rot)] k_mla apart; scores q_abs . latent +
++/// q_pe . k_pe over the cells (nullptr: every position 0 .. n_sel-1, the dense NextN block), / sqrt(qk_nope + n_rot);
++/// out_h = wv_b_h . ctx as q8_1.  scratch: n_head x (kv_lora + v_head).
++void mla_pe(const float* q, int k_mla, int qk_nope, int n_rot, const uint16_t* wk_b, const uint16_t* wv_b,
++            const uint16_t* lat, const float* kpe, const int* cells, int n_sel, int n_head, int kv_lora, int v_head,
++            float* scratch, void* out_q8_1, cudaStream_t s);
++
+ /// tab[keys[i]] = vals[i] for i < n (the expert-table edits the host queues between tokens).
+ void tab_update(unsigned long long* tab, const int* keys, const unsigned long long* vals, int n, cudaStream_t s);
+ 
+-/// The NextN block's input: cat = [rms(emb) * enorm, rms(h) * hnorm] (2 n values) as q8_1.  n <= 4096.
++/// The NextN block's input: cat = [rms(emb) * enorm, rms(h) * hnorm] (2 n values) as q8_1.  n <= 8192.
+ void mtp_in(const float* emb, const float* h, const float* enorm, const float* hnorm, float eps, int n, void* cat_q8_1,
+             cudaStream_t s);
+-/// h += add (add may be null), then x = rms(h) * w and its q8_1 (a plain pre-norm residual step).  n <= 4096.
++/// h += add (add may be null), then x = rms(h) * w and its q8_1 (a plain pre-norm residual step).  n <= 8192.
+ void rms_q8(float* h, const float* add, const float* w, float eps, int n, float* x, void* xq, cudaStream_t s);
+ 
+ /// A chained draft's embedding: out = row *tok (a device int) of token_embd on the device (n_rows rows of type 14 =
+diff --git a/ref/glm_dsa.py b/ref/glm_dsa.py
+new file mode 100644
+index 0000000..9d56db3
+--- /dev/null
++++ b/ref/glm_dsa.py
+@@ -0,0 +1,364 @@
++"""ref/glm_dsa.py - the glm-dsa (GLM-5.3, 744B) reference forward pass, one op at a time.
++
++Phase 1 of the GLM-5.3 port: the specification the engine's glm-dsa kernels are parity-tested
++against.  It is written from llama.cpp's `src/models/glm-dsa.cpp` (the graph unsloth's GGUFs run
++on) with the released config's values as defaults, and keeps `ref/glm.py`'s conventions - and
++its ggml primitives - so seams compare op by op:
++
++  * activations are (features, tokens); weights come from `ref/load.py` as (out, in), y = W @ x;
++  * every intermediate the engine needs as a parity seam is recorded by `cb()` under the name
++    llama.cpp's `cb()` uses for the same node.
++
++What differs from glm5-next (GLM-5.3-Flash, `ref/glm.py`):
++
++  * a plain pre-norm residual (no mHC streams), no KDA layers, no SwiGLU clamps;
++  * ROPED MLA: q splits into qk_nope (absorbed through wk_b into the latent) and qk_rope;
++    kv_a_mqa yields [latent | k_pe]; the score is q_abs . latent + q_pe . k_pe, scaled by
++    1/sqrt(qk_nope + qk_rope); V is the normed latent, expanded through wv_b after the softmax;
++  * the lightning indexer scores TOKENS (no k-pool): q from the normed q_a, k from
++    layer_norm(attn_k @ x), both roped on their first n_rot dims ([rope | nope] layout) and
++    rotated by an orthonormal Walsh-Hadamard matrix, score[t, j] = sum_h relu(q_h . k_j) * w_h
++    over visible j <= t, w prescaled by 1/sqrt(key_dim * n_head), top_k tokens selected;
++  * SHARED indexer layers (indexer types 0) reuse the previous full layer's selection;
++  * rope is ggml's NORM type (adjacent pairs), theta stepped in f32 like ggml's rope cache.
++
++The selection feeds the attention as an unmask: cells not in the top_k are -inf, then the causal
++mask applies - so while t + 1 <= top_k every visible token is attended (llama-graph.cpp
++build_attn_mha's kq_mask_top_k).
++
++The NextN (MTP) block is not part of the trunk and is not implemented here.
++
++Usage:
++    python ref/glm_dsa.py MODEL.gguf [--tokens 1,2,3] [--dump-dir DIR]
++"""
++from __future__ import annotations
++
++import argparse
++import pathlib
++import sys
++
++import numpy as np
++
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
++
++from glm import COVER, F32, layer_norm, rms_norm, sigmoid, silu, split_heads, top_k_desc  # noqa: E402
++from load import Gguf  # noqa: E402
++
++# llama.cpp's built-in indexer pattern for GLM >= 5.2 GGUFs without attention.indexer.types
++# (glm-dsa.cpp GLM_5_2_DEFAULT_INDEXER_TYPES): layers 0 and 1, then every 4th from 2 are full
++GLM_5_2_INDEXER_TYPES = [1, 1] + [1, 0, 0, 0] * 19
++
++
++class GlmDsaConfig:
++    """Every number a kernel depends on, from the GGUF metadata (glm-dsa.* keys) with the released
++    GLM-5.3 values as defaults."""
++
++    def __init__(self, meta: dict):
++        def u(key: str, default):
++            v = meta.get("glm-dsa." + key)
++            return default if v is None else v
++
++        self.n_embd = int(u("embedding_length", 6144))
++        self.n_nextn = int(u("nextn_predict_layers", 0))
++        self.n_layers = int(u("block_count", 79)) - self.n_nextn     # the trunk; NextN blocks follow it
++        self.n_head = int(u("attention.head_count", 64))
++        self.n_head_k_mla = int(u("attention.key_length_mla", 256))
++        self.n_head_v_mla = int(u("attention.value_length_mla", 256))
++        self.n_rot = int(u("rope.dimension_count", 64))
++        self.qk_nope = self.n_head_k_mla - self.n_rot
++        self.q_lora_rank = int(u("attention.q_lora_rank", 2048))
++        self.kv_lora_rank = int(u("attention.kv_lora_rank", 512))
++        _kl = u("attention.key_length", None)
++        if _kl is not None and int(_kl) != self.kv_lora_rank + self.n_rot:
++            raise ValueError(f"attention.key_length {int(_kl)} != kv_lora_rank + n_rot "
++                             f"{self.kv_lora_rank + self.n_rot}")
++        self.rope_freq_base = float(u("rope.freq_base", 8000000.0))
++        scaling = u("rope.scaling.type", None)
++        if scaling not in (None, "none") or float(u("rope.scaling.factor", 1.0)) != 1.0:
++            raise NotImplementedError("rope scaling (YaRN) is not implemented; GLM-5.3 ships without it")
++
++        self.n_expert = int(u("expert_count", 256))
++        self.n_expert_used = int(u("expert_used_count", 8))
++        self.n_ff_exp = int(u("expert_feed_forward_length", 2048))
++        self.n_expert_shared = int(u("expert_shared_count", 1))
++        self.n_layer_dense_lead = int(u("leading_dense_block_count", 3))
++        self.n_ff = int(u("feed_forward_length", 12288))
++        self.expert_weights_scale = float(u("expert_weights_scale", 2.5))
++        self.expert_weights_norm = bool(u("expert_weights_norm", True))
++        if int(u("expert_gating_func", 2)) != 2:
++            raise NotImplementedError("glm-dsa routes with sigmoid gating (expert_gating_func 2)")
++
++        self.idx_n_head = int(u("attention.indexer.head_count", 32))
++        self.idx_key_dim = int(u("attention.indexer.key_length", 128))
++        self.idx_top_k = int(u("attention.indexer.top_k", 2048))
++        if self.n_rot > self.idx_key_dim or self.idx_key_dim & (self.idx_key_dim - 1):
++            raise ValueError(f"indexer key_length {self.idx_key_dim}: must be a power of 2 >= n_rot")
++        idx_types = u("attention.indexer.types", None)
++        if idx_types is None:
++            # llama.cpp's fallback: GLM 5 / 5.1 (context < 1M) index every layer, 5.2+ the pattern
++            idx_types = ([1] * self.n_layers if int(u("context_length", 1048576)) < 1048576
++                         else GLM_5_2_INDEXER_TYPES[:self.n_layers])
++        self.idx_full = [bool(int(x)) for x in idx_types][:self.n_layers]
++        if not self.idx_full[0]:
++            raise ValueError("indexer types: layer 0 must be a full indexer (nothing to share)")
++
++        self.norm_rms_eps = float(u("attention.layer_norm_rms_epsilon", 1e-5))
++        # the indexer key's LayerNorm: glm-dsa never reads layer_norm_epsilon and llama_hparams is
++        # value-initialized, so llama.cpp runs it with eps 0 - matched here unless the key is present
++        self.norm_eps = float(u("attention.layer_norm_epsilon", 0.0))
++
++
++def rope_norm(x: np.ndarray, pos: np.ndarray, n_rot: int, base: float) -> np.ndarray:
++    """ggml_rope_ext, LLAMA_ROPE_TYPE_NORM, no YaRN (ext_factor 0, attn_factor 1): adjacent pairs
++    (2i, 2i+1) of the first n_rot features rotate by pos * base^(-2i/n_rot); the rest pass through.
++    theta is stepped like ggml's rope cache - theta *= base^(-2/n_rot) in f32 - so long positions
++    round the same way.  x is (dim, ..., T); pos is (T,)."""
++    out = x.astype(F32, copy=True)
++    theta_scale = np.float32(base) ** np.float32(-2.0 / n_rot)
++    theta = pos.astype(F32)
++    for i in range(0, n_rot, 2):
++        c = np.cos(theta).astype(F32)
++        s = np.sin(theta).astype(F32)
++        x0, x1 = x[i], x[i + 1]
++        out[i] = x0 * c - x1 * s
++        out[i + 1] = x0 * s + x1 * c
++        theta = (theta * theta_scale).astype(F32)
++    return out
++
++
++def hadamard(n: int) -> np.ndarray:
++    """llama-kv-cache.cpp's ggml_gen_hadamard: the orthonormal Sylvester Walsh-Hadamard matrix
++    (H @ H == I).  Orthonormal, so it leaves every q . k unchanged - it exists for a quantized
++    indexer-key cache, and the reference applies it so its seams match llama.cpp's."""
++    h = np.array([[1.0]])
++    while h.shape[0] < n:
++        h = np.block([[h, h], [h, -h]])
++    return (h / np.sqrt(n)).astype(F32)
++
++
++class GlmDsa:
++    def __init__(self, path: str | pathlib.Path):
++        self.g = Gguf(str(path))
++        self.cfg = GlmDsaConfig(self.g.g.metadata)
++        self.dumps: dict[str, np.ndarray] = {}
++        self.hada = hadamard(self.cfg.idx_key_dim)
++
++    def t(self, name: str) -> np.ndarray:
++        return self.g.tensor(name).astype(F32)
++
++    def layer_t(self, il: int, base: str, suffix: str = "weight") -> np.ndarray:
++        return self.t(f"blk.{il}.{base}.{suffix}")
++
++    def cb(self, name: str, x: np.ndarray, il: int = -1) -> None:
++        self.dumps[f"{name}-{il}" if il >= 0 else name] = np.array(x, copy=True)
++
++    # ================================ the lightning indexer ================================
++
++    def indexer(self, cur: np.ndarray, qr: np.ndarray, pos: np.ndarray, il: int) -> list[np.ndarray]:
++        """A full indexer layer: per query t, the selected key positions (descending score), or
++        every visible position while t + 1 <= top_k."""
++        c = self.cfg
++        T = cur.shape[1]
++        iq = split_heads(self.layer_t(il, "indexer.attn_q_b") @ qr, c.idx_key_dim, c.idx_n_head)
++        iq = rope_norm(iq, pos, c.n_rot, c.rope_freq_base)
++        ik = layer_norm(self.layer_t(il, "indexer.attn_k") @ cur, self.layer_t(il, "indexer.k_norm"),
++                        self.layer_t(il, "indexer.k_norm", "bias"), c.norm_eps)
++        ik = rope_norm(ik, pos, c.n_rot, c.rope_freq_base)
++        iq = np.einsum("ij,jht->iht", self.hada, iq).astype(F32)
++        ik = (self.hada @ ik).astype(F32)
++        self.cb("indexer_q", iq, il)
++        self.cb("indexer_k", ik, il)
++
++        weights = (self.layer_t(il, "indexer.proj") @ cur) / F32(np.sqrt(c.idx_key_dim * c.idx_n_head))
++        self.cb("indexer_weights", weights, il)
++        kq = np.einsum("eht,ej->htj", iq.astype(np.float64), ik.astype(np.float64))
++        score = (np.maximum(kq, 0.0) * weights[:, :, None].astype(np.float64)).sum(axis=0)   # (T, T)
++        score[np.triu_indices(T, 1)] = -np.inf
++        self.cb("indexer_score", score.T, il)
++
++        sel = []
++        for t in range(T):
++            if t + 1 <= c.idx_top_k:
++                sel.append(np.arange(t + 1, dtype=np.int64))
++                continue
++            row = score[t, :t + 1]
++            s = top_k_desc(row, c.idx_top_k)
++            sel.append(s)
++            COVER["dsa_topk_discard_queries"] += 1
++            ordered = np.sort(row)[::-1]
++            COVER["dsa_topk_near_ties"] += int(ordered[c.idx_top_k - 1] - ordered[c.idx_top_k] < 1e-6)
++        return sel
++
++    # ================================ roped MLA ================================
++
++    def attention(self, cur: np.ndarray, pos: np.ndarray, il: int, prev_sel):
++        """build_attn with the indexer's selection.  Returns ((n_embd, T), the selection used)."""
++        c = self.cfg
++        T = cur.shape[1]
++        qr = rms_norm(self.layer_t(il, "attn_q_a") @ cur, self.layer_t(il, "attn_q_a_norm"), c.norm_rms_eps)
++        self.cb("qr", qr, il)
++
++        if c.idx_full[il]:
++            sel = self.indexer(cur, qr, pos, il)
++        else:
++            sel = prev_sel
++            COVER["dsa_shared_indexer_layers"] += 1
++        self.dumps[f"top_k-{il}"] = [s.copy() for s in sel]
++
++        q = split_heads(self.layer_t(il, "attn_q_b") @ qr, c.n_head_k_mla, c.n_head)   # (k_mla, n_head, T)
++        q_nope, q_pe = q[:c.qk_nope], q[c.qk_nope:]
++        q_pe = rope_norm(q_pe, pos, c.n_rot, c.rope_freq_base)
++        self.cb("q_pe", q_pe, il)
++
++        kv_cmpr_pe = self.layer_t(il, "attn_kv_a_mqa") @ cur                            # (kv_lora + rope, T)
++        k_pe = rope_norm(kv_cmpr_pe[c.kv_lora_rank:], pos, c.n_rot, c.rope_freq_base)  # NOT normed
++        kv_cmpr = rms_norm(kv_cmpr_pe[:c.kv_lora_rank], self.layer_t(il, "attn_kv_a_norm"), c.norm_rms_eps)
++        self.cb("k_pe", k_pe, il)
++        self.cb("kv_cmpr", kv_cmpr, il)
++
++        wk_b = self.layer_t(il, "attn_k_b")                      # (n_head, kv_lora, qk_nope)
++        q_abs = np.einsum("hln,nht->lht", wk_b, q_nope).astype(F32)
++        self.cb("q_nope_absorbed", q_abs, il)
++
++        wv_b = self.layer_t(il, "attn_v_b")                      # (n_head, v_head, kv_lora)
++        kq_scale = 1.0 / np.sqrt(c.n_head_k_mla)
++        out = np.zeros((c.n_head * c.n_head_v_mla, T), dtype=F32)
++        for t in range(T):
++            cells = sel[t]
++            lat = kv_cmpr[:, cells].astype(np.float64)           # (kv_lora, n_sel)
++            s = (q_abs[:, :, t].astype(np.float64).T @ lat
++                 + q_pe[:, :, t].astype(np.float64).T @ k_pe[:, cells].astype(np.float64)) * kq_scale
++            p = np.exp(s - s.max(axis=1, keepdims=True))
++            p = p / p.sum(axis=1, keepdims=True)                 # (n_head, n_sel)
++            ctx = lat @ p.T                                      # (kv_lora, n_head)
++            oh = np.einsum("hvl,lh->vh", wv_b.astype(np.float64), ctx)
++            out[:, t] = oh.T.reshape(-1).astype(F32)
++        self.cb("kqv_out", out, il)
++        attn = self.layer_t(il, "attn_output") @ out
++        self.cb("attn_out", attn, il)
++        return attn, sel
++
++    # ================================ the FFNs ================================
++
++    def dense_ffn(self, cur: np.ndarray, il: int, kind: str = "") -> np.ndarray:
++        gate = self.layer_t(il, f"ffn_gate{kind}") @ cur
++        up = self.layer_t(il, f"ffn_up{kind}") @ cur
++        return (self.layer_t(il, f"ffn_down{kind}") @ (silu(gate) * up)).astype(F32)
++
++    def moe_ffn(self, cur: np.ndarray, il: int) -> np.ndarray:
++        """build_moe_ffn: sigmoid probs (unbiased, the weights), + exp_probs_b for the top-k
++        selection only, renormalized (clamp 2**-14), x expert_weights_scale; plus the shared expert.
++        Experts are dequantized one at a time (ref/load.py's lazy path), so the real model runs."""
++        c = self.cfg
++        logits = self.layer_t(il, "ffn_gate_inp") @ cur
++        probs = sigmoid(logits)
++        sel_scores = probs + self.layer_t(il, "exp_probs_b", "bias")[:, None]
++        self.cb("ffn_moe_probs", probs, il)
++
++        T = cur.shape[1]
++        sel_all = np.empty((c.n_expert_used, T), dtype=np.int64)
++        w_all = np.empty((c.n_expert_used, T), dtype=F32)
++        for t in range(T):
++            sel = top_k_desc(sel_scores[:, t], c.n_expert_used)
++            w = probs[sel, t]
++            if c.expert_weights_norm:
++                w = w / max(float(w.sum()), 6.103515625e-5)
++            ordered = np.sort(sel_scores[:, t])[::-1]
++            COVER["moe_selection_near_ties"] += int(
++                ordered[c.n_expert_used - 1] - ordered[c.n_expert_used] < 1e-4)
++            sel_all[:, t] = sel
++            w_all[:, t] = (w * F32(c.expert_weights_scale)).astype(F32)
++
++        moe = np.zeros((c.n_embd, T), dtype=np.float64)
++        for e in np.unique(sel_all):
++            gate = self.g.expert(f"blk.{il}.ffn_gate_exps.weight", int(e))
++            up = self.g.expert(f"blk.{il}.ffn_up_exps.weight", int(e))
++            down = self.g.expert(f"blk.{il}.ffn_down_exps.weight", int(e))
++            rows, toks = np.nonzero(sel_all == e)
++            x = cur[:, toks]
++            y = down @ (silu(gate @ x) * (up @ x))
++            moe[:, toks] += y * w_all[rows, toks][None, :]
++        moe = moe.astype(F32)
++        self.dumps[f"ffn_moe_topk-{il}"] = sel_all
++        self.dumps[f"ffn_moe_weights-{il}"] = w_all
++        self.cb("ffn_moe_out", moe, il)
++        shexp = self.dense_ffn(cur, il, "_shexp")
++        self.cb("ffn_shexp", shexp, il)
++        return (moe + shexp).astype(F32)
++
++    # ================================ the trunk ================================
++
++    def forward(self, tokens: list[int]) -> np.ndarray:
++        """One teacher-forced pass from position 0; returns (vocab, T) float32 logits."""
++        c = self.cfg
++        x = self.g.rows("token_embd.weight", tokens).T.astype(F32)    # (n_embd, T)
++        pos = np.arange(len(tokens), dtype=np.int64)
++        prev_sel = None
++        for il in range(c.n_layers):
++            cur = rms_norm(x, self.layer_t(il, "attn_norm"), c.norm_rms_eps)
++            self.cb("attn_norm", cur, il)
++            attn, prev_sel = self.attention(cur, pos, il, prev_sel)
++            x = (x + attn).astype(F32)
++            self.cb("ffn_inp", x, il)
++            cur = rms_norm(x, self.layer_t(il, "ffn_norm"), c.norm_rms_eps)
++            cur = self.dense_ffn(cur, il) if il < c.n_layer_dense_lead else self.moe_ffn(cur, il)
++            self.cb("ffn_out", cur, il)
++            x = (x + cur).astype(F32)
++            self.cb("l_out", x, il)
++        cur = rms_norm(x, self.t("output_norm.weight"), c.norm_rms_eps)
++        self.cb("result_norm", cur)
++        logits = self.t("output.weight") @ cur
++        self.cb("result_output", logits)
++        return logits
++
++
++def main() -> int:
++    ap = argparse.ArgumentParser(description="glm-dsa reference forward pass")
++    ap.add_argument("model", help="a glm-dsa GGUF (real, any shard, or tools/glm_dsa_synth_gguf.py's)")
++    ap.add_argument("--tokens", default="1,2,3,4,5,6,7,8", help="comma-separated token ids")
++    ap.add_argument("--dump-dir", default=None, help="write every cb() seam here as .npy")
++    ap.add_argument("--logits-out", default=None, help="write the (T, vocab) f32 logits here (.npy)")
++    ap.add_argument("--dump-raw-dir", default=None,
++                    help="write every array seam as raw ggml-order f32 (+ manifest.txt), like ref/glm.py")
++    args = ap.parse_args()
++
++    m = GlmDsa(args.model)
++    c = m.cfg
++    print(f"glm-dsa: n_embd {c.n_embd}, layers {c.n_layers} ({sum(c.idx_full)} full indexers), "
++          f"heads {c.n_head} mla {c.qk_nope}+{c.n_rot}/v {c.n_head_v_mla} kv {c.kv_lora_rank}, "
++          f"experts {c.n_expert} x top{c.n_expert_used}, indexer {c.idx_n_head}x{c.idx_key_dim} "
++          f"top {c.idx_top_k}")
++    tokens = [int(x) for x in args.tokens.split(",")]
++    logits = m.forward(tokens)
++    if not np.isfinite(logits).all():
++        print("glm_dsa.py: NON-FINITE LOGITS")
++        return 1
++    print(f"logits {logits.shape}: mean {logits.mean():.6f} std {logits.std():.6f} "
++          f"argmax per token: {[int(i) for i in logits.argmax(axis=0)]}")
++    if args.logits_out:
++        np.save(args.logits_out, np.ascontiguousarray(logits.T))
++    if args.dump_dir:
++        d = pathlib.Path(args.dump_dir)
++        d.mkdir(parents=True, exist_ok=True)
++        for name, arr in m.dumps.items():
++            if isinstance(arr, np.ndarray):
++                np.save(d / f"{name}.npy", arr)
++        print(f"dumps -> {d}")
++    if args.dump_raw_dir:
++        # ggml layout (features fastest): the numpy axes fully reversed, the manifest carries the reversed shape
++        d = pathlib.Path(args.dump_raw_dir)
++        d.mkdir(parents=True, exist_ok=True)
++        lines = []
++        for name, arr in m.dumps.items():
++            if not isinstance(arr, np.ndarray):
++                continue
++            rev = np.ascontiguousarray(arr.transpose(tuple(range(arr.ndim - 1, -1, -1))))
++            rev.astype(np.int32 if arr.dtype == np.int64 else F32).tofile(d / f"{name}.f32")
++            lines.append(f"{name} {' '.join(str(x) for x in reversed(arr.shape))}")
++        (d / "manifest.txt").write_text("\n".join(lines) + "\n")
++        print(f"raw dumps -> {d}")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/ref/load.py b/ref/load.py
+index ace410f..747df31 100644
+--- a/ref/load.py
++++ b/ref/load.py
+@@ -24,19 +24,9 @@ import sys
+ import numpy as np
+ 
+ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "tools"))
+-from gguf_reader import GGUFFile                     # noqa: E402
++from gguf_reader import BLOCK_GEOMETRY as GEOM, GGUFFile   # noqa: E402
+ from gguf_writer import dequantize_q2_0              # noqa: E402
+ 
+-# gguf-py names differ from our reader's names in a few places; map only what differs.
+-_GGUF_PY_NAME = {"Q4_0": "Q4_0", "Q8_0": "Q8_0", "Q4_K": "Q4_K", "Q5_K": "Q5_K", "Q6_K": "Q6_K",
+-                 "Q3_K": "Q3_K", "IQ4_NL": "IQ4_NL", "IQ4_XS": "IQ4_XS", "Q5_0": "Q5_0"}
+-
+-# (elements per block, bytes per block) - mirrors block_geometry() in src/artifact/gguf_reader.cpp
+-GEOM = {"F32": (1, 4), "F16": (1, 2), "BF16": (1, 2),
+-        "Q4_0": (32, 18), "Q5_0": (32, 22), "Q8_0": (32, 34), "IQ4_NL": (32, 18),
+-        "Q3_K": (256, 110), "Q4_K": (256, 144), "Q5_K": (256, 176), "Q6_K": (256, 210),
+-        "IQ4_XS": (256, 136), "Q2_0": (64, 18)}
+-
+ 
+ def _dequant_flat(type_name: str, raw: np.ndarray) -> np.ndarray:
+     """One dequantization dispatch, shared by tensor()/expert()/rows().
+@@ -54,7 +44,7 @@ def _dequant_flat(type_name: str, raw: np.ndarray) -> np.ndarray:
+     if type_name == "F16":
+         return raw.view(np.float16).astype(np.float32)
+     from gguf import quants, GGMLQuantizationType as Q
+-    return quants.dequantize(raw, Q[_GGUF_PY_NAME[type_name]]).astype(np.float32)
++    return quants.dequantize(raw, Q[type_name]).astype(np.float32)
+ 
+ 
+ def _bf16_to_f32(raw: np.ndarray) -> np.ndarray:
+diff --git a/src/core/glm_dsa_model_test.cpp b/src/core/glm_dsa_model_test.cpp
+new file mode 100644
+index 0000000..2a3d0c0
+--- /dev/null
++++ b/src/core/glm_dsa_model_test.cpp
+@@ -0,0 +1,120 @@
++// src/core/glm_dsa_model_test.cpp - the glm-dsa (GLM-5.3) runner vs ref/glm_dsa.py on the synthetic model.
++//
++// data/glm-dsa-synth.gguf (tools/glm_dsa_synth_gguf.py, seed 4321) and data/glm-dsa-synth-dumps (ref/glm_dsa.py
++// --dump-raw-dir over TOKENS; the oracle itself matches llama.cpp, tools/test_glm_dsa_oracle.py).  24 tokens
++// against an indexer top_k of 8, so from position 8 on the selection discards keys, and layers 2, 4 and 5 reuse
++// the previous full layer's selection.  Two gates:
++//
++//   1. EVERY PREFIX: each prefix its own sequence (reset first); its last logits within f32 tolerance of the
++//      oracle's column, and the same argmax.
++//   2. STREAMING: one token per call on a persistent state reproduces the batched call's logits.
++#include "strata/core/glm_model.hpp"
++
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <string>
++#include <vector>
++
++namespace {
++
++void require(bool ok, const std::string& what) {
++    if (!ok) {
++        std::fprintf(stderr, "glm_dsa_model_test: %s\n", what.c_str());
++        std::exit(1);
++    }
++}
++
++double max_abs(const float* a, const float* b, size_t n) {
++    double m = 0.0;
++    for (size_t i = 0; i < n; ++i) m = std::max(m, (double) std::fabs(a[i] - b[i]));
++    return m;
++}
++
++size_t argmax(const float* v, size_t n) { return (size_t) (std::max_element(v, v + n) - v); }
++
++}  // namespace
++
++// --pack DIR IDS OUT: a REAL pack (MAYA_GLM_SLOW=1) fed the comma-separated token ids one at a time; every
++// position's logits (n_vocab f32) appended to OUT - for the real-model check against ref/glm_dsa.py and llama.cpp
++static int probe_pack(const std::string& dir, const std::string& ids, const std::string& out) {
++    std::vector<int32_t> tokens;
++    for (size_t at = 0; at < ids.size();) {
++        const size_t c = ids.find(',', at);
++        tokens.push_back((int32_t) std::stol(ids.substr(at, c - at)));
++        at = c == std::string::npos ? ids.size() : c + 1;
++    }
++    strata::core::Glm5Model model;
++    std::string err;
++    const bool loaded = model.load_pack_env(dir, 256, err);   // (before the message: argument order is unspecified)
++    require(loaded, "load_pack: " + err);
++    FILE* f = std::fopen(out.c_str(), "wb");
++    require(f != nullptr, "cannot write " + out);
++    for (int32_t tok : tokens) {
++        std::vector<float> lg;
++        const bool ok = model.forward({tok}, lg, err);
++        require(ok, "forward: " + err);
++        std::fwrite(lg.data(), sizeof(float), lg.size(), f);
++        std::printf("pos %lld token %d argmax %zu\n", (long long) model.position() - 1, tok, argmax(lg.data(), lg.size()));
++        std::fflush(stdout);
++    }
++    std::fclose(f);
++    return 0;
++}
++
++int main(int argc, char** argv) {
++    if (argc == 5 && std::string(argv[1]) == "--pack") return probe_pack(argv[2], argv[3], argv[4]);
++    if (argc < 2 || std::string(argv[1]) != "--selftest") {
++        std::fprintf(stderr, "glm_dsa_model_test: run with --selftest (the CTest form)\n");
++        return 2;
++    }
++    const std::string gguf = argc > 2 ? argv[2] : "data/glm-dsa-synth.gguf";
++    const std::string dumps = argc > 3 ? argv[3] : "data/glm-dsa-synth-dumps";
++    std::vector<int32_t> tokens;
++    for (int i = 1; i <= 24; ++i) tokens.push_back(i * 7 % 512);   // TOKENS in tools/test_glm_dsa_oracle.py
++
++    strata::core::Glm5Model model;
++    std::string err;
++    const bool loaded = model.load(gguf, 64, err);
++    require(loaded, "load: " + err);
++    require(model.geometry().dsa, "the synthetic did not load as glm-dsa");
++    const size_t V = (size_t) model.geometry().n_vocab;
++    const size_t T = tokens.size();
++
++    std::vector<float> oracle(V * T);   // (vocab, T) ggml order: element (v, t) at v + V*t
++    FILE* f = std::fopen((dumps + "/result_output.f32").c_str(), "rb");
++    require(f != nullptr, "cannot open " + dumps + "/result_output.f32 (run from the repo root)");
++    require(std::fread(oracle.data(), sizeof(float), oracle.size(), f) == oracle.size(), "short oracle dump");
++    std::fclose(f);
++
++    // ---- 1. every prefix vs the oracle
++    double worst = 0.0;
++    std::vector<float> last;
++    for (size_t t = 1; t <= T; ++t) {
++        model.reset();
++        std::vector<float> lg;
++        const bool ok = model.forward(std::vector<int32_t>(tokens.begin(), tokens.begin() + (long) t), lg, err);
++        require(ok, "forward: " + err);
++        const float* col = oracle.data() + V * (t - 1);
++        const double d = max_abs(lg.data(), col, V);
++        worst = std::max(worst, d);
++        require(d < 2e-3, "prefix " + std::to_string(t) + " diverges from ref/glm_dsa.py (" + std::to_string(d) + ")");
++        require(argmax(lg.data(), V) == argmax(col, V), "prefix " + std::to_string(t) + " argmax differs");
++        last = std::move(lg);
++    }
++
++    // ---- 2. streaming vs the batched call
++    model.reset();
++    std::vector<float> streamed;
++    for (int32_t tok : tokens) {
++        const bool ok = model.forward({tok}, streamed, err);
++        require(ok, "streamed forward: " + err);
++    }
++    const double d_stream = max_abs(streamed.data(), last.data(), V);
++    require(d_stream < 1e-5, "streamed and batched logits differ (" + std::to_string(d_stream) + ")");
++
++    std::printf("glm_dsa_model_test: %zu prefixes match ref/glm_dsa.py (max |dlogit| %.2e), streaming exact (%.1e)\n",
++                T, worst, d_stream);
++    return 0;
++}
+diff --git a/src/core/glm_fast_path.cu b/src/core/glm_fast_path.cu
+index 6f1f249..21a9cbf 100644
+--- a/src/core/glm_fast_path.cu
++++ b/src/core/glm_fast_path.cu
+@@ -726,7 +726,7 @@ bool Glm5Model::fast_setup(std::string& err) {
+             Ly.enorm = f32("nextn.enorm.weight");
+             Ly.hnorm = f32("nextn.hnorm.weight");
+             Ly.shnorm = f32("nextn.shared_head_norm.weight");
+-        } else {
++        } else if (!g.dsa) {   // (glm-dsa: a plain residual, no hyper-connections)
+             Ly.hc_attn_fn = b16("hc_attn_fn.weight");
+             Ly.hc_ffn_fn = b16("hc_ffn_fn.weight");
+             Ly.hc_attn_scale = f32("hc_attn_scale.weight");
+@@ -757,17 +757,21 @@ bool Glm5Model::fast_setup(std::string& err) {
+             Ly.kv_a = q_or_b16("attn_kv_a_mqa.weight", g.n_embd, g.kv_lora);
+             Ly.q_a_norm = f32("attn_q_a_norm.weight");
+             Ly.kv_a_norm = f32("attn_kv_a_norm.weight");
++            if (!(g.dsa && is_mtp)) {   // (glm-dsa's draft block attends densely: no indexer)
+             Ly.k_norm_w = f32("indexer.k_norm.weight");
+             Ly.k_norm_b = f32("indexer.k_norm.bias");
+-            Ly.ape = f32("indexer_compressor_ape.weight");
++            if (!g.dsa) {   // (glm-dsa's indexer scores tokens: no compressor)
++                Ly.ape = f32("indexer_compressor_ape.weight");
++                Ly.idx_gate = b16("indexer_compressor_gate.weight");
++            }
+             Ly.idx_k = b16("indexer.attn_k.weight");
+-            Ly.idx_gate = b16("indexer_compressor_gate.weight");
+             if (const auto xi = ws_map_.find(P + "indexer.attn_q_b.weight");
+                 xi != ws_map_.end() && xi->second.type == strata::kernels::exl3::kTypeEXL3)
+                 Ly.idx_q_b_x = xi->second;   // an EXL3 pack quantizes it
+             else
+                 Ly.idx_q_b = b16("indexer.attn_q_b.weight");
+             Ly.idx_proj = b16("indexer.proj.weight");
++            }
+             Ly.k_b = b16("attn_k_b.weight");
+             Ly.v_b = b16("attn_v_b.weight");
+         }
+@@ -827,14 +831,14 @@ bool Glm5Model::fast_setup(std::string& err) {
+     size_t need = 0;
+     {
+         // generous upper bound, carved below
+-        need = (size_t) (4 * E + 64 + 32 * 26 + 128 + 6 * DI + 4 * 128 + 2 * DI + 2 * g.q_lora + 2 * g.kv_lora +
+-                         4 * g.idx_key + 64 + (int64_t) g.n_head * g.qk_nope + (int64_t) g.idx_heads * g.idx_key +
++        need = (size_t) (4 * E + 64 + 32 * 26 + 128 + 6 * DI + 4 * 128 + 2 * DI + 2 * g.q_lora + 2 * (g.kv_lora + g.n_rot) +
++                         4 * g.idx_key + 64 + (int64_t) g.n_head * g.k_mla() + (int64_t) g.n_head * (g.kv_lora + g.v_head) + (int64_t) g.idx_heads * g.idx_key +
+                          max_pools + g.n_sel_max() + 2 * g.n_expert + 2 * FF + 2 * g.n_ff_dense + 2 * E + 64) *
+                    sizeof(float);
+         need += (size_t) (E + DI + g.q_lora + (int64_t) g.n_head * g.v_head + FF + 8 * g.n_ff_exp + g.n_ff_dense + E) /
+                 32 * q8;
+         need += 64 * 256 + (size_t) (2 * NL * g.n_expert + NL * gf::kSpares) * sizeof(unsigned long long) +
+-                8 * 16 + 4096 * 4 + 4 * 256 + (size_t) g.n_expert * 4 + 256 + 4 * 256;
++                8 * 16 + gf::kMaxEmbd * 4 + 4 * 256 + (size_t) g.n_expert * 4 + 256 + 4 * 256;
+         need += (size_t) gf::kAhead * g.n_expert * sizeof(float) + 256 + (size_t) E * sizeof(float) + 256;
+         need += (size_t) g.n_sel_max() * sizeof(int) + 256;   // slot_cells
+     }
+@@ -865,11 +869,12 @@ bool Glm5Model::fast_setup(std::string& err) {
+     F->qr_raw = fa_take(at, g.q_lora);
+     F->qr = fa_take(at, g.q_lora);
+     F->qr_q = fa_take_b(at, (size_t) g.q_lora / 32 * q8);
+-    F->kv_raw = fa_take(at, g.kv_lora);
++    F->kv_raw = fa_take(at, g.kv_lora + g.n_rot);   // (glm-dsa: [latent | k_pe])
+     F->ik_raw = fa_take(at, g.idx_key);
+     F->ig_raw = fa_take(at, g.idx_key);
+     F->iw = fa_take(at, g.idx_heads);
+-    F->q = fa_take(at, (size_t) g.n_head * g.qk_nope);
++    F->q = fa_take(at, (size_t) g.n_head * g.k_mla());   // (glm-dsa: heads of [nope | rope])
++    if (g.dsa) F->qabs = fa_take(at, (size_t) g.n_head * (g.kv_lora + g.v_head));   // gf::mla_pe's scratch
+     F->iq = fa_take(at, (size_t) g.idx_heads * g.idx_key);
+     F->score = fa_take(at, (size_t) max_pools);
+     F->cells = (int*) fa_take(at, (size_t) g.n_sel_max());
+@@ -3018,7 +3023,7 @@ bool Glm5Model::fast_cpu_lane_setup(std::string& err) {
+                                                       : std::max(2, (int) pin_cpus.size() - spare);
+         }
+     }
+-    if (threads <= 0 || g.n_embd > 4096 || g.n_exp_used > 8) return true;
++    if (threads <= 0 || g.n_embd > gf::kMaxEmbd || g.n_exp_used > 8) return true;
+     namespace kc = strata::kernels::cpu;
+     F->cpu_fmt.assign(F->L.size(), kc::NativeFmt{});
+     int il_cal = -1;
+@@ -4586,7 +4591,7 @@ void Glm5Model::fast_service() {
+                 // Quantize on the CPU only when this route actually has CPU fallback.
+                 if (ne > 0) {
+                     const auto cpu_t0 = std::chrono::steady_clock::now();
+-                    float cpu_part[4096];
++                    float cpu_part[gf::kMaxEmbd];
+                     fast_cpu_experts(rq->layer, ne, blob, w, rq->x, cpu_part);
+                     for (int j = 0; j < g.n_embd; ++j) ans->part[j] += cpu_part[j];
+                     F->cpu_experts.fetch_add((uint64_t) ne, std::memory_order_relaxed);
+@@ -5608,8 +5613,152 @@ bool Glm5Model::fast_moe_experts(int il, const MoeIo& io, bool pred, int n_ah, c
+     return true;
+ }
+ 
++void Glm5Model::embed_res(const float* emb, float* R, cudaStream_t s) const {
++    if (g_.dsa)
++        cudaMemcpyAsync(R, emb, (size_t) g_.n_embd * sizeof(float), cudaMemcpyDeviceToDevice, s);
++    else
++        gf::embed_streams(emb, R, g_.n_embd, s);
++}
++
++void Glm5Model::head_res(const float* R, float* x, void* xq, cudaStream_t s) const {
++    if (g_.dsa)   // (rms_q8 writes h only when it adds)
++        gf::rms_q8(const_cast<float*>(R), nullptr, w_.at("output_norm.weight"), g_.norm_eps, g_.n_embd, x, xq, s);
++    else
++        gf::head_prep(R, w_.at("output_norm.weight"), g_.norm_eps, g_.n_embd, x, xq, s);
++}
++
++// ---- glm-dsa (GLM-5.3): roped MLA over the token indexer's selection (ref/glm_dsa.py GlmDsa.attention).  F->x / xq
++// -> F->mixer.  A full indexer layer scores every visible token and keeps top_k (all of them while p + 1 <= top_k);
++// a shared one reuses the previous full layer's cells (F->cells, F->dsa_n_sel).
++bool Glm5Model::fast_dsa_rope(int il, int64_t p, std::string& err) {
++    FastState* F = fast_;
++    const Glm5Geometry& g = g_;
++    cudaStream_t s = F->cs;
++    static const bool dumps = getenv("GLM_CB_DIR") != nullptr;
++    const auto& Ly = F->L[(size_t) il];
++    const bool dense = il == mtp_il_;   // the draft block attends every position (llama.cpp glm-dsa graph_mtp)
++    const bool full = !dense && g.indexer_full[(size_t) il] != 0;
++    const int n_vis = (int) p + 1;
++    const bool all = n_vis <= g.idx_top_k && gf::dsa_select_all_on();
++    gf::MvJob j[4];
++    int nj = 2;
++    j[0] = {Ly.q_a.q, F->xq, F->x, F->qr_raw, nullptr, 1.0f, Ly.q_a.type, g.n_embd, g.q_lora};
++    j[1] = {Ly.kv_a.q, F->xq, F->x, F->kv_raw, nullptr, 1.0f, Ly.kv_a.type, g.n_embd, g.kv_lora + g.n_rot};
++    if (full) {
++        j[nj++] = {Ly.idx_k, nullptr, F->x, F->ik_raw, nullptr, 1.0f, gf::kTypeBF16, g.n_embd, g.idx_key};
++        if (!all)
++            j[nj++] = {Ly.idx_proj, nullptr, F->x, F->iw, nullptr, 1.0f / std::sqrt((float) (g.idx_key * g.idx_heads)),
++                       gf::kTypeBF16, g.n_embd, g.idx_heads};
++    }
++    if (!gf::mv(j, nj, s)) { err = "glm fast: dsa projections"; return false; }
++    uint16_t* lat = (uint16_t*) (state_ + dsa_lat_[(size_t) il]);
++    float* kpe = state_ + dsa_kpe_[(size_t) il];
++    float* ik = state_ + dsa_pool_[(size_t) il];
++    gf::DsaRopePrepArgs d;
++    d.qr_raw = F->qr_raw;
++    d.q_a_norm = Ly.q_a_norm;
++    d.qr = F->qr;
++    d.qr_q = F->qr_q;
++    d.q_lora = g.q_lora;
++    d.kv_raw = F->kv_raw;
++    d.kv_norm = Ly.kv_a_norm;
++    d.lat = lat;
++    d.kpe = kpe;
++    d.kv_lora = g.kv_lora;
++    d.n_rot = g.n_rot;
++    d.ik_raw = full ? F->ik_raw : nullptr;
++    d.k_norm_w = Ly.k_norm_w;
++    d.k_norm_b = Ly.k_norm_b;
++    d.ik = ik;
++    d.idx_key = g.idx_key;
++    d.p = (int) p;
++    d.base = g.rope_base;
++    d.eps = g.norm_eps;
++    d.ln_eps = g.idx_ln_eps;
++    gf::dsa_rope_prep(d, s);
++    gf::MvJob j2[2];
++    j2[0] = {Ly.q_b.q, F->qr_q, F->qr, F->q, nullptr, 1.0f, Ly.q_b.type, g.q_lora, g.n_head * g.k_mla()};
++    j2[1] = {Ly.idx_q_b, nullptr, F->qr, F->iq, nullptr, 1.0f, gf::kTypeBF16, g.q_lora, g.idx_heads * g.idx_key};
++    if (!gf::mv(j2, full && !all ? 2 : 1, s)) { err = "glm fast: dsa q"; return false; }
++    gf::rope_heads(F->q + g.qk_nope, g.n_rot, g.k_mla(), g.n_head, (int) p, g.rope_base, s);
++    if (full) {
++        F->dsa_n_sel = std::min(g.idx_top_k, n_vis);
++        if (all) {
++            gf::dsa_select_all(n_vis, 1, F->dsa_n_sel, (int) p, F->cells, s);
++        } else {
++            gf::rope_heads(F->iq, g.n_rot, g.idx_key, g.idx_heads, (int) p, g.rope_base, s);
++            gf::dsa_score(F->iq, ik, F->iw, g.idx_key, g.idx_heads, n_vis, F->score, s, true);
++            gf::dsa_select(F->score, n_vis, 1, F->dsa_n_sel, F->dsa_n_sel, (int) p, F->cells, s);
++        }
++    } else if (!dense && F->dsa_n_sel <= 0) {
++        err = "glm fast: glm-dsa layer " + std::to_string(il) + " shares an indexer selection this part never made";
++        return false;
++    }
++    gf::mla_pe(F->q, g.k_mla(), g.qk_nope, g.n_rot, Ly.k_b, Ly.v_b, lat, kpe, dense ? nullptr : F->cells,
++               dense ? n_vis : F->dsa_n_sel, g.n_head, g.kv_lora, g.v_head, F->qabs, F->attn_q, s);
++    if (dumps) fast_dump(s, "kqv_out-" + std::to_string(il), F->qabs + (size_t) g.n_head * g.kv_lora,
++                         (int64_t) g.n_head * g.v_head);
++    gf::MvJob o = {Ly.out.q, F->attn_q, nullptr, F->mixer, nullptr, 1.0f, Ly.out.type, g.n_head * g.v_head, g.n_embd};
++    if (!gf::mv(&o, 1, s)) { err = "glm fast: dsa output"; return false; }
++    return true;
++}
++
++// the residual add the last layer leaves (glm-dsa's plain residual: R += ffn)
++static __global__ void dsa_add_kernel(float* __restrict__ h, const float* __restrict__ add, int n) {
++    const int i = blockIdx.x * blockDim.x + threadIdx.x;
++    if (i < n) h[i] += add[i];
++}
++
++// ---- the glm-dsa layers [l0_, l1_): a plain pre-norm residual (state_ is the one stream) around the roped-MLA mixer and
++// the FFN (dense or the trunk's own fast_moe); the CPU lane's experts are waited for inside the layer (no deferral)
++bool Glm5Model::fast_layers_dsa(int64_t p, std::string& err) {
++    FastState* F = fast_;
++    const Glm5Geometry& g = g_;
++    cudaStream_t s = F->cs;
++    static const bool dumps = getenv("GLM_CB_DIR") != nullptr;
++    bool pf_pending = false;
++    for (int il = l0_; il < l1_; ++il) {
++        const auto& Ly = F->L[(size_t) il];
++        // (fast_layers' gates: a pipelined window's token past a wrong draft, the two-half decode's cancelled pass -
++        // their heavy kernels then do nothing)
++        if (F->win.pipe_t >= 0 && F->win.from != nullptr && F->win.skip_d != nullptr && (F->win.pipe_t > 0 || il == l0_))
++            gf::skip_gate(F->win.from, F->win.pipe_t, F->win.skip_d, s);
++        if (F->spec_gate) gf::skip_gate(F->spec_live_h, 0, F->spec_skip_d, s);
++        gf::rms_q8(state_, il == l0_ ? nullptr : F->ffn, Ly.attn_norm, g.norm_eps, g.n_embd, F->x, F->xq, s);
++        if (dumps) {
++            if (il != l0_) fast_dump(s, "l_out-" + std::to_string(il - 1), state_, g.n_embd);
++            fast_dump(s, "attn_norm-" + std::to_string(il), F->x, g.n_embd);
++        }
++        if (!fast_dsa_rope(il, p, err)) return false;
++        gf::rms_q8(state_, F->mixer, Ly.ffn_norm, g.norm_eps, g.n_embd, F->x, F->xq, s);
++        if (dumps) fast_dump(s, "ffn_inp-" + std::to_string(il), state_, g.n_embd);
++        if (!Ly.moe) {
++            gf::MvJob j[2];
++            j[0] = {Ly.ffn_gate.q, F->xq, F->x, F->dg, nullptr, 1.0f, Ly.ffn_gate.type, g.n_embd, g.n_ff_dense};
++            j[1] = {Ly.ffn_up.q, F->xq, F->x, F->du, nullptr, 1.0f, Ly.ffn_up.type, g.n_embd, g.n_ff_dense};
++            if (!gf::mv(j, 2, s)) { err = "glm fast: dense ffn"; return false; }
++            gf::swiglu_q8(F->dg, F->du, g.swiglu_shexp, g.n_ff_dense, F->dhq, s);
++            gf::MvJob dn = {Ly.ffn_down.q, F->dhq, nullptr, F->ffn, nullptr, 1.0f, Ly.ffn_down.type, g.n_ff_dense,
++                            g.n_embd};
++            if (!gf::mv(&dn, 1, s)) { err = "glm fast: dense ffn down"; return false; }
++        } else if (!fast_moe(il, pf_pending, err, true)) {
++            return false;
++        }
++        if (dumps) fast_dump(s, "ffn_out-" + std::to_string(il), F->ffn, g.n_embd);
++    }
++    dsa_add_kernel<<<(g.n_embd + 255) / 256, 256, 0, s>>>(state_, F->ffn, g.n_embd);
++    if (dumps) fast_dump(s, "l_out-" + std::to_string(l1_ - 1), state_, g.n_embd);
++    const cudaError_t e = cudaGetLastError();
++    if (e != cudaSuccess) {
++        err = std::string("glm fast: ") + cudaGetErrorString(e);
++        return false;
++    }
++    return true;
++}
++
+ bool Glm5Model::fast_layers(int64_t p, bool hop_in, std::string& err) {
+     (void) hop_in;
++    if (g_.dsa) return fast_layers_dsa(p, err);
+     FastState* F = fast_;
+     const Glm5Geometry& g = g_;
+     cudaStream_t s = F->cs;
+@@ -5826,7 +5975,10 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
+                  g.n_embd);
+     if (const float* img = image_row(p)) std::memcpy(F->emb_h, img, (size_t) g.n_embd * sizeof(float));   // an image
+     cudaMemcpyAsync(F->emb, F->emb_h, (size_t) g.n_embd * sizeof(float), cudaMemcpyHostToDevice, F->cs);
+-    gf::embed_streams(F->emb, state_, g.n_embd, F->cs);
++    if (g.dsa)   // glm-dsa: one residual stream
++        cudaMemcpyAsync(state_, F->emb, (size_t) g.n_embd * sizeof(float), cudaMemcpyDeviceToDevice, F->cs);
++    else
++        embed_res(F->emb, state_, F->cs);
+     if (!fast_layers(p, false, err)) return false;
+     // each later part of a split: the residual crosses over through the previous part's pinned hop buffer, the
+     // copy ordered on the devices by an event (the host never waits between the parts)
+@@ -5847,8 +5999,11 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
+     }
+     FastState* FT = tail->fast_;
+     cudaSetDevice(tail->dev_);
+-    gf::head_prep(tail->state_, tail->w_.at("output_norm.weight"), g.norm_eps, g.n_embd, FT->head_x, FT->head_xq,
+-                  FT->cs);
++    if (g.dsa)
++        gf::rms_q8(tail->state_, nullptr, tail->w_.at("output_norm.weight"), g.norm_eps, g.n_embd, FT->head_x,
++                   FT->head_xq, FT->cs);
++    else
++        tail->head_res(tail->state_, FT->head_x, FT->head_xq, FT->cs);
+     // GLM_DUMP_H=<file> (debug): append every position's final hidden state (output_norm of the stream mean - what the
+     // NextN/MTP block reads) as n_embd floats
+     static const char* dh = getenv("GLM_DUMP_H");
+@@ -5976,7 +6131,7 @@ bool Glm5Model::fast_mtp(int64_t p, int32_t next_tok, std::string& err, int step
+     }
+     gf::rms_q8(F->mtp_h, nullptr, Ly.attn_norm, g.norm_eps, E, F->x, F->xq, s);
+     if (glmfast::submit_every() > 0) glmfast::submit_queued(s);   // (Windows HIP: the GPU starts while the rest queues)
+-    if (!fast_dsa(il, p, err)) return false;
++    if (!(g.dsa ? fast_dsa_rope(il, p, err) : fast_dsa(il, p, err))) return false;
+     gf::rms_q8(F->mtp_h, F->mixer, Ly.ffn_norm, g.norm_eps, E, F->x, F->xq, s);
+     bool pf_pending = false;
+     if (!fast_moe(il, pf_pending, err)) return false;
+@@ -6493,7 +6648,7 @@ bool Glm5Model::spec_head(int64_t p, int32_t token, std::string& err) {
+                  g.n_embd);
+     if (const float* img = image_row(p)) std::memcpy(F->emb_h, img, (size_t) g.n_embd * sizeof(float));   // an image
+     cudaMemcpyAsync(F->emb, F->emb_h, (size_t) g.n_embd * sizeof(float), cudaMemcpyHostToDevice, F->cs);
+-    gf::embed_streams(F->emb, state_, g.n_embd, F->cs);
++    embed_res(F->emb, state_, F->cs);
+     lap(2);
+     if (cancellable) {
+         F->spec_gate = true;            // a skip_gate before each layer ...
+@@ -6574,7 +6729,7 @@ bool Glm5Model::spec_tail(Glm5Model* head, int64_t p, std::string& err) {
+             if (!m->hop_to_next(m->split_next_.get(), p, err)) return false;
+         cudaSetDevice(m->dev_);
+         FastState* FL = m->fast_;
+-        gf::head_prep(m->state_, m->w_.at("output_norm.weight"), g.norm_eps, g.n_embd, FL->head_x, FL->head_xq, FL->cs);
++        m->head_res(m->state_, FL->head_x, FL->head_xq, FL->cs);
+         const WSlot& owl = m->ws_map_.at("output.weight");
+         gf::MvJob ol = {owl.q, FL->head_xq, FL->head_x, m->sc_ + m->sc_logits, nullptr, 1.0f, owl.type, g.n_embd,
+                         g.n_vocab};
+@@ -6589,7 +6744,7 @@ bool Glm5Model::spec_tail(Glm5Model* head, int64_t p, std::string& err) {
+         cudaSetDevice(dev_);
+         return true;
+     }
+-    gf::head_prep(state_, w_.at("output_norm.weight"), g.norm_eps, g.n_embd, F->head_x, F->head_xq, F->cs);
++    head_res(state_, F->head_x, F->head_xq, F->cs);
+     const WSlot& ow = ws_map_.at("output.weight");
+     gf::MvJob o = {ow.q, F->head_xq, F->head_x, sc_ + sc_logits, nullptr, 1.0f, ow.type, g.n_embd, g.n_vocab};
+     if (ow.type == 0) o.w = ow.f32;
+diff --git a/src/core/glm_fast_state.hpp b/src/core/glm_fast_state.hpp
+index 9272932..481d51b 100644
+--- a/src/core/glm_fast_state.hpp
++++ b/src/core/glm_fast_state.hpp
+@@ -401,6 +401,8 @@ struct Glm5Model::FastState {
+     float* rep = nullptr;   // a window commit's replay (win_commit_part): kKdaLayers x 5 x d_inner (q k v g1 g2)
+     float *qr_raw = nullptr, *qr = nullptr, *kv_raw = nullptr, *ik_raw = nullptr, *ig_raw = nullptr, *iw = nullptr;
+     float *q = nullptr, *iq = nullptr, *score = nullptr;
++    float* qabs = nullptr;   // glm-dsa: gf::mla_pe's scratch (the absorbed queries, then the heads' outputs)
++    int dsa_n_sel = 0;       // glm-dsa: the last full indexer layer's selection width (its cells in `cells`)
+     int* cells = nullptr;
+     int* slot_cells = nullptr;   // KV streaming: the selection in VRAM slot rows (glm_kv_resolve), what the attention reads
+     void *qr_q = nullptr, *attn_q = nullptr;
+diff --git a/src/core/glm_model.cu b/src/core/glm_model.cu
+index 7906520..2ee6478 100644
+--- a/src/core/glm_model.cu
++++ b/src/core/glm_model.cu
+@@ -247,6 +247,17 @@ static bool exl3_table(const std::string& pack_dir, Exl3Table& t, std::string& e
+ // a dense row's VRAM bytes as load_pack uploads it (0: not uploaded), and how: the fast path keeps the pack's big BF16
+ // rows (kind 4) BF16 and the natively served rows (kind 0) quantized, dequantizes the rest to F32, and leaves
+ // token_embd on the host (the embedding row is dequantized there from the shard mapping)
++// the 3-D absorbed MLA projections, which the runner indexes by row: dequantized to F32 at load even when the pack
++// serves them natively (glm-dsa ships them Q8_0).  (A whole-name compare against the bare suffix never matched a
++// blk.N. name - harmless while only glm5-next's BF16 rows reached here.)
++static bool is_absorbed_mla(const std::string& name) {
++    const auto ends = [&](const char* suf) {
++        const size_t n = std::strlen(suf);
++        return name.size() >= n && name.compare(name.size() - n, n, suf) == 0;
++    };
++    return ends(".attn_k_b.weight") || ends(".attn_v_b.weight");
++}
++
+ static uint64_t pack_row_vram(const std::string& name, const std::string& kind, const strata::TensorInfo* t, bool fast,
+                               std::string* how = nullptr) {
+     if (fast && name == "token_embd.weight") return 0;
+@@ -254,7 +265,7 @@ static uint64_t pack_row_vram(const std::string& name, const std::string& kind,
+         if (how) *how = " bf16";
+         return ((uint64_t) t->elements() * 2 + 255u) & ~(uint64_t) 255u;
+     }
+-    if (kind != "0" || name == "attn_k_b.weight" || name == "attn_v_b.weight") {
++    if (kind != "0" || is_absorbed_mla(name)) {
+         if (how) *how = " f32";
+         return ((uint64_t) t->elements() * 4 + 255u) & ~(uint64_t) 255u;
+     }
+@@ -275,23 +286,45 @@ static const char* const kMtpF32[] = {"attn_norm.weight", "ffn_norm.weight", "at
+                                       "indexer_compressor_ape.weight", "exp_probs_b.bias", "nextn.enorm.weight",
+                                       "nextn.hnorm.weight", "nextn.shared_head_norm.weight"};
+ 
++// glm-dsa's block attends densely (llama.cpp glm-dsa graph_mtp): no indexer, no compressor
++static const char* const kMtpB16Dsa[] = {"ffn_gate_inp.weight", "attn_k_b.weight", "attn_v_b.weight"};
++static const char* const kMtpF32Dsa[] = {"attn_norm.weight", "ffn_norm.weight", "attn_q_a_norm.weight",
++                                         "attn_kv_a_norm.weight", "exp_probs_b.bias", "nextn.enorm.weight",
++                                         "nextn.hnorm.weight", "nextn.shared_head_norm.weight"};
++struct MtpNames {
++    std::vector<const char*> raw, b16, f32;
++};
++static MtpNames mtp_names(bool dsa) {
++    MtpNames m;
++    m.raw.assign(std::begin(kMtpRaw), std::end(kMtpRaw));
++    if (dsa) {
++        m.b16.assign(std::begin(kMtpB16Dsa), std::end(kMtpB16Dsa));
++        m.f32.assign(std::begin(kMtpF32Dsa), std::end(kMtpF32Dsa));
++    } else {
++        m.b16.assign(std::begin(kMtpB16), std::end(kMtpB16));
++        m.f32.assign(std::begin(kMtpF32), std::end(kMtpF32));
++    }
++    return m;
++}
++
+ // ... and the VRAM they take
+ static bool mtp_dense_vram(const std::function<const strata::TensorInfo*(const std::string&)>& find, int il,
+-                           uint64_t& bytes, std::string& err) {
++                           uint64_t& bytes, std::string& err, bool dsa = false) {
+     const std::string P = "blk." + std::to_string(il) + ".";
++    const MtpNames names = mtp_names(dsa);
+     bytes = 0;
+-    for (const char* n : kMtpRaw) {
++    for (const char* n : names.raw) {
+         const strata::TensorInfo* t = find(P + n);
+         if (t == nullptr) { err = "mtp: " + P + n + " missing"; return false; }
+         bytes += (strata::kernels::native_mmvq_weight_bytes(t->type, (int) t->shape[0], (int) t->shape[1]) + 255u) &
+                  ~(uint64_t) 255u;
+     }
+-    for (const char* n : kMtpB16) {
++    for (const char* n : names.b16) {
+         const strata::TensorInfo* t = find(P + n);
+         if (t == nullptr) { err = "mtp: " + P + n + " missing"; return false; }
+         bytes += ((uint64_t) t->elements() * 2 + 255u) & ~(uint64_t) 255u;
+     }
+-    for (const char* n : kMtpF32) {
++    for (const char* n : names.f32) {
+         const strata::TensorInfo* t = find(P + n);
+         if (t == nullptr) { err = "mtp: " + P + n + " missing"; return false; }
+         bytes += ((uint64_t) t->elements() * 4 + 255u) & ~(uint64_t) 255u;
+@@ -426,20 +459,40 @@ __global__ void mean_streams_kernel(const float* __restrict__ R, float* __restri
+     y[e + (size_t) n_embd * t] = acc / (float) hc;
+ }
+ 
++// q_stride: a head's width in q (qk_nope for glm5-next; qk_nope + n_rot for glm-dsa, whose heads are
++// [nope | rope] and absorb only the nope part)
+ __global__ void q_absorb_kernel(const float* __restrict__ wk_b, const float* __restrict__ q,
+-                                float* __restrict__ y, int qk_nope, int kv_lora, int n_head, int T) {
++                                float* __restrict__ y, int qk_nope, int kv_lora, int n_head, int T, int q_stride) {
+     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+     if (idx >= kv_lora * n_head * T) return;
+     const int t = idx / (kv_lora * n_head);
+     const int h = (idx / kv_lora) % n_head;
+     const int c = idx % kv_lora;
+     const float* w = wk_b + (size_t) qk_nope * kv_lora * h;           // (e, c) at e + qk_nope*c
+-    const float* qh = q + (size_t) qk_nope * h + (size_t) qk_nope * n_head * t;
++    const float* qh = q + (size_t) q_stride * h + (size_t) q_stride * n_head * t;
+     float acc = 0.0f;
+     for (int e = 0; e < qk_nope; ++e) acc += w[(size_t) e + (size_t) qk_nope * c] * qh[e];
+     y[c + (size_t) kv_lora * h + (size_t) kv_lora * n_head * t] = acc;
+ }
+ 
++// ggml_rope_ext, LLAMA_ROPE_TYPE_NORM, no YaRN: the adjacent pairs (2i, 2i+1) of the first n_rot floats of
++// each of n_head heads (head h at x + stride*h) rotate by pos * base^(-2i/n_rot), theta stepped in f32 like
++// ggml's rope cache (theta *= base^(-2/n_rot)) so long positions round the same way.  One thread per pair.
++__global__ void rope_norm_kernel(float* __restrict__ x, int n_rot, int stride, int n_head, int pos, float base) {
++    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
++    if (idx >= n_head * (n_rot / 2)) return;
++    const int h = idx / (n_rot / 2);
++    const int i = idx % (n_rot / 2);
++    const float theta_scale = powf(base, -2.0f / (float) n_rot);
++    float theta = (float) pos;
++    for (int k = 0; k < i; ++k) theta *= theta_scale;
++    float* xh = x + (size_t) stride * h + 2 * i;
++    const float c = cosf(theta), sn = sinf(theta);
++    const float x0 = xh[0], x1 = xh[1];
++    xh[0] = x0 * c - x1 * sn;
++    xh[1] = x0 * sn + x1 * c;
++}
++
+ int blocks(int n) { return (n + GM_THREADS - 1) / GM_THREADS; }
+ 
+ __global__ void bias_apply_kernel(float* __restrict__ y, const float* __restrict__ bias, float alpha,
+@@ -504,10 +557,62 @@ static bool pack_dequant_tensor(const strata::TensorInfo& t, const uint8_t* src,
+ 
+ // ================================ geometry ================================
+ 
++// glm-dsa (GLM-5.3): what differs from glm5-next, read after the shared keys (mirrors
++// ref/glm_dsa.py::GlmDsaConfig key for key)
++static bool dsa_from_gguf(const strata::GgufFile& g, const std::string& p, Glm5Geometry& out, std::string& err) {
++    const auto num = [&](const std::string& key, double def) -> double {
++        const auto* v = g.get(p + key);
++        return v != nullptr && v->is_num() ? v->num() : def;
++    };
++    out.n_rot = (int) num("rope.dimension_count", 64);
++    out.rope_base = (float) num("rope.freq_base", 8000000.0);
++    out.qk_nope = out.qk_nope - out.n_rot;   // key_length_mla is the whole head: [nope | rope]
++    out.idx_ln_eps = (float) num("attention.layer_norm_epsilon", 0.0);
++    out.idx_kpool = 1;                        // the indexer scores tokens
++    out.idx_select_tail = 0;
++    out.hc = 1;                               // a plain residual
++    out.swiglu_exp = out.swiglu_shexp = INFINITY;
++    out.n_head_kv.assign((size_t) out.n_layers, 1);   // every layer is MLA + DSA
++
++    // the indexer types: the GGUF's array, else llama.cpp's fallback (glm-dsa.cpp): GLM 5 / 5.1 (context
++    // below 1M) index every layer, 5.2+ layers 0, 1 and every 4th from 2
++    out.indexer_full.assign((size_t) out.n_layers, 1);
++    const auto* types = g.get(p + "attention.indexer.types");
++    if (types != nullptr && types->type == strata::MetaType::ARRAY && types->items.size() >= (size_t) out.n_layers) {
++        for (int i = 0; i < out.n_layers; ++i) out.indexer_full[(size_t) i] = (int) types->items[(size_t) i].u;
++    } else if (num("context_length", 1048576) >= 1048576) {
++        for (int i = 2; i < out.n_layers; ++i) out.indexer_full[(size_t) i] = (i - 2) % 4 == 0;
++    }
++    if (!out.indexer_full[0]) {
++        err = "glm5_model: glm-dsa layer 0 must run a full indexer (a shared one has nothing to reuse)";
++        return false;
++    }
++    if (const auto* v = g.get(p + "rope.scaling.factor"); v != nullptr && v->is_num() && v->num() != 1.0) {
++        err = "glm5_model: glm-dsa rope scaling (YaRN) is not implemented; GLM-5.3 ships without it";
++        return false;
++    }
++    if (const auto* v = g.get(p + "attention.key_length"); v != nullptr && v->is_num() &&
++                                                            v->num() != (double) (out.kv_lora + out.n_rot)) {
++        err = "glm5_model: glm-dsa attention.key_length " + std::to_string(v->num()) + " != kv_lora + n_rot";
++        return false;
++    }
++    if (out.n_rot <= 0 || out.n_rot % 2 || out.n_rot > out.idx_key || out.qk_nope <= 0) {
++        err = "glm5_model: glm-dsa rope dims " + std::to_string(out.n_rot) + " do not fit the heads";
++        return false;
++    }
++    if ((int) num("expert_gating_func", 2) != 2) {
++        err = "glm5_model: glm-dsa routes with sigmoid gating (expert_gating_func 2)";
++        return false;
++    }
++    return true;
++}
++
+ bool Glm5Geometry::from_gguf(const strata::GgufFile& g, Glm5Geometry& out, std::string& err) {
+     // two spellings in the wild: llama.cpp's canonical "glm5-next" and unsloth's "glm5next" -
+-    // the KV PREFIX follows the file's own arch string, so it is detected once here
+-    const std::string p = g.get("glm5next.block_count") ? "glm5next." : "glm5-next.";
++    // the KV PREFIX follows the file's own arch string, so it is detected once here; "glm-dsa" is
++    // GLM-5.3 itself (the 744B), which shares the MLA/DSA/MoE machinery
++    out.dsa = g.get("glm-dsa.block_count") != nullptr;
++    const std::string p = out.dsa ? "glm-dsa." : g.get("glm5next.block_count") ? "glm5next." : "glm5-next.";
+     const auto num = [&](const std::string& key, double def, bool& ok) -> double {
+         const auto* v = g.get(p + key);
+         if (!v) return def;
+@@ -567,6 +672,8 @@ bool Glm5Geometry::from_gguf(const strata::GgufFile& g, Glm5Geometry& out, std::
+     out.swiglu_shexp = (float) num("swiglu_clamp_shexp", out.swiglu_shexp, ok);
+     if (const auto* v = g.get(p + "vocab_size")) out.n_vocab = (int) v->u;
+ 
++    if (out.dsa) return dsa_from_gguf(g, p, out, err);
++
+     // the layer-type array: 0 marks a KDA (recurrent) layer
+     out.n_head_kv.assign((size_t) out.n_layers, 0);
+     arr_i("attention.head_count_kv", out.n_head_kv, out.n_layers);
+@@ -756,6 +863,7 @@ bool Glm5Model::load(const std::string& gguf_path, int64_t max_ctx, std::string&
+     dsa_ik_.assign(g_.n_layers, 0);
+     dsa_ig_.assign(g_.n_layers, 0);
+     dsa_pool_.assign(g_.n_layers, 0);
++    dsa_kpe_.assign(g_.n_layers, 0);
+     ik_ring_ = (int) max_ctx;   // the reference path keeps every position's indexer key / gate
+     for (int il = 0; il < g_.n_layers; ++il) {
+         if (il < l0_ || il >= l1_) continue;   // the other half's caches stay on the other device
+@@ -764,6 +872,14 @@ bool Glm5Model::load(const std::string& gguf_path, int64_t max_ctx, std::string&
+             floats += (int64_t) g_.d_inner() * g_.kda_head_dim;
+             kda_conv_[(size_t) il] = floats;
+             floats += (int64_t) 3 * g_.d_inner() * (g_.d_conv - 1);
++        } else if (g_.dsa) {
++            // glm-dsa: the latent, its k_pe, and the roped indexer key of every token (a pool IS a token)
++            dsa_lat_[(size_t) il] = floats;
++            floats += (int64_t) g_.kv_lora * max_ctx;
++            dsa_kpe_[(size_t) il] = floats;
++            floats += (int64_t) g_.n_rot * max_ctx;
++            dsa_pool_[(size_t) il] = floats;
++            floats += (int64_t) g_.idx_key * max_ctx;
+         } else {
+             dsa_lat_[(size_t) il] = floats;
+             floats += (int64_t) g_.kv_lora * max_ctx;
+@@ -805,8 +921,8 @@ bool Glm5Model::load(const std::string& gguf_path, int64_t max_ctx, std::string&
+     sc_g2 = take(g_.d_inner());
+     sc_gated = take(g_.d_inner());
+     sc_qr = take(g_.q_lora);
+-    sc_kv = take(g_.kv_lora);
+-    sc_q = take((int64_t) g_.n_head * g_.qk_nope);
++    sc_kv = take(g_.kv_lora + g_.n_rot);
++    sc_q = take((int64_t) g_.n_head * g_.k_mla());
+     sc_qabs = take((int64_t) g_.kv_lora * g_.n_head);
+     sc_iq = take((int64_t) g_.idx_heads * g_.idx_key);
+     sc_iw = take(g_.idx_heads);
+@@ -1599,7 +1715,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
+         const strata::TensorInfo* tu = findm(P + "ffn_up_exps.weight");
+         const strata::TensorInfo* td = findm(P + "ffn_down_exps.weight");
+         if ((g.nextn > 0 || extra) && findm(P + "nextn.eh_proj.weight") != nullptr && tg && tu && td &&
+-            mtp_dense_vram(findm, L, b, e2)) {
++            mtp_dense_vram(findm, L, b, e2, g.dsa)) {
+             blob[(size_t) L] = (tensor_bytes(tg) + tensor_bytes(tu) + tensor_bytes(td)) / g.n_expert;
+             stride[(size_t) L] = (double) glmfast::expert_stride((size_t) blob[(size_t) L], (int) tg->type, (int) td->type);
+             mtp_dense = (double) b;
+@@ -1960,6 +2076,17 @@ bool Glm5Model::load_pack_place(const std::string& pack_dir, int64_t max_ctx, st
+     // two-part split (default 1), STRATA_GLM_DEVS the devices of any split.
+     const char* sp = getenv("STRATA_GLM_SPLIT");
+     const std::string spec = sp != nullptr ? std::string(sp) : layer_split;
++    // the model's geometry before any part loads: the boundaries are checked against its layer count (they were checked
++    // against the default 45 - GLM-5.3-Flash's - so a 78-layer GLM-5.3 split was refused)
++    {
++        std::vector<std::string> sn;
++        std::string ge;
++        if (pack_shard_names(pack_dir, sn, ge)) {
++            strata::GgufFile gg(pack_dir + "/../" + sn[0]);
++            Glm5Geometry gt;
++            if (Glm5Geometry::from_gguf(gg, gt, ge)) g_ = gt;
++        }
++    }
+     // STRATA_GLM_EXPERT_HELPER=<device>: the expert helper - alone beside one trunk GPU (no split: dense, state and
+     // MTP stay on device 0), or beside a layer split, which then leaves the helper's device out and gives each part
+     // its own share of the helper over its own layers (fast_helper_setup): two cards and a Ryzen AI Max APU
+@@ -2019,6 +2146,11 @@ bool Glm5Model::load_pack_place(const std::string& pack_dir, int64_t max_ctx, st
+     }
+     if (devs.size() == 2 && getenv("STRATA_GLM_DEVS") == nullptr && !spec.empty() && spec != "auto")
+         if (const char* d1 = getenv("STRATA_GLM_DEV1")) devs[1] = std::atoi(d1);
++    // glm-dsa: a part starts on a FULL indexer layer (a shared one reuses a selection only its own part made) - each
++    // boundary moves down to the nearest full layer
++    if (g_.dsa)
++        for (int& b : bounds)
++            while (b > 1 && b < g_.n_layers && !g_.indexer_full[(size_t) b]) --b;
+     bool ok = devs.size() == bounds.size() + 1;
+     for (size_t i = 0; ok && i < bounds.size(); ++i)
+         ok = bounds[i] >= 1 && bounds[i] < g_.n_layers && (i == 0 || bounds[i] > bounds[i - 1]);
+@@ -2220,6 +2352,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+     strata::kernels::GlmHcWorkspace hcws;
+     strata::kernels::glm_hc_workspace_init(hcs, A + sc_inv, hcws);
+     const float prescale = 1.0f / std::sqrt((float) (g.idx_key * g.idx_heads));
++    int dsa_n_sel = 0;   // glm-dsa: the last full indexer layer's selection width (its cells stay in sc_cells)
+ 
+     for (int il = l0_; il < l1_; ++il) {
+         if (timing_ && !tev_rec(tev_a_, "a")) timing_ = false;
+@@ -2227,19 +2360,84 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+         const auto W = [&](const char* suffix) { return w_.at("blk." + L + "." + suffix); };
+         const auto ws_ = [&](const std::string& suffix) -> WSlot& { return ws_map_.at("blk." + L + "." + suffix); };
+ 
+-        // ---- hc read + norm
+-        strata::kernels::glm_hc_pre(R, W("hc_attn_fn.weight"), W("hc_attn_scale.weight"),
+-                                    W("hc_attn_base.weight"), g.norm_eps, g.hc_eps, hcs, hcws, A + sc_mixed,
+-                                    A + sc_pre, A + sc_post, A + sc_comb, nullptr);
+-        cb_dump("hc_pre-" + L, A + sc_pre, g.hc);
+-        cb_dump("hc_comb-" + L, A + sc_comb, g.hc * g.hc);
+-        cb_dump("hc_post-" + L, A + sc_post, g.hc);
+-        cb_dump("hc_attn_pre-" + L, A + sc_mixed, g.n_embd);
+-        rms_norm_kernel<<<1, GM_THREADS>>>(A + sc_mixed, W("attn_norm.weight"), A + sc_x, g.n_embd, 1,
+-                                           g.norm_eps);
++        // ---- hc read + norm (glm-dsa: the plain residual, normed)
++        if (g.dsa) {
++            rms_norm_kernel<<<1, GM_THREADS>>>(R, W("attn_norm.weight"), A + sc_x, g.n_embd, 1, g.norm_eps);
++        } else {
++            strata::kernels::glm_hc_pre(R, W("hc_attn_fn.weight"), W("hc_attn_scale.weight"),
++                                        W("hc_attn_base.weight"), g.norm_eps, g.hc_eps, hcs, hcws, A + sc_mixed,
++                                        A + sc_pre, A + sc_post, A + sc_comb, nullptr);
++            cb_dump("hc_pre-" + L, A + sc_pre, g.hc);
++            cb_dump("hc_comb-" + L, A + sc_comb, g.hc * g.hc);
++            cb_dump("hc_post-" + L, A + sc_post, g.hc);
++            cb_dump("hc_attn_pre-" + L, A + sc_mixed, g.n_embd);
++            rms_norm_kernel<<<1, GM_THREADS>>>(A + sc_mixed, W("attn_norm.weight"), A + sc_x, g.n_embd, 1,
++                                               g.norm_eps);
++        }
+         cb_dump("attn_norm-" + L, A + sc_x, g.n_embd);
+ 
+-        if (g.is_recr(il)) {
++        if (g.dsa) {
++            // ---- the glm-dsa mixer (ref/glm_dsa.py GlmDsa.attention): roped MLA over the indexer's selection
++            const int pos = (int) p;
++            GM_CHECK(gm_gemv(ws_("attn_q_a.weight"), A + sc_x, nullptr, 1.0f, A + sc_qr, g.q_lora, g.n_embd), err);
++            rms_norm_kernel<<<1, GM_THREADS>>>(A + sc_qr, W("attn_q_a_norm.weight"), A + sc_qr, g.q_lora, 1,
++                                               g.norm_eps);
++            // kv_a_mqa -> [latent | k_pe]: the latent normed, k_pe roped (NOT normed)
++            GM_CHECK(gm_gemv(ws_("attn_kv_a_mqa.weight"), A + sc_x, nullptr, 1.0f, A + sc_kv, g.kv_lora + g.n_rot,
++                             g.n_embd), err);
++            rms_norm_kernel<<<1, GM_THREADS>>>(A + sc_kv, W("attn_kv_a_norm.weight"), A + sc_kv, g.kv_lora, 1,
++                                               g.norm_eps);
++            rope_norm_kernel<<<blocks(g.n_rot / 2), GM_THREADS>>>(A + sc_kv + g.kv_lora, g.n_rot, g.n_rot, 1, pos,
++                                                                  g.rope_base);
++            float* lat = S + dsa_lat_[(size_t) il];
++            float* kpe = S + dsa_kpe_[(size_t) il];
++            GM_CHECK(cudaMemcpy(lat + (int64_t) g.kv_lora * p, A + sc_kv, (size_t) g.kv_lora * sizeof(float),
++                                cudaMemcpyDeviceToDevice), err);
++            GM_CHECK(cudaMemcpy(kpe + (int64_t) g.n_rot * p, A + sc_kv + g.kv_lora, (size_t) g.n_rot * sizeof(float),
++                                cudaMemcpyDeviceToDevice), err);
++            // q_b -> heads of [nope | rope]: the rope part roped in place, the nope part absorbed through wk_b
++            GM_CHECK(gm_gemv(ws_("attn_q_b.weight"), A + sc_qr, nullptr, 1.0f, A + sc_q, g.n_head * g.k_mla(),
++                             g.q_lora), err);
++            rope_norm_kernel<<<blocks(g.n_head * g.n_rot / 2), GM_THREADS>>>(A + sc_q + g.qk_nope, g.n_rot, g.k_mla(),
++                                                                             g.n_head, pos, g.rope_base);
++            q_absorb_kernel<<<blocks((int64_t) g.kv_lora * g.n_head), GM_THREADS>>>(
++                W("attn_k_b.weight"), A + sc_q, A + sc_qabs, g.qk_nope, g.kv_lora, g.n_head, 1, g.k_mla());
++
++            if (g.indexer_full[(size_t) il]) {
++                // the token indexer: the roped key IS the pool (kpool 1); score every visible token, keep top_k.
++                // (The Hadamard llama.cpp applies to q and k is orthonormal: no score changes, so it is skipped.)
++                GM_CHECK(gm_gemv(ws_("indexer.attn_k.weight"), A + sc_x, nullptr, 1.0f, A + sc_tmp, g.idx_key,
++                                 g.n_embd), err);
++                layer_norm_kernel<<<1, GM_THREADS>>>(A + sc_tmp, W("indexer.k_norm.weight"), W("indexer.k_norm.bias"),
++                                                     A + sc_tmp, g.idx_key, 1, g.idx_ln_eps);
++                rope_norm_kernel<<<blocks(g.n_rot / 2), GM_THREADS>>>(A + sc_tmp, g.n_rot, g.idx_key, 1, pos,
++                                                                      g.rope_base);
++                float* ikc = S + dsa_pool_[(size_t) il];
++                GM_CHECK(cudaMemcpy(ikc + (int64_t) g.idx_key * p, A + sc_tmp, (size_t) g.idx_key * sizeof(float),
++                                    cudaMemcpyDeviceToDevice), err);
++                GM_CHECK(gm_gemv(ws_("indexer.attn_q_b.weight"), A + sc_qr, nullptr, 1.0f, A + sc_iq,
++                                 g.idx_heads * g.idx_key, g.q_lora), err);
++                rope_norm_kernel<<<blocks(g.idx_heads * g.n_rot / 2), GM_THREADS>>>(A + sc_iq, g.n_rot, g.idx_key,
++                                                                                    g.idx_heads, pos, g.rope_base);
++                GM_CHECK(gm_gemv(ws_("indexer.proj.weight"), A + sc_x, nullptr, prescale, A + sc_iw, g.idx_heads,
++                                 g.n_embd), err);
++                strata::kernels::glm_dsa_score(A + sc_iq, ikc, A + sc_iw, g.idx_key, g.idx_heads, 1, pos + 1,
++                                               A + sc_score, nullptr);
++                dsa_n_sel = std::min(g.idx_top_k, pos + 1);
++                GM_CHECK(cudaMemcpy(d_pos_, &pos, sizeof(int), cudaMemcpyHostToDevice), err);
++                strata::kernels::glm_dsa_select(A + sc_score, pos + 1, 1, dsa_n_sel, 0, 1, dsa_n_sel, d_pos_,
++                                                (int*) (A + sc_cells), nullptr);
++            } else if (dsa_n_sel == 0) {
++                err = "glm5_model: glm-dsa layer " + L + " shares an indexer selection this part never made";
++                return false;
++            }
++            strata::kernels::glm_mla_attention_pe(A + sc_qabs, A + sc_q + g.qk_nope, g.k_mla(), lat, kpe, g.n_rot,
++                                                  (const int*) (A + sc_cells), W("attn_v_b.weight"), g.kv_lora,
++                                                  g.n_head, g.v_head, g.qk_nope, 1, dsa_n_sel, A + sc_attn, nullptr);
++            cb_dump("kqv_out-" + L, A + sc_attn, (int64_t) g.v_head * g.n_head);
++            GM_CHECK(gm_gemv(ws_("attn_output.weight"), A + sc_attn, nullptr, 1.0f, A + sc_mixer, g.n_embd,
++                             (int64_t) g.n_head * g.v_head), err);
++        } else if (g.is_recr(il)) {
+             // ---- the KDA mixer
+             const char* streams[] = {"q", "k", "v"};
+             for (int si = 0; si < 3; ++si) {
+@@ -2292,7 +2490,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+ 
+             GM_CHECK(gm_gemv(ws_("attn_q_b.weight"), A + sc_qr, nullptr, 1.0f, A + sc_q, g.n_head * g.qk_nope, g.q_lora), err);
+             q_absorb_kernel<<<blocks((int64_t) g.kv_lora * g.n_head), GM_THREADS>>>(
+-                W("attn_k_b.weight"), A + sc_q, A + sc_qabs, g.qk_nope, g.kv_lora, g.n_head, 1);
++                W("attn_k_b.weight"), A + sc_q, A + sc_qabs, g.qk_nope, g.kv_lora, g.n_head, 1, g.qk_nope);
+ 
+             // the indexer: per-token key/gate into their buffers; a pool's key when it completes
+             GM_CHECK(gm_gemv(ws_("indexer.attn_k.weight"), A + sc_x, nullptr,
+@@ -2342,15 +2540,21 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+                              A + sc_mixer, g.n_embd, (int64_t) g.n_head * g.v_head), err);
+         }
+ 
+-        // ---- hc write (ping-pong), then the FFN half
+-        strata::kernels::glm_hc_post(A + sc_mixer, R, A + sc_post, A + sc_comb, hcs, S + g.hc * g.n_embd, nullptr);
+-        R = S + g.hc * g.n_embd;
+-        cb_dump("hc_attn_post-" + L, R, g.hc * g.n_embd);
+-        strata::kernels::glm_hc_pre(R, W("hc_ffn_fn.weight"), W("hc_ffn_scale.weight"), W("hc_ffn_base.weight"),
+-                                    g.norm_eps, g.hc_eps, hcs, hcws, A + sc_mixed, A + sc_pre, A + sc_post,
+-                                    A + sc_comb, nullptr);
+-        cb_dump("hc_ffn_pre-" + L, A + sc_mixed, g.n_embd);
+-        rms_norm_kernel<<<1, GM_THREADS>>>(A + sc_mixed, W("ffn_norm.weight"), A + sc_x, g.n_embd, 1, g.norm_eps);
++        // ---- hc write (ping-pong), then the FFN half (glm-dsa: residual += mixer, normed)
++        if (g.dsa) {
++            add_kernel<<<blocks(g.n_embd), GM_THREADS>>>(R, A + sc_mixer, R, g.n_embd);
++            cb_dump("ffn_inp-" + L, R, g.n_embd);
++            rms_norm_kernel<<<1, GM_THREADS>>>(R, W("ffn_norm.weight"), A + sc_x, g.n_embd, 1, g.norm_eps);
++        } else {
++            strata::kernels::glm_hc_post(A + sc_mixer, R, A + sc_post, A + sc_comb, hcs, S + g.hc * g.n_embd, nullptr);
++            R = S + g.hc * g.n_embd;
++            cb_dump("hc_attn_post-" + L, R, g.hc * g.n_embd);
++            strata::kernels::glm_hc_pre(R, W("hc_ffn_fn.weight"), W("hc_ffn_scale.weight"), W("hc_ffn_base.weight"),
++                                        g.norm_eps, g.hc_eps, hcs, hcws, A + sc_mixed, A + sc_pre, A + sc_post,
++                                        A + sc_comb, nullptr);
++            cb_dump("hc_ffn_pre-" + L, A + sc_mixed, g.n_embd);
++            rms_norm_kernel<<<1, GM_THREADS>>>(A + sc_mixed, W("ffn_norm.weight"), A + sc_x, g.n_embd, 1, g.norm_eps);
++        }
+         cb_dump("ffn_norm-" + L, A + sc_x, g.n_embd);
+ 
+         if (il < g.dense_lead) {
+@@ -2418,8 +2622,12 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+         }
+         cb_dump("ffn_out-" + L, A + sc_ffn, g.n_embd);
+ 
+-        strata::kernels::glm_hc_post(A + sc_ffn, R, A + sc_post, A + sc_comb, hcs, S, nullptr);
+-        R = S;
++        if (g.dsa) {
++            add_kernel<<<blocks(g.n_embd), GM_THREADS>>>(R, A + sc_ffn, R, g.n_embd);
++        } else {
++            strata::kernels::glm_hc_post(A + sc_ffn, R, A + sc_post, A + sc_comb, hcs, S, nullptr);
++            R = S;
++        }
+         cb_dump("l_out-" + L, R, g.hc * g.n_embd);
+         if (timing_) {
+             if (!tev_rec(tev_d_, "d")) timing_ = false;
+@@ -3032,8 +3240,20 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+     // token_embd stays QUANTIZED too (Q4_K, 0.36 GB instead of 2.54 GB F32): step() dequantizes
+     // the one row it needs per token from the host mapping (pack_emb_*), and the 2.2 GB go to
+     // the expert pool instead
++    // glm-dsa on the fast path: the router, the indexer's projections and the absorbed MLA projections become the BF16
++    // copies the fast kernels read (glm5-next ships them BF16; glm-dsa F32 / Q8_0) - rounded to nearest even, as
++    // glm5-next's router already is
++    const auto dsa16 = [&](const std::string& name) {
++        if (!g_.dsa || !fast_mode_) return false;
++        for (const char* suf : {".ffn_gate_inp.weight", ".indexer.proj.weight", ".indexer.attn_k.weight",
++                                ".indexer.attn_q_b.weight", ".attn_k_b.weight", ".attn_v_b.weight"}) {
++            const size_t n = std::strlen(suf);
++            if (name.size() >= n && name.compare(name.size() - n, n, suf) == 0) return true;
++        }
++        return false;
++    };
+     const auto dequant_at_load = [&](const std::string& name) {
+-        return row_kind_[name] != "0" || name == "attn_k_b.weight" || name == "attn_v_b.weight";
++        return row_kind_[name] != "0" || is_absorbed_mla(name) || dsa16(name);
+     };
+     // the fast path keeps the pack's BIG BF16 rows as BF16 on the device (dense.bin stores them BF16,
+     // so this is lossless; F32 expansion doubled their bytes and their read time) and does not upload
+@@ -3262,6 +3482,16 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+             err = "pack: unsupported dense kind '" + r.kind + "' for " + r.name;
+             return false;
+         }
++        if (dsa16(r.name)) {
++            std::vector<uint16_t> h16((size_t) n_f32);
++            const uint32_t* u = (const uint32_t*) host.data();
++            for (size_t i = 0; i < (size_t) n_f32; ++i) h16[i] = (uint16_t) ((u[i] + 0x7FFFu + ((u[i] >> 16) & 1u)) >> 16);
++            { cudaError_t e_ = cudaMemcpy((uint8_t*) w_arena_ + at, h16.data(), (size_t) n_f32 * 2,
++                                cudaMemcpyHostToDevice); if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; } }
++            w16_[r.name] = (const uint16_t*) ((uint8_t*) w_arena_ + at);
++            at += (n_f32 * 2 + 255u) & ~(uint64_t) 255u;
++            continue;
++        }
+         { cudaError_t e_ = cudaMemcpy((uint8_t*) w_arena_ + at, host.data(), (size_t) n_f32 * 4,
+                             cudaMemcpyHostToDevice); if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; } }
+         w_[r.name] = (const float*) ((uint8_t*) w_arena_ + at);
+@@ -3384,11 +3614,11 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+     int64_t floats = 2 * hc_dim;
+     // the fast path keeps the DSA latent cache in FP16 (half the bytes: at 128k context ~0.8 GB more for experts on
+     // each card, and the prompt attention reads half as much); the reference path (STRATA_GLM_SLOW) keeps F32
+-    lat_q8_ = fast_mode_ && g_.kv_lora % 32 == 0 && getenv("STRATA_GLM_KV_INT8") != nullptr &&
++    lat_q8_ = fast_mode_ && !g_.dsa && g_.kv_lora % 32 == 0 && getenv("STRATA_GLM_KV_INT8") != nullptr &&
+               std::atoi(getenv("STRATA_GLM_KV_INT8")) != 0;
+     // KV streaming (--kv-resident N): the latent cache lives in pinned RAM and the state holds N positions of VRAM slots
+     // a layer (kv_stream_setup, below)
+-    const int64_t kv_cells = fast_mode_ ? kv_resident_cells(g_.idx_kpool, max_ctx) : 0;
++    const int64_t kv_cells = fast_mode_ && !g_.dsa ? kv_resident_cells(g_.idx_kpool, max_ctx) : 0;   // (glm-dsa: not yet)
+     const int64_t lat_rows = kv_cells > 0 ? kv_cells : max_ctx;
+     // (INT8: lat8_rec_bytes per position, a multiple of 16 bytes at kv_lora 512)
+     const int64_t lat_floats = lat_q8_      ? (int64_t) strata::kernels::glmf::lat8_rec_bytes(g_.kv_lora) / 4 * lat_rows
+@@ -3403,10 +3633,16 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+     dsa_ik_.assign((size_t) g_.n_layers + 1, 0);
+     dsa_ig_.assign((size_t) g_.n_layers + 1, 0);
+     dsa_pool_.assign((size_t) g_.n_layers + 1, 0);
++    dsa_kpe_.assign((size_t) g_.n_layers + 1, 0);
+     // the indexer key / gate caches: a ring on the fast path (the prompt path's largest sub-batch + 64 positions; see
+     // ik_ring_), the whole context on the reference path (whose kernels index them by position)
+     ik_ring_ = fast_mode_ ? (int) std::min<int64_t>(max_ctx, 8192 + 64) : (int) max_ctx;
+-    if (mtp_il_ >= 0) {
++    if (mtp_il_ >= 0 && g_.dsa) {   // glm-dsa's block: the latent and k_pe only (it attends densely)
++        dsa_lat_[(size_t) mtp_il_] = floats;
++        floats += lat_floats;
++        dsa_kpe_[(size_t) mtp_il_] = floats;
++        floats += (int64_t) g_.n_rot * max_ctx;
++    } else if (mtp_il_ >= 0) {
+         dsa_lat_[(size_t) mtp_il_] = floats;
+         floats += lat_floats;
+         dsa_ik_[(size_t) mtp_il_] = floats;
+@@ -3423,6 +3659,13 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+             floats += (int64_t) g_.d_inner() * g_.kda_head_dim;
+             kda_conv_[(size_t) il] = floats;
+             floats += (int64_t) 3 * g_.d_inner() * (g_.d_conv - 1);
++        } else if (g_.dsa) {   // the latent (FP16 on the fast path), F32 k_pe and indexer keys of every position
++            dsa_lat_[(size_t) il] = floats;
++            floats += lat_floats;
++            dsa_kpe_[(size_t) il] = floats;
++            floats += (int64_t) g_.n_rot * max_ctx;
++            dsa_pool_[(size_t) il] = floats;
++            floats += (int64_t) g_.idx_key * max_ctx;
+         } else {
+             dsa_lat_[(size_t) il] = floats;
+             floats += lat_floats;
+@@ -3465,8 +3708,8 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+     sc_g2 = take(g_.d_inner());
+     sc_gated = take(g_.d_inner());
+     sc_qr = take(g_.q_lora);
+-    sc_kv = take(g_.kv_lora);
+-    sc_q = take((int64_t) g_.n_head * g_.qk_nope);
++    sc_kv = take(g_.kv_lora + g_.n_rot);
++    sc_q = take((int64_t) g_.n_head * g_.k_mla());
+     sc_qabs = take((int64_t) g_.kv_lora * g_.n_head);
+     sc_iq = take((int64_t) g_.idx_heads * g_.idx_key);
+     sc_iw = take(g_.idx_heads);
+@@ -3544,13 +3787,20 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+         size_t pool_bytes_cap = pool_avail;
+         if (const char* ps = getenv("STRATA_GLM_POOL_SLOTS0"))
+             pool_bytes_cap = std::min<size_t>(pool_avail, (size_t) std::atoi(ps) * slot_bytes_);
+-        // per-class bytes proportional to that class's byte demand
++        // every class first gets one route's worth of slots (n_exp_used): a token's experts for a layer must all be
++        // resident at once, and a rare class (one layer of a different recipe - GLM-5.3 UD-Q2_K_XL's layer 8) given
++        // fewer evicted its own route's experts before the kernel read them.  The rest is proportional to demand.
++        size_t floor_b = 0;
++        for (int c = 0; c < pool_nclasses_; ++c) floor_b += (size_t) g_.n_exp_used * c_stride[(size_t) c];
++        const size_t share_b = pool_bytes_cap > floor_b ? pool_bytes_cap - floor_b : 0;
+         size_t off = 0;
+         int64_t base = 0;
+         int64_t slots_total = 0;
++        bool every_class = true;
+         for (int c = 0; c < pool_nclasses_; ++c) {
+             class_stride_[c] = c_stride[(size_t) c];
+-            const size_t bytes_c = c_weight[(size_t) c] ? (size_t) ((double) pool_bytes_cap *
++            const size_t bytes_c = c_weight[(size_t) c] ? (size_t) g_.n_exp_used * c_stride[(size_t) c] +
++                                                (size_t) ((double) share_b *
+                                                 ((double) c_weight[(size_t) c] * (double) c_stride[(size_t) c]) /
+                                                 weight_sum) : 0;
+             class_slots_[c] = std::min<int64_t>((int64_t) (bytes_c / class_stride_[c]),
+@@ -3560,9 +3810,10 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+             off += (size_t) class_slots_[c] * class_stride_[c];
+             base += class_slots_[c];
+             slots_total += class_slots_[c];
++            every_class = every_class && (c_weight[(size_t) c] == 0 || class_slots_[c] >= g_.n_exp_used);
+         }
+         pool_bytes_ = off;
+-        dev_experts_ = slots_total >= g_.n_exp_used;
++        dev_experts_ = every_class && floor_b <= pool_bytes_cap && slots_total >= g_.n_exp_used;
+     }
+     if (dev_experts_) {
+         cudaError_t e_ = cudaMalloc(&pool_, pool_bytes_);
+@@ -3673,9 +3924,10 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
+         return true;   // a GGUF without the draft block
+     }
+     const auto x3 = [&](const std::string& n) { return exl3_ && xt.mats.count(n) != 0; };
+-    const auto& raw_names = kMtpRaw;
+-    const auto& b16_names = kMtpB16;
+-    const auto& f32_names = kMtpF32;
++    const MtpNames names = mtp_names(g_.dsa);
++    const auto& raw_names = names.raw;
++    const auto& b16_names = names.b16;
++    const auto& f32_names = names.f32;
+     uint64_t bytes = 0;
+     if (exl3_) {
+         for (const char* n : raw_names) {
+@@ -3693,7 +3945,7 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
+             if (t == nullptr) { err = "mtp: " + P + n + " missing"; return false; }
+             bytes += ((uint64_t) t->elements() * 4 + 255u) & ~(uint64_t) 255u;
+         }
+-    } else if (!mtp_dense_vram([&](const std::string& n) { return find(n, si); }, il, bytes, err)) {
++    } else if (!mtp_dense_vram([&](const std::string& n) { return find(n, si); }, il, bytes, err, g_.dsa)) {
+         return false;
+     }
+     if (cudaMalloc(&mtp_arena_, bytes) != cudaSuccess) {
+diff --git a/src/core/glm_mtp_rows.cu b/src/core/glm_mtp_rows.cu
+index 5f425fc..f4220e1 100644
+--- a/src/core/glm_mtp_rows.cu
++++ b/src/core/glm_mtp_rows.cu
+@@ -347,7 +347,7 @@ bool Glm5Model::mtpw_part(const int* seqs, const int* counts, int n, const int32
+                 tt->to_float(pack_emb_src_ + (size_t) tokens[row + t] * emb_row, e, E);
+                 if (rw[row + t].img != nullptr) std::memcpy(e, rw[row + t].img, (size_t) E * sizeof(float));
+                 cudaMemcpyAsync(F->emb, e, (size_t) E * sizeof(float), cudaMemcpyHostToDevice, s);
+-                gf::embed_streams(F->emb, rw[row + t].res, E, s);
++                embed_res(F->emb, rw[row + t].res, s);
+             }
+     } else {
+         for (int c = 0, row = 0; c < n; row += counts[c], ++c) {
+@@ -371,7 +371,7 @@ bool Glm5Model::mtpw_part(const int* seqs, const int* counts, int n, const int32
+     } else {
+         // ---- the head: one read of the output matrix for every row, then each window's picks
+         for (int i = 0; i < nr; ++i)
+-            gf::head_prep(rw[i].res, w_.at("output_norm.weight"), g.norm_eps, E, row_at(S->head_x, E, i),
++            head_res(rw[i].res, row_at(S->head_x, E, i),
+                           rowq_at(S->head_xq, E, i), s);
+         const WSlot& ow = ws_map_.at("output.weight");
+         gf::MvJob o = {ow.q, S->head_xq, S->head_x, S->logits, nullptr, 1.0f, ow.type, E, g.n_vocab};
+diff --git a/src/core/glm_multi.cu b/src/core/glm_multi.cu
+index 2723edc..6049f04 100644
+--- a/src/core/glm_multi.cu
++++ b/src/core/glm_multi.cu
+@@ -237,7 +237,7 @@ bool Glm5Model::multi_issue(int s, int32_t token, const strata::kernels::Sampler
+     if (const float* img = image_row(p)) std::memcpy(c.emb_h, img, (size_t) g.n_embd * sizeof(float));
+     cudaSetDevice(dev_);
+     cudaMemcpyAsync(F->emb, c.emb_h, (size_t) g.n_embd * sizeof(float), cudaMemcpyHostToDevice, F->cs);
+-    gf::embed_streams(F->emb, state_, g.n_embd, F->cs);
++    embed_res(F->emb, state_, F->cs);
+     if (!fast_layers(p, false, err)) return false;
+     Glm5Model* tail = this;
+     const size_t hop = (size_t) g.hc * g.n_embd * sizeof(float);
+@@ -256,8 +256,7 @@ bool Glm5Model::multi_issue(int s, int32_t token, const strata::kernels::Sampler
+     FastState* FT = tail->fast_;
+     SeqCtx& ct = tail->seq_[(size_t) s];
+     cudaSetDevice(tail->dev_);
+-    gf::head_prep(tail->state_, tail->w_.at("output_norm.weight"), g.norm_eps, g.n_embd, FT->head_x, FT->head_xq,
+-                  FT->cs);
++    tail->head_res(tail->state_, FT->head_x, FT->head_xq, FT->cs);
+     const WSlot& ow = tail->ws_map_.at("output.weight");
+     gf::MvJob o = {ow.q, FT->head_xq, FT->head_x, tail->sc_ + tail->sc_logits, nullptr, 1.0f, ow.type, g.n_embd,
+                    g.n_vocab};
+diff --git a/src/core/glm_rows.cu b/src/core/glm_rows.cu
+index da17c68..9e72d84 100644
+--- a/src/core/glm_rows.cu
++++ b/src/core/glm_rows.cu
+@@ -278,7 +278,7 @@ bool Glm5Model::rows_embed(const RowSeq* rw, const int32_t* tokens, int n, std::
+         tt->to_float(pack_emb_src_ + (size_t) tokens[i] * emb_row, c.emb_h, E);
+         if (rw[i].img != nullptr) std::memcpy(c.emb_h, rw[i].img, (size_t) E * sizeof(float));
+         cudaMemcpyAsync(F->emb, c.emb_h, (size_t) E * sizeof(float), cudaMemcpyHostToDevice, s);
+-        gf::embed_streams(F->emb, rw[i].res, E, s);
++        embed_res(F->emb, rw[i].res, s);
+     }
+     return true;
+ }
+@@ -844,7 +844,7 @@ bool Glm5Model::rows_head(const RowSeq* rw, const strata::kernels::SamplerParams
+     };
+     // ---- the head: one read of the output matrix for every row, then each row's draw
+     for (int i = 0; i < n; ++i)
+-        gf::head_prep(rw[i].res, w_.at("output_norm.weight"), g.norm_eps, E, rows(S->head_x, E, i),
++        head_res(rw[i].res, rows(S->head_x, E, i),
+                       rows_q(S->head_xq, E, i), s);
+     const WSlot& ow = ws_map_.at("output.weight");
+     gf::MvJob o = {ow.q, S->head_xq, S->head_x, S->logits, nullptr, 1.0f, ow.type, E, g.n_vocab};
+diff --git a/src/core/glm_window.cu b/src/core/glm_window.cu
+index 3af089a..0bfa0bc 100644
+--- a/src/core/glm_window.cu
++++ b/src/core/glm_window.cu
+@@ -1045,7 +1045,7 @@ bool Glm5Model::window(const int32_t* tokens, int T, int32_t* out, std::string&
+         }
+         cudaMemcpyAsync(W.emb, W.emb_h, (size_t) T * E * sizeof(float), cudaMemcpyHostToDevice, F->cs);
+         for (int t = 0; t < T; ++t)
+-            gf::embed_streams(W.emb + (size_t) t * E, W.R[0] + (size_t) t * hcE, E, F->cs);
++            embed_res(W.emb + (size_t) t * E, W.R[0] + (size_t) t * hcE, F->cs);
+     }
+     if (!fast_window_layers(p0, T, err)) return false;
+     // each later part: the rows cross over through the previous part's pinned buffer, ordered on the devices
+@@ -1068,8 +1068,7 @@ bool Glm5Model::window(const int32_t* tokens, int T, int32_t* out, std::string&
+     auto& WT = FT->win;
+     cudaSetDevice(tail->dev_);
+     for (int t = 0; t < T; ++t)
+-        gf::head_prep(WT.R[WT.out] + (size_t) t * hcE, tail->w_.at("output_norm.weight"), g.norm_eps, E,
+-                      WT.head_x + (size_t) t * E, (uint8_t*) WT.head_xq + (size_t) t * WT.xq_s, FT->cs);
++        tail->head_res(WT.R[WT.out] + (size_t) t * hcE, WT.head_x + (size_t) t * E, (uint8_t*) WT.head_xq + (size_t) t * WT.xq_s, FT->cs);
+     const WSlot& ow = tail->ws_map_.at("output.weight");
+     gf::MvJob o = {ow.q, WT.head_xq, WT.head_x, WT.logits, nullptr, 1.0f, ow.type, E, g.n_vocab};
+     if (ow.type == 0) o.w = ow.f32;
+@@ -1248,7 +1247,7 @@ bool Glm5Model::win_pipe_part(int k, int t, std::string& err) {
+     if (prev == nullptr) {
+         cudaMemcpyAsync(W.emb + (size_t) sl * E, W.emb_h + (size_t) sl * E, (size_t) E * sizeof(float),
+                         cudaMemcpyHostToDevice, F->cs);
+-        gf::embed_streams(W.emb + (size_t) sl * E, m->state_, E, F->cs);
++        embed_res(W.emb + (size_t) sl * E, m->state_, F->cs);
+     } else {
+         cudaStreamWaitEvent(F->cs, prev->fast_->win.ev_tok[sl], 0);
+         cudaMemcpyAsync(m->state_, prev->fast_->win.hop_h + (size_t) sl * hcE, hcE * sizeof(float),
+@@ -1274,7 +1273,7 @@ bool Glm5Model::win_pipe_part(int k, int t, std::string& err) {
+     float* hx = W.head_x + (size_t) sl * E;
+     void* hq = (uint8_t*) W.head_xq + (size_t) sl * W.xq_s;
+     float* lg = W.logits + (size_t) sl * g.n_vocab;
+-    gf::head_prep(m->state_, m->w_.at("output_norm.weight"), g.norm_eps, E, hx, hq, F->cs);
++    m->head_res(m->state_, hx, hq, F->cs);
+     const WSlot& ow = m->ws_map_.at("output.weight");
+     if (m->head_split_ready()) {
+         if (!m->win_head_split(t, sl, hx, lg, err)) return false;
+diff --git a/src/kernels/cuda/glm_dsa.cu b/src/kernels/cuda/glm_dsa.cu
+index f9dd608..1525dff 100644
+--- a/src/kernels/cuda/glm_dsa.cu
++++ b/src/kernels/cuda/glm_dsa.cu
+@@ -109,14 +109,15 @@ __global__ void glm_dsa_select_kernel(const float* __restrict__ score, int n_poo
+ __global__ void glm_mla_attention_kernel(const float* __restrict__ q_abs, const float* __restrict__ latents,
+                                          const int* __restrict__ cells, const float* __restrict__ wv_b,
+                                          int kv_lora, int n_head, int v_head, int qk_nope, int n_sel,
+-                                         float* __restrict__ out) {
++                                         float* __restrict__ out, const float* __restrict__ q_pe,
++                                         int q_pe_stride, const float* __restrict__ k_pe, int n_rot) {
+     const int block = blockIdx.x;
+     const int h = block % n_head;
+     const int t = block / n_head;
+     const int tid = threadIdx.x;
+     const int nt = blockDim.x;
+     const int* row = cells + (size_t) n_sel * t;
+-    const float scale = rsqrtf((float) qk_nope);
++    const float scale = rsqrtf((float) (qk_nope + n_rot));
+ 
+     extern __shared__ float smem[];   // probs (n_sel) then ctx (kv_lora)
+     float* s_prob = smem;
+@@ -133,6 +134,11 @@ __global__ void glm_mla_attention_kernel(const float* __restrict__ q_abs, const
+         const float* qa = q_abs + (size_t) kv_lora * h + (size_t) kv_lora * n_head * t;
+         float dot = 0.0f;
+         for (int e = 0; e < kv_lora; ++e) dot += qa[e] * lat[e];
++        if (q_pe != nullptr) {   // glm-dsa: the roped part, q_pe_h . k_pe_cell
++            const float* qp = q_pe + (size_t) q_pe_stride * (h + (size_t) n_head * t);
++            const float* kp = k_pe + (size_t) n_rot * cell;
++            for (int e = 0; e < n_rot; ++e) dot += qp[e] * kp[e];
++        }
+         s_prob[s] = dot * scale;
+     }
+     __syncthreads();
+@@ -209,7 +215,16 @@ void glm_mla_attention(const float* q_abs, const float* latents, const int* cell
+     if (kv_lora <= 0 || n_head <= 0 || v_head <= 0 || T <= 0 || n_sel <= 0) return;
+     const size_t smem = ((size_t) n_sel + kv_lora) * sizeof(float);
+     glm_mla_attention_kernel<<<T * n_head, DS_THREADS, smem, (cudaStream_t) stream>>>(
+-        q_abs, latents, cells, wv_b, kv_lora, n_head, v_head, qk_nope, n_sel, out);
++        q_abs, latents, cells, wv_b, kv_lora, n_head, v_head, qk_nope, n_sel, out, nullptr, 0, nullptr, 0);
++}
++
++void glm_mla_attention_pe(const float* q_abs, const float* q_pe, int q_pe_stride, const float* latents,
++                          const float* k_pe, int n_rot, const int* cells, const float* wv_b, int kv_lora,
++                          int n_head, int v_head, int qk_nope, int T, int n_sel, float* out, void* stream) {
++    if (kv_lora <= 0 || n_head <= 0 || v_head <= 0 || T <= 0 || n_sel <= 0) return;
++    const size_t smem = ((size_t) n_sel + kv_lora) * sizeof(float);
++    glm_mla_attention_kernel<<<T * n_head, DS_THREADS, smem, (cudaStream_t) stream>>>(
++        q_abs, latents, cells, wv_b, kv_lora, n_head, v_head, qk_nope, n_sel, out, q_pe, q_pe_stride, k_pe, n_rot);
+ }
+ 
+ }  // namespace strata::kernels
+diff --git a/src/kernels/cuda/glm_fast.cu b/src/kernels/cuda/glm_fast.cu
+index 268563c..2034ef7 100644
+--- a/src/kernels/cuda/glm_fast.cu
++++ b/src/kernels/cuda/glm_fast.cu
+@@ -6,6 +6,7 @@
+ // serial reference kernels - the values agree to float rounding, which the fast-vs-reference check in
+ // glm_pack_test pins on the real model.
+ #include "strata/kernels/glm_fast.hpp"
++#include "strata/kernels/iq_kernels.hpp"   // quantize_q8_1_rows (mla_pe)
+ #include "strata/kernels/glm_batch.hpp"   // mla_decode_v70 (Volta)
+ #include "strata/kernels/exl3.hpp"
+ #if defined(STRATA_USE_HIP)
+@@ -4982,10 +4983,10 @@ __global__ void __launch_bounds__(1024) mtp_in_kernel(const float* __restrict__
+                                                       float eps, int n, block_q8_1* __restrict__ catq) {
+     __shared__ float sred[32];
+     const int tid = threadIdx.x, lane = tid & 31;
+-    float a[4], b[4];
++    float a[8], b[8];
+     float sa = 0.0f, sb = 0.0f;
+ #pragma unroll
+-    for (int i = 0; i < 4; ++i) {
++    for (int i = 0; i < 8; ++i) {
+         const int e = tid + 1024 * i;
+         a[i] = e < n ? emb[e] : 0.0f;
+         b[i] = e < n ? h[e] : 0.0f;
+@@ -4996,7 +4997,7 @@ __global__ void __launch_bounds__(1024) mtp_in_kernel(const float* __restrict__
+     sb = block_sum(sb, sred);
+     const float ia = rsqrtf(sa / (float) n + eps), ib = rsqrtf(sb / (float) n + eps);
+ #pragma unroll
+-    for (int i = 0; i < 4; ++i) {
++    for (int i = 0; i < 8; ++i) {
+         const int e = tid + 1024 * i;
+         if (e >= n) break;
+         q8_1_store_warp(a[i] * ia * enorm[e], catq + e / 32, lane);
+@@ -5009,10 +5010,10 @@ __global__ void __launch_bounds__(1024) rms_q8_kernel(float* __restrict__ h, con
+                                                       float* __restrict__ x, block_q8_1* __restrict__ xq) {
+     __shared__ float sred[32];
+     const int tid = threadIdx.x, lane = tid & 31;
+-    float v[4];
++    float v[8];
+     float ss = 0.0f;
+ #pragma unroll
+-    for (int i = 0; i < 4; ++i) {
++    for (int i = 0; i < 8; ++i) {
+         const int e = tid + 1024 * i;
+         float t = e < n ? h[e] : 0.0f;
+         if (add != nullptr && e < n) {
+@@ -5025,7 +5026,7 @@ __global__ void __launch_bounds__(1024) rms_q8_kernel(float* __restrict__ h, con
+     ss = block_sum(ss, sred);
+     const float inv = rsqrtf(ss / (float) n + eps);
+ #pragma unroll
+-    for (int i = 0; i < 4; ++i) {
++    for (int i = 0; i < 8; ++i) {
+         const int e = tid + 1024 * i;
+         if (e >= n) break;
+         const float xv = v[i] * inv * w[e];
+@@ -7003,4 +7004,168 @@ void argmax_join(const int* a, const int* b, int c0, int* out, cudaStream_t s) {
+     launch_check("argmax_join");
+ }
+ 
++// ---------------------------------------------------------------- glm-dsa (GLM-5.3): roped MLA + the token indexer
++// ref/glm_dsa.py's arithmetic; the reference path's kernels (glm_model.cu, glm_dsa.cu) are the parity they follow.
++namespace {
++
++// the rotation of pair i (ggml rope NORM, no YaRN): theta = pos * base^(-2i/n_rot), stepped in f32 like ggml's cache
++__device__ __forceinline__ void rope_pair(float x0, float x1, int i, int n_rot, int pos, float base, float& y0,
++                                          float& y1) {
++    const float theta_scale = powf(base, -2.0f / (float) n_rot);
++    float theta = (float) pos;
++    for (int k = 0; k < i; ++k) theta *= theta_scale;
++    const float c = cosf(theta), sn = sinf(theta);
++    y0 = x0 * c - x1 * sn;
++    y1 = x0 * sn + x1 * c;
++}
++
++__global__ void __launch_bounds__(1024) dsa_rope_prep_kernel(DsaRopePrepArgs a) {
++    __shared__ float sred[32];
++    __shared__ float sy[1024];
++    const int tid = threadIdx.x, lane = tid & 31;
++    if (blockIdx.x == 0) {   // qr = rms(qr_raw) * w, and its q8_1
++        float ss = 0.0f;
++        for (int e = tid; e < a.q_lora; e += blockDim.x) ss += a.qr_raw[e] * a.qr_raw[e];
++        const float inv = rsqrtf(block_sum(ss, sred) / (float) a.q_lora + a.eps);
++        for (int e = tid; e < a.q_lora; e += blockDim.x) {
++            const float xv = a.qr_raw[e] * inv * a.q_a_norm[e];
++            a.qr[e] = xv;
++            q8_1_store_warp(xv, (block_q8_1*) a.qr_q + e / 32, lane);
++        }
++    } else if (blockIdx.x == 1) {   // the latent (normed, FP16 cache row p) and k_pe (roped, NOT normed, F32 row p)
++        float ss = 0.0f;
++        for (int e = tid; e < a.kv_lora; e += blockDim.x) ss += a.kv_raw[e] * a.kv_raw[e];
++        const float inv = rsqrtf(block_sum(ss, sred) / (float) a.kv_lora + a.eps);
++        for (int e = tid; e < a.kv_lora; e += blockDim.x)
++            a.lat[(size_t) a.p * a.kv_lora + e] = __half_as_ushort(__float2half(a.kv_raw[e] * inv * a.kv_norm[e]));
++        if (tid < a.n_rot / 2) {
++            float y0, y1;
++            rope_pair(a.kv_raw[a.kv_lora + 2 * tid], a.kv_raw[a.kv_lora + 2 * tid + 1], tid, a.n_rot, a.p, a.base, y0, y1);
++            a.kpe[(size_t) a.p * a.n_rot + 2 * tid] = y0;
++            a.kpe[(size_t) a.p * a.n_rot + 2 * tid + 1] = y1;
++        }
++    } else if (a.ik_raw != nullptr) {   // the indexer key: layer norm (w, b), roped on its first n_rot dims -> row p
++        const int n = a.idx_key;
++        float sum = 0.0f;
++        for (int e = tid; e < n; e += blockDim.x) sum += a.ik_raw[e];
++        const float mu = block_sum(sum, sred) / (float) n;
++        float var = 0.0f;
++        for (int e = tid; e < n; e += blockDim.x) var += (a.ik_raw[e] - mu) * (a.ik_raw[e] - mu);
++        const float inv = rsqrtf(block_sum(var, sred) / (float) n + a.ln_eps);
++        for (int e = tid; e < n; e += blockDim.x) sy[e] = (a.ik_raw[e] - mu) * inv * a.k_norm_w[e] + a.k_norm_b[e];
++        __syncthreads();
++        float* row = a.ik + (size_t) a.p * n;
++        if (tid < a.n_rot / 2) {
++            float y0, y1;
++            rope_pair(sy[2 * tid], sy[2 * tid + 1], tid, a.n_rot, a.p, a.base, y0, y1);
++            row[2 * tid] = y0;
++            row[2 * tid + 1] = y1;
++        }
++        for (int e = a.n_rot + tid; e < n; e += blockDim.x) row[e] = sy[e];
++    }
++}
++
++__global__ void rope_heads_kernel(float* __restrict__ x, int n_rot, int stride, int n_head, int pos, float base) {
++    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
++    if (idx >= n_head * (n_rot / 2)) return;
++    const int h = idx / (n_rot / 2), i = idx % (n_rot / 2);
++    float* xh = x + (size_t) stride * h + 2 * i;
++    float y0, y1;
++    rope_pair(xh[0], xh[1], i, n_rot, pos, base, y0, y1);
++    xh[0] = y0;
++    xh[1] = y1;
++}
++
++// q_abs[h][c] = sum_e wk_b[h][c][e] * q_nope[h][e]   (wk_b BF16 {qk_nope, kv_lora, n_head}; q heads k_mla apart)
++__global__ void mla_pe_qabs_kernel(const float* __restrict__ q, int k_mla, int qk_nope, const uint16_t* __restrict__ wk_b,
++                                   int kv_lora, int n_head, float* __restrict__ q_abs) {
++    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
++    if (idx >= kv_lora * n_head) return;
++    const int h = idx / kv_lora, c = idx % kv_lora;
++    const uint16_t* w = wk_b + (size_t) qk_nope * c + (size_t) qk_nope * kv_lora * h;
++    const float* qh = q + (size_t) k_mla * h;
++    float acc = 0.0f;
++    for (int e = 0; e < qk_nope; ++e) acc += bf(w[e]) * qh[e];
++    q_abs[idx] = acc;
++}
++
++// one block a head: scores (q_abs . latent + q_pe . k_pe) / sqrt(qk_nope + n_rot) over the cells, softmax, ctx, wv_b . ctx
++__global__ void __launch_bounds__(256) mla_pe_attend_kernel(const float* __restrict__ q_abs, const float* __restrict__ q,
++                                                            int k_mla, int qk_nope, int n_rot,
++                                                            const uint16_t* __restrict__ lat,
++                                                            const float* __restrict__ kpe, const int* __restrict__ cells,
++                                                            int n_sel, const uint16_t* __restrict__ wv_b, int kv_lora,
++                                                            int v_head, float* __restrict__ out) {
++    extern __shared__ float sm[];
++    float* prob = sm;                 // n_sel
++    float* ctx = sm + n_sel;          // kv_lora
++    float* qa = ctx + kv_lora;        // kv_lora
++    float* qp = qa + kv_lora;         // n_rot
++    __shared__ float sred[32];
++    const int h = blockIdx.x, tid = threadIdx.x;
++    for (int c = tid; c < kv_lora; c += blockDim.x) qa[c] = q_abs[(size_t) kv_lora * h + c];
++    for (int e = tid; e < n_rot; e += blockDim.x) qp[e] = q[(size_t) k_mla * h + qk_nope + e];
++    __syncthreads();
++    const float scale = rsqrtf((float) (qk_nope + n_rot));
++    float mx = -INFINITY;
++    for (int s = tid; s < n_sel; s += blockDim.x) {
++        const int cell = cells != nullptr ? cells[s] : s;
++        const uint16_t* lr = lat + (size_t) kv_lora * cell;
++        float dot = 0.0f;
++        for (int c = 0; c < kv_lora; ++c) dot += qa[c] * __half2float(__ushort_as_half(lr[c]));
++        const float* kr = kpe + (size_t) n_rot * cell;
++        for (int e = 0; e < n_rot; ++e) dot += qp[e] * kr[e];
++        prob[s] = dot * scale;
++        mx = fmaxf(mx, prob[s]);
++    }
++    mx = block_max(mx, sred);
++    float sum = 0.0f;
++    for (int s = tid; s < n_sel; s += blockDim.x) {
++        prob[s] = expf(prob[s] - mx);
++        sum += prob[s];
++    }
++    const float inv = 1.0f / block_sum(sum, sred);
++    __syncthreads();
++    for (int c = tid; c < kv_lora; c += blockDim.x) {
++        float acc = 0.0f;
++        for (int s = 0; s < n_sel; ++s)
++            acc += prob[s] * __half2float(__ushort_as_half(lat[(size_t) kv_lora * (cells != nullptr ? cells[s] : s) + c]));
++        ctx[c] = acc * inv;
++    }
++    __syncthreads();
++    for (int v = tid; v < v_head; v += blockDim.x) {
++        const uint16_t* w = wv_b + (size_t) kv_lora * v + (size_t) kv_lora * v_head * h;
++        float acc = 0.0f;
++        for (int c = 0; c < kv_lora; ++c) acc += bf(w[c]) * ctx[c];
++        out[(size_t) v_head * h + v] = acc;
++    }
++}
++
++}  // namespace
++
++void dsa_rope_prep(const DsaRopePrepArgs& a, cudaStream_t s) {
++    dsa_rope_prep_kernel<<<a.ik_raw != nullptr ? 3 : 2, 1024, 0, s>>>(a);
++    launch_check("dsa_rope_prep");
++}
++
++void rope_heads(float* x, int n_rot, int stride, int n_head, int pos, float base, cudaStream_t s) {
++    const int n = n_head * (n_rot / 2);
++    rope_heads_kernel<<<(n + 255) / 256, 256, 0, s>>>(x, n_rot, stride, n_head, pos, base);
++    launch_check("rope_heads");
++}
++
++void mla_pe(const float* q, int k_mla, int qk_nope, int n_rot, const uint16_t* wk_b, const uint16_t* wv_b,
++            const uint16_t* lat, const float* kpe, const int* cells, int n_sel, int n_head, int kv_lora, int v_head,
++            float* scratch, void* out_q8_1, cudaStream_t s) {
++    float* q_abs = scratch;
++    float* out = scratch + (size_t) n_head * kv_lora;
++    mla_pe_qabs_kernel<<<(kv_lora * n_head + 255) / 256, 256, 0, s>>>(q, k_mla, qk_nope, wk_b, kv_lora, n_head, q_abs);
++    launch_check("mla_pe_qabs");
++    const size_t smem = ((size_t) n_sel + 2 * kv_lora + n_rot) * sizeof(float);
++    mla_pe_attend_kernel<<<n_head, 256, smem, s>>>(q_abs, q, k_mla, qk_nope, n_rot, lat, kpe, cells, n_sel, wv_b,
++                                                   kv_lora, v_head, out);
++    launch_check("mla_pe_attend");
++    strata::kernels::quantize_q8_1_rows(out, 1, (int64_t) n_head * v_head, out_q8_1, s);
++}
++
+ }  // namespace strata::kernels::glmf
+diff --git a/tools/glm_dsa_synth_gguf.py b/tools/glm_dsa_synth_gguf.py
+new file mode 100644
+index 0000000..0f96eb6
+--- /dev/null
++++ b/tools/glm_dsa_synth_gguf.py
+@@ -0,0 +1,167 @@
++"""tools/glm_dsa_synth_gguf.py - a tiny, structurally complete synthetic glm-dsa (GLM-5.3) GGUF.
++
++The glm-dsa counterpart of tools/glm_synth_gguf.py: the tensor set and metadata keys llama.cpp's
++glm-dsa loader reads, dimensions scaled down, values from a seeded RNG.  Every path of
++ref/glm_dsa.py is exercised: a dense lead layer, MoE + shared expert, roped MLA, full AND shared
++indexer layers (the indexer types array), and an indexer top_k small enough that 24-token
++sequences discard keys.  The indexer key width is 64, the smallest Walsh-Hadamard size llama.cpp
++builds, so `--vocab` output loads in upstream llama.cpp for the parity check.
++
++Usage:
++    python tools/glm_dsa_synth_gguf.py --out glm-dsa-synth.gguf [--seed 4321] [--vocab]
++"""
++from __future__ import annotations
++
++import argparse
++import sys
++from pathlib import Path
++
++import numpy as np
++
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++
++from glm_synth_gguf import ALIGN, arr_f32, arr_i32, arr_str, kv_bool, kv_f32, kv_str, kv_u32, write_gguf  # noqa: E402
++
++SMALL = dict(n_embd=128, n_vocab=512, n_layers=6, n_head=4, qk_nope=32, n_rot=16, v_head=32,
++             q_lora=64, kv_lora=64, n_expert=16, n_exp_used=4, n_ff_exp=32, n_shared=1,
++             n_ff_dense=192, dense_lead=1, idx_heads=4, idx_dim=64, idx_topk=8,
++             idx_types=[1, 1, 0, 1, 0, 0], freq_base=10000.0, ctx=4096)
++
++
++def build(seed: int = 4321, vocab: bool = False) -> tuple[list, list]:
++    g = SMALL
++    n_embd, n_vocab, n_layers, n_head = g["n_embd"], g["n_vocab"], g["n_layers"], g["n_head"]
++    qk_nope, n_rot, v_head = g["qk_nope"], g["n_rot"], g["v_head"]
++    k_mla = qk_nope + n_rot
++    q_lora, kv_lora = g["q_lora"], g["kv_lora"]
++    n_expert, n_ff_exp, n_shared = g["n_expert"], g["n_ff_exp"], g["n_shared"]
++    idx_heads, idx_dim = g["idx_heads"], g["idx_dim"]
++    rng = np.random.default_rng(seed)
++
++    def w(*shape, scale=0.05):
++        return (rng.standard_normal(shape) * scale).astype(np.float32)
++
++    def norm_w(n):
++        return (1.0 + rng.standard_normal(n) * 0.02).astype(np.float32)
++
++    a = "glm-dsa."
++    md = [
++        ("general.architecture", kv_str("glm-dsa")),
++        ("general.name", kv_str("glm-dsa-synth")),
++        ("general.alignment", kv_u32(ALIGN)),
++        (a + "block_count", kv_u32(n_layers)),
++        (a + "context_length", kv_u32(g["ctx"])),
++        (a + "embedding_length", kv_u32(n_embd)),
++        (a + "feed_forward_length", kv_u32(g["n_ff_dense"])),
++        (a + "vocab_size", kv_u32(n_vocab)),
++        (a + "attention.head_count", kv_u32(n_head)),
++        (a + "attention.head_count_kv", kv_u32(1)),
++        (a + "attention.key_length", kv_u32(kv_lora + n_rot)),
++        (a + "attention.value_length", kv_u32(kv_lora)),
++        (a + "attention.key_length_mla", kv_u32(k_mla)),
++        (a + "attention.value_length_mla", kv_u32(v_head)),
++        (a + "attention.q_lora_rank", kv_u32(q_lora)),
++        (a + "attention.kv_lora_rank", kv_u32(kv_lora)),
++        (a + "attention.layer_norm_rms_epsilon", kv_f32(1e-5)),
++        (a + "rope.freq_base", kv_f32(g["freq_base"])),
++        (a + "rope.dimension_count", kv_u32(n_rot)),
++        (a + "expert_count", kv_u32(n_expert)),
++        (a + "expert_used_count", kv_u32(g["n_exp_used"])),
++        (a + "expert_group_count", kv_u32(1)),
++        (a + "expert_group_used_count", kv_u32(1)),
++        (a + "expert_gating_func", kv_u32(2)),
++        (a + "expert_feed_forward_length", kv_u32(n_ff_exp)),
++        (a + "expert_shared_count", kv_u32(n_shared)),
++        (a + "expert_weights_scale", kv_f32(2.5)),
++        (a + "expert_weights_norm", kv_bool(True)),
++        (a + "leading_dense_block_count", kv_u32(g["dense_lead"])),
++        (a + "nextn_predict_layers", kv_u32(0)),
++        (a + "attention.indexer.head_count", kv_u32(idx_heads)),
++        (a + "attention.indexer.key_length", kv_u32(idx_dim)),
++        (a + "attention.indexer.top_k", kv_u32(g["idx_topk"])),
++        (a + "attention.indexer.types", arr_i32(g["idx_types"])),
++    ]
++    if vocab:
++        md += [
++            ("tokenizer.ggml.model", kv_str("gpt2")),
++            ("tokenizer.ggml.pre", kv_str("glm5")),
++            ("tokenizer.ggml.tokens", arr_str(["tok%d" % i for i in range(n_vocab)])),
++            ("tokenizer.ggml.scores", arr_f32([0.0] * n_vocab)),
++            ("tokenizer.ggml.token_type", arr_i32([1] * n_vocab)),
++            ("tokenizer.ggml.merges", arr_str([])),
++        ]
++
++    ts = [
++        ("token_embd.weight", w(n_vocab, n_embd, scale=1.0)),
++        ("output_norm.weight", norm_w(n_embd)),
++        ("output.weight", w(n_vocab, n_embd)),
++    ]
++    for il in range(n_layers):
++        p = f"blk.{il}."
++        ts += [
++            (p + "attn_norm.weight", norm_w(n_embd)),
++            (p + "ffn_norm.weight", norm_w(n_embd)),
++            (p + "attn_q_a_norm.weight", norm_w(q_lora)),
++            (p + "attn_kv_a_norm.weight", norm_w(kv_lora)),
++            (p + "attn_q_a.weight", w(q_lora, n_embd)),
++            (p + "attn_q_b.weight", w(n_head * k_mla, q_lora, scale=0.2)),
++            (p + "attn_kv_a_mqa.weight", w(kv_lora + n_rot, n_embd, scale=0.2)),
++            (p + "attn_k_b.weight", w(n_head, kv_lora, qk_nope, scale=0.2)),
++            (p + "attn_v_b.weight", w(n_head, v_head, kv_lora)),
++            (p + "attn_output.weight", w(n_embd, n_head * v_head)),
++            # every layer carries indexer weights (the real GGUF does); shared layers ignore them
++            (p + "indexer.k_norm.weight", norm_w(idx_dim)),
++            (p + "indexer.k_norm.bias", w(idx_dim)),
++            (p + "indexer.proj.weight", w(idx_heads, n_embd, scale=0.5)),
++            (p + "indexer.attn_k.weight", w(idx_dim, n_embd, scale=0.2)),
++            (p + "indexer.attn_q_b.weight", w(idx_heads * idx_dim, q_lora, scale=0.2)),
++        ]
++        if il < g["dense_lead"]:
++            ts += [
++                (p + "ffn_gate.weight", w(g["n_ff_dense"], n_embd)),
++                (p + "ffn_down.weight", w(n_embd, g["n_ff_dense"])),
++                (p + "ffn_up.weight", w(g["n_ff_dense"], n_embd)),
++            ]
++        else:
++            ts += [
++                (p + "ffn_gate_inp.weight", w(n_expert, n_embd, scale=0.2)),
++                (p + "exp_probs_b.bias", w(n_expert, scale=0.1)),
++                (p + "ffn_gate_exps.weight", w(n_expert, n_ff_exp, n_embd)),
++                (p + "ffn_down_exps.weight", w(n_expert, n_embd, n_ff_exp)),
++                (p + "ffn_up_exps.weight", w(n_expert, n_ff_exp, n_embd)),
++                (p + "ffn_gate_shexp.weight", w(n_ff_exp * n_shared, n_embd)),
++                (p + "ffn_down_shexp.weight", w(n_embd, n_ff_exp * n_shared)),
++                (p + "ffn_up_shexp.weight", w(n_ff_exp * n_shared, n_embd)),
++            ]
++    return md, ts
++
++
++def selftest(path: Path) -> None:
++    from gguf_reader import GGUFFile
++    gf = GGUFFile(path)
++    by = {t.name: t for t in gf.tensors}
++    assert gf.metadata["general.architecture"] == "glm-dsa", "architecture key lost"
++    assert gf.metadata["glm-dsa.attention.indexer.types"] == SMALL["idx_types"], "indexer types mangled"
++    assert list(by["blk.1.attn_k_b.weight"].shape) == [32, 64, 4], f"k_b shape {by['blk.1.attn_k_b.weight'].shape}"
++    assert list(by["blk.1.attn_kv_a_mqa.weight"].shape) == [128, 80], "kv_a_mqa is kv_lora + rope wide"
++    assert list(by["blk.1.ffn_gate_exps.weight"].shape) == [128, 32, 16], "expert shape wrong"
++    assert "blk.0.ffn_gate.weight" in by and "blk.0.ffn_gate_exps.weight" not in by, "dense lead wrong"
++    print(f"selftest ok: {len(gf.tensors)} tensors, {path.stat().st_size / 1e6:.2f} MB")
++
++
++def main() -> int:
++    ap = argparse.ArgumentParser(description="write a tiny synthetic glm-dsa GGUF")
++    ap.add_argument("--out", default="glm-dsa-synth.gguf")
++    ap.add_argument("--seed", type=int, default=4321)
++    ap.add_argument("--vocab", action="store_true",
++                    help="add the tokenizer metadata upstream llama.cpp needs to LOAD the model")
++    args = ap.parse_args()
++    md, ts = build(args.seed, vocab=args.vocab)
++    out = Path(args.out)
++    write_gguf(out, md, ts)
++    selftest(out)
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/tools/iq_pack.py b/tools/iq_pack.py
+index cc9bb6b..622f673 100644
+--- a/tools/iq_pack.py
++++ b/tools/iq_pack.py
+@@ -96,10 +96,19 @@ GLM5NEXT_NATIVE_OK = (
+     # dequantizes them into the F32 arena at load (2x ~1.2 GB quantized)
+     "token_embd.weight", "output.weight",
+ )
+-ARCHITECTURES = ("qwen4exp", "glm5-next", "glm5next")   # unsloth spells it without the hyphen
++# glm-dsa (GLM-5.3, the 744B): no mHC, no KDA; its MLA's absorbed projections and its indexer ship Q8_0 in the
++# UD recipes and are served natively (k_b / v_b dequantized to F32 at load - exact, no BF16 rounding), the
++# norms, router and indexer proj stay F32.  Nothing is forced to BF16.
++GLMDSA_NATIVE_OK = GLM5NEXT_NATIVE_OK + (
++    "attn_k_b.weight", "attn_v_b.weight", "indexer.attn_q_b.weight", "indexer.attn_k.weight",
++)
++GLM_ARCHS = ("glm5-next", "glm5next", "glm-dsa")
++ARCHITECTURES = ("qwen4exp", "glm5-next", "glm5next", "glm-dsa")   # unsloth spells glm5-next without the hyphen
+ 
+ 
+ def needs_bf16(name: str, type_name: str, arch: str = "qwen4exp") -> bool:
++    if arch == "glm-dsa":
++        return False
+     if arch in ("glm5-next", "glm5next"):
+         # glm5-next has no PLE and no output_hc; its F32 router stays F32 (the runner reads it
+         # as F32 by config), so ONLY the listed projections take the BF16 path.
+@@ -222,7 +231,7 @@ def index_standalone(src, out, model: Model, compat_bf16: bool = False, arch: st
+             # a trailing ne3 of 1 adds no bytes: some converters write glm5-next's conv weights as
+             # [4, 1, 8192, 1] instead of [4, 1, 8192], and index_shape packs both as (4, 8192)
+             dims = len(t.shape) - (len(t.shape) == 4 and int(t.shape[3]) == 1)
+-            if dims > 2 and not (arch in ("glm5-next", "glm5next") and dims == 3):
++            if dims > 2 and not (arch in GLM_ARCHS and dims == 3):
+                 print("tensor %s has %d dimensions; the index holds two" % (t.name, len(t.shape)))
+                 return 1
+             ne0, ne1 = index_shape(t.shape)
+@@ -248,9 +257,9 @@ def index_standalone(src, out, model: Model, compat_bf16: bool = False, arch: st
+                 pad = (-len(raw)) % ALIGN
+                 fo.write(b"\0" * pad)
+                 at += len(raw) + pad
+-            elif arch in ("glm5-next", "glm5next") and not name.endswith(GLM5NEXT_NATIVE_OK):
+-                print("%s is %s: not on the BF16 upgrade list nor the glm5-next native set "
+-                      "(GLM5NEXT_NATIVE_OK); refusing to pack it silently" % (t.name, t.type_name))
++            elif arch in GLM_ARCHS and not name.endswith(GLMDSA_NATIVE_OK if arch == "glm-dsa" else GLM5NEXT_NATIVE_OK):
++                print("%s is %s: not on the BF16 upgrade list nor the %s native set; refusing to pack it "
++                      "silently" % (t.name, t.type_name, arch))
+                 return 1
+             else:
+                 served += 1
+@@ -361,6 +370,9 @@ def main() -> int:
+     if arch not in ARCHITECTURES:
+         print("general.architecture is %r; the packer knows %s" % (arch, " and ".join(ARCHITECTURES)))
+         return 1
++    if arch == "glm-dsa":
++        prefix = "glm-dsa."
++        print("glm-dsa: packing GLM-5.3 for the Glm5Model runner (quantized dense served natively)")
+     if arch in ("glm5-next", "glm5next"):
+         # two spellings in the wild: llama.cpp's canonical "glm5-next" (llama-arch.cpp L156) and
+         # unsloth's "glm5next" - the KV PREFIX follows the same spelling, so it is read per file
+@@ -370,9 +382,9 @@ def main() -> int:
+     block_count = None
+     trunk = None
+     # (a Qwen GGUF with its MTP block - qwen4exp, nextn_predict_layers 1, block_count 49 - the same: the trunk only)
+-    if arch not in ("glm5-next", "glm5next"):
++    if arch not in GLM_ARCHS:
+         prefix = arch + "."
+-    if arch in ("glm5-next", "glm5next") or int(g.metadata.get(prefix + "nextn_predict_layers", 0) or 0) > 0:
++    if arch in GLM_ARCHS or int(g.metadata.get(prefix + "nextn_predict_layers", 0) or 0) > 0:
+         bc = g.metadata.get(prefix + "block_count")
+         if bc is None:
+             print("%s: %sblock_count is missing; cannot tell the trunk from the NextN block" % (arch, prefix))
+@@ -421,7 +433,7 @@ def main() -> int:
+     else:
+         n_layers = 1 + max(int(n.split(".")[1]) for n in T if n.startswith("blk.") and n.endswith("_exps.weight"))
+     # the MoE layers only: the leading dense blocks ship no router and no experts
+-    if arch in ("glm5-next", "glm5next"):
++    if arch in GLM_ARCHS:
+         lead = int(g.metadata.get(prefix + "leading_dense_block_count", 0) or 0)
+     else:
+         lead = int(g.metadata.get("qwen4exp.leading_dense_block_count", 0) or 0)
+diff --git a/tools/test_glm_dsa_oracle.py b/tools/test_glm_dsa_oracle.py
+new file mode 100644
+index 0000000..12ec731
+--- /dev/null
++++ b/tools/test_glm_dsa_oracle.py
+@@ -0,0 +1,123 @@
++"""tools/test_glm_dsa_oracle.py - the glm-dsa (GLM-5.3) reference forward pass on a synthetic model.
++
++Runs tools/glm_dsa_synth_gguf.py's tiny glm-dsa GGUF through ref/glm_dsa.py and checks:
++
++  * PARITY WITH LLAMA.CPP: data/glm-dsa-synth-llama-logprobs.npy holds upstream llama.cpp's
++    full log-softmax at the last position of every prefix of TOKENS (llama-server, CPU, f32 KV,
++    rocmmain image @ 5aeac37, the --vocab variant of the same seed); the oracle must match it
++    to f32 noise - and two wrong readings (no top-k, shared layers re-indexing) must NOT, so the
++    fixture keeps proving it can tell;
++  * the indexer selection: every visible key while t + 1 <= top_k, then exactly top_k distinct
++    causal keys; shared layers reuse the previous full layer's selection;
++  * MoE weights renormalize to expert_weights_scale; logits finite; causality (prefix logits
++    unchanged by later tokens); the Hadamard is orthonormal; rope is the identity at position 0.
++
++No GPU, no network: `python -m unittest tools.test_glm_dsa_oracle`.
++"""
++from __future__ import annotations
++
++import pathlib
++import sys
++import tempfile
++import unittest
++
++ROOT = pathlib.Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(ROOT / "tools"))
++sys.path.insert(0, str(ROOT / "ref"))
++
++import numpy as np  # noqa: E402
++
++import glm_dsa_synth_gguf  # noqa: E402
++from glm_dsa import GlmDsa, hadamard, rope_norm  # noqa: E402
++
++TOKENS = [i * 7 % 512 for i in range(1, 25)]
++LLAMA_LOGPROBS = ROOT / "data" / "glm-dsa-synth-llama-logprobs.npy"
++
++
++def log_softmax(logits: np.ndarray) -> np.ndarray:
++    z = logits.astype(np.float64) - logits.max(axis=0, keepdims=True)
++    return z - np.log(np.exp(z).sum(axis=0, keepdims=True))
++
++
++class GlmDsaOracleTest(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.tmp = tempfile.TemporaryDirectory(prefix="maya-glm-dsa-oracle-")
++        cls.gguf = pathlib.Path(cls.tmp.name) / "glm-dsa-synth.gguf"
++        md, ts = glm_dsa_synth_gguf.build()
++        glm_dsa_synth_gguf.write_gguf(cls.gguf, md, ts)
++        cls.model = GlmDsa(cls.gguf)
++        cls.cfg = cls.model.cfg
++        cls.logits = cls.model.forward(TOKENS)
++        cls.llama = np.load(LLAMA_LOGPROBS).astype(np.float64).T          # (vocab, T)
++
++    @classmethod
++    def tearDownClass(cls):
++        cls.model.g.close()
++        cls.tmp.cleanup()
++
++    def _llama_gap(self, logits: np.ndarray) -> np.ndarray:
++        return np.abs(log_softmax(logits) - self.llama).max(axis=0)       # per position
++
++    def test_config_read_from_metadata(self):
++        c = self.cfg
++        self.assertEqual((c.n_embd, c.n_layers, c.n_head), (128, 6, 4))
++        self.assertEqual((c.qk_nope, c.n_rot, c.n_head_v_mla, c.kv_lora_rank), (32, 16, 32, 64))
++        self.assertEqual(c.idx_full, [True, True, False, True, False, False])
++        self.assertEqual((c.idx_top_k, c.idx_key_dim), (8, 64))
++        self.assertEqual(c.norm_eps, 0.0)
++
++    def test_matches_llama_cpp(self):
++        gap = self._llama_gap(self.logits)
++        self.assertLess(float(gap.max()), 1e-5, f"per-position gap {gap}")
++        np.testing.assert_array_equal(self.logits.argmax(axis=0), self.llama.argmax(axis=0))
++
++    def test_fixture_rejects_wrong_readings(self):
++        for name, patch in (("attend all", lambda c: setattr(c, "idx_top_k", 10 ** 9)),
++                            ("re-index shared", lambda c: setattr(c, "idx_full", [True] * c.n_layers))):
++            m = GlmDsa(self.gguf)
++            patch(m.cfg)
++            gap = self._llama_gap(m.forward(TOKENS))
++            m.g.close()
++            self.assertLess(float(gap[:self.cfg.idx_top_k].max()), 1e-5, f"{name}: no discard yet, must agree")
++            self.assertGreater(float(gap[self.cfg.idx_top_k:].max()), 0.1, f"{name}: fixture cannot tell")
++
++    def test_selection(self):
++        K = self.cfg.idx_top_k
++        prev = None
++        for il in range(self.cfg.n_layers):
++            sel = self.model.dumps[f"top_k-{il}"]
++            if self.cfg.idx_full[il]:
++                for t, s in enumerate(sel):
++                    if t + 1 <= K:
++                        np.testing.assert_array_equal(np.sort(s), np.arange(t + 1))
++                    else:
++                        self.assertEqual(len(set(s.tolist())), K, f"layer {il} t {t}")
++                        self.assertLessEqual(int(s.max()), t, f"layer {il} t {t}: future key selected")
++            else:
++                for a, b in zip(sel, prev, strict=True):
++                    np.testing.assert_array_equal(a, b)
++            prev = sel
++
++    def test_moe_weights_renormalize_to_scale(self):
++        for il in range(self.cfg.n_layer_dense_lead, self.cfg.n_layers):
++            w = self.model.dumps[f"ffn_moe_weights-{il}"]
++            np.testing.assert_allclose(w.sum(axis=0), self.cfg.expert_weights_scale, atol=1e-5)
++
++    def test_logits_finite_and_causal(self):
++        self.assertEqual(self.logits.shape, (512, len(TOKENS)))
++        self.assertTrue(np.isfinite(self.logits).all())
++        m = GlmDsa(self.gguf)
++        prefix = m.forward(TOKENS[:12])
++        m.g.close()
++        np.testing.assert_allclose(prefix, self.logits[:, :12], atol=3e-6, rtol=3e-6)
++
++    def test_primitives(self):
++        h = hadamard(64)
++        np.testing.assert_allclose(h @ h, np.eye(64), atol=1e-6)
++        x = np.random.default_rng(0).standard_normal((16, 3)).astype(np.float32)
++        np.testing.assert_array_equal(rope_norm(x, np.zeros(3, np.int64), 16, 1e4), x)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tools/test_iq_pack_glm.py b/tools/test_iq_pack_glm.py
+index 1422407..0330a0e 100644
+--- a/tools/test_iq_pack_glm.py
++++ b/tools/test_iq_pack_glm.py
+@@ -136,7 +136,8 @@ class ArchitectureCheck(unittest.TestCase):
+         self.assertIn("qwen4exp", iq_pack.ARCHITECTURES)
+         self.assertIn("glm5-next", iq_pack.ARCHITECTURES)
+         self.assertIn("glm5next", iq_pack.ARCHITECTURES)   # unsloth's spelling, same KV family
+-        self.assertEqual(len(iq_pack.ARCHITECTURES), 3)
++        self.assertIn("glm-dsa", iq_pack.ARCHITECTURES)    # GLM-5.3 itself
++        self.assertEqual(len(iq_pack.ARCHITECTURES), 4)
+ 
+ 
+ if __name__ == "__main__":

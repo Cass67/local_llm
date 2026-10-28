@@ -639,6 +639,8 @@ def build_runner_container_spec(  # noqa: C901
         # its default <pack>/slots sits on that read-only mount: every set-aside conversation failed
         binds.append(f"{MAYA_SLOTS_DIR}:{MAYA_SLOTS_DIR}:rw")
         environment["MAYA_GLM_SLOT_DIR"] = MAYA_SLOTS_DIR
+        # the weights disk: DeepSeek's bigger quants and GLM-5.3's pack live there
+        binds.append(f"{MAYA_WEIGHTS_DIR}:{MAYA_WEIGHTS_DIR}:ro")
         maya_args = cfg.get("maya_args") or []
         maya_args = (
             [str(f) for f in maya_args] if isinstance(maya_args, list) else maya_args.split()
@@ -647,7 +649,6 @@ def build_runner_container_spec(  # noqa: C901
             # DeepSeek (maya-ds4): the Engram shards' real home, and its pack writable - the engine
             # keeps its learned expert profile, CPU-lane timings and hipBLASLt picks there
             binds.append(f"{MAYA_SPILL_DIR}:{MAYA_SPILL_DIR}:ro")
-            binds.append(f"{MAYA_WEIGHTS_DIR}:{MAYA_WEIGHTS_DIR}:ro")
             pack = maya_args[maya_args.index("--pack") + 1]
             binds.append(f"{pack}:{pack}:rw")
         # Maya's switches are env vars (MAYA_GLM_*: server.py maps them to STRATA_GLM_*)

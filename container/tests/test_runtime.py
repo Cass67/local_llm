@@ -415,6 +415,7 @@ def test_build_runner_container_spec_maya_runs_its_runner_with_card_order(tmp_pa
     assert spec.binds == [
         "/mnt/hfcache/maya:/mnt/hfcache/maya:ro",
         "/mnt/hfcache/maya-slots:/mnt/hfcache/maya-slots:rw",
+        "/mnt/models:/mnt/models:ro",  # the weights disk (GLM-5.3's pack lives there)
     ]
     assert spec.environment["MAYA_GLM_SLOT_DIR"] == "/mnt/hfcache/maya-slots"
     assert spec.command[1:] == [
@@ -450,8 +451,8 @@ def test_build_runner_container_spec_maya_deepseek_mounts_spill_and_writable_pac
     assert spec.binds == [
         "/mnt/hfcache/maya:/mnt/hfcache/maya:ro",
         "/mnt/hfcache/maya-slots:/mnt/hfcache/maya-slots:rw",
-        "/mnt/spare/build/maya-dsv41:/mnt/spare/build/maya-dsv41:ro",
         "/mnt/models:/mnt/models:ro",
+        "/mnt/spare/build/maya-dsv41:/mnt/spare/build/maya-dsv41:ro",
         f"{pack}:{pack}:rw",
     ]
 
