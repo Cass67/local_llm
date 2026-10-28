@@ -451,6 +451,7 @@ def test_build_runner_container_spec_maya_deepseek_mounts_spill_and_writable_pac
         "/mnt/hfcache/maya:/mnt/hfcache/maya:ro",
         "/mnt/hfcache/maya-slots:/mnt/hfcache/maya-slots:rw",
         "/mnt/spare/build/maya-dsv41:/mnt/spare/build/maya-dsv41:ro",
+        "/mnt/models:/mnt/models:ro",
         f"{pack}:{pack}:rw",
     ]
 

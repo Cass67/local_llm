@@ -34,13 +34,9 @@ def test_runner_launch_resolves_model_path_from_hf_cache(tmp_path):
         if call.args[0] == "POST" and call.args[1].startswith("/containers/create")
     )
     create_payload = json.loads(create_call.args[2])
-    assert create_payload["Cmd"][:5] == [
-        "llama-server",
-        "--port",
-        "8080",
-        "-m",
-        str(model),
-    ]
+    cmd = create_payload["Cmd"]
+    assert cmd[:3] == ["llama-server", "--port", "8080"]
+    assert cmd[cmd.index("-m") + 1] == str(model)
     assert create_payload["Image"] == "runner:latest"
     assert create_payload["HostConfig"]["NetworkMode"] == "host"
     assert create_payload["HostConfig"]["ShmSize"] == 1024 * 1024 * 1024
