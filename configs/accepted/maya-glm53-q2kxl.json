@@ -1,0 +1,12 @@
+{
+  "family": "maya-glm53-q2kxl",
+  "alias": "maya-glm53-q2kxl",
+  "model_name": "GLM-5.3 unsloth UD-Q2_K_XL (Maya)",
+  "profile": "default",
+  "context": 65536,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 65536
+  }
+}

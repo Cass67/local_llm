@@ -903,6 +903,39 @@
     }
    }
   },
+  "maya-glm53-q2kxl": {
+   "default": "default",
+   "profiles": {
+    "default": {
+     "backend": "maya",
+     "context": 65536,
+     "load_timeout_s": 900,
+     "maya_args": [
+      "--glm-pack",
+      "/mnt/models/unsloth-glm53/pack",
+      "--layer-split",
+      "18,38,58",
+      "--prefill",
+      "0"
+     ],
+     "maya_gpus": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "maya_server": {
+      "shared": {
+       "max_tokens": 32768
+      }
+     },
+     "served_model_name": "maya-glm53-q2kxl",
+     "temperature": 1.0,
+     "top_p": 0.95,
+     "visible_devices": "0,1,2,3"
+    }
+   }
+  },
   "muse-glimmer-30b-gguf-rocm": {
    "default": "balanced",
    "profiles": {
