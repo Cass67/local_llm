@@ -1930,7 +1930,7 @@ index bfe8a42..a6eda35 100644
      // GLM_TEST_TIME=<n>: then n more tokens token by token, twice: the time a token costs (with and without a DFlash
      // drafter loaded, STRATA_GLM_DFLASH, the same forward)
 diff --git a/src/core/glm_prefill.cu b/src/core/glm_prefill.cu
-index 85076b6..3d9b71d 100644
+index 85076b6..b6fcd3b 100644
 --- a/src/core/glm_prefill.cu
 +++ b/src/core/glm_prefill.cu
 @@ -234,11 +234,11 @@ DsaBufs carve_dsa(Carve& c, size_t T, const Glm5Geometry& g, int max_pools) {
@@ -1977,7 +1977,20 @@ index 85076b6..3d9b71d 100644
          std::fprintf(stderr, "glm prefill: geometry not covered by the batched kernels - token by token\n");
          return true;
      }
-@@ -1476,6 +1483,7 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
+@@ -1163,8 +1170,10 @@ bool Glm5Model::prefill_setup(std::string& err) {
+     const char* pct_env = getenv("STRATA_PREFILL_LEND_PCT");
+     const char* mb_env = getenv("STRATA_GLM_PREFILL_MB");
+     const size_t gbuf = has_moe ? (size_t) PrefillState::NG * PrefillState::GE * gstride : 0;
+-    // the prestage buffer (the ring): one GPU (a split's parts hold most of their experts); STRATA_GLM_PRESTAGE=<slots>
+-    int ring_max = has_moe && n_parts_ == 1 ? kPreSlots : 0;
++    // the prestage buffer (the ring): one GPU (a split's parts hold most of their experts) - and glm-dsa's splits, whose
++    // parts hold ~20% (UD-Q2_K_XL on 4x 20 GB: 8190-token prompt 173 -> 241 tok/s, staging during the MoE 25-29 -> 3-4
++    // GB a card a chunk); STRATA_GLM_PRESTAGE=<slots>
++    int ring_max = has_moe && (n_parts_ == 1 || g.dsa) ? kPreSlots : 0;
+     if (const char* v = getenv("STRATA_GLM_PRESTAGE")) ring_max = has_moe ? std::max(0, std::atoi(v)) : 0;
+     // A COMPLETE pool to come (fast_setup: every expert and the spares in each layer's main slots, this path's buffers
+     // in the tail beyond them - the Windows APU's carve-out): no expert is outside VRAM, so there is nothing to prestage
+@@ -1476,6 +1485,7 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
      a.take<float>(T);
      a.take<float>(T * 24);
      a.take<int>(T * (size_t) g.n_exp_used);      // iota
@@ -1985,7 +1998,7 @@ index 85076b6..3d9b71d 100644
      a.take<uint8_t>(kv_stage);
      size_t uni = 0;
      const size_t ts = std::min<size_t>(T, mixer_sub(T, g, has_kda, has_dsa, has_dense, has_moe, max_pools, sub_env));
-@@ -1484,7 +1492,7 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
+@@ -1484,7 +1494,7 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
      if (has_dense) { Carve d; carve_dense(d, ts, g); uni = std::max(uni, d.off); }
      if (has_moe) { Carve m; carve_moe(m, T, (size_t) shexp_sub(sub_env), g); uni = std::max(uni, m.off); }
      // the NextN block's cache fill (the last half) carves 4 n_embd + 1.5 n_embd rows of its own
@@ -1994,7 +2007,7 @@ index 85076b6..3d9b71d 100644
      return {a.off, uni};
  }
 
-@@ -1560,6 +1568,7 @@ bool Glm5Model::prefill_carve(int Tn, int64_t end) {
+@@ -1560,6 +1570,7 @@ bool Glm5Model::prefill_carve(int Tn, int64_t end) {
      S->ss = a.take<float>(T);
      S->mix = a.take<float>(T * 24);
      S->iota = a.take<int>(T * (size_t) g.n_exp_used);
@@ -2002,7 +2015,7 @@ index 85076b6..3d9b71d 100644
      S->kv_stage = stage > 0 ? a.take<uint8_t>(stage) : nullptr;
      S->uni = S->arena + a.off;
      blas_ck(cublasSetWorkspace(S->blas, S->ws, S->ws_bytes), "set workspace");
-@@ -2093,6 +2102,14 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2093,6 +2104,14 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
      // the mHC read half for the whole chunk: (write half of the previous block,) mix dots, gates, x / x16
      const auto hc_read = [&](const float* block_out, const uint16_t* fn, const float* scale, const float* base,
                               const float* norm) {
@@ -2017,7 +2030,7 @@ index 85076b6..3d9b71d 100644
          gb::hc_update(block_out, S->R, S->post, S->comb, S->ss, T, E, s);
          sgemm_bf16(fn, 24, 4 * E, S->R, 4 * E, S->mix, 24, T, 1.0f);
          gb::HcFinishArgs h;
-@@ -2462,6 +2479,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2462,6 +2481,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
      if (!kv_prefetch(kv_dsa_from(l0_))) return false;   // (the layers before the first DSA layer run meanwhile)
      prestage(next_moe(l0_));   // (the dense layers before the first MoE one run meanwhile)
      for (auto& t : S->tr) t.on = false;
@@ -2025,7 +2038,7 @@ index 85076b6..3d9b71d 100644
      for (int il = l0_; il < l1_; ++il) {
          progress_at("the prompt: layer", il);   // a layer is the serve watchdog's heartbeat (issue #40)
          progress_beat();
-@@ -2494,7 +2512,99 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2494,7 +2514,99 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
          uint16_t* const lat = kv_host != nullptr ? (uint16_t*) S->kv_stage : (uint16_t*) (state_ + dsa_lat_[(size_t) il]);
 
          // ---- the mixer, in sub-batches of S->sub tokens (the recurrences carry their state across)
@@ -2126,7 +2139,7 @@ index 85076b6..3d9b71d 100644
              const int tn = std::min(S->sub, T - t0);
              const float* xs = S->x + (size_t) t0 * E;
              const uint16_t* x16 = S->x16 + (size_t) t0 * E;
-@@ -3413,7 +3523,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3413,7 +3525,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
              return blas_dev[dev] - 1;
  #endif
          }();
@@ -2135,7 +2148,7 @@ index 85076b6..3d9b71d 100644
                                mmq::to_f16_supported(Ly.d_type) && S->w16_elems >= (int64_t) 2 * nff * E + E;
          const auto run_blas_q = [&](const uint8_t* blob, int a, int nrows, int r0) {
              namespace x3 = strata::kernels::exl3;
-@@ -3468,8 +3578,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3468,8 +3580,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
              else if (use_blas) run_set_q(wbase, n_exp, stride, d_bounds, hb, r0);
              else run_set(wbase, n_exp, stride, d_bounds, hb, r0);
          };
@@ -2146,7 +2159,7 @@ index 85076b6..3d9b71d 100644
              return false;
          }
          // the disk-only experts (staged last, ascending): their indices in the reader's order - inside the segment
-@@ -3976,7 +4086,10 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3976,7 +4088,10 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
      }
      // the last layer's write half: R = post x ffn + comb . R
      if (!tail_skip) {
@@ -2158,7 +2171,7 @@ index 85076b6..3d9b71d 100644
          S->mark("hc", s);
      }
      // ---- the NextN block's caches for these positions (the half that carries it): position p reads h_p and the
-@@ -4001,63 +4114,75 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -4001,63 +4116,75 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
                  else
                      tt->to_float(pack_emb_src_ + (size_t) next_ids[t] * row_b, S->emb_h + (size_t) t * E, E);
              }
@@ -2290,7 +2303,7 @@ index 85076b6..3d9b71d 100644
          }
      }
      S->collect();
-@@ -4516,7 +4641,8 @@ bool Glm5Model::prefill_run(const std::vector<int32_t>& tokens, std::string& err
+@@ -4516,7 +4643,8 @@ bool Glm5Model::prefill_run(const std::vector<int32_t>& tokens, std::string& err
          }
          // the embedding lands in x (free until the first layer's gates write it) and fans out to the 4 streams
          cudaMemcpyAsync(S->x, S->emb_h, (size_t) T * E * sizeof(float), cudaMemcpyHostToDevice, fast_->cs);

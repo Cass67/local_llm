@@ -916,8 +916,11 @@
       "--layer-split",
       "18,38,58",
       "--prefill",
-      "2048"
+      "4096"
      ],
+     "maya_env": {
+      "STRATA_GLM_PREFILL_MIN_CHUNKS": "3"
+     },
      "maya_gpus": [
       0,
       1,
