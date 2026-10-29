@@ -908,7 +908,7 @@
    "profiles": {
     "default": {
      "backend": "maya",
-     "context": 65536,
+     "context": 262144,
      "load_timeout_s": 900,
      "maya_args": [
       "--glm-pack",
@@ -919,6 +919,7 @@
       "4096"
      ],
      "maya_env": {
+      "STRATA_GLM_KV_RESIDENT": "32768",
       "STRATA_GLM_PREFILL_MIN_CHUNKS": "3"
      },
      "maya_gpus": [

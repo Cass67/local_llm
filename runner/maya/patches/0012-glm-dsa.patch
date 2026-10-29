@@ -29,7 +29,7 @@ index a1f2c80..ae6dc53 100644
    # the 45-layer big fixture: its 1.2 GB GGUF is generated into the build tree by a ctest
    # fixture (far too large to commit); the f64 expectation IS committed (data/glm5-big-dumps)
 diff --git a/include/strata/core/glm_model.hpp b/include/strata/core/glm_model.hpp
-index a5afaf8..e1f2e92 100644
+index a5afaf8..1435414 100644
 --- a/include/strata/core/glm_model.hpp
 +++ b/include/strata/core/glm_model.hpp
 @@ -83,7 +83,16 @@ struct Glm5Geometry {
@@ -49,15 +49,17 @@ index a5afaf8..e1f2e92 100644
      int d_inner() const { return kda_head_dim * n_head; }
      int top_pools_max() const { return idx_top_k / idx_kpool; }
      int n_sel_max() const { return idx_top_k + (idx_select_tail ? idx_kpool - 1 : 0); }
-@@ -323,6 +332,7 @@ private:
+@@ -323,6 +332,9 @@ private:
 
      // per-layer state offsets, in floats into state_ (-1: the layer has no such state)
      std::vector<int64_t> kda_S_, kda_conv_, dsa_lat_, dsa_ik_, dsa_ig_, dsa_pool_;
 +    std::vector<int64_t> dsa_kpe_;                // glm-dsa: the roped k_pe cache (n_rot per cell)
++    int dsa_rec_ = 0;                             // glm-dsa fast path: a cell's record in halves, [latent FP16 | k_pe
++                                                  // F32] (dsa_kpe_ points into the first record); 0 = separate caches
 
  public:
      // ---- per-weight serving slots (strata::core::WSlot below): F32 pointers for the
-@@ -570,6 +580,12 @@ public:
+@@ -570,6 +582,12 @@ public:
      bool fast_token(int32_t token, std::string& err);
      bool fast_layers(int64_t p, bool hop_in, std::string& err);
      bool fast_dsa(int il, int64_t p, std::string& err);     // one DSA mixer (x -> mixer)
@@ -71,10 +73,10 @@ index a5afaf8..e1f2e92 100644
      bool moe_defer_wait_ = false;                            // (fast_moe's cpu_wait = false: the caller waits)
      // ... its routed experts, once the router and the shared expert's gate / up have run: the token path's own
 diff --git a/include/strata/kernels/glm_batch.hpp b/include/strata/kernels/glm_batch.hpp
-index 8ad3130..4d6cce7 100644
+index 8ad3130..3b47455 100644
 --- a/include/strata/kernels/glm_batch.hpp
 +++ b/include/strata/kernels/glm_batch.hpp
-@@ -101,8 +101,11 @@ void mla_attn_f16q(const uint16_t* q16, const uint16_t* lat, const int* cells, c
+@@ -101,8 +101,12 @@ void mla_attn_f16q(const uint16_t* q16, const uint16_t* lat, const int* cells, c
  /// The same attention with Q in F32 on wave32 WMMA intrinsics (gfx11/gfx12): the FP32 query and softmax probability
  /// are each split into FP16 high + residual, both products through WMMA with F32 accumulation and online softmax.
  /// n_head % 16 == 0, kv_lora 512. lat_q8 expands INT8 codes with one FP16 scale per 32 values as they are loaded.
@@ -83,11 +85,12 @@ index 8ad3130..4d6cce7 100644
  void mla_attn_wmma2(const float* q_abs, const uint16_t* lat, const int* cells, const int* n_sel, int n_sel_max,
 -                    int n_head, int kv_lora, float scale, int T, float* ctx, cudaStream_t s, bool lat_q8 = false);
 +                    int n_head, int kv_lora, float scale, int T, float* ctx, cudaStream_t s, bool lat_q8 = false,
-+                    const float* q_pe = nullptr, int q_pe_hs = 0, const float* kpe = nullptr, int n_rot = 0);
++                    const float* q_pe = nullptr, int q_pe_hs = 0, const float* kpe = nullptr, int n_rot = 0,
++                    int lat_ld = 512, int kpe_ld = 0);   // (strides in halves / floats; kpe_ld 0: n_rot)
  /// True on the current device where mla_attn_wmma2 runs (gfx11/gfx12); mla_wmma2_default() is true on gfx12 (RDNA4) and gfx1151 (Strix Halo),
  /// where the prompt path prefers it over mla_attn_f16q.
  bool mla_wmma2_supported();
-@@ -123,7 +126,7 @@ void head_rows(const float* R, const float* w, float eps, int T, int n_embd, flo
+@@ -123,7 +127,7 @@ void head_rows(const float* R, const float* w, float eps, int T, int n_embd, flo
  /// out16[t] = [rms(emb[t]) * enorm, rms(h[t]) * hnorm] in FP16 (eh_proj's input, 2 n_embd per row).
  void mtp_in_rows(const float* emb, const float* h, const float* enorm, const float* hnorm, float eps, int T, int n_embd,
                   void* out16, cudaStream_t s);
@@ -113,7 +116,7 @@ index b945405..958f696 100644
 +
  }  // namespace strata::kernels
 diff --git a/include/strata/kernels/glm_fast.hpp b/include/strata/kernels/glm_fast.hpp
-index c83d4c2..594bb71 100644
+index c83d4c2..ca4fce6 100644
 --- a/include/strata/kernels/glm_fast.hpp
 +++ b/include/strata/kernels/glm_fast.hpp
 @@ -18,6 +18,8 @@
@@ -152,7 +155,7 @@ index c83d4c2..594bb71 100644
  };
  /// Router (sigmoid + bias, stable top-k, normalised weights - router_sigmoid's arithmetic), the plan
  /// lookup in `tab`, the request publish, and the shared expert's swiglu + q8_1.
-@@ -443,13 +445,42 @@ bool rows_experts(int gu_type, int d_type, const uint8_t* base, size_t stride, s
+@@ -443,13 +445,48 @@ bool rows_experts(int gu_type, int d_type, const uint8_t* base, size_t stride, s
                    const int* row_tok, const float* x, int n_tok, int n_embd, int n_ff, float limit, int rlo, int rhi,
                    void* xq_scratch, void* hq_scratch, float* out, int ld, cudaStream_t s);
 
@@ -173,6 +176,11 @@ index c83d4c2..594bb71 100644
 +    // qr_q may then be null, qr16 (optional) takes qr's FP16
 +    int T = 1;
 +    uint16_t* qr16 = nullptr;
++    // rec > 0: a position's latent and k_pe are ONE record of rec halves ([kv_lora FP16 | n_rot F32]; kpe unused) at
++    // record p of each target - lat (the identity cache, or null), lat_host (KV streaming's host copy, or null) and
++    // lat_slots (row lat_table[p / lat_page] * lat_page + p % lat_page when that block is resident)
++    int rec = 0;
++    uint16_t* lat_host = nullptr; uint16_t* lat_slots = nullptr; const int* lat_table = nullptr; int lat_page = 1;
 +};
 +void dsa_rope_prep(const DsaRopePrepArgs& a, cudaStream_t s);
 +/// ggml rope NORM on the first n_rot floats of n_head heads (head h at x + stride * h), at position pos; T rows ld floats
@@ -181,9 +189,10 @@ index c83d4c2..594bb71 100644
 +/// glm-dsa's absorbed MLA for one token: q heads of [nope (qk_nope) | rope (n_rot)] k_mla apart; scores q_abs . latent +
 +/// q_pe . k_pe over the cells (nullptr: every position 0 .. n_sel-1, the dense NextN block), / sqrt(qk_nope + n_rot);
 +/// out_h = wv_b_h . ctx as q8_1.  scratch: n_head x (kv_lora + v_head).
++/// lat_ld / kpe_ld: a cell's latent / k_pe stride in halves / floats (0: kv_lora / n_rot - the separate caches).
 +void mla_pe(const float* q, int k_mla, int qk_nope, int n_rot, const uint16_t* wk_b, const uint16_t* wv_b,
 +            const uint16_t* lat, const float* kpe, const int* cells, int n_sel, int n_head, int kv_lora, int v_head,
-+            float* scratch, void* out_q8_1, cudaStream_t s);
++            float* scratch, void* out_q8_1, cudaStream_t s, int lat_ld = 0, int kpe_ld = 0);
 +
  /// tab[keys[i]] = vals[i] for i < n (the expert-table edits the host queues between tokens).
  void tab_update(unsigned long long* tab, const int* keys, const unsigned long long* vals, int n, cudaStream_t s);
@@ -728,7 +737,7 @@ index 0000000..2a3d0c0
 +    return 0;
 +}
 diff --git a/src/core/glm_fast_path.cu b/src/core/glm_fast_path.cu
-index 6f1f249..a879da3 100644
+index 6f1f249..b4c09ef 100644
 --- a/src/core/glm_fast_path.cu
 +++ b/src/core/glm_fast_path.cu
 @@ -726,7 +726,7 @@ bool Glm5Model::fast_setup(std::string& err) {
@@ -815,7 +824,7 @@ index 6f1f249..a879da3 100644
                      fast_cpu_experts(rq->layer, ne, blob, w, rq->x, cpu_part);
                      for (int j = 0; j < g.n_embd; ++j) ans->part[j] += cpu_part[j];
                      F->cpu_experts.fetch_add((uint64_t) ne, std::memory_order_relaxed);
-@@ -5608,8 +5613,181 @@ bool Glm5Model::fast_moe_experts(int il, const MoeIo& io, bool pred, int n_ah, c
+@@ -5608,8 +5613,197 @@ bool Glm5Model::fast_moe_experts(int il, const MoeIo& io, bool pred, int n_ah, c
      return true;
  }
 
@@ -853,6 +862,7 @@ index 6f1f249..a879da3 100644
 +    d.kv_norm = Ly.kv_a_norm;
 +    d.lat = (uint16_t*) (state_ + dsa_lat_[(size_t) mtp_il_]);
 +    d.kpe = state_ + dsa_kpe_[(size_t) mtp_il_];
++    d.rec = dsa_rec_;
 +    d.kv_lora = g.kv_lora;
 +    d.n_rot = g.n_rot;
 +    d.base = g.rope_base;
@@ -886,6 +896,7 @@ index 6f1f249..a879da3 100644
 +                       gf::kTypeBF16, g.n_embd, g.idx_heads};
 +    }
 +    if (!gf::mv(j, nj, s)) { err = "glm fast: dsa projections"; return false; }
++    if (F->prof_on) F->mark("dsa_proj_mv");
 +    uint16_t* lat = (uint16_t*) (state_ + dsa_lat_[(size_t) il]);
 +    float* kpe = state_ + dsa_kpe_[(size_t) il];
 +    float* ik = state_ + dsa_pool_[(size_t) il];
@@ -899,6 +910,14 @@ index 6f1f249..a879da3 100644
 +    d.kv_norm = Ly.kv_a_norm;
 +    d.lat = lat;
 +    d.kpe = kpe;
++    d.rec = dsa_rec_;
++    if (kv_streamed(kv_, il)) {   // KV streaming: the host copy and the block's VRAM slot (when resident)
++        d.lat = nullptr;
++        d.lat_host = (uint16_t*) kv_->host[(size_t) il];
++        d.lat_slots = lat;
++        d.lat_table = kv_->map[(size_t) il].page_table;
++        d.lat_page = kv_->page;
++    }
 +    d.kv_lora = g.kv_lora;
 +    d.n_rot = g.n_rot;
 +    d.ik_raw = full ? F->ik_raw : nullptr;
@@ -916,6 +935,7 @@ index 6f1f249..a879da3 100644
 +    j2[1] = {Ly.idx_q_b, nullptr, F->qr, F->iq, nullptr, 1.0f, gf::kTypeBF16, g.q_lora, g.idx_heads * g.idx_key};
 +    if (!gf::mv(j2, full && !all ? 2 : 1, s)) { err = "glm fast: dsa q"; return false; }
 +    gf::rope_heads(F->q + g.qk_nope, g.n_rot, g.k_mla(), g.n_head, (int) p, g.rope_base, s);
++    if (F->prof_on) F->mark("dsa_prep_q");
 +    if (full) {
 +        F->dsa_n_sel = std::min(g.idx_top_k, n_vis);
 +        if (all) {
@@ -929,12 +949,17 @@ index 6f1f249..a879da3 100644
 +        err = "glm fast: glm-dsa layer " + std::to_string(il) + " shares an indexer selection this part never made";
 +        return false;
 +    }
-+    gf::mla_pe(F->q, g.k_mla(), g.qk_nope, g.n_rot, Ly.k_b, Ly.v_b, lat, kpe, dense ? nullptr : F->cells,
-+               dense ? n_vis : F->dsa_n_sel, g.n_head, g.kv_lora, g.v_head, F->qabs, F->attn_q, s);
++    if (F->prof_on) F->mark("dsa_index");
++    // KV streaming: the selected cells into VRAM slots, the attention reading the selection in slot rows
++    const int* cells = dense ? nullptr : kv_attend_cells(kv_, il, lat, F->cells, F->dsa_n_sel, F->slot_cells, s);
++    gf::mla_pe(F->q, g.k_mla(), g.qk_nope, g.n_rot, Ly.k_b, Ly.v_b, lat, kpe, cells, dense ? n_vis : F->dsa_n_sel,
++               g.n_head, g.kv_lora, g.v_head, F->qabs, F->attn_q, s, dsa_rec_, dsa_rec_ / 2);
++    if (F->prof_on) F->mark("dsa_mla");
 +    if (dumps) fast_dump(s, "kqv_out-" + std::to_string(il), F->qabs + (size_t) g.n_head * g.kv_lora,
 +                         (int64_t) g.n_head * g.v_head);
 +    gf::MvJob o = {Ly.out.q, F->attn_q, nullptr, F->mixer, nullptr, 1.0f, Ly.out.type, g.n_head * g.v_head, g.n_embd};
 +    if (!gf::mv(&o, 1, s)) { err = "glm fast: dsa output"; return false; }
++    if (F->prof_on) F->mark("dsa_out_mv");
 +    return true;
 +}
 +
@@ -997,7 +1022,7 @@ index 6f1f249..a879da3 100644
      FastState* F = fast_;
      const Glm5Geometry& g = g_;
      cudaStream_t s = F->cs;
-@@ -5810,7 +5988,24 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
+@@ -5810,7 +6004,24 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
      }
      // the one-GPU MTP decode's NextN cache: its entry p - 1 from the trunk's hidden state of p - 1 and this token (on
      // the part with the block, queued before this token's layers there)
@@ -1023,7 +1048,7 @@ index 6f1f249..a879da3 100644
          cudaSetDevice(last->dev_);
          if (!last->mtp_fill_prev(token, p, err)) return false;
          last->mtp_hx_pos_ = -1;
-@@ -5826,7 +6021,10 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
+@@ -5826,7 +6037,10 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
                   g.n_embd);
      if (const float* img = image_row(p)) std::memcpy(F->emb_h, img, (size_t) g.n_embd * sizeof(float));   // an image
      cudaMemcpyAsync(F->emb, F->emb_h, (size_t) g.n_embd * sizeof(float), cudaMemcpyHostToDevice, F->cs);
@@ -1035,7 +1060,7 @@ index 6f1f249..a879da3 100644
      if (!fast_layers(p, false, err)) return false;
      // each later part of a split: the residual crosses over through the previous part's pinned hop buffer, the
      // copy ordered on the devices by an event (the host never waits between the parts)
-@@ -5847,8 +6045,11 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
+@@ -5847,8 +6061,11 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
      }
      FastState* FT = tail->fast_;
      cudaSetDevice(tail->dev_);
@@ -1049,7 +1074,7 @@ index 6f1f249..a879da3 100644
      // GLM_DUMP_H=<file> (debug): append every position's final hidden state (output_norm of the stream mean - what the
      // NextN/MTP block reads) as n_embd floats
      static const char* dh = getenv("GLM_DUMP_H");
-@@ -5976,7 +6177,7 @@ bool Glm5Model::fast_mtp(int64_t p, int32_t next_tok, std::string& err, int step
+@@ -5976,7 +6193,7 @@ bool Glm5Model::fast_mtp(int64_t p, int32_t next_tok, std::string& err, int step
      }
      gf::rms_q8(F->mtp_h, nullptr, Ly.attn_norm, g.norm_eps, E, F->x, F->xq, s);
      if (glmfast::submit_every() > 0) glmfast::submit_queued(s);   // (Windows HIP: the GPU starts while the rest queues)
@@ -1058,7 +1083,7 @@ index 6f1f249..a879da3 100644
      gf::rms_q8(F->mtp_h, F->mixer, Ly.ffn_norm, g.norm_eps, E, F->x, F->xq, s);
      bool pf_pending = false;
      if (!fast_moe(il, pf_pending, err)) return false;
-@@ -6493,7 +6694,7 @@ bool Glm5Model::spec_head(int64_t p, int32_t token, std::string& err) {
+@@ -6493,7 +6710,7 @@ bool Glm5Model::spec_head(int64_t p, int32_t token, std::string& err) {
                   g.n_embd);
      if (const float* img = image_row(p)) std::memcpy(F->emb_h, img, (size_t) g.n_embd * sizeof(float));   // an image
      cudaMemcpyAsync(F->emb, F->emb_h, (size_t) g.n_embd * sizeof(float), cudaMemcpyHostToDevice, F->cs);
@@ -1067,7 +1092,7 @@ index 6f1f249..a879da3 100644
      lap(2);
      if (cancellable) {
          F->spec_gate = true;            // a skip_gate before each layer ...
-@@ -6574,7 +6775,7 @@ bool Glm5Model::spec_tail(Glm5Model* head, int64_t p, std::string& err) {
+@@ -6574,7 +6791,7 @@ bool Glm5Model::spec_tail(Glm5Model* head, int64_t p, std::string& err) {
              if (!m->hop_to_next(m->split_next_.get(), p, err)) return false;
          cudaSetDevice(m->dev_);
          FastState* FL = m->fast_;
@@ -1076,7 +1101,7 @@ index 6f1f249..a879da3 100644
          const WSlot& owl = m->ws_map_.at("output.weight");
          gf::MvJob ol = {owl.q, FL->head_xq, FL->head_x, m->sc_ + m->sc_logits, nullptr, 1.0f, owl.type, g.n_embd,
                          g.n_vocab};
-@@ -6589,7 +6790,7 @@ bool Glm5Model::spec_tail(Glm5Model* head, int64_t p, std::string& err) {
+@@ -6589,7 +6806,7 @@ bool Glm5Model::spec_tail(Glm5Model* head, int64_t p, std::string& err) {
          cudaSetDevice(dev_);
          return true;
      }
@@ -1099,7 +1124,7 @@ index 9272932..481d51b 100644
      int* slot_cells = nullptr;   // KV streaming: the selection in VRAM slot rows (glm_kv_resolve), what the attention reads
      void *qr_q = nullptr, *attn_q = nullptr;
 diff --git a/src/core/glm_model.cu b/src/core/glm_model.cu
-index 7906520..2ee6478 100644
+index 7906520..24eab4a 100644
 --- a/src/core/glm_model.cu
 +++ b/src/core/glm_model.cu
 @@ -247,6 +247,17 @@ static bool exl3_table(const std::string& pack_dir, Exl3Table& t, std::string& e
@@ -1330,7 +1355,41 @@ index 7906520..2ee6478 100644
      sc_qabs = take((int64_t) g_.kv_lora * g_.n_head);
      sc_iq = take((int64_t) g_.idx_heads * g_.idx_key);
      sc_iw = take(g_.idx_heads);
-@@ -1599,7 +1715,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
+@@ -881,11 +997,12 @@ int64_t Glm5Model::kv_resident() const {
+ // an error.  Null with err empty: no DSA layer on this part.
+ Glm5Model::KvStream* Glm5Model::kv_stream_make(int64_t cells, int64_t ctx, std::string& err) {
+     namespace k = strata::kernels;
+-    const std::vector<int> ls = dsa_layers();
++    std::vector<int> ls = dsa_layers();
++    if (g_.dsa) std::erase(ls, mtp_il_);   // (glm-dsa's NextN block attends every position: its cache stays resident)
+     if (ls.empty()) return nullptr;
+     auto* K = new KvStream();
+     K->page = g_.idx_kpool;
+-    K->row_bytes = lat_q8_ ? k::glmf::lat8_rec_bytes(g_.kv_lora) : g_.kv_lora * 2;
++    K->row_bytes = dsa_rec_ > 0 ? dsa_rec_ * 2 : lat_q8_ ? k::glmf::lat8_rec_bytes(g_.kv_lora) : g_.kv_lora * 2;
+     K->slots = cells / K->page;
+     K->n_blocks = (ctx + K->page - 1) / K->page;
+     const auto fail = [&](const std::string& e) {
+@@ -1543,8 +1660,17 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
+     const int64_t kv_cells = fast ? Glm5Model::kv_resident_cells(g.idx_kpool, max_ctx) : 0;
+     const double lat_rows = (double) (kv_cells > 0 ? kv_cells : max_ctx);
+     const double lat = fast ? (double) g.kv_lora * lat_rows / 2 : (double) g.kv_lora * lat_rows;
+-    const size_t kv_stage = kv_cells > 0 ? (size_t) g.kv_lora * 2 * (size_t) max_ctx : 0;
++    // glm-dsa's fast path: [latent FP16 | k_pe F32] records (load_pack's dsa_rec_), indexer keys on full layers only, and
++    // the NextN block resident at the whole context (it attends densely, KV streaming leaves it out)
++    const double dsa_rec_bytes = fast && g.dsa ? 2.0 * g.kv_lora + 4.0 * g.n_rot : 0.0;
++    const size_t kv_stage = kv_cells <= 0 ? 0
++                            : (size_t) (dsa_rec_bytes > 0 ? dsa_rec_bytes : 2.0 * g.kv_lora) * (size_t) max_ctx;
+     const double dsa_state = 4.0 * (lat + 2.0 * g.idx_key * (double) max_ctx + (double) g.idx_key * max_pools);
++    const auto dsa_state_of = [&](int l) {
++        if (dsa_rec_bytes <= 0) return dsa_state;
++        if (l >= g.n_layers) return dsa_rec_bytes * (double) max_ctx;   // (the NextN block)
++        return dsa_rec_bytes * lat_rows + (g.indexer_full[(size_t) l] ? 4.0 * g.idx_key * (double) max_ctx : 0.0);
++    };
+     const double kda_state = 4.0 * ((double) g.d_inner() * g.kda_head_dim + 3.0 * g.d_inner() * (g.d_conv - 1));
+     // a DFlash drafter (STRATA_GLM_DFLASH): its file and ring on the last part; every part keeps the verify window's
+     // buffers - per KDA layer its state backup and the window's inputs, and ~32 MB of rows and logits
+@@ -1599,7 +1725,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
          const strata::TensorInfo* tu = findm(P + "ffn_up_exps.weight");
          const strata::TensorInfo* td = findm(P + "ffn_down_exps.weight");
          if ((g.nextn > 0 || extra) && findm(P + "nextn.eh_proj.weight") != nullptr && tg && tu && td &&
@@ -1339,7 +1398,25 @@ index 7906520..2ee6478 100644
              blob[(size_t) L] = (tensor_bytes(tg) + tensor_bytes(tu) + tensor_bytes(td)) / g.n_expert;
              stride[(size_t) L] = (double) glmfast::expert_stride((size_t) blob[(size_t) L], (int) tg->type, (int) td->type);
              mtp_dense = (double) b;
-@@ -1960,6 +2076,17 @@ bool Glm5Model::load_pack_place(const std::string& pack_dir, int64_t max_ctx, st
+@@ -1747,7 +1873,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
+         double bsum = 0, ssum = 0, smax = 0;
+         bool kda = false, dsa = false, dense_ffn = false, moe = false;
+         for (int l = lb; l < le; ++l) {
+-            used += dense[(size_t) l] + (g.is_recr(l) ? kda_state + win_kda : dsa_state);
++            used += dense[(size_t) l] + (g.is_recr(l) ? kda_state + win_kda : dsa_state_of(l));
+             (g.is_recr(l) ? kda : dsa) = true;
+             if (moe_layer(l)) {
+                 bsum += blob[(size_t) l];
+@@ -1761,7 +1887,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
+         if (last) {
+             used += head + dflash;
+             if (mtp) {
+-                used += mtp_dense + dsa_state;
++                used += mtp_dense + dsa_state_of(g.n_layers);
+                 bsum += blob[(size_t) L];
+                 ssum += stride[(size_t) L];
+                 smax = std::max(smax, stride[(size_t) L]);
+@@ -1960,6 +2086,17 @@ bool Glm5Model::load_pack_place(const std::string& pack_dir, int64_t max_ctx, st
      // two-part split (default 1), STRATA_GLM_DEVS the devices of any split.
      const char* sp = getenv("STRATA_GLM_SPLIT");
      const std::string spec = sp != nullptr ? std::string(sp) : layer_split;
@@ -1357,7 +1434,7 @@ index 7906520..2ee6478 100644
      // STRATA_GLM_EXPERT_HELPER=<device>: the expert helper - alone beside one trunk GPU (no split: dense, state and
      // MTP stay on device 0), or beside a layer split, which then leaves the helper's device out and gives each part
      // its own share of the helper over its own layers (fast_helper_setup): two cards and a Ryzen AI Max APU
-@@ -2019,6 +2146,11 @@ bool Glm5Model::load_pack_place(const std::string& pack_dir, int64_t max_ctx, st
+@@ -2019,6 +2156,11 @@ bool Glm5Model::load_pack_place(const std::string& pack_dir, int64_t max_ctx, st
      }
      if (devs.size() == 2 && getenv("STRATA_GLM_DEVS") == nullptr && !spec.empty() && spec != "auto")
          if (const char* d1 = getenv("STRATA_GLM_DEV1")) devs[1] = std::atoi(d1);
@@ -1369,7 +1446,7 @@ index 7906520..2ee6478 100644
      bool ok = devs.size() == bounds.size() + 1;
      for (size_t i = 0; ok && i < bounds.size(); ++i)
          ok = bounds[i] >= 1 && bounds[i] < g_.n_layers && (i == 0 || bounds[i] > bounds[i - 1]);
-@@ -2220,6 +2352,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2220,6 +2362,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
      strata::kernels::GlmHcWorkspace hcws;
      strata::kernels::glm_hc_workspace_init(hcs, A + sc_inv, hcws);
      const float prescale = 1.0f / std::sqrt((float) (g.idx_key * g.idx_heads));
@@ -1377,7 +1454,7 @@ index 7906520..2ee6478 100644
 
      for (int il = l0_; il < l1_; ++il) {
          if (timing_ && !tev_rec(tev_a_, "a")) timing_ = false;
-@@ -2227,19 +2360,84 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2227,19 +2370,84 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
          const auto W = [&](const char* suffix) { return w_.at("blk." + L + "." + suffix); };
          const auto ws_ = [&](const std::string& suffix) -> WSlot& { return ws_map_.at("blk." + L + "." + suffix); };
 
@@ -1473,7 +1550,7 @@ index 7906520..2ee6478 100644
              // ---- the KDA mixer
              const char* streams[] = {"q", "k", "v"};
              for (int si = 0; si < 3; ++si) {
-@@ -2292,7 +2490,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2292,7 +2500,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
 
              GM_CHECK(gm_gemv(ws_("attn_q_b.weight"), A + sc_qr, nullptr, 1.0f, A + sc_q, g.n_head * g.qk_nope, g.q_lora), err);
              q_absorb_kernel<<<blocks((int64_t) g.kv_lora * g.n_head), GM_THREADS>>>(
@@ -1482,7 +1559,7 @@ index 7906520..2ee6478 100644
 
              // the indexer: per-token key/gate into their buffers; a pool's key when it completes
              GM_CHECK(gm_gemv(ws_("indexer.attn_k.weight"), A + sc_x, nullptr,
-@@ -2342,15 +2540,21 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2342,15 +2550,21 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
                               A + sc_mixer, g.n_embd, (int64_t) g.n_head * g.v_head), err);
          }
 
@@ -1513,7 +1590,7 @@ index 7906520..2ee6478 100644
          cb_dump("ffn_norm-" + L, A + sc_x, g.n_embd);
 
          if (il < g.dense_lead) {
-@@ -2418,8 +2622,12 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2418,8 +2632,12 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
          }
          cb_dump("ffn_out-" + L, A + sc_ffn, g.n_embd);
 
@@ -1528,7 +1605,7 @@ index 7906520..2ee6478 100644
          cb_dump("l_out-" + L, R, g.hc * g.n_embd);
          if (timing_) {
              if (!tev_rec(tev_d_, "d")) timing_ = false;
-@@ -3032,8 +3240,20 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3032,8 +3250,20 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
      // token_embd stays QUANTIZED too (Q4_K, 0.36 GB instead of 2.54 GB F32): step() dequantizes
      // the one row it needs per token from the host mapping (pack_emb_*), and the 2.2 GB go to
      // the expert pool instead
@@ -1550,7 +1627,7 @@ index 7906520..2ee6478 100644
      };
      // the fast path keeps the pack's BIG BF16 rows as BF16 on the device (dense.bin stores them BF16,
      // so this is lossless; F32 expansion doubled their bytes and their read time) and does not upload
-@@ -3262,6 +3482,16 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3262,6 +3492,16 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
              err = "pack: unsupported dense kind '" + r.kind + "' for " + r.name;
              return false;
          }
@@ -1567,7 +1644,7 @@ index 7906520..2ee6478 100644
          { cudaError_t e_ = cudaMemcpy((uint8_t*) w_arena_ + at, host.data(), (size_t) n_f32 * 4,
                              cudaMemcpyHostToDevice); if (e_ != cudaSuccess) { err = std::string("pack: ") + cudaGetErrorString(e_); return false; } }
          w_[r.name] = (const float*) ((uint8_t*) w_arena_ + at);
-@@ -3384,11 +3614,11 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3384,12 +3624,15 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
      int64_t floats = 2 * hc_dim;
      // the fast path keeps the DSA latent cache in FP16 (half the bytes: at 128k context ~0.8 GB more for experts on
      // each card, and the prompt attention reads half as much); the reference path (STRATA_GLM_SLOW) keeps F32
@@ -1576,12 +1653,15 @@ index 7906520..2ee6478 100644
                std::atoi(getenv("STRATA_GLM_KV_INT8")) != 0;
      // KV streaming (--kv-resident N): the latent cache lives in pinned RAM and the state holds N positions of VRAM slots
      // a layer (kv_stream_setup, below)
--    const int64_t kv_cells = fast_mode_ ? kv_resident_cells(g_.idx_kpool, max_ctx) : 0;
-+    const int64_t kv_cells = fast_mode_ && !g_.dsa ? kv_resident_cells(g_.idx_kpool, max_ctx) : 0;   // (glm-dsa: not yet)
+     const int64_t kv_cells = fast_mode_ ? kv_resident_cells(g_.idx_kpool, max_ctx) : 0;
      const int64_t lat_rows = kv_cells > 0 ? kv_cells : max_ctx;
++    // glm-dsa's fast path keeps a cell's latent and roped k_pe as one record (one row for KV streaming to page)
++    dsa_rec_ = fast_mode_ && g_.dsa ? g_.kv_lora + 2 * g_.n_rot : 0;
++    const int64_t rec_floats = dsa_rec_ / 2;
      // (INT8: lat8_rec_bytes per position, a multiple of 16 bytes at kv_lora 512)
      const int64_t lat_floats = lat_q8_      ? (int64_t) strata::kernels::glmf::lat8_rec_bytes(g_.kv_lora) / 4 * lat_rows
-@@ -3403,10 +3633,16 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+                                : fast_mode_ ? (int64_t) g_.kv_lora * lat_rows / 2
+@@ -3403,10 +3646,20 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
      dsa_ik_.assign((size_t) g_.n_layers + 1, 0);
      dsa_ig_.assign((size_t) g_.n_layers + 1, 0);
      dsa_pool_.assign((size_t) g_.n_layers + 1, 0);
@@ -1590,7 +1670,11 @@ index 7906520..2ee6478 100644
      // ik_ring_), the whole context on the reference path (whose kernels index them by position)
      ik_ring_ = fast_mode_ ? (int) std::min<int64_t>(max_ctx, 8192 + 64) : (int) max_ctx;
 -    if (mtp_il_ >= 0) {
-+    if (mtp_il_ >= 0 && g_.dsa) {   // glm-dsa's block: the latent and k_pe only (it attends densely)
++    if (mtp_il_ >= 0 && g_.dsa && dsa_rec_ > 0) {   // glm-dsa's block attends densely: every position resident
++        dsa_lat_[(size_t) mtp_il_] = floats;
++        dsa_kpe_[(size_t) mtp_il_] = floats + g_.kv_lora / 2;
++        floats += rec_floats * max_ctx;
++    } else if (mtp_il_ >= 0 && g_.dsa) {   // glm-dsa's block: the latent and k_pe only (it attends densely)
 +        dsa_lat_[(size_t) mtp_il_] = floats;
 +        floats += lat_floats;
 +        dsa_kpe_[(size_t) mtp_il_] = floats;
@@ -1599,11 +1683,17 @@ index 7906520..2ee6478 100644
          dsa_lat_[(size_t) mtp_il_] = floats;
          floats += lat_floats;
          dsa_ik_[(size_t) mtp_il_] = floats;
-@@ -3423,6 +3659,13 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3423,6 +3676,19 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
              floats += (int64_t) g_.d_inner() * g_.kda_head_dim;
              kda_conv_[(size_t) il] = floats;
              floats += (int64_t) 3 * g_.d_inner() * (g_.d_conv - 1);
-+        } else if (g_.dsa) {   // the latent (FP16 on the fast path), F32 k_pe and indexer keys of every position
++        } else if (g_.dsa && dsa_rec_ > 0) {   // records (lat_rows: the VRAM slots when streamed); indexer keys of
++            dsa_lat_[(size_t) il] = floats;     // every position on the full indexer layers only (shared ones reuse)
++            dsa_kpe_[(size_t) il] = floats + g_.kv_lora / 2;
++            floats += rec_floats * lat_rows;
++            dsa_pool_[(size_t) il] = floats;
++            if (g_.indexer_full[(size_t) il]) floats += (int64_t) g_.idx_key * max_ctx;
++        } else if (g_.dsa) {   // the latent (F32 on the reference path), F32 k_pe and indexer keys of every position
 +            dsa_lat_[(size_t) il] = floats;
 +            floats += lat_floats;
 +            dsa_kpe_[(size_t) il] = floats;
@@ -1613,7 +1703,7 @@ index 7906520..2ee6478 100644
          } else {
              dsa_lat_[(size_t) il] = floats;
              floats += lat_floats;
-@@ -3465,8 +3708,8 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3465,8 +3731,8 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
      sc_g2 = take(g_.d_inner());
      sc_gated = take(g_.d_inner());
      sc_qr = take(g_.q_lora);
@@ -1624,7 +1714,7 @@ index 7906520..2ee6478 100644
      sc_qabs = take((int64_t) g_.kv_lora * g_.n_head);
      sc_iq = take((int64_t) g_.idx_heads * g_.idx_key);
      sc_iw = take(g_.idx_heads);
-@@ -3544,13 +3787,20 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3544,13 +3810,20 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
          size_t pool_bytes_cap = pool_avail;
          if (const char* ps = getenv("STRATA_GLM_POOL_SLOTS0"))
              pool_bytes_cap = std::min<size_t>(pool_avail, (size_t) std::atoi(ps) * slot_bytes_);
@@ -1647,7 +1737,7 @@ index 7906520..2ee6478 100644
                                                  ((double) c_weight[(size_t) c] * (double) c_stride[(size_t) c]) /
                                                  weight_sum) : 0;
              class_slots_[c] = std::min<int64_t>((int64_t) (bytes_c / class_stride_[c]),
-@@ -3560,9 +3810,10 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3560,9 +3833,10 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
              off += (size_t) class_slots_[c] * class_stride_[c];
              base += class_slots_[c];
              slots_total += class_slots_[c];
@@ -1659,7 +1749,7 @@ index 7906520..2ee6478 100644
      }
      if (dev_experts_) {
          cudaError_t e_ = cudaMalloc(&pool_, pool_bytes_);
-@@ -3673,9 +3924,10 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
+@@ -3673,9 +3947,10 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
          return true;   // a GGUF without the draft block
      }
      const auto x3 = [&](const std::string& n) { return exl3_ && xt.mats.count(n) != 0; };
@@ -1673,7 +1763,7 @@ index 7906520..2ee6478 100644
      uint64_t bytes = 0;
      if (exl3_) {
          for (const char* n : raw_names) {
-@@ -3693,7 +3945,7 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
+@@ -3693,7 +3968,7 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
              if (t == nullptr) { err = "mtp: " + P + n + " missing"; return false; }
              bytes += ((uint64_t) t->elements() * 4 + 255u) & ~(uint64_t) 255u;
          }
@@ -1930,7 +2020,7 @@ index bfe8a42..a6eda35 100644
      // GLM_TEST_TIME=<n>: then n more tokens token by token, twice: the time a token costs (with and without a DFlash
      // drafter loaded, STRATA_GLM_DFLASH, the same forward)
 diff --git a/src/core/glm_prefill.cu b/src/core/glm_prefill.cu
-index 85076b6..b6fcd3b 100644
+index 85076b6..afaca74 100644
 --- a/src/core/glm_prefill.cu
 +++ b/src/core/glm_prefill.cu
 @@ -234,11 +234,11 @@ DsaBufs carve_dsa(Carve& c, size_t T, const Glm5Geometry& g, int max_pools) {
@@ -2038,7 +2128,7 @@ index 85076b6..b6fcd3b 100644
      for (int il = l0_; il < l1_; ++il) {
          progress_at("the prompt: layer", il);   // a layer is the serve watchdog's heartbeat (issue #40)
          progress_beat();
-@@ -2494,7 +2514,99 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2494,7 +2514,107 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
          uint16_t* const lat = kv_host != nullptr ? (uint16_t*) S->kv_stage : (uint16_t*) (state_ + dsa_lat_[(size_t) il]);
 
          // ---- the mixer, in sub-batches of S->sub tokens (the recurrences carry their state across)
@@ -2067,7 +2157,8 @@ index 85076b6..b6fcd3b 100644
 +                sgemm_bf16(Ly.idx_proj, g.idx_heads, E, xs, E, B.iw, g.idx_heads, tn,
 +                           1.0f / std::sqrt((float) (g.idx_key * g.idx_heads)));
 +            }
-+            float* const kpe = state_ + dsa_kpe_[(size_t) il];
++            // a cell's [latent | k_pe] record: lat is the identity cache, or the layer's staging copy when it streams
++            float* const kpe = (float*) (lat + g.kv_lora);
 +            float* const ik = state_ + dsa_pool_[(size_t) il];
 +            gf::DsaRopePrepArgs d;
 +            d.qr_raw = B.qr_raw;
@@ -2091,6 +2182,13 @@ index 85076b6..b6fcd3b 100644
 +            d.base = g.rope_base;
 +            d.eps = g.norm_eps;
 +            d.ln_eps = g.idx_ln_eps;
++            d.rec = dsa_rec_;
++            if (kv_host != nullptr) {   // + the host copy and the resident slots (the stage is this chunk's only)
++                d.lat_host = (uint16_t*) kv_host;
++                d.lat_slots = (uint16_t*) (state_ + dsa_lat_[(size_t) il]);
++                d.lat_table = kv_->map[(size_t) il].page_table;
++                d.lat_page = kv_->page;
++            }
 +            gf::dsa_rope_prep(d, s);
 +            hgemm_q(Ly.q_b, HQ, g.q_lora, B.qr16, g.q_lora, B.q, HQ, tn, 0.0f);
 +            gf::rope_heads(B.q + g.qk_nope, g.n_rot, g.k_mla(), g.n_head, pt, g.rope_base, s, tn, HQ);
@@ -2119,7 +2217,7 @@ index 85076b6..b6fcd3b 100644
 +#if defined(STRATA_USE_HIP)
 +            gb::mla_attn_wmma2(B.q_abs, lat, cells, B.n_sel, KS, g.n_head, g.kv_lora,
 +                               1.0f / std::sqrt((float) (g.qk_nope + g.n_rot)), tn, B.ctx, s, false, B.q + g.qk_nope,
-+                               g.k_mla(), kpe, g.n_rot);
++                               g.k_mla(), kpe, g.n_rot, dsa_rec_, dsa_rec_ / 2);
 +#else
 +            err = "glm prefill: the glm-dsa prompt attention is HIP only";
 +            return false;
@@ -2139,7 +2237,7 @@ index 85076b6..b6fcd3b 100644
              const int tn = std::min(S->sub, T - t0);
              const float* xs = S->x + (size_t) t0 * E;
              const uint16_t* x16 = S->x16 + (size_t) t0 * E;
-@@ -3413,7 +3525,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3413,7 +3533,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
              return blas_dev[dev] - 1;
  #endif
          }();
@@ -2148,7 +2246,7 @@ index 85076b6..b6fcd3b 100644
                                mmq::to_f16_supported(Ly.d_type) && S->w16_elems >= (int64_t) 2 * nff * E + E;
          const auto run_blas_q = [&](const uint8_t* blob, int a, int nrows, int r0) {
              namespace x3 = strata::kernels::exl3;
-@@ -3468,8 +3580,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3468,8 +3588,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
              else if (use_blas) run_set_q(wbase, n_exp, stride, d_bounds, hb, r0);
              else run_set(wbase, n_exp, stride, d_bounds, hb, r0);
          };
@@ -2159,7 +2257,7 @@ index 85076b6..b6fcd3b 100644
              return false;
          }
          // the disk-only experts (staged last, ascending): their indices in the reader's order - inside the segment
-@@ -3976,7 +4088,10 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3976,7 +4096,10 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
      }
      // the last layer's write half: R = post x ffn + comb . R
      if (!tail_skip) {
@@ -2171,7 +2269,7 @@ index 85076b6..b6fcd3b 100644
          S->mark("hc", s);
      }
      // ---- the NextN block's caches for these positions (the half that carries it): position p reads h_p and the
-@@ -4001,63 +4116,75 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -4001,63 +4124,75 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
                  else
                      tt->to_float(pack_emb_src_ + (size_t) next_ids[t] * row_b, S->emb_h + (size_t) t * E, E);
              }
@@ -2303,7 +2401,7 @@ index 85076b6..b6fcd3b 100644
          }
      }
      S->collect();
-@@ -4516,7 +4643,8 @@ bool Glm5Model::prefill_run(const std::vector<int32_t>& tokens, std::string& err
+@@ -4516,7 +4651,8 @@ bool Glm5Model::prefill_run(const std::vector<int32_t>& tokens, std::string& err
          }
          // the embedding lands in x (free until the first layer's gates write it) and fans out to the 4 streams
          cudaMemcpyAsync(S->x, S->emb_h, (size_t) T * E * sizeof(float), cudaMemcpyHostToDevice, fast_->cs);
@@ -2411,7 +2509,7 @@ index b3fc18e..8411615 100644
      if (tid == 0) {
          s_prefix = 0u;
 diff --git a/src/kernels/cuda/glm_batch.cu b/src/kernels/cuda/glm_batch.cu
-index b91fdff..4f1398d 100644
+index b91fdff..4913f1f 100644
 --- a/src/kernels/cuda/glm_batch.cu
 +++ b/src/kernels/cuda/glm_batch.cu
 @@ -1781,8 +1781,10 @@ __device__ __forceinline__ int mla2_wmma_row(int i, int hi) {
@@ -2420,7 +2518,7 @@ index b91fdff..4f1398d 100644
          const int* __restrict__ cells_all, const int* __restrict__ n_sel_arr,
 -        int n_sel_max, int n_head, float scale, float* __restrict__ ctx, bool q8) {
 +        int n_sel_max, int n_head, float scale, float* __restrict__ ctx, bool q8,
-+        const float* __restrict__ q_pe, int q_pe_hs, const float* __restrict__ kpe, int n_rot) {
++        const float* __restrict__ q_pe, int q_pe_hs, const float* __restrict__ kpe, int n_rot, int lat_ld, int kpe_ld) {
      __shared__ __align__(16) _Float16 sl[16][512];
 +    __shared__ float sqpe[16][64];   // glm-dsa: the 16 heads' roped query part (n_rot <= 64)
      __shared__ __align__(16) _Float16 ph[16][16], pl[16][16];
@@ -2436,12 +2534,21 @@ index b91fdff..4f1398d 100644
      for (int s0 = 0; s0 < ns; s0 += 16) {
          __syncthreads();
          if (tid < 16) cells[tid] = s0 + tid < ns ? cl[s0 + tid] : -1;
+@@ -1817,7 +1822,7 @@ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
+             const int r = i / 64, col = (i % 64) * 8, cell = cells[r];
+             *(uint4*)(&sl[r][col]) = cell < 0 ? make_uint4(0, 0, 0, 0)
+                 : q8 ? lat8_h8(lat8_rec(lat, 512, cell), 512, col / 8)
+-                     : *(const uint4*)(lat + (size_t)cell * 512 + col);
++                     : *(const uint4*)(lat + (size_t)cell * lat_ld + col);
+         }
+         __syncthreads();
+         mla2_f8 dot = {};
 @@ -1837,6 +1842,10 @@ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
          float v = 0;
  #pragma unroll
          for (int w = 0; w < 8; ++w) v += scores[w][r][col];
 +        if (q_pe != nullptr && cells[col] >= 0) {
-+            const float* kr = kpe + (size_t)cells[col] * n_rot;
++            const float* kr = kpe + (size_t)cells[col] * kpe_ld;
 +            for (int e = 0; e < n_rot; ++e) v += sqpe[r][e] * kr[e];
 +        }
          v = cells[col] < 0 ? -INFINITY : v * scale;
@@ -2493,15 +2600,17 @@ index b91fdff..4f1398d 100644
          if (i >= per) break;
          const int e = tid + i * (int) blockDim.x;
          const float xv = v[i] * inv * w[e];
-@@ -2614,14 +2623,20 @@ bool mla_wmma2_supported() { const int a = mla_wmma2_arch(); return a == 1 || a
+@@ -2614,14 +2623,21 @@ bool mla_wmma2_supported() { const int a = mla_wmma2_arch(); return a == 1 || a
  bool mla_wmma2_default() { const int a = mla_wmma2_arch(); return a == 1 || a == 4; }
 
  void mla_attn_wmma2(const float* q_abs, const uint16_t* lat, const int* cells, const int* n_sel, int n_sel_max,
 -                    int n_head, int kv_lora, float scale, int T, float* ctx, cudaStream_t s, bool lat_q8) {
 +                    int n_head, int kv_lora, float scale, int T, float* ctx, cudaStream_t s, bool lat_q8,
-+                    const float* q_pe, int q_pe_hs, const float* kpe, int n_rot) {
++                    const float* q_pe, int q_pe_hs, const float* kpe, int n_rot, int lat_ld, int kpe_ld) {
      if (T <= 0) return;
-     if (kv_lora != 512 || n_head % 16 != 0) {
+-    if (kv_lora != 512 || n_head % 16 != 0) {
++    if (kpe_ld <= 0) kpe_ld = n_rot;
++    if (kv_lora != 512 || n_head % 16 != 0 || lat_ld < 512 || lat_ld % 8 != 0) {
          std::fprintf(stderr, "glm_batch mla_attn_wmma2: kv_lora %d / n_head %d unsupported\n", kv_lora, n_head);
          return;
      }
@@ -2512,7 +2621,7 @@ index b91fdff..4f1398d 100644
 +        return;
 +    }
 +    mla_attn_wmma2_kernel<<<grid, 256, 0, s>>>(q_abs, lat, cells, n_sel, n_sel_max, n_head, scale, ctx, lat_q8, q_pe,
-+                                               q_pe_hs, kpe, n_rot);
++                                               q_pe_hs, kpe, n_rot, lat_ld, kpe_ld);
      check("mla_attn_wmma2");
  }
  #endif
@@ -2569,7 +2678,7 @@ index f9dd608..1525dff 100644
 
  }  // namespace strata::kernels
 diff --git a/src/kernels/cuda/glm_fast.cu b/src/kernels/cuda/glm_fast.cu
-index 268563c..d97fa28 100644
+index 268563c..fa8ca9b 100644
 --- a/src/kernels/cuda/glm_fast.cu
 +++ b/src/kernels/cuda/glm_fast.cu
 @@ -6,6 +6,7 @@
@@ -2580,7 +2689,55 @@ index 268563c..d97fa28 100644
  #include "strata/kernels/glm_batch.hpp"   // mla_decode_v70 (Volta)
  #include "strata/kernels/exl3.hpp"
  #if defined(STRATA_USE_HIP)
-@@ -4982,10 +4983,10 @@ __global__ void __launch_bounds__(1024) mtp_in_kernel(const float* __restrict__
+@@ -3281,9 +3282,14 @@ __global__ void __launch_bounds__(256) mla_attn_kernel(const float* __restrict__
+ // The latents stay FP16 in shared memory, as in the cache (34 KB at kv_lora 512; F32 rows were over Turing's 64 KB).
+ constexpr int MLA_CHUNK = 32;
+ constexpr int MLA_HPB = 16;
++// (glm-dsa, mla_pe: lat_ld > 0 a cell's latent stride; q_pe non-null adds q_pe[h] . kpe[cell] (n_rot, q heads q_pe_hs
++//  apart, k_pe kpe_ld floats a cell) to each score; scale_ov > 0 the softmax scale; cells null: cell = position)
+ __global__ void __launch_bounds__(256) mla_split_kernel(const float* __restrict__ q_abs, const uint16_t* __restrict__ lat,
+                                                         const int* __restrict__ cells, int n_sel, int n_head, int qk_nope,
+-                                                        int kv_lora, float* __restrict__ part, bool q8) {
++                                                        int kv_lora, float* __restrict__ part, bool q8, int lat_ld = 0,
++                                                        const float* __restrict__ q_pe = nullptr, int q_pe_hs = 0,
++                                                        const float* __restrict__ kpe = nullptr, int kpe_ld = 0,
++                                                        int n_rot = 0, float scale_ov = 0.0f) {
+     extern __shared__ float smem[];
+     uint16_t* sL = (uint16_t*) smem;                   // MLA_CHUNK x kv_lora, FP16
+     float* sS = smem + MLA_CHUNK * kv_lora / 2;        // MLA_HPB x MLA_CHUNK scores -> weights
+@@ -3292,15 +3298,16 @@ __global__ void __launch_bounds__(256) mla_split_kernel(const float* __restrict_
+     const int h0 = blockIdx.y * MLA_HPB, nh = min(MLA_HPB, n_head - h0);
+     const int s0 = b * MLA_CHUNK;
+     const int ns = min(MLA_CHUNK, n_sel - s0);
+-    if (tid < MLA_CHUNK) s_cell[tid] = tid < ns ? cells[s0 + tid] : -1;
++    if (tid < MLA_CHUNK) s_cell[tid] = tid < ns ? (cells != nullptr ? cells[s0 + tid] : s0 + tid) : -1;
+     __syncthreads();
++    const int ld = lat_ld > 0 ? lat_ld : kv_lora;
+     for (int i = tid; i < MLA_CHUNK * kv_lora; i += blockDim.x) {
+         const int s = i / kv_lora, c = i - s * kv_lora;
+         const int cell = s_cell[s];
+-        sL[i] = cell < 0 ? (uint16_t) 0 : q8 ? lat_h(lat_any(lat, true, kv_lora, cell, c)) : lat[(size_t) kv_lora * cell + c];
++        sL[i] = cell < 0 ? (uint16_t) 0 : q8 ? lat_h(lat_any(lat, true, kv_lora, cell, c)) : lat[(size_t) ld * cell + c];
+     }
+     __syncthreads();
+-    const float scale = rsqrtf((float) qk_nope);
++    const float scale = scale_ov > 0.0f ? scale_ov : rsqrtf((float) qk_nope);
+     // scores: a warp per head, the head's q in registers (kv_lora / 32 per lane), one warp reduction per cell
+     for (int hh = warp; hh < nh; hh += nw) {
+         float q[16];
+@@ -3312,6 +3319,11 @@ __global__ void __launch_bounds__(256) mla_split_kernel(const float* __restrict_
+ #pragma unroll
+             for (int j = 0; j < 16; ++j)
+                 if (lane + 32 * j < kv_lora) acc += q[j] * lat_f(sL[s * kv_lora + lane + 32 * j]);
++            if (q_pe != nullptr && s_cell[s] >= 0) {
++                const float* qp = q_pe + (size_t) q_pe_hs * (h0 + hh);
++                const float* kr = kpe + (size_t) kpe_ld * s_cell[s];
++                for (int e = lane; e < n_rot; e += 32) acc += qp[e] * kr[e];
++            }
+             acc = warp_sum(acc);
+             if (lane == 0) sS[hh * MLA_CHUNK + s] = s_cell[s] >= 0 ? acc * scale : -INFINITY;
+         }
+@@ -4982,10 +4994,10 @@ __global__ void __launch_bounds__(1024) mtp_in_kernel(const float* __restrict__
                                                        float eps, int n, block_q8_1* __restrict__ catq) {
      __shared__ float sred[32];
      const int tid = threadIdx.x, lane = tid & 31;
@@ -2593,7 +2750,7 @@ index 268563c..d97fa28 100644
          const int e = tid + 1024 * i;
          a[i] = e < n ? emb[e] : 0.0f;
          b[i] = e < n ? h[e] : 0.0f;
-@@ -4996,7 +4997,7 @@ __global__ void __launch_bounds__(1024) mtp_in_kernel(const float* __restrict__
+@@ -4996,7 +5008,7 @@ __global__ void __launch_bounds__(1024) mtp_in_kernel(const float* __restrict__
      sb = block_sum(sb, sred);
      const float ia = rsqrtf(sa / (float) n + eps), ib = rsqrtf(sb / (float) n + eps);
  #pragma unroll
@@ -2602,7 +2759,7 @@ index 268563c..d97fa28 100644
          const int e = tid + 1024 * i;
          if (e >= n) break;
          q8_1_store_warp(a[i] * ia * enorm[e], catq + e / 32, lane);
-@@ -5009,10 +5010,10 @@ __global__ void __launch_bounds__(1024) rms_q8_kernel(float* __restrict__ h, con
+@@ -5009,10 +5021,10 @@ __global__ void __launch_bounds__(1024) rms_q8_kernel(float* __restrict__ h, con
                                                        float* __restrict__ x, block_q8_1* __restrict__ xq) {
      __shared__ float sred[32];
      const int tid = threadIdx.x, lane = tid & 31;
@@ -2615,7 +2772,7 @@ index 268563c..d97fa28 100644
          const int e = tid + 1024 * i;
          float t = e < n ? h[e] : 0.0f;
          if (add != nullptr && e < n) {
-@@ -5025,7 +5026,7 @@ __global__ void __launch_bounds__(1024) rms_q8_kernel(float* __restrict__ h, con
+@@ -5025,7 +5037,7 @@ __global__ void __launch_bounds__(1024) rms_q8_kernel(float* __restrict__ h, con
      ss = block_sum(ss, sred);
      const float inv = rsqrtf(ss / (float) n + eps);
  #pragma unroll
@@ -2624,7 +2781,7 @@ index 268563c..d97fa28 100644
          const int e = tid + 1024 * i;
          if (e >= n) break;
          const float xv = v[i] * inv * w[e];
-@@ -7003,4 +7004,180 @@ void argmax_join(const int* a, const int* b, int c0, int* out, cudaStream_t s) {
+@@ -7003,4 +7015,251 @@ void argmax_join(const int* a, const int* b, int c0, int* out, cudaStream_t s) {
      launch_check("argmax_join");
  }
 
@@ -2670,6 +2827,30 @@ index 268563c..d97fa28 100644
 +        float ss = 0.0f;
 +        for (int e = tid; e < a.kv_lora; e += blockDim.x) ss += a.kv_raw[e] * a.kv_raw[e];
 +        const float inv = rsqrtf(block_sum(ss, sred) / (float) a.kv_lora + a.eps);
++        if (a.rec > 0) {   // one record a position, into each target (identity / host copy / resident slot)
++            uint16_t* tg[3];
++            int nt = 0;
++            if (a.lat != nullptr) tg[nt++] = a.lat + (size_t) a.p * a.rec;
++            if (a.lat_host != nullptr) tg[nt++] = a.lat_host + (size_t) a.p * a.rec;
++            if (a.lat_slots != nullptr && a.lat_table != nullptr) {
++                const int sl = a.lat_table[a.p / a.lat_page];
++                if (sl >= 0) tg[nt++] = a.lat_slots + ((size_t) sl * a.lat_page + a.p % a.lat_page) * a.rec;
++            }
++            for (int e = tid; e < a.kv_lora; e += blockDim.x) {
++                const uint16_t h = __half_as_ushort(__float2half(a.kv_raw[e] * inv * a.kv_norm[e]));
++                for (int k = 0; k < nt; ++k) tg[k][e] = h;
++            }
++            if (tid < a.n_rot / 2) {
++                float y0, y1;
++                rope_pair(a.kv_raw[a.kv_lora + 2 * tid], a.kv_raw[a.kv_lora + 2 * tid + 1], tid, a.n_rot, a.p, a.base, y0, y1);
++                for (int k = 0; k < nt; ++k) {
++                    float* kp = (float*) (tg[k] + a.kv_lora);
++                    kp[2 * tid] = y0;
++                    kp[2 * tid + 1] = y1;
++                }
++            }
++            return;
++        }
 +        for (int e = tid; e < a.kv_lora; e += blockDim.x)
 +            a.lat[(size_t) a.p * a.kv_lora + e] = __half_as_ushort(__float2half(a.kv_raw[e] * inv * a.kv_norm[e]));
 +        if (tid < a.n_rot / 2) {
@@ -2713,6 +2894,11 @@ index 268563c..d97fa28 100644
 +}
 +
 +// q_abs[h][c] = sum_e wk_b[h][c][e] * q_nope[h][e]   (wk_b BF16 {qk_nope, kv_lora, n_head}; q heads k_mla apart)
++// q_nope of every head, packed: qn[h][e] = q[k_mla * h + e]
++__global__ void pack_q_nope_kernel(const float* __restrict__ q, int k_mla, int qk_nope, float* __restrict__ qn) {
++    for (int e = threadIdx.x; e < qk_nope; e += blockDim.x) qn[(size_t) qk_nope * blockIdx.x + e] = q[(size_t) k_mla * blockIdx.x + e];
++}
++
 +__global__ void mla_pe_qabs_kernel(const float* __restrict__ q, int k_mla, int qk_nope, const uint16_t* __restrict__ wk_b,
 +                                   int kv_lora, int n_head, float* __restrict__ q_abs) {
 +    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2731,7 +2917,7 @@ index 268563c..d97fa28 100644
 +                                                            const uint16_t* __restrict__ lat,
 +                                                            const float* __restrict__ kpe, const int* __restrict__ cells,
 +                                                            int n_sel, const uint16_t* __restrict__ wv_b, int kv_lora,
-+                                                            int v_head, float* __restrict__ out) {
++                                                            int v_head, float* __restrict__ out, int lat_ld, int kpe_ld) {
 +    extern __shared__ float sm[];
 +    float* prob = sm;                 // n_sel
 +    float* ctx = sm + n_sel;          // kv_lora
@@ -2746,10 +2932,10 @@ index 268563c..d97fa28 100644
 +    float mx = -INFINITY;
 +    for (int s = tid; s < n_sel; s += blockDim.x) {
 +        const int cell = cells != nullptr ? cells[s] : s;
-+        const uint16_t* lr = lat + (size_t) kv_lora * cell;
++        const uint16_t* lr = lat + (size_t) lat_ld * cell;
 +        float dot = 0.0f;
 +        for (int c = 0; c < kv_lora; ++c) dot += qa[c] * __half2float(__ushort_as_half(lr[c]));
-+        const float* kr = kpe + (size_t) n_rot * cell;
++        const float* kr = kpe + (size_t) kpe_ld * cell;
 +        for (int e = 0; e < n_rot; ++e) dot += qp[e] * kr[e];
 +        prob[s] = dot * scale;
 +        mx = fmaxf(mx, prob[s]);
@@ -2765,7 +2951,7 @@ index 268563c..d97fa28 100644
 +    for (int c = tid; c < kv_lora; c += blockDim.x) {
 +        float acc = 0.0f;
 +        for (int s = 0; s < n_sel; ++s)
-+            acc += prob[s] * __half2float(__ushort_as_half(lat[(size_t) kv_lora * (cells != nullptr ? cells[s] : s) + c]));
++            acc += prob[s] * __half2float(__ushort_as_half(lat[(size_t) lat_ld * (cells != nullptr ? cells[s] : s) + c]));
 +        ctx[c] = acc * inv;
 +    }
 +    __syncthreads();
@@ -2792,14 +2978,56 @@ index 268563c..d97fa28 100644
 +
 +void mla_pe(const float* q, int k_mla, int qk_nope, int n_rot, const uint16_t* wk_b, const uint16_t* wv_b,
 +            const uint16_t* lat, const float* kpe, const int* cells, int n_sel, int n_head, int kv_lora, int v_head,
-+            float* scratch, void* out_q8_1, cudaStream_t s) {
++            float* scratch, void* out_q8_1, cudaStream_t s, int lat_ld, int kpe_ld) {
++    if (lat_ld <= 0) lat_ld = kv_lora;
++    if (kpe_ld <= 0) kpe_ld = n_rot;
++    // Flash's decode structure (mla): wk_b . q_nope by warp-per-row GEMVs, the attention split over cell chunks and
++    // head groups (mla_split_kernel + the q_pe . k_pe term) and merged, wv_b . ctx into q8_1.  STRATA_GLM_MLA_PE_NAIVE=1:
++    // the one-block-a-head kernels below (the parity reference)
++    static const bool naive = getenv("STRATA_GLM_MLA_PE_NAIVE") != nullptr;
++    int dev = 0;
++    cudaGetDevice(&dev);
++    if (!naive && dev < 16 && kv_lora <= 512 && kv_lora % 32 == 0 && v_head % 32 == 0 && n_head <= 128) {
++        static float* buf[16] = {};
++        static int attr[16] = {};
++        const size_t smem = (size_t) MLA_CHUNK * kv_lora * sizeof(uint16_t) + (size_t) MLA_HPB * MLA_CHUNK * sizeof(float);
++        if (attr[dev] < (int) smem) {
++            if (cudaFuncSetAttribute(mla_split_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int) smem) == cudaSuccess)
++                attr[dev] = (int) smem;
++            else
++                cudaGetLastError();
++        }
++        if (buf[dev] == nullptr &&
++            cudaMalloc(&buf[dev], (size_t) n_head * (2 * kv_lora + qk_nope) * sizeof(float)) != cudaSuccess) {
++            buf[dev] = nullptr;
++            cudaGetLastError();
++        }
++        const int n_chunks = (n_sel + MLA_CHUNK - 1) / MLA_CHUNK;
++        int cap = 0;
++        float* part = buf[dev] != nullptr && attr[dev] >= (int) smem ? mla_part(dev, n_head, kv_lora, n_chunks, &cap) : nullptr;
++        if (part != nullptr && cap >= n_chunks) {
++            float* q_abs = buf[dev];
++            float* ctx = q_abs + (size_t) n_head * kv_lora;
++            float* qn = ctx + (size_t) n_head * kv_lora;
++            pack_q_nope_kernel<<<n_head, 256, 0, s>>>(q, k_mla, qk_nope, qn);
++            headwise_gemv_kernel<<<n_head * kv_lora / 32, 256, 0, s>>>(wk_b, qn, kv_lora, qk_nope, q_abs, nullptr);
++            mla_split_kernel<<<dim3(n_chunks, (n_head + MLA_HPB - 1) / MLA_HPB), 256, smem, s>>>(
++                q_abs, lat, cells, n_sel, n_head, qk_nope, kv_lora, part, false, lat_ld, q + qk_nope, k_mla, kpe, kpe_ld,
++                n_rot, 1.0f / std::sqrt((float) (qk_nope + n_rot)));
++            mla_combine_kernel<<<n_head, 256, 0, s>>>(part, n_chunks, n_head, kv_lora, ctx);
++            headwise_gemv_kernel<<<n_head * v_head / 32, 256, 0, s>>>(wv_b, ctx, v_head, kv_lora, nullptr,
++                                                                      (block_q8_1*) out_q8_1);
++            launch_check("mla_pe split");
++            return;
++        }
++    }
 +    float* q_abs = scratch;
 +    float* out = scratch + (size_t) n_head * kv_lora;
 +    mla_pe_qabs_kernel<<<(kv_lora * n_head + 255) / 256, 256, 0, s>>>(q, k_mla, qk_nope, wk_b, kv_lora, n_head, q_abs);
 +    launch_check("mla_pe_qabs");
 +    const size_t smem = ((size_t) n_sel + 2 * kv_lora + n_rot) * sizeof(float);
 +    mla_pe_attend_kernel<<<n_head, 256, smem, s>>>(q_abs, q, k_mla, qk_nope, n_rot, lat, kpe, cells, n_sel, wv_b,
-+                                                   kv_lora, v_head, out);
++                                                   kv_lora, v_head, out, lat_ld, kpe_ld);
 +    launch_check("mla_pe_attend");
 +    strata::kernels::quantize_q8_1_rows(out, 1, (int64_t) n_head * v_head, out_q8_1, s);
 +}
