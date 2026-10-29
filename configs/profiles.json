@@ -2956,40 +2956,6 @@
      "ubatch": 512
     }
    }
-  },
-  "maya-mm31-q4": {
-   "default": "default",
-   "profiles": {
-    "default": {
-     "backend": "maya",
-     "context": 262144,
-     "visible_devices": "0,1,2,3",
-     "load_timeout_s": 1200,
-     "served_model_name": "maya-mm31-q4",
-     "maya_gpus": [
-      0,
-      1,
-      2,
-      3
-     ],
-     "maya_args": [
-      "--pack",
-      "/mnt/models/minimax-m31/atomicchat/AD-Q4_K/maya-mm3",
-      "--dspark",
-      "on",
-      "--vision",
-      "on"
-     ],
-     "maya_server": {
-      "shared": {
-       "max_tokens": 32768
-      }
-     },
-     "temperature": 1.0,
-     "top_p": 0.95,
-     "maya_env": {}
-    }
-   }
   }
  }
 }
