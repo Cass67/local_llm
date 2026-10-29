@@ -52,7 +52,9 @@ def _scan_orphaned() -> list[dict]:
                 repo_dir_name = f"models--{str(repo).replace('/', '--')}"
                 downloaded = (repo_dir_name, filename) in cached
             else:
-                downloaded = False
+                # no file to check (a Maya/Strata pack is named in the profile's args, outside this
+                # container): unknown is not missing - the POST deletes whatever this returns
+                downloaded = True
         if not downloaded:
             family = str(data.get("family", path.stem))
             orphaned.append(

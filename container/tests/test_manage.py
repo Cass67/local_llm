@@ -239,3 +239,21 @@ async def test_status_returns_full_state(temp_state):
     assert data["target"] == "local"
     assert data["accepted_count"] == 1
     assert data["running"]["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_audit_keeps_registrations_without_files_and_drops_missing_ones(
+    temp_state, monkeypatch
+):
+    import backend.config as cfg
+
+    monkeypatch.setattr(cfg, "MODELS_CACHE_DIR", temp_state / "hub")
+    gone = {"family": "gone", "alias": "gone", "hf_repo": "org/gone", "hf_file": "gone.gguf"}
+    (temp_state / "accepted" / "gone.json").write_text(json.dumps(gone))
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/models/audit")
+
+    assert response.status_code == 200
+    assert (temp_state / "accepted" / "qwen.json").exists()  # no file named (a Maya pack): kept
+    assert not (temp_state / "accepted" / "gone.json").exists()
