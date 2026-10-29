@@ -60,8 +60,8 @@ RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
       -DCMAKE_HIP_COMPILER="$root/llvm/bin/clang++" -DCMAKE_PREFIX_PATH="$root" \
       -DSTRATA_GGML_DIR=/opt/maya/src/third_party/llama.cpp \
       "-DCMAKE_HIP_FLAGS=--rocm-path=$root --rocm-device-lib-path=$root/lib/llvm/amdgcn/bitcode"; \
-    cmake --build build-hip --target maya maya-ds4 -j"$BUILD_JOBS"; \
-    mkdir -p engine && cp build-hip/maya build-hip/maya-ds4 engine/ && rm -rf build-hip
+    cmake --build build-hip --target maya maya-ds4 maya-mm3 -j"$BUILD_JOBS"; \
+    mkdir -p engine && cp build-hip/maya build-hip/maya-ds4 build-hip/maya-mm3 engine/ && rm -rf build-hip
 
 # The image encoder (docs/AMD_MAYA.md "CPU image encoder on Linux": HIP has no GPU vision path): llama.cpp mtmd
 # with Maya's GLM-5.3-Flash patch, CPU only, static. Patched after the engine build so the engine's MMQ sources stay

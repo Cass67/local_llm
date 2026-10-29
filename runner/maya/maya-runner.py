@@ -39,6 +39,8 @@ pack_flag = next((f for f in ("--glm-pack", "--pack") if f in args), None)
 if pack_flag is None:
     sys.exit("maya-runner: the engine args need --glm-pack <dir> (GLM) or --pack <dir> (DeepSeek)")
 deepseek = pack_flag == "--pack"
+# maya-mm3 (MiniMax-M3.1-Flash) takes --pack too; its pack is the one with an mm3.txt
+minimax = deepseek and (Path(args[args.index(pack_flag) + 1]) / "mm3.txt").is_file()
 if deepseek and a.vision_mmproj:
     sys.exit(
         "maya-runner: images through the CPU encoder are GLM's; DeepSeek's need its pack's vision"
@@ -72,7 +74,7 @@ table = SRC / f"tools/hip/gfx1100-glm-hipblaslt-{hipblaslt_version()}.txt"
 if table.is_file() and not deepseek:
     env["MAYA_HIPBLASLT_TUNING"] = str(table)
 cfg = {
-    "exe": str(SRC / "engine" / ("maya-ds4" if deepseek else "maya")),
+    "exe": str(SRC / "engine" / ("maya-mm3" if minimax else "maya-ds4" if deepseek else "maya")),
     "cwd": str(SRC),
     "tokenizer": str(Path(args[args.index(pack_flag) + 1]) / "tokenizer"),
     "model_name": a.model_name,
