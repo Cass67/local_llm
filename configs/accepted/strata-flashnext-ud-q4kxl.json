@@ -1,0 +1,12 @@
+{
+  "family": "strata-flashnext-ud-q4kxl",
+  "alias": "strata-flashnext-ud-q4kxl",
+  "model_name": "Qwen3.8-Flash-Next unsloth UD-Q4_K_XL (Strata)",
+  "profile": "default",
+  "context": 262144,
+  "reasoning": true,
+  "config": {
+    "backend": "strata",
+    "ctx": 262144
+  }
+}

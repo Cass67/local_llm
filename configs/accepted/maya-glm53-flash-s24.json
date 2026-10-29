@@ -1,0 +1,12 @@
+{
+  "family": "maya-glm53-flash-s24",
+  "alias": "maya-glm53-flash-s24",
+  "model_name": "GLM-5.3-Flash Maya-S24 (Maya)",
+  "profile": "default",
+  "context": 524288,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 524288
+  }
+}

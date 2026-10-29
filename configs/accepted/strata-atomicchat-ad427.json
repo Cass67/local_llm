@@ -1,0 +1,12 @@
+{
+  "family": "strata-atomicchat-ad427",
+  "alias": "strata-atomicchat-ad427",
+  "model_name": "Qwen3.8-Flash-Next AtomicChat AD-4.27bpw (Strata)",
+  "profile": "default",
+  "context": 262144,
+  "reasoning": true,
+  "config": {
+    "backend": "strata",
+    "ctx": 262144
+  }
+}

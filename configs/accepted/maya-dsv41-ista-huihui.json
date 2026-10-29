@@ -1,0 +1,12 @@
+{
+  "family": "maya-dsv41-ista-huihui",
+  "alias": "maya-dsv41-ista-huihui",
+  "model_name": "DeepSeek-V4.1-Flash ISTA IQ2_XXS huihui abliterated (Maya)",
+  "profile": "default",
+  "context": 524288,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 524288
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "family": "maya-dsv41-flash-xs",
+  "alias": "maya-dsv41-flash-xs",
+  "model_name": "DeepSeek-V4.1-Flash Maya-XS (Maya)",
+  "profile": "default",
+  "context": 524288,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 524288
+  }
+}

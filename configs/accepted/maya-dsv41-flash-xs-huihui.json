@@ -1,0 +1,12 @@
+{
+  "family": "maya-dsv41-flash-xs-huihui",
+  "alias": "maya-dsv41-flash-xs-huihui",
+  "model_name": "DeepSeek-V4.1-Flash Maya-XS huihui abliterated (Maya)",
+  "profile": "default",
+  "context": 524288,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 524288
+  }
+}

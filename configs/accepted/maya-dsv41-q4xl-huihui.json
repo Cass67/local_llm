@@ -1,0 +1,12 @@
+{
+  "family": "maya-dsv41-q4xl-huihui",
+  "alias": "maya-dsv41-q4xl-huihui",
+  "model_name": "DeepSeek-V4.1-Flash unsloth UD-Q4_K_XL huihui abliterated (Maya)",
+  "profile": "default",
+  "context": 524288,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 524288
+  }
+}
