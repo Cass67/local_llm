@@ -920,7 +920,8 @@
      ],
      "maya_env": {
       "STRATA_GLM_KV_RESIDENT": "32768",
-      "STRATA_GLM_PREFILL_MIN_CHUNKS": "3"
+      "STRATA_GLM_PREFILL_MIN_CHUNKS": "3",
+      "STRATA_GLM_USAGE": "/mnt/hfcache/maya-slots/glm53-q2kxl-usage.txt"
      },
      "maya_gpus": [
       0,
