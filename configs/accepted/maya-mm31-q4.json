@@ -1,0 +1,12 @@
+{
+  "family": "maya-mm31-q4",
+  "alias": "maya-mm31-q4",
+  "model_name": "MiniMax-M3.1-Flash AtomicChat AD-Q4_K (Maya)",
+  "profile": "default",
+  "context": 262144,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 262144
+  }
+}
