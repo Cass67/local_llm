@@ -1,0 +1,11 @@
+[Unit]
+Description=Cap GPU board power
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/gpu-power-cap
+
+[Install]
+WantedBy=multi-user.target

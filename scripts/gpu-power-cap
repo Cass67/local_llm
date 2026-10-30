@@ -1,0 +1,18 @@
+#!/bin/sh
+# Cap every GPU's board power. 238W is the lowest the Sapphire/ASRock BIOS
+# allows; the Gigabytes floor at 253W (power1_cap_min = default - 10%), and a
+# write below the floor returns EIO with the old cap left in place, so clamp.
+# Going lower needs a kernel patch to smu_v13_0_0_get_power_limit.
+set -eu
+
+CAP_W=${CAP_W:-238}
+
+for f in /sys/class/drm/card[0-9]/device/hwmon/hwmon*/power1_cap; do
+    [ -e "$f" ] || continue
+    want=$((CAP_W * 1000000))
+    floor=$(cat "${f}_min")
+    [ "$want" -lt "$floor" ] && want=$floor
+    echo "$want" > "$f" || true
+    pci=$(basename "$(readlink -f "${f%/hwmon/*}")")
+    echo "$pci cap=$(($(cat "$f") / 1000000))W (asked $((want / 1000000))W)"
+done
