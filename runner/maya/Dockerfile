@@ -12,8 +12,8 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
-# v1.1.36
-ARG MAYA_REF=f031a23b9682551e744e29d0e9f8d527df49f282
+# v1.1.43
+ARG MAYA_REF=acdab34bd58eec957715392a1d822777c3c579c3
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -41,11 +41,11 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 
 # 0002 is local: an answer nobody reads (a phone's locked screen) is kept 30 min, not 5, and the
 # web chat reconnects for as long.
-# 0006: maya-ds4 --experts N (port of Strata 3dd11c6d): the router's top N of 6, weights renormalised.
-# 0007: #476's pull clock on HIP (wall_clock64) and DS4_IQ1S_ROWS.
 # 0012: full GLM-5.3 (llama.cpp arch glm-dsa) on the GLM engine - roped MLA, the token indexer (top-k 2048),
-# plain residual, NextN MTP, batched prompt path; generated from the glm-dsa-port branch (git diff v1.1.36..).
-# The ds4 NUMA (MPOL_LOCAL, needs CapAdd SYS_NICE - runtime.py) and down-act-copy patches landed in v1.1.36 (#562, #561).
+# plain residual, NextN MTP, batched prompt path; generated from ~/git/maya-ml4 branch ml4-port
+# (git diff v1.1.43 ml4-port, without data/ and the ML4 oracle files).
+# The ds4 NUMA (MPOL_LOCAL, needs CapAdd SYS_NICE - runtime.py) and down-act-copy patches landed in v1.1.36 (#562, #561);
+# --experts N (old 0006) in v1.1.41 (#564), DS4_IQ1S_ROWS + the HIP wall_clock64 pull clock (old 0007) in v1.1.41 (#563).
 COPY patches /opt/maya/patches
 RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
 
