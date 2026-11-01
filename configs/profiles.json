@@ -3013,6 +3013,103 @@
      "ubatch": 512
     }
    }
+  },
+  "maya-ml4-q2kxl": {
+   "default": "default",
+   "profiles": {
+    "default": {
+     "backend": "maya",
+     "context": 131072,
+     "load_timeout_s": 1200,
+     "maya_args": [
+      "--glm-pack",
+      "/mnt/models/unsloth-ml4/UD-Q2_K_XL/maya-glm",
+      "--expert-cache",
+      "auto",
+      "--prefill",
+      "auto",
+      "--kv-streaming",
+      "on",
+      "--kv-resident",
+      "20480"
+     ],
+     "maya_env": {
+      "MAYA_GLM_PARALLEL_LOAD": "0",
+      "MAYA_GLM_PREFILL_KEEP": "7",
+      "MAYA_GLM_RAM_HEADROOM_GB": "16",
+      "MAYA_GLM_RESERVE_MB": "512",
+      "MAYA_GLM_SPLIT": "16,36,56",
+      "STRATA_GLM_PREFILL_MB": "10000"
+     },
+     "maya_gpus": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "maya_server": {
+      "reasoning_effort": "high",
+      "shared": {
+       "max_tokens": 32768
+      }
+     },
+     "served_model_name": "maya-ml4-q2kxl",
+     "temperature": 1.0,
+     "top_p": 0.95,
+     "visible_devices": "0,1,2,3",
+     "notes": "chunk tuning: STRATA_GLM_PREFILL_MB=10000"
+    },
+    "dflash-stable": {
+     "backend": "maya",
+     "context": 131072,
+     "load_timeout_s": 1200,
+     "maya_args": [
+      "--glm-pack",
+      "/mnt/models/unsloth-ml4/UD-Q2_K_XL/maya-glm",
+      "--expert-cache",
+      "auto",
+      "--prefill",
+      "auto",
+      "--kv-streaming",
+      "on",
+      "--kv-resident",
+      "20480",
+      "--dflash",
+      "/mnt/models/unsloth-ml4/dspark-Mistral-Large-4-1T-A52B-Q8_0.gguf",
+      "--spec",
+      "3",
+      "--spec-min-p",
+      "0"
+     ],
+     "maya_env": {
+      "MAYA_GLM_PARALLEL_LOAD": "0",
+      "MAYA_GLM_PREFILL_KEEP": "7",
+      "MAYA_GLM_RAM_HEADROOM_GB": "16",
+      "MAYA_GLM_RESERVE_MB": "512",
+      "MAYA_GLM_SPLIT": "16,36,56",
+      "MAYA_GLM_CPU_COLD": "0",
+      "MAYA_GLM_PROMOTE": "0",
+      "MAYA_GLM_PROMOTE_MIN": "2147483647",
+      "MAYA_GLM_PREFILL_CPU": "0"
+     },
+     "maya_gpus": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "maya_server": {
+      "reasoning_effort": "high",
+      "shared": {
+       "max_tokens": 32768
+      }
+     },
+     "served_model_name": "maya-ml4-q2kxl",
+     "temperature": 1.0,
+     "top_p": 0.95,
+     "visible_devices": "0,1,2,3"
+    }
+   }
   }
  }
 }

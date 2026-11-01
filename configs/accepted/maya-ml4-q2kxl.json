@@ -1,0 +1,12 @@
+{
+  "family": "maya-ml4-q2kxl",
+  "alias": "maya-ml4-q2kxl",
+  "model_name": "Mistral Large 4 1T-A52B UD-Q2_K_XL (Maya)",
+  "profile": "default",
+  "context": 131072,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 131072
+  }
+}
