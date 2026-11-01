@@ -42,7 +42,8 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 # 0002 is local: an answer nobody reads (a phone's locked screen) is kept 30 min, not 5, and the
 # web chat reconnects for as long.
 # 0012: full GLM-5.3 (llama.cpp arch glm-dsa) on the GLM engine - roped MLA, the token indexer (top-k 2048),
-# plain residual, NextN MTP, batched prompt path; generated from ~/git/maya-ml4 branch ml4-port
+# plain residual, NextN MTP, batched prompt path - and Mistral Large 4 (mistral-large4: NoPE / shared-KV layers, SSMax,
+# YaRN, softmax router, the DSpark drafter via --dflash, serve's Mistral chat format); generated from ~/git/maya-ml4 branch ml4-port
 # (git diff v1.1.43 ml4-port, without data/ and the ML4 oracle files).
 # The ds4 NUMA (MPOL_LOCAL, needs CapAdd SYS_NICE - runtime.py) and down-act-copy patches landed in v1.1.36 (#562, #561);
 # --experts N (old 0006) in v1.1.41 (#564), DS4_IQ1S_ROWS + the HIP wall_clock64 pull clock (old 0007) in v1.1.41 (#563).

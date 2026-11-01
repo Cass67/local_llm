@@ -1,0 +1,10 @@
+# Incremental packaging of a binary built/tested by the canonical Maya worktree.
+# Context: maya (the HIP executable) and source/ (matching patched source files).
+# Compose source/ with ALL runner patches, including 0002's server policy;
+# copying canonical engine files alone can undo an independent runner patch.
+# The base must use the same ROCm / ggml toolchain as runner/maya/Dockerfile.
+# Keep patches/0012-glm-dsa.patch in sync so a full build reproduces this source.
+ARG BASE_IMAGE=local-llm-runner-maya:v1.1.43-glmdsa
+FROM ${BASE_IMAGE}
+COPY source/ /opt/maya/src/
+COPY maya /opt/maya/src/engine/maya
