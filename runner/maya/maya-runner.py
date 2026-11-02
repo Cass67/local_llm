@@ -112,7 +112,7 @@ os.execv(  # noqa: S606  # nosec B606 - replace this process with the server
         str(VENV / "bin/python"),
         str(SRC / "serve/server.py"),
         "--engine",
-        "strata",
+        "maya",  # v1.1.47 dropped the "strata" alias: it falls through to MockEngine
         "--config",
         str(conf),
         "--port",
