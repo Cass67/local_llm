@@ -9,7 +9,7 @@ DeepSeek-V4.1-Flash's (--pack <model>/maya-ds4, --tp, --dspark, ...) run its own
 The GPUs are --gpus (the profile's `maya_gpus`: the split's ORDER matters, the x4 card first), else
 HIP_VISIBLE_DEVICES as mgmt sets it from the cluster. server.py hands the list on to the engine.
 --vision-mmproj/--vision-model (the profile's mmproj + maya_vision_model) turn images on through the
-image's CPU encoder (HIP has no GPU one).
+image's CPU encoder. DeepSeek uses its native tower and defaults to vision on.
 """
 
 import argparse
@@ -41,6 +41,9 @@ if pack_flag is None:
 deepseek = pack_flag == "--pack"
 # maya-mm3 (MiniMax-M3.1-Flash) takes --pack too; its pack is the one with an mm3.txt
 minimax = deepseek and (Path(args[args.index(pack_flag) + 1]) / "mm3.txt").is_file()
+# DeepSeek uses its native tower; preserve an explicit opt-out.
+if deepseek and not minimax and "--vision" not in args:
+    args += ["--vision", "on"]
 if deepseek and a.vision_mmproj:
     sys.exit(
         "maya-runner: images through the CPU encoder are GLM's; DeepSeek's need its pack's vision"

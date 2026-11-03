@@ -12,8 +12,8 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
-# v1.1.47
-ARG MAYA_REF=9a8dc626b445d90337948b0c0215dce899e8421f
+# v1.1.52
+ARG MAYA_REF=3c935e411cd6625a9af0f292dd0af52598e866d8
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -34,16 +34,15 @@ RUN git init -q /opt/maya/src && cd /opt/maya/src \
     && git fetch -q --depth 1 "$MAYA_REPO" "$MAYA_REF" && git checkout -q FETCH_HEAD \
     && python3 -m venv /opt/maya/venv \
     && /opt/maya/venv/bin/pip install --quiet --disable-pip-version-check \
-       numpy jinja2 regex pyyaml tqdm requests pillow psutil
+       numpy jinja2 regex pyyaml tqdm requests pillow psutil jsonschema
 
 RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/third_party/llama.cpp; \
     git fetch -q --depth 1 https://github.com/ggml-org/llama.cpp.git "$LLAMA_CPP_COMMIT"; git checkout -q FETCH_HEAD
 
-# 0002 is local: an answer nobody reads (a phone's locked screen) is kept 30 min, not 5, and the
-# web chat reconnects for as long.
+# 0002 is local: an answer nobody reads (a phone's locked screen) is kept 30 min, not 5.
 # 0012: full GLM-5.3 (llama.cpp arch glm-dsa) on the GLM engine - roped MLA, the token indexer (top-k 2048),
 # plain residual, NextN MTP, batched prompt path - and Mistral Large 4 (mistral-large4: NoPE / shared-KV layers, SSMax,
-# YaRN, softmax router, the DSpark drafter via --dflash, serve's Mistral chat format); generated from ~/git/maya-ml4 branch ml4-port
+# YaRN, softmax router, the DSpark drafter via --dflash, serve's Mistral chat format); rebased onto v1.1.52 from ~/git/maya-ml4 branch ml4-port
 # (git diff v1.1.43 ml4-port, without data/ and the ML4 oracle files).
 # The ds4 NUMA (MPOL_LOCAL, needs CapAdd SYS_NICE - runtime.py) and down-act-copy patches landed in v1.1.36 (#562, #561);
 # --experts N (old 0006) in v1.1.41 (#564), DS4_IQ1S_ROWS + the HIP wall_clock64 pull clock (old 0007) in v1.1.41 (#563).
@@ -61,10 +60,10 @@ RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
       -DCMAKE_HIP_COMPILER="$root/llvm/bin/clang++" -DCMAKE_PREFIX_PATH="$root" \
       -DSTRATA_GGML_DIR=/opt/maya/src/third_party/llama.cpp \
       "-DCMAKE_HIP_FLAGS=--rocm-path=$root --rocm-device-lib-path=$root/lib/llvm/amdgcn/bitcode"; \
-    cmake --build build-hip --target maya maya-ds4 maya-mm3 -j"$BUILD_JOBS"; \
-    mkdir -p engine && cp build-hip/maya build-hip/maya-ds4 build-hip/maya-mm3 engine/ && rm -rf build-hip
+    cmake --build build-hip --target maya maya-ds4 maya-mm3 ds4_index_score_tc -j"$BUILD_JOBS"; \
+    mkdir -p engine && cp build-hip/maya build-hip/maya-ds4 build-hip/maya-mm3 build-hip/ds4_index_score_tc engine/ && rm -rf build-hip
 
-# The image encoder (docs/AMD_MAYA.md "CPU image encoder on Linux": HIP has no GPU vision path): llama.cpp mtmd
+# The GLM CPU image encoder (docs/AMD_MAYA.md): llama.cpp mtmd. DeepSeek uses its native GPU tower.
 # with Maya's GLM-5.3-Flash patch, CPU only, static. Patched after the engine build so the engine's MMQ sources stay
 # stock. Images are on when the profile sets mmproj (+ maya_vision_model, the vocab GGUF).
 RUN set -e; cd /opt/maya/src; \

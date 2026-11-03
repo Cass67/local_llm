@@ -3110,6 +3110,70 @@
      "visible_devices": "0,1,2,3"
     }
    }
+  },
+  "maya-dsv41-q4xl-huihui": {
+   "default": "default",
+   "profiles": {
+    "default": {
+     "backend": "maya",
+     "context": 524288,
+     "visible_devices": "0,1,2,3",
+     "load_timeout_s": 900,
+     "served_model_name": "maya-dsv41-q4xl-huihui",
+     "maya_gpus": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "maya_args": [
+      "--pack",
+      "/mnt/models/unsloth-dsv41/UD-Q4_K_XL/maya-ds4",
+      "--tp",
+      "4",
+      "--reserve-mib",
+      "512",
+      "--vision",
+      "on",
+      "--dspark",
+      "on",
+      "--mmap-experts",
+      "off",
+      "--experts",
+      "6",
+      "--prefill-chunk",
+      "16384"
+     ],
+     "maya_server": {
+      "reasoning_effort": "high",
+      "shared": {
+       "max_tokens": 32768
+      }
+     },
+     "temperature": 1.0,
+     "top_p": 1.0,
+     "maya_env": {
+      "MAYA_DS4_SLOT_KEEP": "1",
+      "MAYA_DS4_Q8_BATCH": "1",
+      "MAYA_DS4_EXPERT_MMQ": "1",
+      "DS4_ENGRAM_RAM": "1",
+      "DS4_REQUIRE_ALL_RAM": "1",
+      "MAYA_DS4_DRAFT_DEV": "0,1,2",
+      "MAYA_DS4_TP_GGUF_UNEVEN": "1",
+      "DS4_FLOW_TP": "1",
+      "MAYA_DS4_HC_FUSE": "2",
+      "MAYA_DS4_ROUTE_FUSE": "2",
+      "MAYA_DS4_DECODE_TRIM": "15",
+      "MAYA_DS4_AR2_DECODE": "1",
+      "MAYA_DS4_DRAFT_VRAM": "32,32,32",
+      "MAYA_DS4_ROUTER_BF16": "1",
+      "MAYA_DS4_ROUTER_CHECK": "1",
+      "MAYA_DS4_FLOW_AR_DMA": "1",
+      "DS4_INDEX_TC": "1",
+      "MAYA_DS4_TP_BORROW": "1"
+     }
+    }
+   }
   }
  }
 }
