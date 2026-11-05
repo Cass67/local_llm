@@ -3174,6 +3174,62 @@
      }
     }
    }
+  },
+  "maya-glm53-flash-q4xl-huihui": {
+   "default": "default",
+   "profiles": {
+    "default": {
+     "backend": "maya",
+     "context": 524288,
+     "visible_devices": "0,1,2,3",
+     "load_timeout_s": 900,
+     "served_model_name": "maya-glm53-flash-q4xl-huihui",
+     "maya_gpus": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "maya_args": [
+      "--glm-pack",
+      "/mnt/models/huihui-glm53-flash/UD-Q4_K_XL/pack",
+      "--expert-cache",
+      "auto",
+      "--prefill",
+      "auto",
+      "--kv-streaming",
+      "on",
+      "--expert-profile",
+      "/opt/maya/src/data/expert-profile-glm.bin",
+      "--dflash",
+      "/mnt/hfcache/maya/GLM-5.3-Flash-DFlash2/GLM-5.3-Flash-DFlash2-Q4_K_M.gguf"
+     ],
+     "maya_env": {
+      "MAYA_GLM_RESERVE_MB": "512",
+      "MAYA_GLM_RAM_HEADROOM_GB": "16",
+      "MAYA_GLM_PREFILL_SUB": "1024",
+      "MAYA_GLM_PREFILL_MB": "4096",
+      "MAYA_GLM_PREFILL_ATTN": "wmma2",
+      "MAYA_GLM_SLOT_KEEP": "1",
+      "MAYA_GLM_RAM_RESIDENT": "1",
+      "MAYA_GLM_USAGE": "/mnt/hfcache/maya-slots/glm53-flash-q4xl-huihui-usage.txt",
+      "MAYA_GLM_CPU_LANE": "20",
+      "MAYA_GLM_ROW_HALVES": "1",
+      "MAYA_GLM_PREFILL_MIN_CHUNKS": "4",
+      "MAYA_GLM_SPLIT": "14,25,36"
+     },
+     "maya_server": {
+      "reasoning_effort": "high",
+      "shared": {
+       "max_tokens": 32768
+      }
+     },
+     "temperature": 1.0,
+     "top_p": 0.95,
+     "mmproj": "/mnt/hfcache/maya/vision/mmproj-GLM-5.3-Flash-F16.gguf",
+     "maya_vision_model": "/mnt/hfcache/maya/vision/GLM-5.3-Flash-vocab.gguf"
+    }
+   }
   }
  }
 }

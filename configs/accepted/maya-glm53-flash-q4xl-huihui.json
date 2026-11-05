@@ -1,0 +1,12 @@
+{
+  "family": "maya-glm53-flash-q4xl-huihui",
+  "alias": "maya-glm53-flash-q4xl-huihui",
+  "model_name": "GLM-5.3-Flash unsloth UD-Q4_K_XL huihui abliterated (Maya)",
+  "profile": "default",
+  "context": 524288,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 524288
+  }
+}
