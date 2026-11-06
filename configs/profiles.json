@@ -3170,7 +3170,8 @@
       "MAYA_DS4_ROUTER_CHECK": "1",
       "MAYA_DS4_FLOW_AR_DMA": "1",
       "DS4_INDEX_TC": "1",
-      "MAYA_DS4_TP_BORROW": "1"
+      "MAYA_DS4_TP_BORROW": "1",
+      "MAYA_DS4_YOCO_TP": "1"
      }
     }
    }
