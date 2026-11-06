@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 8c40d41..fb3e257 100644
+index ca21d39..68dabf9 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -600,7 +600,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -622,7 +622,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
      enable_testing()
      add_executable(expert_cache_lend_test tests/core/expert_cache_lend_test.cpp)
      target_include_directories(expert_cache_lend_test PRIVATE ${_strata_gpu_include_directories})
@@ -11,7 +11,7 @@ index 8c40d41..fb3e257 100644
      add_test(NAME expert_cache_lend_test COMMAND expert_cache_lend_test)
      set_tests_properties(expert_cache_lend_test PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
    endif()
-@@ -901,12 +901,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -953,12 +953,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
      target_include_directories(mm3_attn_bench PRIVATE ${_strata_gpu_include_directories} include src/mm3 third_party/ggml)
      target_link_libraries(mm3_attn_bench PRIVATE strata_kernels_cpu ${_strata_gpu_runtime_target})
      add_executable(hip_expert_cache_staging tests/hip/expert_cache_staging.cpp)
@@ -26,7 +26,7 @@ index 8c40d41..fb3e257 100644
      add_test(NAME hip_glm_expert_helper COMMAND hip_glm_expert_helper)
      set_tests_properties(hip_glm_expert_helper PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
      if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/hip/intrinsics.cpp")
-@@ -1045,6 +1045,14 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -1097,6 +1097,14 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
    target_link_libraries(glm_model_test PRIVATE ${_strata_gpu_glm_libs} ${_strata_gpu_runtime_target})
    add_test(NAME glm_model_test COMMAND glm_model_test --selftest)
    set_tests_properties(glm_model_test PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -41,7 +41,7 @@ index 8c40d41..fb3e257 100644
  
    # the 45-layer big fixture: its 1.2 GB GGUF is generated into the build tree by a ctest
    # fixture (far too large to commit); the f64 expectation IS committed (data/glm5-big-dumps)
-@@ -1063,6 +1071,10 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -1115,6 +1123,10 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
    add_executable(glm_pack_test src/core/glm_pack_test.cpp)
    target_include_directories(glm_pack_test PRIVATE ${_strata_gpu_include_directories})
    target_link_libraries(glm_pack_test PRIVATE ${_strata_gpu_glm_libs} ${_strata_gpu_runtime_target})
@@ -52,7 +52,7 @@ index 8c40d41..fb3e257 100644
    target_include_directories(glm_model_big_test PRIVATE ${_strata_gpu_include_directories})
    target_link_libraries(glm_model_big_test PRIVATE ${_strata_gpu_glm_libs} ${_strata_gpu_runtime_target})
    find_program(STRATA_PYTHON3 python3)
-@@ -1375,12 +1387,14 @@ if(STRATA_NATIVE_EXPERTS)
+@@ -1433,12 +1445,14 @@ if(STRATA_NATIVE_EXPERTS)
    else()
      target_sources(strata_kernels_cpu PRIVATE src/kernels/cpu/native_expert.cpp)
    endif()
@@ -67,7 +67,7 @@ index 8c40d41..fb3e257 100644
      set_source_files_properties(src/kernels/cpu/iq_avx512_one.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX512")
    elseif(STRATA_CPU_X86)
      # (no VNNI / VBMI needed - cpu_avx512bw_ok() is enough to run them; no FP contraction: their sums must take
-@@ -1388,6 +1402,7 @@ if(STRATA_NATIVE_EXPERTS)
+@@ -1446,6 +1460,7 @@ if(STRATA_NATIVE_EXPERTS)
      set_source_files_properties(src/kernels/cpu/iq_avx512.cpp PROPERTIES COMPILE_OPTIONS
                                  "-mavx512f;-mavx512bw;-mavx512vl;-mavx512dq;-mf16c;-mfma;-ffp-contract=off")
      set_source_files_properties(src/kernels/cpu/iq_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mf16c;-ffp-contract=off")
@@ -844,7 +844,7 @@ index ace410f..747df31 100644
  
  def _bf16_to_f32(raw: np.ndarray) -> np.ndarray:
 diff --git a/serve/frontend.py b/serve/frontend.py
-index 0edf630..1953826 100644
+index 0875574..73097df 100644
 --- a/serve/frontend.py
 +++ b/serve/frontend.py
 @@ -63,6 +63,9 @@ class ChatTemplate:
@@ -854,10 +854,10 @@ index 0edf630..1953826 100644
 +        # Mistral Large 4: [INST] turns, reasoning_effort low / medium / high (no "off": off is low), [THINK] reasoning
 +        # the model opens itself and [TOOL_CALLS]NAME[ARGS]{json} calls (OutputParser(mistral=True) reads them)
 +        self.mistral = "[TOOL_CALLS]" in self.source and "[INST]" in self.source
- 
-     def render(self, messages: list[dict], tools: list[dict] | None = None, add_generation_prompt: bool = True,
-                **kwargs) -> str:
-@@ -114,6 +117,16 @@ class ChatTemplate:
+         # A Qwen3.x template (Qwen3.8-Flash-Next's - unsloth's GGUF copy - and CYBER-FROST's): it writes each tool as
+         # `tool | tojson`, and Qwen's reference render (transformers' apply_chat_template, the pack's chat_golden.json)
+         # gets the tools in OpenAI's form - {"type": "function", "function": {...}} - so that is how they go in.
+@@ -122,6 +125,16 @@ class ChatTemplate:
              tools = [t if "function" in t else {"type": "function", "function": t} for t in tools or []] or None
              return self.template.render(messages=messages, tools=tools, add_generation_prompt=add_generation_prompt,
                                          **kwargs)
@@ -874,7 +874,7 @@ index 0edf630..1953826 100644
          off = False
          if self.glm_effort:
              off = kwargs.pop("enable_thinking", True) is False
-@@ -944,6 +957,106 @@ def may_be_string(schema, defs: dict | None = None, seen: frozenset = frozenset(
+@@ -1021,6 +1034,106 @@ def may_be_string(schema, defs: dict | None = None, seen: frozenset = frozenset(
      return False
  
  
@@ -981,7 +981,7 @@ index 0edf630..1953826 100644
  class MinimaxRewriter:
      """MiniMax-M3.1's output rewritten, as it streams, into what OutputParser reads (DeepSeek's path: GLM's tool-call
      form with JSON values).  `<mm:think>` opens reasoning: THINK_AGAIN for the parser, which drops it while it is
-@@ -1123,8 +1236,9 @@ class OutputParser:
+@@ -1200,8 +1313,9 @@ class OutputParser:
  
      def __init__(self, thinking: bool = True, tools: list[dict] | None = None, stream_tools: bool = False,
                   dsml: bool = False, strict_tools: bool = False, single_tool: bool = False, minimax: bool = False,
@@ -993,7 +993,7 @@ index 0edf630..1953826 100644
          # token_only_end: the vocabulary has the end of thinking as a token (DeepSeek's), so only that token closes the
          # reasoning - the text "</think>" in it does not (a model that quotes the tag while it talks about it, as in
          # the server's own code, would have its reasoning cut there and spill into the answer).  The server closes it
-@@ -1133,11 +1247,12 @@ class OutputParser:
+@@ -1210,11 +1324,12 @@ class OutputParser:
          self.token_only_end = token_only_end
          # DeepSeek-V4.1's tool calls, read as GLM's (DsmlRewriter); MiniMax-M3.1's the same way (MinimaxRewriter):
          # both send JSON values, so the parser takes them without the tools' schemas
@@ -1009,10 +1009,10 @@ index 0edf630..1953826 100644
          # soon as the name is known, then "tool_args" pieces of its JSON arguments (string parameters character by
          # character; other types whole, once complete) - before the final "tool_call".  Without it, a client sees
 diff --git a/serve/server.py b/serve/server.py
-index ef77928..2a561cc 100644
+index 6d52f7d..d8eb277 100644
 --- a/serve/server.py
 +++ b/serve/server.py
-@@ -2150,6 +2150,8 @@ class Service:
+@@ -2379,6 +2379,8 @@ class Service:
                              _special_ids("<｜end▁of▁sentence｜>") + _special_ids("<｜User｜>") +
                              # MiniMax-M3.1 with [e~[ (and would start the next turn with ]~b])
                              _special_ids("[e~[") + _special_ids("]~b]"))
@@ -1021,7 +1021,7 @@ index ef77928..2a561cc 100644
          # DeepSeek's turn openers: where its last user turn starts and its system prompt ends (MAYA_DS4_RESTORE_POINTS)
          self.ds_user_id = (_special_ids("<｜User｜>") or [None])[0]
          self.ds_system_id = (_special_ids("<｜System｜>") or [None])[0]
-@@ -2162,7 +2164,8 @@ class Service:
+@@ -2391,7 +2393,8 @@ class Service:
          # closed with the template's </think> and the answer follows - GLM at High can plan for 14k+ tokens
          self.think_budget = 0
          # (MiniMax-M3.1 closes its reasoning with </mm:think>; its vocabulary may hold a plain "</think>" too)
@@ -1031,7 +1031,7 @@ index ef77928..2a561cc 100644
          self.think_end_id = end[0] if end else None
          # the tokens the engine itself ends a request at, whatever the server does (see THINK_RESTARTS): a pack
          # tokenizer that names its "eos" (DeepSeek's, MiniMax's: their engines' --eos default) ends there only; the
-@@ -3761,6 +3764,7 @@ class Service:
+@@ -4117,6 +4120,7 @@ class Service:
                                  stream_tools=True, dsml=getattr(self.template, "deepseek", False),
                                  token_only_end=getattr(self.template, "deepseek", False) and self.think_end_id is not None,
                                  minimax=getattr(self.template, "minimax", False),
@@ -1125,10 +1125,10 @@ index 0000000..f6cc68c
 +    return true;
 +}
 diff --git a/src/core/glm_dflash.cu b/src/core/glm_dflash.cu
-index 3acb32f..6f23b61 100644
+index d2967e2..f5f8f1f 100644
 --- a/src/core/glm_dflash.cu
 +++ b/src/core/glm_dflash.cu
-@@ -693,8 +693,228 @@ struct GlmDflash::Impl {
+@@ -718,8 +718,228 @@ struct GlmDflash::Impl {
      } hs;
  
      size_t q8(int n) const { return (size_t) n / 32 * 36; }
@@ -1357,7 +1357,7 @@ index 3acb32f..6f23b61 100644
  GlmDflash::GlmDflash() : d_(new Impl) {}
  
  GlmDflash::~GlmDflash() {
-@@ -751,6 +971,9 @@ int GlmDflash::ctx() const { return d_->window; }
+@@ -776,6 +996,9 @@ int GlmDflash::ctx() const { return d_->window; }
  const std::vector<int>& GlmDflash::target_layers() const { return d_->tl; }
  size_t GlmDflash::bytes() const {
      const Impl& m = *d_;
@@ -1367,7 +1367,7 @@ index 3acb32f..6f23b61 100644
      return m.arena_bytes + m.buf_bytes + (size_t) 2 * m.n_layer * m.ring * m.n_kv * kHeadDim * sizeof(__half) +
             (size_t) m.ring * sizeof(long long);
  }
-@@ -760,6 +983,13 @@ std::string GlmDflash::describe() const {
+@@ -785,6 +1008,13 @@ std::string GlmDflash::describe() const {
      std::string t;
      for (size_t i = 0; i < m.tl.size(); ++i) t += (i ? "," : "") + std::to_string(m.tl[i]);
      char b[320];
@@ -1381,7 +1381,7 @@ index 3acb32f..6f23b61 100644
      std::snprintf(b, sizeof b, "%d layers, hidden %d, %d heads (%d kv), block %d, window %d, selector top-%d rank %d, "
                                 "reads trunk layers %s; %.0f MB on CUDA%d",
                    m.n_layer, m.E, m.n_head, m.n_kv, m.block, m.window, m.top_k, m.rank, t.c_str(),
-@@ -767,6 +997,12 @@ std::string GlmDflash::describe() const {
+@@ -792,6 +1022,12 @@ std::string GlmDflash::describe() const {
      return b;
  }
  
@@ -1394,7 +1394,7 @@ index 3acb32f..6f23b61 100644
  bool GlmDflash::load(const std::string& path, int dev, std::string& err) {
      Impl& m = *d_;
      m.dev = dev;
-@@ -789,6 +1025,7 @@ bool GlmDflash::load(const std::string& path, int dev, std::string& err) {
+@@ -814,6 +1050,7 @@ bool GlmDflash::load(const std::string& path, int dev, std::string& err) {
          const auto* v = G.get(std::string("dflash.") + k);
          return v != nullptr && v->is_num() ? v->num() : def;
      };
@@ -1402,7 +1402,7 @@ index 3acb32f..6f23b61 100644
      m.E = (int) num("embedding_length", 0);
      m.n_layer = (int) num("block_count", 0);
      m.n_head = (int) num("attention.head_count", 0);
-@@ -1034,8 +1271,8 @@ bool GlmDflash::bind(int target_embd, int target_vocab, int target_layers, std::
+@@ -1059,8 +1296,8 @@ bool GlmDflash::bind(int target_embd, int target_vocab, int target_layers, std::
                std::to_string(target_vocab) + ")";
          return false;
      }
@@ -1413,7 +1413,7 @@ index 3acb32f..6f23b61 100644
              err = "glm dflash: the draft reads layer " + std::to_string(l) + " of a " + std::to_string(target_layers) +
                    "-layer model";
              return false;
-@@ -1111,9 +1348,454 @@ static bool mv_cols(gf::MvJob j, int cols, size_t xq_s, size_t xf_s, size_t y_s,
+@@ -1136,9 +1373,454 @@ static bool mv_cols(gf::MvJob j, int cols, size_t xq_s, size_t xf_s, size_t y_s,
      return true;
  }
  
@@ -1868,7 +1868,7 @@ index 3acb32f..6f23b61 100644
      lo = std::max<int64_t>(lo, hi - m.window);
      const uint32_t full = m.K >= 32 ? 0xffffffffu : (1u << m.K) - 1u;
      const int KE = m.K * m.E, kvd = m.n_kv * kHeadDim;
-@@ -1205,6 +1887,7 @@ bool GlmDflash::draft_start(int32_t anchor, int64_t n_past, int n_max, float p_m
+@@ -1230,6 +1912,7 @@ bool GlmDflash::draft_start(int32_t anchor, int64_t n_past, int n_max, float p_m
                              const uint8_t* emb, int emb_type, cudaStream_t s, std::string& err) {
      Impl& m = *d_;
      m.pend_n = 0;
@@ -1876,7 +1876,7 @@ index 3acb32f..6f23b61 100644
      n_max = std::min(n_max, m.block - 1);
      if (n_max < 1) return true;
      const int B = n_max + 1, E = m.E, qd = m.n_head * kHeadDim, kvd = m.n_kv * kHeadDim, cd = m.cdyn;
-@@ -1617,7 +2300,8 @@ bool Glm5Model::dflash_bind(std::string& err) {
+@@ -1642,7 +2325,8 @@ bool Glm5Model::dflash_bind(std::string& err) {
      for (Glm5Model* m = this; m != nullptr; m = m->split_next_.get()) {
          m->cap_k_.assign((size_t) g_.n_layers + 1, -1);
          for (size_t k = 0; k < tl.size(); ++k)
@@ -1886,7 +1886,7 @@ index 3acb32f..6f23b61 100644
          m->cap_d_ = D;
          cudaSetDevice(m->dev_);
          if (m->fast_->cap == nullptr) {
-@@ -1741,6 +2425,59 @@ bool Glm5Model::decode_dflash(strata::kernels::SamplerParams& sp, int64_t max_ne
+@@ -1766,6 +2450,59 @@ bool Glm5Model::decode_dflash(strata::kernels::SamplerParams& sp, int64_t max_ne
          tnow = t;
      };
      // the first token: the prompt's last forward left its logits on the tail
@@ -1946,7 +1946,7 @@ index 3acb32f..6f23b61 100644
      int y = -1;
      if (sp.greedy && sp.penalty_last_n <= 0 && last_tok_ >= 0) {   // (penalties: picked through the sampler)
          y = last_tok_;
-@@ -1748,6 +2485,7 @@ bool Glm5Model::decode_dflash(strata::kernels::SamplerParams& sp, int64_t max_ne
+@@ -1773,6 +2510,7 @@ bool Glm5Model::decode_dflash(strata::kernels::SamplerParams& sp, int64_t max_ne
          y = sample_token(sp, err);
          if (y < 0) return false;
      }
@@ -1954,7 +1954,7 @@ index 3acb32f..6f23b61 100644
      y = forced(y);
      sp.counter += 1;
      ++produced;
-@@ -1881,7 +2619,9 @@ bool Glm5Model::decode_dflash(strata::kernels::SamplerParams& sp, int64_t max_ne
+@@ -1906,7 +2644,9 @@ bool Glm5Model::decode_dflash(strata::kernels::SamplerParams& sp, int64_t max_ne
              // are captured for the drafter there), the next token picked as the token loop picks it
              std::vector<float> lg;
              if (!forward({y}, lg, err)) return false;
@@ -1965,7 +1965,7 @@ index 3acb32f..6f23b61 100644
              if (y2 < 0) return false;
              if (stats != nullptr) {
                  const auto t_tok = std::chrono::steady_clock::now();
-@@ -1956,6 +2696,8 @@ bool Glm5Model::decode_dflash(strata::kernels::SamplerParams& sp, int64_t max_ne
+@@ -1981,6 +2721,8 @@ bool Glm5Model::decode_dflash(strata::kernels::SamplerParams& sp, int64_t max_ne
          // reasoning closed by the caller - ends the run there, like a wrong draft)
          int acc = 0;
          while (acc < T - 1 && tok[(size_t) acc + 1] == goes_out(acc)) ++acc;
@@ -6520,10 +6520,10 @@ index b3fc18e..8411615 100644
      if (tid == 0) {
          s_prefix = 0u;
 diff --git a/src/kernels/cuda/glm_batch.cu b/src/kernels/cuda/glm_batch.cu
-index b91fdff..7921b9e 100644
+index 56c2648..aa04990 100644
 --- a/src/kernels/cuda/glm_batch.cu
 +++ b/src/kernels/cuda/glm_batch.cu
-@@ -1781,8 +1781,10 @@ __device__ __forceinline__ int mla2_wmma_row(int i, int hi) {
+@@ -1799,8 +1799,10 @@ __device__ __forceinline__ int mla2_wmma_row(int i, int hi) {
  __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
          const float* __restrict__ q_abs, const uint16_t* __restrict__ lat,
          const int* __restrict__ cells_all, const int* __restrict__ n_sel_arr,
@@ -6535,7 +6535,7 @@ index b91fdff..7921b9e 100644
      __shared__ __align__(16) _Float16 ph[16][16], pl[16][16];
      __shared__ float scores[8][16][16], qi[8][16];
      __shared__ float sm[16], denom[16], rescale[16];
-@@ -1809,6 +1811,9 @@ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
+@@ -1827,6 +1829,9 @@ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
          }
      mla2_f8 acc[4] = {};
      if (tid < 16) { sm[tid] = -INFINITY; denom[tid] = 0; }
@@ -6545,7 +6545,7 @@ index b91fdff..7921b9e 100644
      for (int s0 = 0; s0 < ns; s0 += 16) {
          __syncthreads();
          if (tid < 16) cells[tid] = s0 + tid < ns ? cl[s0 + tid] : -1;
-@@ -1817,7 +1822,7 @@ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
+@@ -1835,7 +1840,7 @@ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
              const int r = i / 64, col = (i % 64) * 8, cell = cells[r];
              *(uint4*)(&sl[r][col]) = cell < 0 ? make_uint4(0, 0, 0, 0)
                  : q8 ? lat8_h8(lat8_rec(lat, 512, cell), 512, col / 8)
@@ -6554,7 +6554,7 @@ index b91fdff..7921b9e 100644
          }
          __syncthreads();
          mla2_f8 dot = {};
-@@ -1837,6 +1842,10 @@ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
+@@ -1855,6 +1860,10 @@ __global__ void __launch_bounds__(256) mla_attn_wmma2_kernel(
          float v = 0;
  #pragma unroll
          for (int w = 0; w < 8; ++w) v += scores[w][r][col];
@@ -6565,7 +6565,7 @@ index b91fdff..7921b9e 100644
          v = cells[col] < 0 ? -INFINITY : v * scale;
          float m = v;
  #pragma unroll
-@@ -1941,11 +1950,11 @@ __global__ void __launch_bounds__(256) mtp_in_rows_kernel(const float* __restric
+@@ -1959,11 +1968,11 @@ __global__ void __launch_bounds__(256) mtp_in_rows_kernel(const float* __restric
                                                            __half* __restrict__ out) {
      __shared__ float sred[32];
      const int t = blockIdx.x, tid = threadIdx.x;
@@ -6579,7 +6579,7 @@ index b91fdff..7921b9e 100644
          if (i >= per) break;
          const int e = tid + i * (int) blockDim.x;
          a[i] = emb[(size_t) t * E + e];
-@@ -1957,7 +1966,7 @@ __global__ void __launch_bounds__(256) mtp_in_rows_kernel(const float* __restric
+@@ -1975,7 +1984,7 @@ __global__ void __launch_bounds__(256) mtp_in_rows_kernel(const float* __restric
      sb = block_sum(sb, sred);
      const float ia = rsqrtf(sa / (float) E + eps), ib = rsqrtf(sb / (float) E + eps);
  #pragma unroll
@@ -6588,7 +6588,7 @@ index b91fdff..7921b9e 100644
          if (i >= per) break;
          const int e = tid + i * (int) blockDim.x;
          out[(size_t) t * 2 * E + e] = __float2half(a[i] * ia * enorm[e]);
-@@ -1969,11 +1978,11 @@ __global__ void __launch_bounds__(256) rms_rows_kernel(const float* __restrict__
+@@ -1987,11 +1996,11 @@ __global__ void __launch_bounds__(256) rms_rows_kernel(const float* __restrict__
                                                         int E, float* __restrict__ x, __half* __restrict__ x16) {
      __shared__ float sred[32];
      const int t = blockIdx.x, tid = threadIdx.x;
@@ -6602,7 +6602,7 @@ index b91fdff..7921b9e 100644
          if (i >= per) break;
          const int e = tid + i * (int) blockDim.x;
          v[i] = in[(size_t) t * E + e];
-@@ -1982,7 +1991,7 @@ __global__ void __launch_bounds__(256) rms_rows_kernel(const float* __restrict__
+@@ -2000,7 +2009,7 @@ __global__ void __launch_bounds__(256) rms_rows_kernel(const float* __restrict__
      ss = block_sum(ss, sred);
      const float inv = rsqrtf(ss / (float) E + eps);
  #pragma unroll
@@ -6611,7 +6611,7 @@ index b91fdff..7921b9e 100644
          if (i >= per) break;
          const int e = tid + i * (int) blockDim.x;
          const float xv = v[i] * inv * w[e];
-@@ -2035,17 +2044,25 @@ __device__ void topk_argmax(float* sel, int E, int k, int* out, float* s_bv, int
+@@ -2053,17 +2062,25 @@ __device__ void topk_argmax(float* sel, int E, int k, int* out, float* s_bv, int
  
  __global__ void __launch_bounds__(256) route_kernel(const float* __restrict__ logits, const float* __restrict__ bias,
                                                      int E, int k, float w_scale, int norm_w, int* __restrict__ ids,
@@ -6640,7 +6640,7 @@ index b91fdff..7921b9e 100644
          s_p[e] = p;
          s_sel[e] = bias ? p + bias[e] : p;
          if (!isfinite(logits[(size_t) t * E + e]) || !isfinite(s_sel[e])) atomicExch(&bad, 1);
-@@ -2614,14 +2631,21 @@ bool mla_wmma2_supported() { const int a = mla_wmma2_arch(); return a == 1 || a
+@@ -2632,14 +2649,21 @@ bool mla_wmma2_supported() { const int a = mla_wmma2_arch(); return a == 1 || a
  bool mla_wmma2_default() { const int a = mla_wmma2_arch(); return a == 1 || a == 4; }
  
  void mla_attn_wmma2(const float* q_abs, const uint16_t* lat, const int* cells, const int* n_sel, int n_sel_max,
@@ -6665,7 +6665,7 @@ index b91fdff..7921b9e 100644
      check("mla_attn_wmma2");
  }
  #endif
-@@ -2646,9 +2670,9 @@ void rms_rows(const float* in, const float* w, float eps, int T, int n_embd, flo
+@@ -2664,9 +2688,9 @@ void rms_rows(const float* in, const float* w, float eps, int T, int n_embd, flo
  }
  
  void route(const float* logits, const float* bias, int n_expert, int k, float w_scale, bool norm_w, int T, int* ids,
@@ -6730,7 +6730,7 @@ index f9dd608..1525dff 100644
  
  }  // namespace strata::kernels
 diff --git a/src/kernels/cuda/glm_fast.cu b/src/kernels/cuda/glm_fast.cu
-index d2f660b..e7682f3 100644
+index 91f61a3..29684d0 100644
 --- a/src/kernels/cuda/glm_fast.cu
 +++ b/src/kernels/cuda/glm_fast.cu
 @@ -6,6 +6,7 @@
@@ -6741,7 +6741,7 @@ index d2f660b..e7682f3 100644
  #include "strata/kernels/glm_batch.hpp"   // mla_decode_v70 (Volta)
  #include "strata/kernels/exl3.hpp"
  #if defined(STRATA_USE_HIP)
-@@ -3281,9 +3282,14 @@ __global__ void __launch_bounds__(256) mla_attn_kernel(const float* __restrict__
+@@ -3295,9 +3296,14 @@ __global__ void __launch_bounds__(256) mla_attn_kernel(const float* __restrict__
  // The latents stay FP16 in shared memory, as in the cache (34 KB at kv_lora 512; F32 rows were over Turing's 64 KB).
  constexpr int MLA_CHUNK = 32;
  constexpr int MLA_HPB = 16;
@@ -6757,7 +6757,7 @@ index d2f660b..e7682f3 100644
      extern __shared__ float smem[];
      uint16_t* sL = (uint16_t*) smem;                   // MLA_CHUNK x kv_lora, FP16
      float* sS = smem + MLA_CHUNK * kv_lora / 2;        // MLA_HPB x MLA_CHUNK scores -> weights
-@@ -3292,15 +3298,16 @@ __global__ void __launch_bounds__(256) mla_split_kernel(const float* __restrict_
+@@ -3306,15 +3312,16 @@ __global__ void __launch_bounds__(256) mla_split_kernel(const float* __restrict_
      const int h0 = blockIdx.y * MLA_HPB, nh = min(MLA_HPB, n_head - h0);
      const int s0 = b * MLA_CHUNK;
      const int ns = min(MLA_CHUNK, n_sel - s0);
@@ -6777,7 +6777,7 @@ index d2f660b..e7682f3 100644
      // scores: a warp per head, the head's q in registers (kv_lora / 32 per lane), one warp reduction per cell
      for (int hh = warp; hh < nh; hh += nw) {
          float q[16];
-@@ -3312,6 +3319,11 @@ __global__ void __launch_bounds__(256) mla_split_kernel(const float* __restrict_
+@@ -3326,6 +3333,11 @@ __global__ void __launch_bounds__(256) mla_split_kernel(const float* __restrict_
  #pragma unroll
              for (int j = 0; j < 16; ++j)
                  if (lane + 32 * j < kv_lora) acc += q[j] * lat_f(sL[s * kv_lora + lane + 32 * j]);
@@ -6789,7 +6789,7 @@ index d2f660b..e7682f3 100644
              acc = warp_sum(acc);
              if (lane == 0) sS[hh * MLA_CHUNK + s] = s_cell[s] >= 0 ? acc * scale : -INFINITY;
          }
-@@ -3922,6 +3934,8 @@ struct RouteArgs {
+@@ -3936,6 +3948,8 @@ struct RouteArgs {
      float affinity;             // STRATA_GLM_ROUTE_AFFINITY: added to a VRAM-resident expert's selection score (its
                                  // weight stays its own probability) - LOSSY, it changes which experts run (0: off)
      int rank_sel;               // the selections by topk_rank (STRATA_GLM_ROUTE_RANK; the host checks E fits it)
@@ -6798,7 +6798,7 @@ index d2f660b..e7682f3 100644
      unsigned long long* prof;   // STRATA_GLM_ROUTE_PROF (measurement): block 0's cycles from its start to each phase's
                                  // end, summed over routes (host-mapped; [15] counts the routes); null: off
      int fast;                   // STRATA_GLM_ROUTE_FAST (on by default; =0: the old order, A/B): the error flag from
-@@ -3970,8 +3984,17 @@ __global__ void __launch_bounds__(ROUTE_THREADS) moe_route_kernel(const STRATA_G
+@@ -3984,8 +3998,17 @@ __global__ void __launch_bounds__(ROUTE_THREADS) moe_route_kernel(const STRATA_G
      // the CPU lane's frequency counts age: every 4096 routes all of them halve (the whole block, before any use)
      if (a.cpu_plan != 0ull && a.d.dcnt != nullptr && ((*a.d.seq + 1) & 4095u) == 0u)
          for (int i = tid; i < a.d.n_keys; i += ROUTE_THREADS) a.d.dcnt[i] >>= 1;
@@ -6817,7 +6817,7 @@ index d2f660b..e7682f3 100644
          s_p[e] = p;
          s_sel[e] = a.bias ? p + a.bias[e] : p;
          if (a.affinity > 0.0f && a.d.tab != nullptr && a.d.tab[(size_t) a.layer * E + e] != 0ull) s_sel[e] += a.affinity;
-@@ -5267,10 +5290,10 @@ __global__ void __launch_bounds__(1024) mtp_in_kernel(const float* __restrict__
+@@ -5281,10 +5304,10 @@ __global__ void __launch_bounds__(1024) mtp_in_kernel(const float* __restrict__
                                                        float eps, int n, block_q8_1* __restrict__ catq) {
      __shared__ float sred[32];
      const int tid = threadIdx.x, lane = tid & 31;
@@ -6830,7 +6830,7 @@ index d2f660b..e7682f3 100644
          const int e = tid + 1024 * i;
          a[i] = e < n ? emb[e] : 0.0f;
          b[i] = e < n ? h[e] : 0.0f;
-@@ -5281,7 +5304,7 @@ __global__ void __launch_bounds__(1024) mtp_in_kernel(const float* __restrict__
+@@ -5295,7 +5318,7 @@ __global__ void __launch_bounds__(1024) mtp_in_kernel(const float* __restrict__
      sb = block_sum(sb, sred);
      const float ia = rsqrtf(sa / (float) n + eps), ib = rsqrtf(sb / (float) n + eps);
  #pragma unroll
@@ -6839,7 +6839,7 @@ index d2f660b..e7682f3 100644
          const int e = tid + 1024 * i;
          if (e >= n) break;
          q8_1_store_warp(a[i] * ia * enorm[e], catq + e / 32, lane);
-@@ -5294,10 +5317,10 @@ __global__ void __launch_bounds__(1024) rms_q8_kernel(float* __restrict__ h, con
+@@ -5308,10 +5331,10 @@ __global__ void __launch_bounds__(1024) rms_q8_kernel(float* __restrict__ h, con
                                                        float* __restrict__ x, block_q8_1* __restrict__ xq) {
      __shared__ float sred[32];
      const int tid = threadIdx.x, lane = tid & 31;
@@ -6852,7 +6852,7 @@ index d2f660b..e7682f3 100644
          const int e = tid + 1024 * i;
          float t = e < n ? h[e] : 0.0f;
          if (add != nullptr && e < n) {
-@@ -5310,7 +5333,7 @@ __global__ void __launch_bounds__(1024) rms_q8_kernel(float* __restrict__ h, con
+@@ -5324,7 +5347,7 @@ __global__ void __launch_bounds__(1024) rms_q8_kernel(float* __restrict__ h, con
      ss = block_sum(ss, sred);
      const float inv = rsqrtf(ss / (float) n + eps);
  #pragma unroll
@@ -6861,7 +6861,7 @@ index d2f660b..e7682f3 100644
          const int e = tid + 1024 * i;
          if (e >= n) break;
          const float xv = v[i] * inv * w[e];
-@@ -5944,6 +5967,10 @@ bool mv_nt(const MvJob* jobs, int n, int nt, cudaStream_t s) {
+@@ -5958,6 +5981,10 @@ bool mv_nt(const MvJob* jobs, int n, int nt, cudaStream_t s) {
  }
  
  void quantize_q8_1(const float* x, void* xq, int n, cudaStream_t s) {
@@ -6872,7 +6872,7 @@ index d2f660b..e7682f3 100644
      quantize_kernel<<<(n + 255) / 256, 256, 0, s>>>(x, (block_q8_1*) xq, n);
      launch_check("quantize");
  }
-@@ -6580,7 +6607,7 @@ void moe_route(const float* logits, const float* bias, int n_expert, int k, floa
+@@ -6594,7 +6621,7 @@ void moe_route(const float* logits, const float* bias, int n_expert, int k, floa
                 int max_prefetch, const float* ahead_logits, const float* const* ahead_bias, int n_ahead,
                 int skip_from, unsigned long long cpu_plan, int promote_min, int pf_rank, int near_n, int win,
                 unsigned int* scr_used, int win_n, int disk_skip_from, float disk_skip_w, float miss_skip_w,
@@ -6881,7 +6881,7 @@ index d2f660b..e7682f3 100644
      RouteArgs a{logits, bias, n_expert, k, w_scale, norm_w ? 1 : 0, layer, x, n_embd, d,
                  sh_gate, sh_up, sh_limit, n_ff_sh, (block_q8_1*) sh_hq, pred_logits, pred_bias, max_prefetch,
                  ahead_logits, {}, 0, skip_from, d.cpu_seq != nullptr ? cpu_plan : 0ull, promote_min,
-@@ -6602,6 +6629,7 @@ void moe_route(const float* logits, const float* bias, int n_expert, int k, floa
+@@ -6616,6 +6643,7 @@ void moe_route(const float* logits, const float* bias, int n_expert, int k, floa
      }();
      a.res_w = resident_ok ? res_w : 0.0f;
      a.res_k = resident_ok ? res_k : 0;
@@ -6889,7 +6889,7 @@ index d2f660b..e7682f3 100644
      // STRATA_GLM_ROUTE_RANK=0: the selections by topk_warp's serial rounds again (A/B); topk_rank needs whole warps of
      // experts that one block's threads cover and at most 8 picks
      static const bool rank_on = [] {
-@@ -7367,4 +7395,314 @@ void argmax_join(const int* a, const int* b, int c0, int* out, cudaStream_t s) {
+@@ -7381,4 +7409,314 @@ void argmax_join(const int* a, const int* b, int c0, int* out, cudaStream_t s) {
      launch_check("argmax_join");
  }
  
@@ -7294,7 +7294,7 @@ index de676ec..84f3c3d 100644
      run(false, 6002, 2001, 4003, 1100, 7u);
      run(true, 6002, 2001, 4003, 1100, 8u);
 diff --git a/src/program/generate.cpp b/src/program/generate.cpp
-index 5fdf458..72cbc3a 100644
+index 0882f31..5f445c7 100644
 --- a/src/program/generate.cpp
 +++ b/src/program/generate.cpp
 @@ -14,6 +14,7 @@
@@ -7305,7 +7305,7 @@ index 5fdf458..72cbc3a 100644
  #include "strata/core/expert_cache.hpp"
  #include "strata/platform/env_alias.hpp"
  #include "strata/platform/idle_gate.hpp"
-@@ -2352,7 +2353,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -2377,7 +2378,7 @@ static int glm_pack_generate(const Options& o) {
                               (unsigned long long) (model.mtp_rounds_ - rounds0),
                               (double) n_spec / (double) (model.mtp_rounds_ - rounds0), lens.c_str());
              }
@@ -7314,7 +7314,7 @@ index 5fdf458..72cbc3a 100644
              // the pipelined speculative decode: the two halves of the split work on consecutive tokens, the head
              // running the NextN block's draft (same tokens as the loop below)
              // STRATA_GLM_SPEC_WIN=1: the MTP drafts + the pipelined verify window through a split (decode_spec_pipe)
-@@ -4521,6 +4522,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -4546,6 +4547,7 @@ static int glm_pack_generate(const Options& o) {
  
  int main(int argc, char** argv) {
      strata::platform::env_aliases();   // (MAYA_* settings under their older names too)
@@ -7645,7 +7645,7 @@ index 0000000..0f96eb6
 +if __name__ == "__main__":
 +    sys.exit(main())
 diff --git a/tools/iq_pack.py b/tools/iq_pack.py
-index cc9bb6b..2b8d626 100644
+index d536e3b..acc676d 100644
 --- a/tools/iq_pack.py
 +++ b/tools/iq_pack.py
 @@ -96,10 +96,21 @@ GLM5NEXT_NATIVE_OK = (
@@ -7680,7 +7680,7 @@ index cc9bb6b..2b8d626 100644
                  print("tensor %s has %d dimensions; the index holds two" % (t.name, len(t.shape)))
                  return 1
              ne0, ne1 = index_shape(t.shape)
-@@ -248,9 +259,10 @@ def index_standalone(src, out, model: Model, compat_bf16: bool = False, arch: st
+@@ -263,9 +274,10 @@ def index_standalone(src, out, model: Model, compat_bf16: bool = False, arch: st
                  pad = (-len(raw)) % ALIGN
                  fo.write(b"\0" * pad)
                  at += len(raw) + pad
@@ -7694,7 +7694,7 @@ index cc9bb6b..2b8d626 100644
                  return 1
              else:
                  served += 1
-@@ -361,6 +373,12 @@ def main() -> int:
+@@ -376,6 +388,12 @@ def main() -> int:
      if arch not in ARCHITECTURES:
          print("general.architecture is %r; the packer knows %s" % (arch, " and ".join(ARCHITECTURES)))
          return 1
@@ -7707,7 +7707,7 @@ index cc9bb6b..2b8d626 100644
      if arch in ("glm5-next", "glm5next"):
          # two spellings in the wild: llama.cpp's canonical "glm5-next" (llama-arch.cpp L156) and
          # unsloth's "glm5next" - the KV PREFIX follows the same spelling, so it is read per file
-@@ -370,9 +388,9 @@ def main() -> int:
+@@ -385,9 +403,9 @@ def main() -> int:
      block_count = None
      trunk = None
      # (a Qwen GGUF with its MTP block - qwen4exp, nextn_predict_layers 1, block_count 49 - the same: the trunk only)
@@ -7719,7 +7719,7 @@ index cc9bb6b..2b8d626 100644
          bc = g.metadata.get(prefix + "block_count")
          if bc is None:
              print("%s: %sblock_count is missing; cannot tell the trunk from the NextN block" % (arch, prefix))
-@@ -421,7 +439,7 @@ def main() -> int:
+@@ -436,7 +454,7 @@ def main() -> int:
      else:
          n_layers = 1 + max(int(n.split(".")[1]) for n in T if n.startswith("blk.") and n.endswith("_exps.weight"))
      # the MoE layers only: the leading dense blocks ship no router and no experts
@@ -7729,7 +7729,7 @@ index cc9bb6b..2b8d626 100644
      else:
          lead = int(g.metadata.get("qwen4exp.leading_dense_block_count", 0) or 0)
 diff --git a/tools/strata_tokenizer.py b/tools/strata_tokenizer.py
-index f63d33b..983dabc 100644
+index 53138e8..05b9a5d 100644
 --- a/tools/strata_tokenizer.py
 +++ b/tools/strata_tokenizer.py
 @@ -110,6 +110,21 @@ MINIMAX_PATTERN = (
@@ -7779,7 +7779,7 @@ index f63d33b..983dabc 100644
                      regex.compile(GLM_PATTERN if self.ignore_merges else QWEN35_PATTERN))
          self._nfc = pre == "minimax"
  
-@@ -395,8 +411,11 @@ def extract(gguf_path, out_dir) -> dict:
+@@ -399,8 +415,11 @@ def extract(gguf_path, out_dir) -> dict:
          # The pattern is SHIPPED, not recomputed by the reader: it is transcribed from llama.cpp for the
          # declared `pre` type, and a C++ port that re-derived it would be free to get `\p{M}` wrong again.
          "ignore_merges": tk.ignore_merges,
