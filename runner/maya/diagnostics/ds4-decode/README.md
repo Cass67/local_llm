@@ -69,6 +69,29 @@ so the v1.1.56 difference is not established. P2P never engaged: the engine logg
 host-mapped" because `hipDeviceCanAccessPeer` allows only HIP 0 <-> 1. HIP 2 and 3 have no peer
 access, even to each other. A 4-card peer all-reduce is not possible on this board.
 
+Why: no PCIe switch, one card per CPU root port. The kernel's p2pdma check allowlists the host
+bridge by the root bus's device 00.0. Socket 0's bus 00 has Intel 8086:6f00 there; socket 1's bus a0
+has no 00.0, so 2 <-> 3 is refused. Cross-socket pairs are refused by policy.
+
+Sol's kernel `7.4.0-rc1-t7910-p2p` (`/mnt/scratch/t7910-p2p/t7910-p2p.patch`, boot arg
+`t7910_p2p_cross=1`) allows every pair. Results:
+- Cross-socket device-to-device transfers run at 0.25-0.29 GB/s; see `../gpu-micro/qpi-p2p.cpp`.
+  This is the CPU, not the patch.
+- Cached peer buffers hang the 4-card hub test and the engine.
+- Uncached buffers (`DS4_AR_P2P_UNCACHED=1`, Sol's `:v1.1.56-p2p-uncached-test`) work but are
+  slower. Same image, launched by Sol's `launch-test.py`, warm round:
+
+  | | tok/s |
+  |---|---|
+  | P2P off | 62.3 |
+  | Uncached P2P | 39.2 (-37%) |
+
+  Every prompt got slower. Rejected.
+
+A gain would need P2P within each socket (0-1, 2-3), then the existing host path between sockets.
+That is engine work, not a flag. The `arm.py` image comes from the cluster, not the profile, so
+image A/Bs need `launch-test.py`.
+
 ## Segment graphs (DS4_SEG_GRAPH), 2026-11-07
 
 Branch `ds4-decode-graph` in `~/git/maya-ds4graph` (local commit ba1eed4, on v1.1.56). Each layer's

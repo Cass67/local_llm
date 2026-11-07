@@ -12,6 +12,8 @@ Small HIP programs that test one runtime behaviour each, with no model loaded. S
 
 - `graph-cost.cpp`: the GPU-side gap per kernel in a dependent chain, stream launches vs one
   captured HIP graph, for empty kernels and for kernels doing 20 µs of work. Arg: `device`.
+- `qpi-p2p.cpp`: 64 MB peer copy per `src:dst` pair: kernel write, kernel read, SDMA peer copy,
+  and the same data staged through pinned host RAM. Args: `0:1 0:2 ...`.
 
 ## Run on ubt26
 
@@ -60,3 +62,11 @@ inside `hipLaunchKernel` (see `../ds4-decode/`).
 **Idle burn:** `queue-steps 1 2 4` reaches 9 queues, and card1 sits at 16-17% busy / 15 W
 until exit. `1 0 6` and `GPU_MAX_HW_QUEUES=1` stay at 0%. That matches the 7.4 partial fix in
 `../issue-841/kernel-test.md`.
+
+**Cross-socket P2P (`qpi-p2p`, kernel `7.4.0-rc1-t7910-p2p` with all pairs allowed):** same socket
+(0-1, 2-3) kernel write and SDMA 10.2 GB/s, read 2.2. Cross socket (0-2, 1-3) write and SDMA
+0.24-0.29 GB/s, read 0.53-0.60. Staged through host RAM 6.7 GB/s serial (D2H 14.1, H2D 12.8) for
+every pair, so QPI itself is fast; only device-to-device traffic forwarded over QPI is slow.
+SDMA is as slow as a kernel, so it is the Broadwell-EP CPU, not the code or the kernel patch
+(which only allows the mapping). BIOS has Home Snoop, MMIO above 4G / Large, no QPI or ACS
+tokens; root-port ACS ReqRedir+ also applies to same-socket pairs, which run at full speed.
