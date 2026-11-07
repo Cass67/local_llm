@@ -10,6 +10,9 @@ Small HIP programs that test one runtime behaviour each, with no model loaded. S
 - `run.py`: runs a command with 0.5 s busy/watts/KFD-queue sampling. Writes
   `results/<kernel>-<name>.jsonl`. Refuses to start while any KFD process exists.
 
+- `graph-cost.cpp`: the GPU-side gap per kernel in a dependent chain, stream launches vs one
+  captured HIP graph, for empty kernels and for kernels doing 20 µs of work. Arg: `device`.
+
 ## Run on ubt26
 
 Stop the live runner first. Run inside `maya-841-debug` (live image, `/mnt/scratch` at
@@ -41,6 +44,10 @@ Try the scheduling flags with `SUBMIT_SCHED=spin|yield|block`.
 The first version of this bench launched onto streams whose device was not current. HIP rejects
 that with `invalid resource handle`, and the bench did not check, so its "0.3 µs" numbers were
 failed launches. Always `hipSetDevice` to the stream's device and check `hipGetLastError`.
+
+**Graphs:** with 20 µs kernels the gap is 2.0-2.1 µs per kernel for both stream launches and graph
+replay, on HIP 0 and 3. With empty kernels, graphs save only 0.3-0.5 µs. On gfx1100 a graph saves
+host time, not GPU time, so it only helps when the launching thread falls behind the GPU.
 
 **Idle burn:** `queue-steps 1 2 4` reaches 9 queues, and card1 sits at 16-17% busy / 15 W
 until exit. `1 0 6` and `GPU_MAX_HW_QUEUES=1` stay at 0%. That matches the 7.4 partial fix in
