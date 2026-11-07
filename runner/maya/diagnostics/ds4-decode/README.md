@@ -60,3 +60,11 @@ launcher cannot keep up with kernels that take 2.5-6 us. `../gpu-micro/launch-co
 lock contention between the four launcher threads plus 256 B+ by-value args make each launch cost
 5-9 us. `hipGraphLaunch` costs 0.05-0.09 us per node, so capturing DS4 decode as graphs is the
 fix to try. This replaces "Ruled out" above on graphs.
+
+## v1.1.56 and DS4_AR_P2P, 2026-11-07
+
+Warm `pair.py` means (temp 0, round 2): v1.1.55 61.2 tok/s, v1.1.56 63.9, and v1.1.56 with
+`DS4_AR_P2P=1` plus a local override of #809's AMD guard (`DS4_AR_P2P_AMD=1`) 62.1. One run each,
+so the v1.1.56 difference is not established. P2P never engaged: the engine logged "stays
+host-mapped" because `hipDeviceCanAccessPeer` allows only HIP 0 <-> 1. HIP 2 and 3 have no peer
+access, even to each other. A 4-card peer all-reduce is not possible on this board.
