@@ -1,0 +1,128 @@
+{
+  "date": "2026-11-06",
+  "host": "ubt26",
+  "maya": "v1.1.55 c4effee67cb9",
+  "kernel": "7.2.13-ubt26",
+  "results": [
+    {
+      "case": "auto",
+      "stage": "idle",
+      "samples": 9,
+      "settled_samples": 9,
+      "busy_min_max": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "median_watts": [
+        10.0,
+        7.0,
+        13.0,
+        18.0
+      ]
+    },
+    {
+      "case": "auto-tp4",
+      "stage": "idle",
+      "samples": 9,
+      "settled_samples": 9,
+      "busy_min_max": [
+        [
+          100,
+          100
+        ],
+        [
+          100,
+          100
+        ],
+        [
+          100,
+          100
+        ],
+        [
+          100,
+          100
+        ]
+      ],
+      "median_watts": [
+        88.0,
+        104.0,
+        84.0,
+        104.0
+      ]
+    },
+    {
+      "case": "priority0-tp4",
+      "stage": "idle",
+      "samples": 9,
+      "settled_samples": 8,
+      "busy_min_max": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "median_watts": [
+        11.0,
+        5.0,
+        10.0,
+        18.0
+      ]
+    },
+    {
+      "case": "priority0-tp4",
+      "stage": "after-request-idle",
+      "samples": 6,
+      "settled_samples": 5,
+      "busy_min_max": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "median_watts": [
+        14.0,
+        14.0,
+        9.0,
+        12.0
+      ]
+    }
+  ]
+}

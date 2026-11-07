@@ -1,0 +1,5 @@
+# One-off diagnostics / CAD scripts kept as records: check for real errors only.
+line-length = 100
+
+[lint]
+select = ["E9", "F"]

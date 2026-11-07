@@ -1,0 +1,63 @@
+{
+  "kernel": "7.4.0-070400rc1-generic",
+  "case": "kernel74-auto-tp4",
+  "notes": "Default priorities, auto shares, uneven TP4; unchanged Maya v1.1.55 and HIP runtime. First settling sample excluded in both stages.",
+  "results": [
+    {
+      "stage": "idle",
+      "settled_samples": 8,
+      "busy_min_max": [
+        [
+          15,
+          15
+        ],
+        [
+          17,
+          18
+        ],
+        [
+          14,
+          15
+        ],
+        [
+          14,
+          14
+        ]
+      ],
+      "median_watts": [
+        14.0,
+        15.0,
+        14.0,
+        16.0
+      ]
+    },
+    {
+      "stage": "after-request-idle",
+      "settled_samples": 5,
+      "busy_min_max": [
+        [
+          15,
+          15
+        ],
+        [
+          17,
+          18
+        ],
+        [
+          14,
+          14
+        ],
+        [
+          14,
+          14
+        ]
+      ],
+      "median_watts": [
+        14.0,
+        15.0,
+        16.0,
+        16.0
+      ]
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+diff --git a/src/ds4/ds4_model.cu b/src/ds4/ds4_model.cu
+index 81935a0..209026b 100644
+--- a/src/ds4/ds4_model.cu
++++ b/src/ds4/ds4_model.cu
+@@ -2409,8 +2409,28 @@ struct Model::Impl {
+         }
+         rc_cv.notify_all();
+         if (rc_th.joinable()) rc_th.join();
+-        for (Dev& d : devs) {
++        // Diagnostic only: complete the first-pass stream/event teardown before reloading.
++        const bool test_cleanup = std::getenv("MAYA_DS4_TEST_CLEANUP") != nullptr;
++        for (size_t di = 0; di < devs.size(); ++di) {
++            Dev& d = devs[di];
+             cudaSetDevice(d.id);
++            if (test_cleanup) {
++                cudaDeviceSynchronize();
++                if (di < chunks.size() && chunks[di]) {
++                    Chunk& c = *chunks[di];
++                    for (cudaStream_t st : {c.cs, c.ar_aux.s2, c.ar_s, c.ar_aux2.s2})
++                        if (st) cudaStreamDestroy(st);
++                    std::vector<cudaEvent_t> evs = {c.ar_go, c.ar_done};
++                    for (int i = 0; i < Chunk::kParts; ++i) evs.push_back(c.filled[i]), evs.push_back(c.freed[i]);
++                    for (int sl = 0; sl < 2; ++sl) evs.push_back(c.emb_ev[sl]), evs.push_back(c.eg_ev[sl]);
++                    for (cudaEvent_t e : c.ar_aux.ev) evs.push_back(e);
++                    for (cudaEvent_t e : c.ar_aux2.ev) evs.push_back(e);
++                    for (cudaEvent_t e : evs) if (e) cudaEventDestroy(e);
++                }
++                if (d.st2) cudaStreamDestroy(d.st2);
++                if (d.hc_go) cudaEventDestroy(d.hc_go);
++                if (d.hc_done) cudaEventDestroy(d.hc_done);
++            }
+             for (void* p : d.allocs) cudaFree(p);
+             if (d.st) cudaStreamDestroy(d.st);
+             if (d.ev) cudaEventDestroy(d.ev);
+@@ -22265,7 +22285,21 @@ bool Model::load(const Options& o, std::string& err) {
+     // is made again with the parts (its reads mostly from the page cache now)
+     std::vector<std::vector<int>> parts = std::move(p_->tp_auto);
+     const int unit = p_->tp_auto_unit;
++    std::string test_parts;
++    for (const auto& row : parts) {
++        if (row.empty()) continue;
++        if (!test_parts.empty()) test_parts += ":";
++        for (size_t i = 0; i < row.size(); ++i) {
++            if (i) test_parts += ",";
++            test_parts += std::to_string(row[i]);
++        }
++    }
++    std::fprintf(stderr, "TEST841: manual shares %s\n", test_parts.c_str());
++    std::fprintf(stderr, "TEST841: first pass finished; before reset\n");
++    std::this_thread::sleep_for(std::chrono::seconds(5));
+     p_.reset();
++    std::fprintf(stderr, "TEST841: reset finished; before second load\n");
++    std::this_thread::sleep_for(std::chrono::seconds(5));
+     p_.reset(new Impl);
+     p_->tp_auto = std::move(parts);
+     p_->tp_auto_unit = unit;

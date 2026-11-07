@@ -1,0 +1,242 @@
+[
+  {
+    "round": 1,
+    "kind": "code",
+    "elapsed_s": 2.695,
+    "usage": {
+      "prompt_tokens": 21,
+      "completion_tokens": 89,
+      "total_tokens": 110,
+      "prompt_tokens_details": {
+        "cached_tokens": 20
+      }
+    },
+    "timings": {
+      "cache_n": 20,
+      "prompt_n": 1,
+      "prompt_ms": 96.7,
+      "prompt_per_token_ms": 96.7,
+      "prompt_per_second": 10.3,
+      "predicted_n": 89,
+      "predicted_ms": 2575.4,
+      "predicted_per_token_ms": 28.937,
+      "predicted_per_second": 34.6,
+      "draft_n": 75,
+      "draft_n_accepted": 72
+    },
+    "wall_tokens_per_s": 33.02667491725868,
+    "finish_reason": "stop",
+    "content": "```python\ndef fibonacci(n):\n    if n < 0:\n        raise ValueError(\"n must be non-negative\")\n    if n == 0:\n        return 0\n    if n == 1:\n        return 1\n    a, b = 0, 1\n    for _ in range(2, n + 1):\n        a, b = b, a + b\n    return b\n```",
+    "reasoning_content": null
+  },
+  {
+    "round": 1,
+    "kind": "prose",
+    "elapsed_s": 5.621,
+    "usage": {
+      "prompt_tokens": 16,
+      "completion_tokens": 128,
+      "total_tokens": 144,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 16,
+      "prompt_ms": 623.1,
+      "prompt_per_token_ms": 38.944,
+      "prompt_per_second": 25.7,
+      "predicted_n": 128,
+      "predicted_ms": 4991.2,
+      "predicted_per_token_ms": 38.994,
+      "predicted_per_second": 25.6,
+      "draft_n": 49,
+      "draft_n_accepted": 39
+    },
+    "wall_tokens_per_s": 22.772030007990452,
+    "finish_reason": "length",
+    "content": "The seaside village in winter is a study in muted desolation, its cobblestone streets glistening under a thin, persistent drizzle that blurs the line between sea and sky. The cheerful pastels of the cottages\u2014washed-out blues, faded pinks, and pale yellows\u2014seem to surrender their vibrancy to the grey light, their shuttered windows like closed eyes against the salt-laden wind. At the edge of the harbor, where fishing boats tug at their moorings with low, rhythmic groans, the water is a restless, gunmetal grey, slapping against the stone quay with",
+    "reasoning_content": null
+  },
+  {
+    "round": 1,
+    "kind": "json",
+    "elapsed_s": 5.1,
+    "usage": {
+      "prompt_tokens": 25,
+      "completion_tokens": 128,
+      "total_tokens": 153,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 25,
+      "prompt_ms": 848.9,
+      "prompt_per_token_ms": 33.956,
+      "prompt_per_second": 29.4,
+      "predicted_n": 128,
+      "predicted_ms": 4243.4,
+      "predicted_per_token_ms": 33.152,
+      "predicted_per_second": 30.2,
+      "draft_n": 96,
+      "draft_n_accepted": 90
+    },
+    "wall_tokens_per_s": 25.095704281834845,
+    "finish_reason": "length",
+    "content": "[\n  {\"id\": 1, \"name\": \"Copper Wire\", \"quantity\": 42},\n  {\"id\": 2, \"name\": \"Oak Plank\", \"quantity\": 17},\n  {\"id\": 3, \"name\": \"Glass Vial\", \"quantity\": 8},\n  {\"id\": 4, \"name\": \"Iron Nail\", \"quantity\": 230},\n  {\"id\": 5, \"name\": \"Linen Cloth\", \"quantity\": 64},\n  {\"id\": 6, \"name\": \"Charcoal\", \"quantity\": 95},\n ",
+    "reasoning_content": null
+  },
+  {
+    "round": 1,
+    "kind": "explain",
+    "elapsed_s": 5.275,
+    "usage": {
+      "prompt_tokens": 17,
+      "completion_tokens": 128,
+      "total_tokens": 145,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 17,
+      "prompt_ms": 537.8,
+      "prompt_per_token_ms": 31.635,
+      "prompt_per_second": 31.6,
+      "predicted_n": 128,
+      "predicted_ms": 4729.2,
+      "predicted_per_token_ms": 36.947,
+      "predicted_per_second": 27.1,
+      "draft_n": 91,
+      "draft_n_accepted": 67
+    },
+    "wall_tokens_per_s": 24.26329109093687,
+    "finish_reason": "length",
+    "content": "# How Hash Tables Resolve Collisions\n\nA hash table maps keys to array indices using a hash function. Since the number of possible keys usually exceeds the number of slots, two different keys can hash to the same index \u2014 this is a **collision**. Hash tables handle this in two main ways.\n\n## 1. Separate Chaining\n\nEach slot holds a **bucket** (typically a linked list or dynamic array). When a collision occurs, the new entry is simply appended to that slot's bucket.\n\n- **Lookup:** hash the key, go to the slot, then scan the bucket for the matching key.\n- **Pros",
+    "reasoning_content": null
+  },
+  {
+    "round": 2,
+    "kind": "code",
+    "elapsed_s": 2.164,
+    "usage": {
+      "prompt_tokens": 21,
+      "completion_tokens": 59,
+      "total_tokens": 80,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 21,
+      "prompt_ms": 550.3,
+      "prompt_per_token_ms": 26.205,
+      "prompt_per_second": 38.2,
+      "predicted_n": 59,
+      "predicted_ms": 1605.5,
+      "predicted_per_token_ms": 27.212,
+      "predicted_per_second": 36.7,
+      "draft_n": 52,
+      "draft_n_accepted": 47
+    },
+    "wall_tokens_per_s": 27.26953756038126,
+    "finish_reason": "stop",
+    "content": "```python\ndef fibonacci(n):\n    if n < 0:\n        raise ValueError(\"n must be non-negative\")\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```",
+    "reasoning_content": null
+  },
+  {
+    "round": 2,
+    "kind": "prose",
+    "elapsed_s": 5.038,
+    "usage": {
+      "prompt_tokens": 16,
+      "completion_tokens": 128,
+      "total_tokens": 144,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 16,
+      "prompt_ms": 516.6,
+      "prompt_per_token_ms": 32.288,
+      "prompt_per_second": 31.0,
+      "predicted_n": 128,
+      "predicted_ms": 4513.0,
+      "predicted_per_token_ms": 35.258,
+      "predicted_per_second": 28.4,
+      "draft_n": 37,
+      "draft_n_accepted": 31
+    },
+    "wall_tokens_per_s": 25.409374870286484,
+    "finish_reason": "length",
+    "content": "The seaside village in winter is a study in desolate beauty, its cobblestone streets glistening with a patina of frost and rain-slick, empty of the summer crowds that once filled them. A biting wind, tasting of salt and seaweed, whips off a leaden, churning sea, rattling the shutters of cottages whose chimneys puff thin, grey smoke into the pale sky. The fishing boats, painted in now-faded primary colors, are hauled up onto the shingle beach like sleeping whales, their hulls creaking softly against their moorings, while the only sounds are the mournful",
+    "reasoning_content": null
+  },
+  {
+    "round": 2,
+    "kind": "json",
+    "elapsed_s": 3.719,
+    "usage": {
+      "prompt_tokens": 25,
+      "completion_tokens": 128,
+      "total_tokens": 153,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 25,
+      "prompt_ms": 721.0,
+      "prompt_per_token_ms": 28.84,
+      "prompt_per_second": 34.7,
+      "predicted_n": 128,
+      "predicted_ms": 2986.4,
+      "predicted_per_token_ms": 23.331,
+      "predicted_per_second": 42.9,
+      "draft_n": 93,
+      "draft_n_accepted": 92
+    },
+    "wall_tokens_per_s": 34.41649094686533,
+    "finish_reason": "length",
+    "content": "[\n  {\"id\": 1, \"name\": \"Copper Wire\", \"quantity\": 42},\n  {\"id\": 2, \"name\": \"Glass Vial\", \"quantity\": 17},\n  {\"id\": 3, \"name\": \"Iron Ingot\", \"quantity\": 88},\n  {\"id\": 4, \"name\": \"Moon Dust\", \"quantity\": 5},\n  {\"id\": 5, \"name\": \"Oak Plank\", \"quantity\": 63},\n  {\"id\": 6, \"name\": \"Silver Key\", \"quantity\": 12},\n  {\"id",
+    "reasoning_content": null
+  },
+  {
+    "round": 2,
+    "kind": "explain",
+    "elapsed_s": 4.029,
+    "usage": {
+      "prompt_tokens": 17,
+      "completion_tokens": 128,
+      "total_tokens": 145,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 17,
+      "prompt_ms": 424.2,
+      "prompt_per_token_ms": 24.953,
+      "prompt_per_second": 40.1,
+      "predicted_n": 128,
+      "predicted_ms": 3591.6,
+      "predicted_per_token_ms": 28.059,
+      "predicted_per_second": 35.6,
+      "draft_n": 89,
+      "draft_n_accepted": 76
+    },
+    "wall_tokens_per_s": 31.769328426218365,
+    "finish_reason": "length",
+    "content": "# How Hash Tables Resolve Collisions\n\nA hash table maps keys to values using a hash function that converts each key into an array index. Since the number of possible keys is usually much larger than the number of array slots, **two different keys can hash to the same index** \u2014 this is called a **collision**. Hash tables must have a strategy to handle this.\n\n## Common Collision Resolution Strategies\n\n### 1. Separate Chaining\nEach array slot holds a **linked list** (or another container) of all entries that hash to that index. When a collision occurs, the new entry is simply appended to the list",
+    "reasoning_content": null
+  }
+]

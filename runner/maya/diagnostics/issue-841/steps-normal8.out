@@ -1,0 +1,24 @@
+{"t": 0.01, "stage": "starting", "processes": [], "gpus": [{"card": "card0", "busy": 0, "power_uw": 11000000}, {"card": "card1", "busy": 0, "power_uw": 12000000}, {"card": "card2", "busy": 0, "power_uw": 14000000}, {"card": "card3", "busy": 0, "power_uw": 19000000}]}
+0.16 START pid=85 hi=-1 normal=0 clean=1 high_streams=0 normal_streams=8
+3.21 CREATE pass=0 index=0 priority=0 held=1
+{"t": 5.05, "stage": "CREATE pass=0 index=0 priority=0 held=1", "processes": [{"pid": 415057, "queues": [{"gpuid": 22117, "type": 0, "size": 1048576, "count": 1}, {"gpuid": 22117, "type": 0, "size": 4096, "count": 1}]}], "gpus": [{"card": "card0", "busy": 0, "power_uw": 12000000}, {"card": "card1", "busy": 0, "power_uw": 13000000}, {"card": "card2", "busy": 0, "power_uw": 18000000}, {"card": "card3", "busy": 0, "power_uw": 18000000}]}
+6.22 CREATE pass=0 index=1 priority=0 held=2
+9.23 CREATE pass=0 index=2 priority=0 held=3
+{"t": 10.11, "stage": "CREATE pass=0 index=2 priority=0 held=3", "processes": [{"pid": 415057, "queues": [{"gpuid": 22117, "type": 0, "size": 1048576, "count": 3}, {"gpuid": 22117, "type": 0, "size": 4096, "count": 1}]}], "gpus": [{"card": "card0", "busy": 0, "power_uw": 12000000}, {"card": "card1", "busy": 0, "power_uw": 5000000}, {"card": "card2", "busy": 0, "power_uw": 18000000}, {"card": "card3", "busy": 0, "power_uw": 18000000}]}
+12.25 CREATE pass=0 index=3 priority=0 held=4
+{"t": 15.16, "stage": "CREATE pass=0 index=3 priority=0 held=4", "processes": [{"pid": 415057, "queues": [{"gpuid": 22117, "type": 0, "size": 1048576, "count": 4}, {"gpuid": 22117, "type": 0, "size": 4096, "count": 1}]}], "gpus": [{"card": "card0", "busy": 0, "power_uw": 12000000}, {"card": "card1", "busy": 0, "power_uw": 7000000}, {"card": "card2", "busy": 0, "power_uw": 18000000}, {"card": "card3", "busy": 0, "power_uw": 18000000}]}
+15.27 CREATE pass=0 index=4 priority=0 held=5
+18.29 CREATE pass=0 index=5 priority=0 held=6
+{"t": 20.22, "stage": "CREATE pass=0 index=5 priority=0 held=6", "processes": [{"pid": 415057, "queues": [{"gpuid": 22117, "type": 0, "size": 1048576, "count": 6}, {"gpuid": 22117, "type": 0, "size": 4096, "count": 1}]}], "gpus": [{"card": "card0", "busy": 0, "power_uw": 12000000}, {"card": "card1", "busy": 0, "power_uw": 13000000}, {"card": "card2", "busy": 0, "power_uw": 18000000}, {"card": "card3", "busy": 0, "power_uw": 18000000}]}
+21.31 CREATE pass=0 index=6 priority=0 held=7
+24.33 CREATE pass=0 index=7 priority=0 held=8
+{"t": 25.29, "stage": "CREATE pass=0 index=7 priority=0 held=8", "processes": [{"pid": 415057, "queues": [{"gpuid": 22117, "type": 0, "size": 1048576, "count": 8}, {"gpuid": 22117, "type": 0, "size": 4096, "count": 1}]}], "gpus": [{"card": "card0", "busy": 0, "power_uw": 12000000}, {"card": "card1", "busy": 100, "power_uw": 95000000}, {"card": "card2", "busy": 0, "power_uw": 18000000}, {"card": "card3", "busy": 0, "power_uw": 18000000}]}
+27.36 FIRST_TEARDOWN
+{"t": 30.34, "stage": "FIRST_TEARDOWN", "processes": [{"pid": 415057, "queues": [{"gpuid": 22117, "type": 0, "size": 1048576, "count": 8}, {"gpuid": 22117, "type": 0, "size": 4096, "count": 1}]}], "gpus": [{"card": "card0", "busy": 0, "power_uw": 12000000}, {"card": "card1", "busy": 100, "power_uw": 96000000}, {"card": "card2", "busy": 0, "power_uw": 18000000}, {"card": "card3", "busy": 0, "power_uw": 18000000}]}
+33.37 CREATE pass=1 index=0 priority=0 held=1
+{"t": 35.4, "stage": "CREATE pass=1 index=0 priority=0 held=1", "processes": [{"pid": 415057, "queues": [{"gpuid": 22117, "type": 0, "size": 1048576, "count": 8}, {"gpuid": 22117, "type": 0, "size": 4096, "count": 1}]}], "gpus": [{"card": "card0", "busy": 0, "power_uw": 12000000}, {"card": "card1", "busy": 100, "power_uw": 97000000}, {"card": "card2", "busy": 0, "power_uw": 18000000}, {"card": "card3", "busy": 0, "power_uw": 18000000}]}
+36.38 CREATE pass=1 index=1 priority=0 held=2
+39.39 CREATE pass=1 index=2 priority=0 held=3
+{"t": 40.46, "stage": "CREATE pass=1 index=2 priority=0 held=3", "processes": [{"pid": 415057, "queues": [{"gpuid": 22117, "type": 0, "size": 1048576, "count": 8}, {"gpuid": 22117, "type": 0, "size": 4096, "count": 1}]}], "gpus": [{"card": "card0", "busy": 0, "power_uw": 12000000}, {"card": "card1", "busy": 100, "power_uw": 98000000}, {"card": "card2", "busy": 0, "power_uw": 18000000}, {"card": "card3", "busy": 0, "power_uw": 18000000}]}
+42.4 CREATE pass=1 index=3 priority=0 held=4
+exit 143

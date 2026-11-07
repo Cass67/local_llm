@@ -1,0 +1,34 @@
+[
+  {
+    "case": "steps-clean",
+    "max_compute_queues": 9,
+    "first_100_percent": {
+      "t": 30.87,
+      "stage": "CREATE pass=1 index=1 priority=-1 held=2",
+      "queues": 9
+    },
+    "last_eight_queue_idle_sample": 30.37
+  },
+  {
+    "case": "steps-normal",
+    "max_compute_queues": 5,
+    "first_100_percent": null,
+    "last_eight_queue_idle_sample": null
+  },
+  {
+    "case": "steps-cap1",
+    "max_compute_queues": 3,
+    "first_100_percent": null,
+    "last_eight_queue_idle_sample": null
+  },
+  {
+    "case": "steps-normal8",
+    "max_compute_queues": 9,
+    "first_100_percent": {
+      "t": 24.78,
+      "stage": "CREATE pass=0 index=7 priority=0 held=8",
+      "queues": 9
+    },
+    "last_eight_queue_idle_sample": 24.28
+  }
+]

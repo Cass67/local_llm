@@ -1,0 +1,32 @@
+[
+  {
+    "round": 1,
+    "kind": "code",
+    "elapsed_s": 2.899,
+    "usage": {
+      "prompt_tokens": 21,
+      "completion_tokens": 59,
+      "total_tokens": 80,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 21,
+      "prompt_ms": 994.7,
+      "prompt_per_token_ms": 47.367,
+      "prompt_per_second": 21.1,
+      "predicted_n": 59,
+      "predicted_ms": 1857.1,
+      "predicted_per_token_ms": 31.476,
+      "predicted_per_second": 31.8,
+      "draft_n": 52,
+      "draft_n_accepted": 47
+    },
+    "wall_tokens_per_s": 20.348833506689477,
+    "finish_reason": "stop",
+    "content": "```python\ndef fibonacci(n):\n    if n < 0:\n        raise ValueError(\"n must be non-negative\")\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```",
+    "reasoning_content": null
+  }
+]

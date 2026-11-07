@@ -1,0 +1,56 @@
+--- a/drivers/pci/p2pdma.c
++++ b/drivers/pci/p2pdma.c
+@@ -12,6 +12,8 @@
+ #include <linux/ctype.h>
+ #include <linux/dma-map-ops.h>
+ #include <linux/pci-p2pdma.h>
++#include <linux/dmi.h>
++#include <linux/init.h>
+ #include <linux/module.h>
+ #include <linux/slab.h>
+ #include <linux/genalloc.h>
+@@ -621,6 +623,22 @@
+ 	return NULL;
+ }
+ 
++/* T7910 diagnostic: same-socket root-port enumeration and opt-in QPI test. */
++static bool t7910_p2p_cross;
++static int __init t7910_p2p_cross_setup(char *str)
++{
++    return !kstrtobool(str, &t7910_p2p_cross);
++}
++__setup("t7910_p2p_cross=", t7910_p2p_cross_setup);
++
++static bool t7910_p2p_root(struct pci_dev *root)
++{
++    return root && root->vendor == PCI_VENDOR_ID_INTEL &&
++        (root->device == 0x6f00 || root->device == 0x6f04) &&
++        dmi_match(DMI_SYS_VENDOR, "Dell Inc.") &&
++        dmi_match(DMI_PRODUCT_NAME, "Precision Tower 7910");
++}
++
+ static bool __host_bridge_whitelist(struct pci_host_bridge *host,
+ 				    bool same_host_bridge, bool warn)
+ {
+@@ -631,6 +649,9 @@
+ 	if (!root)
+ 		return false;
+ 
++	if (same_host_bridge && t7910_p2p_root(root))
++        return true;
++
+ 	vendor = root->vendor;
+ 	device = root->device;
+ 
+@@ -664,6 +685,11 @@
+ 	struct pci_host_bridge *host_a = pci_find_host_bridge(a->bus);
+ 	struct pci_host_bridge *host_b = pci_find_host_bridge(b->bus);
+ 
++	if (t7910_p2p_cross &&
++        t7910_p2p_root(pci_host_bridge_dev(host_a)) &&
++        t7910_p2p_root(pci_host_bridge_dev(host_b)))
++        return true;
++
+ 	if (host_a == host_b)
+ 		return __host_bridge_whitelist(host_a, true, warn);
+ 

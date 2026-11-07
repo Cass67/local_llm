@@ -1,0 +1,40 @@
+{
+  "kernel": "7.4.0-070400rc1-generic",
+  "glm_health": {
+    "status": "ok",
+    "model": "maya-glm53-flash-q4xl-huihui",
+    "max_context": 524288
+  },
+  "gpus": [
+    {
+      "card": "card0",
+      "busy": 0,
+      "vram_used": 21206122496,
+      "power_w": 7.0
+    },
+    {
+      "card": "card1",
+      "busy": 0,
+      "vram_used": 21210644480,
+      "power_w": 10.0
+    },
+    {
+      "card": "card2",
+      "busy": 0,
+      "vram_used": 21206134784,
+      "power_w": 8.0
+    },
+    {
+      "card": "card3",
+      "busy": 0,
+      "vram_used": 21214568448,
+      "power_w": 12.0
+    }
+  ],
+  "container": {
+    "state": "running",
+    "restarts": 0
+  },
+  "power_cap_service": "active",
+  "temporary_grub_setting_removed": true
+}

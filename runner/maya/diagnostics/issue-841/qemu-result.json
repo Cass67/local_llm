@@ -1,0 +1,11 @@
+{
+  "elapsed_s": 5.8,
+  "exit_code": 0,
+  "timed_out": false,
+  "markers": [
+    "BOOTTEST_KERNEL=7.4.0-070400rc1-generic",
+    "BOOTTEST_EXT4_ROOT_RW_OK",
+    "BOOTTEST_COMPLETE"
+  ],
+  "passed": true
+}

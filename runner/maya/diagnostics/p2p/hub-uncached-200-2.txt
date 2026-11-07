@@ -1,0 +1,1 @@
+PASS four-card hub mode=2 atomic=1 barrier=0 rounds=200 floats=5120

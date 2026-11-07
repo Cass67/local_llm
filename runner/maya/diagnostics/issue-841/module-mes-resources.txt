@@ -1,0 +1,212 @@
+
+/lib/modules/7.2.13-ubt26/kernel/drivers/gpu/drm/amd/amdgpu/amdgpu.ko:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+000000000023dc70 <mes_v11_0_set_hw_resources>:
+  23dc70:	e8 00 00 00 00       	call   23dc75 <mes_v11_0_set_hw_resources+0x5>
+			23dc71: R_X86_64_PLT32	__fentry__-0x4
+  23dc75:	55                   	push   %rbp
+  23dc76:	49 89 f9             	mov    %rdi,%r9
+  23dc79:	b9 20 00 00 00       	mov    $0x20,%ecx
+  23dc7e:	48 89 e5             	mov    %rsp,%rbp
+  23dc81:	53                   	push   %rbx
+  23dc82:	31 db                	xor    %ebx,%ebx
+  23dc84:	4c 8d 85 f0 fe ff ff 	lea    -0x110(%rbp),%r8
+  23dc8b:	48 81 ec 38 01 00 00 	sub    $0x138,%rsp
+  23dc92:	4c 8b 17             	mov    (%rdi),%r10
+  23dc95:	4c 89 c7             	mov    %r8,%rdi
+  23dc98:	65 48 8b 05 00 00 00 	mov    %gs:0x0(%rip),%rax        # 23dca0 <mes_v11_0_set_hw_resources+0x30>
+  23dc9f:	00 
+			23dc9c: R_X86_64_PC32	__ref_stack_chk_guard-0x4
+  23dca0:	48 89 45 f0          	mov    %rax,-0x10(%rbp)
+  23dca4:	31 c0                	xor    %eax,%eax
+  23dca6:	f3 48 ab             	rep stos %rax,(%rdi)
+  23dca9:	41 8b 81 54 39 00 00 	mov    0x3954(%r9),%eax
+  23dcb0:	c7 85 f0 fe ff ff 01 	movl   $0x40001,-0x110(%rbp)
+  23dcb7:	00 04 00 
+  23dcba:	89 85 f4 fe ff ff    	mov    %eax,-0x10c(%rbp)
+  23dcc0:	41 8b 81 50 39 00 00 	mov    0x3950(%r9),%eax
+  23dcc7:	89 85 f8 fe ff ff    	mov    %eax,-0x108(%rbp)
+  23dccd:	41 8b 82 10 f4 03 00 	mov    0x3f410(%r10),%eax
+  23dcd4:	89 85 fc fe ff ff    	mov    %eax,-0x104(%rbp)
+  23dcda:	49 8b 81 e0 39 00 00 	mov    0x39e0(%r9),%rax
+  23dce1:	48 89 85 48 ff ff ff 	mov    %rax,-0xb8(%rbp)
+  23dce8:	49 8b 81 20 3b 00 00 	mov    0x3b20(%r9),%rax
+  23dcef:	48 89 85 50 ff ff ff 	mov    %rax,-0xb0(%rbp)
+  23dcf6:	48 63 f3             	movslq %ebx,%rsi
+  23dcf9:	48 63 d3             	movslq %ebx,%rdx
+  23dcfc:	48 83 fe 08          	cmp    $0x8,%rsi
+  23dd00:	0f 83 8b 01 00 00    	jae    23de91 <mes_v11_0_set_hw_resources+0x221>
+  23dd06:	48 83 fa 08          	cmp    $0x8,%rdx
+  23dd0a:	0f 83 4a 01 00 00    	jae    23de5a <mes_v11_0_set_hw_resources+0x1ea>
+  23dd10:	41 8b 94 99 60 39 00 	mov    0x3960(%r9,%rbx,4),%edx
+  23dd17:	00 
+  23dd18:	41 89 54 98 14       	mov    %edx,0x14(%r8,%rbx,4)
+  23dd1d:	48 83 c3 01          	add    $0x1,%rbx
+  23dd21:	48 83 fb 08          	cmp    $0x8,%rbx
+  23dd25:	75 cf                	jne    23dcf6 <mes_v11_0_set_hw_resources+0x86>
+  23dd27:	49 8b 81 58 39 00 00 	mov    0x3958(%r9),%rax
+  23dd2e:	4d 8b 9a c8 67 05 00 	mov    0x567c8(%r10),%r11
+  23dd35:	48 89 85 24 ff ff ff 	mov    %rax,-0xdc(%rbp)
+  23dd3c:	41 8b 81 80 39 00 00 	mov    0x3980(%r9),%eax
+  23dd43:	89 85 2c ff ff ff    	mov    %eax,-0xd4(%rbp)
+  23dd49:	49 8b 81 84 39 00 00 	mov    0x3984(%r9),%rax
+  23dd50:	48 89 85 30 ff ff ff 	mov    %rax,-0xd0(%rbp)
+  23dd57:	49 8b 81 8c 39 00 00 	mov    0x398c(%r9),%rax
+  23dd5e:	48 89 85 38 ff ff ff 	mov    %rax,-0xc8(%rbp)
+  23dd65:	49 8b 81 94 39 00 00 	mov    0x3994(%r9),%rax
+  23dd6c:	48 89 85 40 ff ff ff 	mov    %rax,-0xc0(%rbp)
+  23dd73:	31 c0                	xor    %eax,%eax
+  23dd75:	48 63 f0             	movslq %eax,%rsi
+  23dd78:	48 63 d0             	movslq %eax,%rdx
+  23dd7b:	48 8d 0c 85 00 00 00 	lea    0x0(,%rax,4),%rcx
+  23dd82:	00 
+  23dd83:	48 83 fe 08          	cmp    $0x8,%rsi
+  23dd87:	0f 83 15 02 00 00    	jae    23dfa2 <mes_v11_0_set_hw_resources+0x332>
+  23dd8d:	41 8b 34 83          	mov    (%r11,%rax,4),%esi
+  23dd91:	49 8b 9a 48 78 05 00 	mov    0x57848(%r10),%rbx
+  23dd98:	41 89 74 80 68       	mov    %esi,0x68(%r8,%rax,4)
+  23dd9d:	48 01 cb             	add    %rcx,%rbx
+  23dda0:	48 83 fa 08          	cmp    $0x8,%rdx
+  23dda4:	0f 83 89 01 00 00    	jae    23df33 <mes_v11_0_set_hw_resources+0x2c3>
+  23ddaa:	8b 33                	mov    (%rbx),%esi
+  23ddac:	49 03 8a c8 88 05 00 	add    0x588c8(%r10),%rcx
+  23ddb3:	41 89 b4 80 88 00 00 	mov    %esi,0x88(%r8,%rax,4)
+  23ddba:	00 
+  23ddbb:	48 83 fa 08          	cmp    $0x8,%rdx
+  23ddbf:	0f 83 0d 01 00 00    	jae    23ded2 <mes_v11_0_set_hw_resources+0x262>
+  23ddc5:	8b 11                	mov    (%rcx),%edx
+  23ddc7:	41 89 94 80 a8 00 00 	mov    %edx,0xa8(%r8,%rax,4)
+  23ddce:	00 
+  23ddcf:	48 83 c0 01          	add    $0x1,%rax
+  23ddd3:	48 83 f8 05          	cmp    $0x5,%rax
+  23ddd7:	75 9c                	jne    23dd75 <mes_v11_0_set_hw_resources+0x105>
+  23ddd9:	48 ba 47 04 00 00 32 	movabs $0x3200000447,%rdx
+  23dde0:	00 00 00 
+  23dde3:	48 8b 45 c8          	mov    -0x38(%rbp),%rax
+  23dde7:	25 b8 fb ff ff       	and    $0xfffffbb8,%eax
+  23ddec:	48 09 d0             	or     %rdx,%rax
+  23ddef:	48 89 45 c8          	mov    %rax,-0x38(%rbp)
+  23ddf3:	8b 05 00 00 00 00    	mov    0x0(%rip),%eax        # 23ddf9 <mes_v11_0_set_hw_resources+0x189>
+			23ddf5: R_X86_64_PC32	amdgpu_mes_log_enable-0x4
+  23ddf9:	85 c0                	test   %eax,%eax
+  23ddfb:	74 0f                	je     23de0c <mes_v11_0_set_hw_resources+0x19c>
+  23ddfd:	80 4d c9 02          	orb    $0x2,-0x37(%rbp)
+  23de01:	49 8b 81 58 3c 00 00 	mov    0x3c58(%r9),%rax
+  23de08:	48 89 45 d8          	mov    %rax,-0x28(%rbp)
+  23de0c:	41 83 ba a8 df 05 00 	cmpl   $0x1,0x5dfa8(%r10)
+  23de13:	01 
+  23de14:	75 04                	jne    23de1a <mes_v11_0_set_hw_resources+0x1aa>
+  23de16:	80 4d ca 02          	orb    $0x2,-0x36(%rbp)
+  23de1a:	ba c8 00 00 00       	mov    $0xc8,%edx
+  23de1f:	4c 89 c6             	mov    %r8,%rsi
+  23de22:	4c 89 cf             	mov    %r9,%rdi
+  23de25:	e8 86 f3 ff ff       	call   23d1b0 <mes_v11_0_submit_pkt_and_poll_completion.constprop.0>
+  23de2a:	48 8b 55 f0          	mov    -0x10(%rbp),%rdx
+  23de2e:	65 48 2b 15 00 00 00 	sub    %gs:0x0(%rip),%rdx        # 23de36 <mes_v11_0_set_hw_resources+0x1c6>
+  23de35:	00 
+			23de32: R_X86_64_PC32	__ref_stack_chk_guard-0x4
+  23de36:	0f 85 d1 01 00 00    	jne    23e00d <mes_v11_0_set_hw_resources+0x39d>
+  23de3c:	48 8b 5d f8          	mov    -0x8(%rbp),%rbx
+  23de40:	c9                   	leave
+  23de41:	31 d2                	xor    %edx,%edx
+  23de43:	31 c9                	xor    %ecx,%ecx
+  23de45:	31 f6                	xor    %esi,%esi
+  23de47:	31 ff                	xor    %edi,%edi
+  23de49:	45 31 c0             	xor    %r8d,%r8d
+  23de4c:	45 31 c9             	xor    %r9d,%r9d
+  23de4f:	45 31 d2             	xor    %r10d,%r10d
+  23de52:	45 31 db             	xor    %r11d,%r11d
+  23de55:	e9 00 00 00 00       	jmp    23de5a <mes_v11_0_set_hw_resources+0x1ea>
+			23de56: R_X86_64_PLT32	__x86_return_thunk-0x4
+  23de5a:	48 89 d6             	mov    %rdx,%rsi
+  23de5d:	48 c7 c7 00 00 00 00 	mov    $0x0,%rdi
+			23de60: R_X86_64_32S	.data+0x6c0e0
+  23de64:	4c 89 8d e0 fe ff ff 	mov    %r9,-0x120(%rbp)
+  23de6b:	4c 89 95 e8 fe ff ff 	mov    %r10,-0x118(%rbp)
+  23de72:	e8 00 00 00 00       	call   23de77 <mes_v11_0_set_hw_resources+0x207>
+			23de73: R_X86_64_PLT32	__ubsan_handle_out_of_bounds-0x4
+  23de77:	4c 8b 8d e0 fe ff ff 	mov    -0x120(%rbp),%r9
+  23de7e:	4c 8b 95 e8 fe ff ff 	mov    -0x118(%rbp),%r10
+  23de85:	4c 8d 85 f0 fe ff ff 	lea    -0x110(%rbp),%r8
+  23de8c:	e9 7f fe ff ff       	jmp    23dd10 <mes_v11_0_set_hw_resources+0xa0>
+  23de91:	48 c7 c7 00 00 00 00 	mov    $0x0,%rdi
+			23de94: R_X86_64_32S	.data+0x6c100
+  23de98:	4c 89 8d d8 fe ff ff 	mov    %r9,-0x128(%rbp)
+  23de9f:	89 95 e0 fe ff ff    	mov    %edx,-0x120(%rbp)
+  23dea5:	4c 89 95 e8 fe ff ff 	mov    %r10,-0x118(%rbp)
+  23deac:	e8 00 00 00 00       	call   23deb1 <mes_v11_0_set_hw_resources+0x241>
+			23dead: R_X86_64_PLT32	__ubsan_handle_out_of_bounds-0x4
+  23deb1:	4c 8b 8d d8 fe ff ff 	mov    -0x128(%rbp),%r9
+  23deb8:	48 63 95 e0 fe ff ff 	movslq -0x120(%rbp),%rdx
+  23debf:	4c 8d 85 f0 fe ff ff 	lea    -0x110(%rbp),%r8
+  23dec6:	4c 8b 95 e8 fe ff ff 	mov    -0x118(%rbp),%r10
+  23decd:	e9 34 fe ff ff       	jmp    23dd06 <mes_v11_0_set_hw_resources+0x96>
+  23ded2:	48 89 d6             	mov    %rdx,%rsi
+  23ded5:	48 c7 c7 00 00 00 00 	mov    $0x0,%rdi
+			23ded8: R_X86_64_32S	.data+0x6c080
+  23dedc:	4c 89 8d c8 fe ff ff 	mov    %r9,-0x138(%rbp)
+  23dee3:	4c 89 9d d0 fe ff ff 	mov    %r11,-0x130(%rbp)
+  23deea:	48 89 85 d8 fe ff ff 	mov    %rax,-0x128(%rbp)
+  23def1:	4c 89 95 e0 fe ff ff 	mov    %r10,-0x120(%rbp)
+  23def8:	48 89 8d e8 fe ff ff 	mov    %rcx,-0x118(%rbp)
+  23deff:	e8 00 00 00 00       	call   23df04 <mes_v11_0_set_hw_resources+0x294>
+			23df00: R_X86_64_PLT32	__ubsan_handle_out_of_bounds-0x4
+  23df04:	4c 8b 8d c8 fe ff ff 	mov    -0x138(%rbp),%r9
+  23df0b:	4c 8b 9d d0 fe ff ff 	mov    -0x130(%rbp),%r11
+  23df12:	4c 8d 85 f0 fe ff ff 	lea    -0x110(%rbp),%r8
+  23df19:	48 8b 85 d8 fe ff ff 	mov    -0x128(%rbp),%rax
+  23df20:	4c 8b 95 e0 fe ff ff 	mov    -0x120(%rbp),%r10
+  23df27:	48 8b 8d e8 fe ff ff 	mov    -0x118(%rbp),%rcx
+  23df2e:	e9 92 fe ff ff       	jmp    23ddc5 <mes_v11_0_set_hw_resources+0x155>
+  23df33:	48 89 d6             	mov    %rdx,%rsi
+  23df36:	48 c7 c7 00 00 00 00 	mov    $0x0,%rdi
+			23df39: R_X86_64_32S	.data+0x6c0a0
+  23df3d:	4c 89 8d c0 fe ff ff 	mov    %r9,-0x140(%rbp)
+  23df44:	4c 89 9d c8 fe ff ff 	mov    %r11,-0x138(%rbp)
+  23df4b:	48 89 85 d0 fe ff ff 	mov    %rax,-0x130(%rbp)
+  23df52:	4c 89 95 d8 fe ff ff 	mov    %r10,-0x128(%rbp)
+  23df59:	48 89 8d e0 fe ff ff 	mov    %rcx,-0x120(%rbp)
+  23df60:	48 89 95 e8 fe ff ff 	mov    %rdx,-0x118(%rbp)
+  23df67:	e8 00 00 00 00       	call   23df6c <mes_v11_0_set_hw_resources+0x2fc>
+			23df68: R_X86_64_PLT32	__ubsan_handle_out_of_bounds-0x4
+  23df6c:	4c 8b 8d c0 fe ff ff 	mov    -0x140(%rbp),%r9
+  23df73:	4c 8b 9d c8 fe ff ff 	mov    -0x138(%rbp),%r11
+  23df7a:	4c 8d 85 f0 fe ff ff 	lea    -0x110(%rbp),%r8
+  23df81:	48 8b 85 d0 fe ff ff 	mov    -0x130(%rbp),%rax
+  23df88:	4c 8b 95 d8 fe ff ff 	mov    -0x128(%rbp),%r10
+  23df8f:	48 8b 8d e0 fe ff ff 	mov    -0x120(%rbp),%rcx
+  23df96:	48 8b 95 e8 fe ff ff 	mov    -0x118(%rbp),%rdx
+  23df9d:	e9 08 fe ff ff       	jmp    23ddaa <mes_v11_0_set_hw_resources+0x13a>
+  23dfa2:	48 c7 c7 00 00 00 00 	mov    $0x0,%rdi
+			23dfa5: R_X86_64_32S	.data+0x6c0c0
+  23dfa9:	4c 89 8d c0 fe ff ff 	mov    %r9,-0x140(%rbp)
+  23dfb0:	4c 89 9d c8 fe ff ff 	mov    %r11,-0x138(%rbp)
+  23dfb7:	89 95 d0 fe ff ff    	mov    %edx,-0x130(%rbp)
+  23dfbd:	48 89 85 d8 fe ff ff 	mov    %rax,-0x128(%rbp)
+  23dfc4:	4c 89 95 e0 fe ff ff 	mov    %r10,-0x120(%rbp)
+  23dfcb:	48 89 8d e8 fe ff ff 	mov    %rcx,-0x118(%rbp)
+  23dfd2:	e8 00 00 00 00       	call   23dfd7 <mes_v11_0_set_hw_resources+0x367>
+			23dfd3: R_X86_64_PLT32	__ubsan_handle_out_of_bounds-0x4
+  23dfd7:	4c 8b 8d c0 fe ff ff 	mov    -0x140(%rbp),%r9
+  23dfde:	4c 8b 9d c8 fe ff ff 	mov    -0x138(%rbp),%r11
+  23dfe5:	4c 8d 85 f0 fe ff ff 	lea    -0x110(%rbp),%r8
+  23dfec:	48 63 95 d0 fe ff ff 	movslq -0x130(%rbp),%rdx
+  23dff3:	48 8b 85 d8 fe ff ff 	mov    -0x128(%rbp),%rax
+  23dffa:	4c 8b 95 e0 fe ff ff 	mov    -0x120(%rbp),%r10
+  23e001:	48 8b 8d e8 fe ff ff 	mov    -0x118(%rbp),%rcx
+  23e008:	e9 80 fd ff ff       	jmp    23dd8d <mes_v11_0_set_hw_resources+0x11d>
+  23e00d:	e8 00 00 00 00       	call   23e012 <mes_v11_0_set_hw_resources+0x3a2>
+			23e00e: R_X86_64_PLT32	__stack_chk_fail-0x4
+
+Disassembly of section .init.text:
+
+Disassembly of section .exit.text:
+
+Disassembly of section .altinstr_replacement:
+
+Disassembly of section .altinstr_aux:
+
+Disassembly of section .static_call.text:

@@ -1,0 +1,13 @@
+{
+  "host": "ubt26",
+  "product": "Precision Tower 7910",
+  "bios": "A34",
+  "cpus": "2 x Xeon E5-2699C v4",
+  "numa_nodes": 2,
+  "snoop_mode": "Home",
+  "cluster_on_die": false,
+  "isochronous_mode": false,
+  "node_interleaving": "Not directly readable with these tokens; Linux exposes two NUMA nodes",
+  "method": "Read-only libsmbios token queries: 042c,042d,0430,045d,042e,042f. 01c4/01c5 unsupported.",
+  "firmware_changed": false
+}

@@ -1,0 +1,32 @@
+// Standalone HIP queue-lifecycle reproducer for mw00/project-maya#841.
+// Modes: 0 = leak five first-pass streams; 1 = destroy all between passes;
+// 3 = mode 0 without memset; 4 = mode 0 with default-priority streams only;
+// 5 = mode 1 with default-priority streams only;
+// 6 = stream creation/destruction only (no malloc, memset, or synchronize);
+// 7 = mode 6 with complete teardown between passes.
+// Run in a separate process with no model serving on these GPUs.
+// Optional diagnostic: GPU_MAX_HW_QUEUES=1 ./queues 0
+#include <hip/hip_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
+#include <vector>
+void check(hipError_t r,const char* what){if(r!=hipSuccess){fprintf(stderr,"%s: %s\n",what,hipGetErrorString(r));exit(1);}}
+int main(int argc,char**argv){
+ int mode=argc>1?atoi(argv[1]):0, count=0;check(hipGetDeviceCount(&count),"devices");
+ printf("mode=%d devices=%d\n",mode,count);fflush(stdout);
+ std::vector<std::vector<hipStream_t>> held(count);
+ for(int pass=0;pass<2;++pass){
+  for(int d=0;d<count;++d){check(hipSetDevice(d),"device");int lo=0,hi=0;check(hipDeviceGetStreamPriorityRange(&lo,&hi),"priority");
+   if(mode==4||mode==5)hi=0;
+   void*p=nullptr;if(mode<6)check(hipMalloc(&p,4096),"malloc");
+   for(int i=0;i<6;++i){hipStream_t s;check(hipStreamCreateWithPriority(&s,hipStreamNonBlocking,i<2?hi:0),"create");held[d].push_back(s);if(mode!=3 && mode<6)check(hipMemsetAsync(p,0,4096,s),"memset");}
+   if(mode<6){check(hipDeviceSynchronize(),"sync");check(hipFree(p),"free");}
+  }
+  printf("pass=%d created-and-synchronized\n",pass);fflush(stdout);sleep(8);
+  if(pass==0){for(int d=0;d<count;++d){check(hipSetDevice(d),"device");auto&v=held[d];if(mode==1||mode==5||mode==7){for(auto s:v)check(hipStreamDestroy(s),"destroy-all");v.clear();}else{check(hipStreamDestroy(v[0]),"destroy-main");v.erase(v.begin());}}printf("pass=0 teardown done\n");fflush(stdout);sleep(8);}
+ }
+ printf("all work synchronized; idle\n");fflush(stdout);sleep(15);
+ for(int d=0;d<count;++d){check(hipSetDevice(d),"device");for(auto s:held[d])check(hipStreamDestroy(s),"final-destroy");}
+ printf("all streams destroyed; idle\n");fflush(stdout);sleep(8);
+}

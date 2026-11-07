@@ -1,0 +1,44 @@
+{
+  "kernel": "7.4.0-070400rc1-generic",
+  "expected_kernel_running": true,
+  "boot_id_changed": true,
+  "saved_default_preserved": true,
+  "one_time_entry_cleared": true,
+  "panic_timeout_seconds": 30,
+  "kfd_present": true,
+  "gpu_count": 4,
+  "gpus": [
+    {
+      "card": "card0",
+      "vram_total": 21458059264,
+      "vram_used": 2260623360,
+      "busy": 1
+    },
+    {
+      "card": "card1",
+      "vram_total": 21458059264,
+      "vram_used": 3210518528,
+      "busy": 2
+    },
+    {
+      "card": "card2",
+      "vram_total": 21458059264,
+      "vram_used": 2577424384,
+      "busy": 3
+    },
+    {
+      "card": "card3",
+      "vram_total": 21458059264,
+      "vram_used": 2789117952,
+      "busy": 1
+    }
+  ],
+  "services": {
+    "ssh": "active",
+    "docker": "active",
+    "containerd": "active"
+  },
+  "glm_health": {
+    "status": "not-ready"
+  }
+}

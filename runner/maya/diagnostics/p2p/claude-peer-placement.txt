@@ -1,0 +1,2 @@
+ds4: copied expert cache: DONTNEED hints accepted for 237.635 GB of whole source pages (eviction is advisory)
+ds4: DS4_AR_P2P: 6.7 MB of all-reduce buffers in their group's first GPU, peers reaching them directly, 3200 MiB left host-mapped (no room)

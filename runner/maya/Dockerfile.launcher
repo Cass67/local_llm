@@ -1,0 +1,5 @@
+# Update the launcher on an already built, pinned Maya engine image.
+# The canonical Dockerfile also copies this launcher during a clean build.
+ARG BASE_IMAGE=local-llm-runner-maya:latest
+FROM ${BASE_IMAGE}
+COPY maya-runner.py /opt/maya/maya-runner.py

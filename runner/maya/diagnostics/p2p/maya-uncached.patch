@@ -1,0 +1,19 @@
+--- a/src/ds4/ds4_model.cu
++++ b/src/ds4/ds4_model.cu
+@@ -2757,7 +2757,15 @@
+             }
+             void* v = nullptr;
+             cudaSetDevice(b.home);
+-            if (ok && (cudaMalloc(&v, b.bytes) != cudaSuccess || cudaMemset(v, 0, b.bytes) != cudaSuccess)) {
++            const auto peer_alloc = [](void** out, size_t bytes) {
++#if defined(STRATA_USE_HIP)
++                const char* uncached = std::getenv("DS4_AR_P2P_UNCACHED");
++                if (uncached != nullptr && std::atoi(uncached) != 0)
++                    return hipExtMallocWithFlags(out, bytes, hipDeviceMallocUncached);
++#endif
++                return cudaMalloc(out, bytes);
++            };
++            if (ok && (peer_alloc(&v, b.bytes) != cudaSuccess || cudaMemset(v, 0, b.bytes) != cudaSuccess)) {
+                 (void) cudaGetLastError();
+                 if (v != nullptr) cudaFree(v);
+                 v = nullptr;
