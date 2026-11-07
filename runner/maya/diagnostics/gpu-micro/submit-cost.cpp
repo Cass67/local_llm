@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 __global__ void empty_kernel() {}
@@ -29,10 +30,17 @@ static double pct(std::vector<double>& v, double p) {
 
 int main(int argc, char** argv) {
     int steps = argc > 1 ? std::atoi(argv[1]) : 2000, count = 0;
+    // SUBMIT_SCHED=spin|yield|block sets how the host waits in hipStreamSynchronize.
+    const char* sched = std::getenv("SUBMIT_SCHED");
+    unsigned flags = !sched                            ? hipDeviceScheduleAuto
+                     : std::string(sched) == "spin"  ? hipDeviceScheduleSpin
+                     : std::string(sched) == "yield" ? hipDeviceScheduleYield
+                                                     : hipDeviceScheduleBlockingSync;
     ck(hipGetDeviceCount(&count));
     std::vector<hipStream_t> streams(count);
     for (int d = 0; d < count; ++d) {
         ck(hipSetDevice(d));
+        if (sched) ck(hipSetDeviceFlags(flags));
         ck(hipStreamCreateWithFlags(&streams[d], hipStreamNonBlocking));
     }
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -42,19 +50,26 @@ int main(int argc, char** argv) {
                 std::vector<double> total, launch, wait;
                 for (int s = 0; s < steps + 100; ++s) {
                     double t0 = now_us(), l = 0, w = 0;
+                    // A stream only accepts work while its device is current; without the
+                    // hipSetDevice the launch fails and the "sync" returns at once.
                     for (int i = 0; i < n; ++i) {
                         if (chain && i) {
                             double a = now_us();
+                            ck(hipSetDevice((i - 1) % cards));
                             ck(hipStreamSynchronize(streams[(i - 1) % cards]));
                             w += now_us() - a;
                         }
                         double a = now_us();
+                        ck(hipSetDevice(i % cards));
                         hipLaunchKernelGGL(empty_kernel, dim3(1), dim3(1), 0, streams[i % cards]);
+                        ck(hipGetLastError());
                         l += now_us() - a;
                     }
                     double a = now_us();
-                    for (int c = 0; c < std::min(cards, n); ++c)
+                    for (int c = 0; c < std::min(cards, n); ++c) {
+                        ck(hipSetDevice(c));
                         ck(hipStreamSynchronize(streams[c]));
+                    }
                     w += now_us() - a;
                     if (s >= 100) {  // first steps carry queue and code-object setup
                         total.push_back(now_us() - t0);

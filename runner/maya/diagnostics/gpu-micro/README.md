@@ -32,12 +32,15 @@ Kernel 7.4.0-rc1, Maya v1.1.55 image `a2430cbf`.
 both full reads and one word per 64-byte line. The ~65% seen in llama.cpp decode is therefore
 software or access pattern, not the memory system.
 
-**Submit:** HIP launch costs ~0.45 µs per kernel on any card, so it is not a real cost. Cross-card
-waits are ~0.3 µs per handoff on 1-3 cards and ~4.5 µs once a fourth device is in the step.
-Reordering devices (`3,0,1,2`) keeps that ~4.5 µs, so the cost comes from using four devices,
-not from card3. Unexplained: with a single visible device (`HIP_VISIBLE_DEVICES=0` or `3`),
-launches slow to ~2 µs and chain waits to ~17 µs per kernel. Using the same card while all four
-are visible is fast.
+**Submit:** a launch costs ~1.9 µs and a single-kernel round trip ~20 µs. A chained handoff is
+~20 µs on one card and ~29 µs across two. Across four cards it is ~145 µs with HIP's default wait
+(auto, and yield too), but ~32 µs with `hipDeviceScheduleSpin`, `hipDeviceScheduleBlockingSync`
+or `HSA_ENABLE_INTERRUPT=0`. `GPU_MAX_HW_QUEUES=1` and the CPU socket change nothing.
+Try the scheduling flags with `SUBMIT_SCHED=spin|yield|block`.
+
+The first version of this bench launched onto streams whose device was not current. HIP rejects
+that with `invalid resource handle`, and the bench did not check, so its "0.3 µs" numbers were
+failed launches. Always `hipSetDevice` to the stream's device and check `hipGetLastError`.
 
 **Idle burn:** `queue-steps 1 2 4` reaches 9 queues, and card1 sits at 16-17% busy / 15 W
 until exit. `1 0 6` and `GPU_MAX_HW_QUEUES=1` stay at 0%. That matches the 7.4 partial fix in
