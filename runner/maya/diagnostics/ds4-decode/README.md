@@ -68,3 +68,20 @@ Warm `pair.py` means (temp 0, round 2): v1.1.55 61.2 tok/s, v1.1.56 63.9, and v1
 so the v1.1.56 difference is not established. P2P never engaged: the engine logged "stays
 host-mapped" because `hipDeviceCanAccessPeer` allows only HIP 0 <-> 1. HIP 2 and 3 have no peer
 access, even to each other. A 4-card peer all-reduce is not possible on this board.
+
+## Segment graphs (DS4_SEG_GRAPH), 2026-11-07
+
+Branch `ds4-decode-graph` in `~/git/maya-ds4graph` (local commit ba1eed4, on v1.1.56). Each layer's
+four fixed-argument runs (attention in, attention out, FFN mix, shared expert) are recorded through
+`pdl_launch` and `plain_launch`, hashed over every argument byte, and replayed as captured graphs.
+Built with `devbuild.sh v1.1.56-seg`.
+
+- Hits: about 99.9% once `Q8Round`'s and `gg::mv`'s job arrays were zeroed. Before that, their
+  unused slots changed the hash every token.
+- Speed: warm 61.6 tok/s with graphs vs 61.3 without, so no gain.
+- Why: card 0's idle time fell from 1342 to 619 ms per 3 s, so the launch starvation is fixed. HIP 2
+  (Agent 4) then became the late card, with 1492 ms idle per 3 s. Its gaps fall at graph starts
+  and even between nodes inside one graph (`hc_post -> hc_mix`). Untested guess: ROCm submits a
+  graph's nodes lazily.
+- Greedy output at temp 0 differs between two graphs-off runs, from the first character, so text
+  comparison cannot test correctness on DS4.
