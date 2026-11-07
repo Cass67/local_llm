@@ -241,3 +241,18 @@ Engine commit c40e6c6 (`ds4-decode-graph`), images `:v1.1.56-probe`, `:v1.1.56-s
 - Causal test, `DS4_LAUNCH_PAD_US=3` (3 us of host spin after every launch, about +50% launch cost): warm 64.4 vs 64.2.
   Launch cost is not on the decode critical path, so whole-layer graphs or one launcher thread would not raise tok/s.
   The cards' idle gaps are waits on each other and on the host, not launch starvation.
+
+## Where the all-reduce wait comes from, 2026-11-07
+
+- From the PF=2 kernel trace (`arlate.py`, `arseg.py`, `arlayer.py` on ubt26 `~/scratch/hsaint`): the lead arrives last
+  at both all-reduces, by a median 424 us at the MoE one and 319 us at the attention one. Between the MoE all-reduce and
+  the next attention all-reduce the lead takes ~550 us against ~225 us on a member, at every layer position. Same kernels,
+  same busy time; the lead's difference is idle gaps before ordinary kernels.
+- perf: the per-card launcher threads are on-CPU ~23% and sleep in their worker loop between windows (each launches a
+  window in ~8 ms). The main thread is 82% blocked in `forward` waiting on the GPU. Four other busy threads are the
+  expert cache swap threads (`cache_loop`), not launchers. With the flat `DS4_LAUNCH_PAD_US` test this rules out launch
+  starvation; the traced gaps may partly be rocprofv3's per-dispatch hooks.
+- Causal test, every CPU-lane expert skipped (`RAM_SKIP_W=2`, changes the answers, test only): layer calls/s 1247 ->
+  1530 (+23%), cycle 802 -> 654 us = lane 35 + GPU part 619 (up from 526: some GPU work had hidden under the lane). Warm
+  tok/s 74.2 with lower draft acceptance. So the lane's remaining share is at most ~20%, and ~400 us of each layer's
+  619 us GPU part is cross-card waiting, not compute (~200 us), even with no CPU work.
