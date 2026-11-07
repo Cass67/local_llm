@@ -124,3 +124,6 @@ id_dsa.*
 # Python bytecode and caches.
 *.py[cod]
 
+
+# playwright CLI session logs
+.playwright-cli/
