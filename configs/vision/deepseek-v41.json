@@ -1,0 +1,12 @@
+{
+  "family": "DeepSeek-V4.1-Flash-1017",
+  "repo": "unsloth/DeepSeek-V4.1-Flash-1017-GGUF",
+  "revision": "8a6ec9cf118e785a362ea94ee123c61c70553be6",
+  "file": "mmproj-BF16.gguf",
+  "bytes": 972208288,
+  "sha256": "9a1ef7c40d0d702c7ed8c5f863f60abae64091387ba3fce0ad19ce9beeda3bf9",
+  "shared_runtime_dir": "/mnt/models/unsloth-dsv41/vision",
+  "packer": "tools/ds4/vision_pack.py --dir <shared_runtime_dir> --mmproj <downloaded_file>",
+  "attach": "scripts/maya-add-vision.py --pack <existing_pack> --vision <shared_runtime_dir> --backup <backup_dir> --apply",
+  "engine_args": ["--vision", "on"]
+}
