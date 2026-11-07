@@ -225,3 +225,19 @@ Gaps of 500 us or more (draft-round boundaries) are 6%. Segment graphs cut the l
 move: the expert path's kernels, which take per-token arguments, are still launched one at a time. The next lever is
 graph capture of the whole layer with per-token values read from device memory, so that all four launcher threads stop
 contending in the HIP runtime.
+
+## Whole-layer graphs: not built, 2026-11-07
+
+Engine commit c40e6c6 (`ds4-decode-graph`), images `:v1.1.56-probe`, `:v1.1.56-seg2`, `:v1.1.56-pad`.
+
+- `DS4_SEG_PROBE=1` lists which kernels' arguments change token to token: the two all-reduces, the mailbox kernels
+  (publish, wait_seq, mx_wait, route_publish) and mx_combine on every token (sequence numbers, ring slots); the attention
+  ring/position kernels 62-100%; everything else (q8_mv, q8_quant, hc_*, swiglu, mx_gate_up/down) is constant.
+- Gap causes with `--hip-runtime-trace` (inflates host times): every card's queue runs dry 29-38% of wall with its
+  launcher in `hipLaunchKernel` or engine code. The old segment recorder hashed every argument byte and heap-allocated
+  a closure per launch; it was rewritten (arena, word hash). Graphs were still flat: 64.1 vs 65.0 warm.
+- No HIP setting (`AMD_DIRECT_DISPATCH=0`, `GPU_MAX_HW_QUEUES=1`, `HIP_FORCE_DEV_KERNARG=0`, ...) lowers the contended
+  launch cost in `../gpu-micro/launch-cost.cpp`.
+- Causal test, `DS4_LAUNCH_PAD_US=3` (3 us of host spin after every launch, about +50% launch cost): warm 64.4 vs 64.2.
+  Launch cost is not on the decode critical path, so whole-layer graphs or one launcher thread would not raise tok/s.
+  The cards' idle gaps are waits on each other and on the host, not launch starvation.
