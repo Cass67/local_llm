@@ -1,0 +1,20 @@
+{"t": 0.0, "stage": "starting", "queues": {}, "gpus": {"card0": {"busy": 0, "watts": 9.0}, "card1": {"busy": 0, "watts": 13.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 14.0}}}
+{"result": {"mode": "stream", "arg_bytes": 8, "threads": 1, "launch_us_p50": [2.38]}}
+{"result": {"mode": "stream", "arg_bytes": 256, "threads": 1, "launch_us_p50": [3.37]}}
+{"result": {"mode": "stream", "arg_bytes": 1024, "threads": 1, "launch_us_p50": [3.77]}}
+{"result": {"mode": "stream", "arg_bytes": 2048, "threads": 1, "launch_us_p50": [3.9]}}
+{"t": 0.51, "stage": "starting", "queues": {"3819043": 9}, "gpus": {"card0": {"busy": 1, "watts": 13.0}, "card1": {"busy": 44, "watts": 41.0}, "card2": {"busy": 1, "watts": 12.0}, "card3": {"busy": 1, "watts": 14.0}}}
+{"result": {"mode": "stream", "arg_bytes": 8, "threads": 4, "launch_us_p50": [3.67, 4.12, 3.39, 4.04]}}
+{"result": {"mode": "stream", "arg_bytes": 256, "threads": 4, "launch_us_p50": [6.2, 6.13, 5.98, 5.74]}}
+{"result": {"mode": "stream", "arg_bytes": 1024, "threads": 4, "launch_us_p50": [6.55, 7.26, 5.96, 6.04]}}
+{"t": 1.01, "stage": "starting", "queues": {"3819043": 18}, "gpus": {"card0": {"busy": 44, "watts": 43.0}, "card1": {"busy": 47, "watts": 43.0}, "card2": {"busy": 46, "watts": 52.0}, "card3": {"busy": 38, "watts": 44.0}}}
+{"result": {"mode": "stream", "arg_bytes": 2048, "threads": 4, "launch_us_p50": [8.89, 8.09, 6.67, 8.02]}}
+{"result": {"mode": "graph", "arg_bytes": 8, "threads": 1, "launch_us_p50": [0.05]}}
+{"result": {"mode": "graph", "arg_bytes": 256, "threads": 1, "launch_us_p50": [0.07]}}
+{"result": {"mode": "graph", "arg_bytes": 1024, "threads": 1, "launch_us_p50": [0.08]}}
+{"result": {"mode": "graph", "arg_bytes": 2048, "threads": 1, "launch_us_p50": [0.09]}}
+{"result": {"mode": "graph", "arg_bytes": 8, "threads": 4, "launch_us_p50": [0.09, 0.07, 0.06, 0.07]}}
+{"result": {"mode": "graph", "arg_bytes": 256, "threads": 4, "launch_us_p50": [0.08, 0.08, 0.07, 0.07]}}
+{"result": {"mode": "graph", "arg_bytes": 1024, "threads": 4, "launch_us_p50": [0.08, 0.08, 0.07, 0.09]}}
+{"result": {"mode": "graph", "arg_bytes": 2048, "threads": 4, "launch_us_p50": [0.09, 0.07, 0.08, 0.08]}}
+{"t": 1.52, "stage": "starting", "queues": {"3819043": 20}, "gpus": {"card0": {"busy": 26, "watts": 30.0}, "card1": {"busy": 35, "watts": 32.0}, "card2": {"busy": 25, "watts": 39.0}, "card3": {"busy": 25, "watts": 35.0}}}

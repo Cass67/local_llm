@@ -45,9 +45,17 @@ The first version of this bench launched onto streams whose device was not curre
 that with `invalid resource handle`, and the bench did not check, so its "0.3 µs" numbers were
 failed launches. Always `hipSetDevice` to the stream's device and check `hipGetLastError`.
 
-**Graphs:** with 20 µs kernels the gap is 2.0-2.1 µs per kernel for both stream launches and graph
-replay, on HIP 0 and 3. With empty kernels, graphs save only 0.3-0.5 µs. On gfx1100 a graph saves
-host time, not GPU time, so it only helps when the launching thread falls behind the GPU.
+**Graphs, GPU side:** with 20 µs kernels the gap is 2.0-2.1 µs per kernel for both stream
+launches and graph replay, on HIP 0 and 3. With empty kernels, graphs save only 0.3-0.5 µs.
+
+**Launch, host side** (`launch-cost.cpp`): one `hipLaunchKernel` costs 2.1-2.4 µs with 8-byte
+args and 3.4-3.9 µs with 256 B-2 KB, on one thread. With four threads launching to four cards at
+once it costs 3.4-4.3 µs and 5.2-8.9 µs, which is runtime lock contention. `HIP_FORCE_DEV_KERNARG`
+makes no difference. `hipGraphLaunch` costs 0.05-0.09 µs per node, with one thread or four.
+
+So a graph does not make the GPU faster, but it keeps the GPU fed whenever kernels are shorter
+than the launch cost. Maya DS4 is in that case: card 0's queue runs dry while its launcher is
+inside `hipLaunchKernel` (see `../ds4-decode/`).
 
 **Idle burn:** `queue-steps 1 2 4` reaches 9 queues, and card1 sits at 16-17% busy / 15 W
 until exit. `1 0 6` and `GPU_MAX_HW_QUEUES=1` stay at 0%. That matches the 7.4 partial fix in
