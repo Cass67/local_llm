@@ -128,3 +128,35 @@ Two bottlenecks are about level: the lead's launch overhead and the CPU expert l
 cut together. A faster lead alone just waits for the CPU lane, and a faster CPU lane alone waits for the lead's
 launches. Next: profile the CPU lane (threads, NUMA placement of the RAM experts across the two sockets, memory
 bandwidth per socket), then retry `DS4_SEG_GRAPH=1` on top of any lane gain.
+
+## CPU lane at 62 tok/s, 2026-11-07
+
+This is not bandwidth. Story decode reads 11.4 GB/s from DRAM on socket 0 and 14.4 GB/s on socket 1. Each socket
+gives about 60 GB/s.
+
+perf of the engine, story, 10 s:
+
+| function | share |
+|---|---|
+| `clock_gettime` / `steady_clock::now` spin | 61% |
+| `Pool::loop` | 12% |
+| `mx_avx2::rows`, the real expert math | 17% |
+
+The lane's workers mostly wait for the next call. `DS4_CPU_STATS` counted 113,610 calls averaging 2.2 experts and
+2.6 rows each, spread over 45 threads that spin 20 ms between calls. The per-phase timers read zero on the TP path.
+No lane thread is pinned: `taskset` shows 0-87 for all of them.
+
+Lane threads (`--cpu-threads`, `STRATA_DS4_CPU_LANE=smt` via `MAYA_DS4_CPU_LANE`), warm mean of one run each:
+
+| threads | tok/s |
+|---|---|
+| 16 | 56.7 |
+| 22 | 60.1 |
+| **45** (one per core, production) | **62.4** |
+| 80 (smt, 8 logical CPUs free) | 60.5 |
+| 86 (smt, all but the 2 kept free) | 39.2 |
+
+One thread per physical core is best. Sibling threads slow the per-core workers more than they add. Taking every
+logical CPU starves the GPU launch threads, which is what turning off hyperthreading would do too. Not tried: why
+`os::pin_thread` does not stick in the container. Pinned workers plus reserved cores for the launchers is the
+remaining layout test.
