@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index ca21d39..68dabf9 100644
+index 389bf1c..c920acd 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -622,7 +622,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -642,7 +642,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
      enable_testing()
      add_executable(expert_cache_lend_test tests/core/expert_cache_lend_test.cpp)
      target_include_directories(expert_cache_lend_test PRIVATE ${_strata_gpu_include_directories})
@@ -11,7 +11,7 @@ index ca21d39..68dabf9 100644
      add_test(NAME expert_cache_lend_test COMMAND expert_cache_lend_test)
      set_tests_properties(expert_cache_lend_test PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
    endif()
-@@ -953,12 +953,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -973,12 +973,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
      target_include_directories(mm3_attn_bench PRIVATE ${_strata_gpu_include_directories} include src/mm3 third_party/ggml)
      target_link_libraries(mm3_attn_bench PRIVATE strata_kernels_cpu ${_strata_gpu_runtime_target})
      add_executable(hip_expert_cache_staging tests/hip/expert_cache_staging.cpp)
@@ -26,7 +26,7 @@ index ca21d39..68dabf9 100644
      add_test(NAME hip_glm_expert_helper COMMAND hip_glm_expert_helper)
      set_tests_properties(hip_glm_expert_helper PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
      if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/hip/intrinsics.cpp")
-@@ -1097,6 +1097,14 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -1117,6 +1117,14 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
    target_link_libraries(glm_model_test PRIVATE ${_strata_gpu_glm_libs} ${_strata_gpu_runtime_target})
    add_test(NAME glm_model_test COMMAND glm_model_test --selftest)
    set_tests_properties(glm_model_test PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -41,7 +41,7 @@ index ca21d39..68dabf9 100644
  
    # the 45-layer big fixture: its 1.2 GB GGUF is generated into the build tree by a ctest
    # fixture (far too large to commit); the f64 expectation IS committed (data/glm5-big-dumps)
-@@ -1115,6 +1123,10 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -1135,6 +1143,10 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
    add_executable(glm_pack_test src/core/glm_pack_test.cpp)
    target_include_directories(glm_pack_test PRIVATE ${_strata_gpu_include_directories})
    target_link_libraries(glm_pack_test PRIVATE ${_strata_gpu_glm_libs} ${_strata_gpu_runtime_target})
@@ -52,7 +52,7 @@ index ca21d39..68dabf9 100644
    target_include_directories(glm_model_big_test PRIVATE ${_strata_gpu_include_directories})
    target_link_libraries(glm_model_big_test PRIVATE ${_strata_gpu_glm_libs} ${_strata_gpu_runtime_target})
    find_program(STRATA_PYTHON3 python3)
-@@ -1433,12 +1445,14 @@ if(STRATA_NATIVE_EXPERTS)
+@@ -1453,12 +1465,14 @@ if(STRATA_NATIVE_EXPERTS)
    else()
      target_sources(strata_kernels_cpu PRIVATE src/kernels/cpu/native_expert.cpp)
    endif()
@@ -67,7 +67,7 @@ index ca21d39..68dabf9 100644
      set_source_files_properties(src/kernels/cpu/iq_avx512_one.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX512")
    elseif(STRATA_CPU_X86)
      # (no VNNI / VBMI needed - cpu_avx512bw_ok() is enough to run them; no FP contraction: their sums must take
-@@ -1446,6 +1460,7 @@ if(STRATA_NATIVE_EXPERTS)
+@@ -1466,6 +1480,7 @@ if(STRATA_NATIVE_EXPERTS)
      set_source_files_properties(src/kernels/cpu/iq_avx512.cpp PROPERTIES COMPILE_OPTIONS
                                  "-mavx512f;-mavx512bw;-mavx512vl;-mavx512dq;-mf16c;-mfma;-ffp-contract=off")
      set_source_files_properties(src/kernels/cpu/iq_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mf16c;-ffp-contract=off")
@@ -267,7 +267,7 @@ index b945405..958f696 100644
 +
  }  // namespace strata::kernels
 diff --git a/include/strata/kernels/glm_fast.hpp b/include/strata/kernels/glm_fast.hpp
-index 2ba7c2c..4886c72 100644
+index fbcdaf3..eb8918c 100644
 --- a/include/strata/kernels/glm_fast.hpp
 +++ b/include/strata/kernels/glm_fast.hpp
 @@ -18,6 +18,8 @@
@@ -1009,10 +1009,10 @@ index 0875574..73097df 100644
          # soon as the name is known, then "tool_args" pieces of its JSON arguments (string parameters character by
          # character; other types whole, once complete) - before the final "tool_call".  Without it, a client sees
 diff --git a/serve/server.py b/serve/server.py
-index 6d52f7d..d8eb277 100644
+index 22c0ca9..d23a19c 100644
 --- a/serve/server.py
 +++ b/serve/server.py
-@@ -2379,6 +2379,8 @@ class Service:
+@@ -2380,6 +2380,8 @@ class Service:
                              _special_ids("<｜end▁of▁sentence｜>") + _special_ids("<｜User｜>") +
                              # MiniMax-M3.1 with [e~[ (and would start the next turn with ]~b])
                              _special_ids("[e~[") + _special_ids("]~b]"))
@@ -1021,7 +1021,7 @@ index 6d52f7d..d8eb277 100644
          # DeepSeek's turn openers: where its last user turn starts and its system prompt ends (MAYA_DS4_RESTORE_POINTS)
          self.ds_user_id = (_special_ids("<｜User｜>") or [None])[0]
          self.ds_system_id = (_special_ids("<｜System｜>") or [None])[0]
-@@ -2391,7 +2393,8 @@ class Service:
+@@ -2392,7 +2394,8 @@ class Service:
          # closed with the template's </think> and the answer follows - GLM at High can plan for 14k+ tokens
          self.think_budget = 0
          # (MiniMax-M3.1 closes its reasoning with </mm:think>; its vocabulary may hold a plain "</think>" too)
@@ -1031,7 +1031,7 @@ index 6d52f7d..d8eb277 100644
          self.think_end_id = end[0] if end else None
          # the tokens the engine itself ends a request at, whatever the server does (see THINK_RESTARTS): a pack
          # tokenizer that names its "eos" (DeepSeek's, MiniMax's: their engines' --eos default) ends there only; the
-@@ -4117,6 +4120,7 @@ class Service:
+@@ -4124,6 +4127,7 @@ class Service:
                                  stream_tools=True, dsml=getattr(self.template, "deepseek", False),
                                  token_only_end=getattr(self.template, "deepseek", False) and self.think_end_id is not None,
                                  minimax=getattr(self.template, "minimax", False),
@@ -2101,7 +2101,7 @@ index 0000000..5f8d64f
 +    return 0;
 +}
 diff --git a/src/core/glm_fast_path.cu b/src/core/glm_fast_path.cu
-index 0eec4f0..da1c876 100644
+index 17439f4..f19a42e 100644
 --- a/src/core/glm_fast_path.cu
 +++ b/src/core/glm_fast_path.cu
 @@ -21,6 +21,7 @@
@@ -2111,8 +2111,8 @@ index 0eec4f0..da1c876 100644
 +#include "strata/kernels/cpu/iq2_plane.hpp"
  #include "strata/kernels/cpu/exl3_cpu.hpp"
  #include "strata/kernels/cpu/exl3_ref.hpp"
- #include "strata/platform/idle_gate.hpp"
-@@ -71,6 +72,7 @@
+ #include "strata/platform/env_switch.hpp"
+@@ -72,6 +73,7 @@
  #include <sched.h>
  #include <sys/mman.h>
  #include <sys/syscall.h>
@@ -2120,7 +2120,7 @@ index 0eec4f0..da1c876 100644
  #endif
  
  namespace gf = strata::kernels::glmf;
-@@ -878,7 +880,7 @@ bool Glm5Model::fast_setup(std::string& err) {
+@@ -879,7 +881,7 @@ bool Glm5Model::fast_setup(std::string& err) {
              Ly.enorm = f32("nextn.enorm.weight");
              Ly.hnorm = f32("nextn.hnorm.weight");
              Ly.shnorm = f32("nextn.shared_head_norm.weight");
@@ -2129,7 +2129,7 @@ index 0eec4f0..da1c876 100644
              Ly.hc_attn_fn = b16("hc_attn_fn.weight");
              Ly.hc_ffn_fn = b16("hc_ffn_fn.weight");
              Ly.hc_attn_scale = f32("hc_attn_scale.weight");
-@@ -903,30 +905,55 @@ bool Glm5Model::fast_setup(std::string& err) {
+@@ -904,30 +906,55 @@ bool Glm5Model::fast_setup(std::string& err) {
              Ly.dt_bias = f32("ssm_dt.bias");
              Ly.ssm_a = f32("ssm_a");
              Ly.ssm_norm = f32("ssm_norm.weight");
@@ -2188,7 +2188,7 @@ index 0eec4f0..da1c876 100644
              Ly.sh_gate = q("ffn_gate_shexp.weight");
              Ly.sh_up = q("ffn_up_shexp.weight");
              Ly.sh_down = q("ffn_down_shexp.weight");
-@@ -974,19 +1001,20 @@ bool Glm5Model::fast_setup(std::string& err) {
+@@ -975,19 +1002,20 @@ bool Glm5Model::fast_setup(std::string& err) {
  
      // ---- the activation arena
      const int64_t E = g.n_embd, DI = g.d_inner(), FF = g.n_ff_exp * g.n_shared;
@@ -2213,7 +2213,7 @@ index 0eec4f0..da1c876 100644
          need += (size_t) gf::kAhead * g.n_expert * sizeof(float) + 256 + (size_t) E * sizeof(float) + 256;
          need += (size_t) g.n_sel_max() * sizeof(int) + 256;   // slot_cells
      }
-@@ -1015,13 +1043,14 @@ bool Glm5Model::fast_setup(std::string& err) {
+@@ -1016,13 +1044,14 @@ bool Glm5Model::fast_setup(std::string& err) {
      F->g2 = fa_take(at, DI);
      F->gated_q = fa_take_b(at, (size_t) DI / 32 * q8);
      F->qr_raw = fa_take(at, g.q_lora);
@@ -2232,7 +2232,7 @@ index 0eec4f0..da1c876 100644
      F->iq = fa_take(at, (size_t) g.idx_heads * g.idx_key);
      F->score = fa_take(at, (size_t) max_pools);
      F->cells = (int*) fa_take(at, (size_t) g.n_sel_max());
-@@ -1126,9 +1155,14 @@ bool Glm5Model::fast_setup(std::string& err) {
+@@ -1127,9 +1156,14 @@ bool Glm5Model::fast_setup(std::string& err) {
              }
          }
      }
@@ -2248,7 +2248,7 @@ index 0eec4f0..da1c876 100644
          std::string werr;
          if (win_reserve(werr) && mtp_cache_setup(werr)) {
              mtp_dec_ = true;
-@@ -1850,7 +1884,8 @@ bool Glm5Model::fast_setup(std::string& err) {
+@@ -1855,7 +1889,8 @@ bool Glm5Model::fast_setup(std::string& err) {
              err = "glm fast: the table update buffers did not allocate";
              return false;
          }
@@ -2258,7 +2258,7 @@ index 0eec4f0..da1c876 100644
          for (auto& sbuf : F->stage)
              if (cudaHostAlloc((void**) &sbuf, sstride, cudaHostAllocPortable) != cudaSuccess) {
                  err = "glm fast: pinned disk staging did not allocate";
-@@ -2782,13 +2817,50 @@ void Glm5Model::lane_experts(glmfast::Workers& pool, uint8_t* act, uint8_t* hq,
+@@ -2851,13 +2886,50 @@ void Glm5Model::lane_experts(glmfast::Workers& pool, uint8_t* act, uint8_t* hq,
          return;
      }
      const int gu_tot = ne * n_ff;
@@ -2310,7 +2310,7 @@ index 0eec4f0..da1c876 100644
              q += r1 - r0;
          }
      });
-@@ -2803,7 +2875,12 @@ void Glm5Model::lane_experts(glmfast::Workers& pool, uint8_t* act, uint8_t* hq,
+@@ -2872,7 +2944,12 @@ void Glm5Model::lane_experts(glmfast::Workers& pool, uint8_t* act, uint8_t* hq,
              const int i = q / n_embd, r0 = q % n_embd, r1 = std::min(n_embd, r0 + (q1 - q));
              const void* h[1] = {hq + (size_t) i * kc::kNativeHBytes};
              float* o[1] = {dn + (size_t) i * n_embd};
@@ -2324,7 +2324,7 @@ index 0eec4f0..da1c876 100644
              q += r1 - r0;
          }
      });
-@@ -3206,9 +3283,11 @@ static std::shared_ptr<glmfast::Workers> shared_cpu_pool(int threads) {
+@@ -3275,9 +3352,11 @@ static std::shared_ptr<glmfast::Workers> shared_cpu_pool(int threads) {
      }();
      std::lock_guard<std::mutex> lk(mu);
      std::shared_ptr<glmfast::Workers> p = held.lock();
@@ -2338,7 +2338,7 @@ index 0eec4f0..da1c876 100644
          held = p;
      }
      return p;
-@@ -3387,7 +3466,7 @@ bool Glm5Model::fast_cpu_lane_setup(std::string& err) {
+@@ -3456,7 +3535,7 @@ bool Glm5Model::fast_cpu_lane_setup(std::string& err) {
              pin_node = -1;
          }
      }
@@ -2347,7 +2347,7 @@ index 0eec4f0..da1c876 100644
      namespace kc = strata::kernels::cpu;
      F->cpu_fmt.assign(F->L.size(), kc::NativeFmt{});
      int il_cal = -1;
-@@ -3473,6 +3552,8 @@ bool Glm5Model::fast_cpu_lane_setup(std::string& err) {
+@@ -3542,6 +3621,8 @@ bool Glm5Model::fast_cpu_lane_setup(std::string& err) {
      // the service thread is the pool's last worker; idle workers spin 20 ms (a decode's routes come ~1 ms apart)
      if (shared) {
          F->cpu_pool = shared_cpu_pool(threads);
@@ -2356,7 +2356,7 @@ index 0eec4f0..da1c876 100644
      } else {
          // STRATA_GLM_CPU_LANE_MAX=N, more than the lane's count: the pool holds N threads and starts with the lane's
          // count active (the rest sleep), so a request's cpu_threads can try up to N without a restart - the setup's
-@@ -3488,6 +3569,149 @@ bool Glm5Model::fast_cpu_lane_setup(std::string& err) {
+@@ -3557,6 +3638,149 @@ bool Glm5Model::fast_cpu_lane_setup(std::string& err) {
          F->cpu_node = pin_node;
          F->cpu_pin = pin_cpus;
      }
@@ -2506,7 +2506,7 @@ index 0eec4f0..da1c876 100644
      // one GPU with a DFlash drafter on two NUMA nodes or more: a verify window's tokens on both sockets (win_lane) - the
      // pool then pinned to the GPU's node, a second one on another node.  A decode's one token keeps its node's pool
      // (one token's experts across both sockets measured no faster); a window's tokens are separate answers, so the
-@@ -4196,6 +4420,12 @@ void Glm5Model::fast_destroy() {
+@@ -4265,6 +4489,12 @@ void Glm5Model::fast_destroy() {
      }
      F->ah_cv.notify_all();
      for (auto& t : F->ah_th) t.join();
@@ -2519,7 +2519,7 @@ index 0eec4f0..da1c876 100644
      F->workers.reset();
      win_lanes_stop();   // (after the service thread: it hands them their routes)
      F->cpu_pool.reset();
-@@ -4441,6 +4671,49 @@ double Glm5Model::pcie_share() const {
+@@ -4517,6 +4747,49 @@ double Glm5Model::pcie_share() const {
      return fast_ != nullptr && fast_->cpu_pool != nullptr ? plan_share(fast_->cpu_plan) : 1.0;
  }
  
@@ -2569,7 +2569,7 @@ index 0eec4f0..da1c876 100644
  bool Glm5Model::set_pcie_share(double share) {
      bool any = false;
      for (Glm5Model* m = this; m != nullptr; m = m->split_next_.get()) {
-@@ -4477,6 +4750,11 @@ bool Glm5Model::set_cpu_lane_threads(int n) {
+@@ -4553,6 +4826,11 @@ bool Glm5Model::set_cpu_lane_threads(int n) {
      return any;
  }
  
@@ -2581,7 +2581,7 @@ index 0eec4f0..da1c876 100644
  void Glm5Model::set_miss_skip(double w, int from) {
      for (Glm5Model* m = this; m != nullptr; m = m->split_next_.get())
          if (m->fast_ != nullptr) {
-@@ -4490,6 +4768,24 @@ void Glm5Model::set_read_chunks(int n) {
+@@ -4566,6 +4844,24 @@ void Glm5Model::set_read_chunks(int n) {
          if (m->fast_ != nullptr) m->fast_->read_chunks = n > 0 ? std::min(16, n) : 0;
  }
  
@@ -2606,16 +2606,25 @@ index 0eec4f0..da1c876 100644
  Glm5Model::FastStats Glm5Model::fast_stats() const {
      FastStats s;
      for (const Glm5Model* m = this; m != nullptr; m = m->split_next_.get()) {
-@@ -5045,7 +5341,7 @@ void Glm5Model::fast_service() {
-                 // Quantize on the CPU only when this route actually has CPU fallback.
-                 if (ne > 0) {
-                     const auto cpu_t0 = std::chrono::steady_clock::now();
+@@ -5128,7 +5424,7 @@ void Glm5Model::fast_service() {
+                             F->helper_failed.store(true, std::memory_order_release);
+                         }
+                     }
 -                    float cpu_part[4096];
 +                    float cpu_part[gf::kMaxEmbd];
-                     fast_cpu_experts(rq->layer, ne, blob, w, rq->x, cpu_part);
-                     for (int j = 0; j < g.n_embd; ++j) ans->part[j] += cpu_part[j];
-                     F->cpu_experts.fetch_add((uint64_t) ne, std::memory_order_relaxed);
-@@ -5429,7 +5725,7 @@ bool Glm5Model::fast_boundary(std::string& err) {
+                     uint64_t lane_us = 0;
+                     if (ne > 0) {
+                         const auto cpu_t0 = std::chrono::steady_clock::now();
+@@ -5174,7 +5470,7 @@ void Glm5Model::fast_service() {
+                     // Quantize on the CPU only when this route actually has CPU fallback.
+                     if (ne > 0) {
+                         const auto cpu_t0 = std::chrono::steady_clock::now();
+-                        float cpu_part[4096];
++                        float cpu_part[gf::kMaxEmbd];
+                         fast_cpu_experts(rq->layer, ne, blob, w, rq->x, cpu_part);
+                         for (int j = 0; j < g.n_embd; ++j) ans->part[j] += cpu_part[j];
+                         F->cpu_experts.fetch_add((uint64_t) ne, std::memory_order_relaxed);
+@@ -5559,7 +5855,7 @@ bool Glm5Model::fast_boundary(std::string& err) {
      F->draining.swap(still);
      // (3)
      for (int il = l0_; il < lt_; ++il) {
@@ -2624,7 +2633,7 @@ index 0eec4f0..da1c876 100644
          auto& P = F->lp[(size_t) il];
          if (P.n == 0) continue;
          auto& R = F->rc[(size_t) F->layer_rc[(size_t) il]];
-@@ -5621,8 +5917,9 @@ bool Glm5Model::fast_boundary(std::string& err) {
+@@ -5751,8 +6047,9 @@ bool Glm5Model::fast_boundary(std::string& err) {
          }();
          // a pipelined window's boundary comes once for its tokens (not one a token): the budgets for them all
          const int bk = std::max(1, std::min(8, F->bnd_tokens.exchange(0)));
@@ -2636,7 +2645,7 @@ index 0eec4f0..da1c876 100644
          constexpr uint32_t bg_ratio = 2;
          bool lane_all = F->cpu_plan != 0ull;   // the CPU lane takes every RAM-tier expert of a route
          for (int f = 1; f <= g.n_exp_used && lane_all; ++f) lane_all = (int) ((F->cpu_plan >> (4 * f)) & 15ull) == f;
-@@ -5639,7 +5936,7 @@ bool Glm5Model::fast_boundary(std::string& err) {
+@@ -5769,7 +6066,7 @@ bool Glm5Model::fast_boundary(std::string& err) {
          // (the refill into FREE slots runs whatever the plan: a slot a prompt's lending gave back holds nothing - a
          // split whose cards send one of 7-8 RAM-tier experts over PCIe left ~13% of VRAM empty after a long prompt;
          // the swaps below stay with the all-CPU plan, beside which the routes' own promotions do not run)
@@ -2645,7 +2654,7 @@ index 0eec4f0..da1c876 100644
              struct Cand {
                  uint32_t hot, cold;
                  int il, e, rs, free_slot, cold_slot;
-@@ -5725,7 +6022,7 @@ bool Glm5Model::fast_boundary(std::string& err) {
+@@ -5855,7 +6152,7 @@ bool Glm5Model::fast_boundary(std::string& err) {
          }
      }
      flush();
@@ -2654,7 +2663,7 @@ index 0eec4f0..da1c876 100644
      F->check_resident(l0_, lt_, g.n_expert);   // (the tables as the next token's routes find them)
      static const bool diag = getenv("STRATA_GLM_TIER_DIAG") != nullptr;
      static const int diag_every = getenv("STRATA_GLM_TIER_DIAG_EVERY") ? std::max(1, std::atoi(getenv("STRATA_GLM_TIER_DIAG_EVERY"))) : 64;
-@@ -5958,13 +6255,13 @@ void Glm5Model::fast_moe_route(int il, const MoeIo& io, const gf::MoeDev& md, vo
+@@ -6088,13 +6385,13 @@ void Glm5Model::fast_moe_route(int il, const MoeIo& io, const gf::MoeDev& md, vo
                    g.n_embd, md, io.sh_g, io.sh_u, g.swiglu_shexp, FFs, sh_hq, F->cs,
                    pred ? F->plog : nullptr, pred ? F->L[(size_t) il + 1].router_bias : nullptr,
                    pred ? F->max_pf : 0, n_ah > 0 ? F->alog : nullptr, ah_bias, n_ah,
@@ -2670,7 +2679,7 @@ index 0eec4f0..da1c876 100644
  }
  
  bool Glm5Model::fast_moe_experts(int il, const MoeIo& io, bool pred, int n_ah, const float* const* ah_bias,
-@@ -6076,8 +6373,309 @@ bool Glm5Model::fast_moe_experts(int il, const MoeIo& io, bool pred, int n_ah, c
+@@ -6206,8 +6503,309 @@ bool Glm5Model::fast_moe_experts(int il, const MoeIo& io, bool pred, int n_ah, c
      return true;
  }
  
@@ -2980,7 +2989,7 @@ index 0eec4f0..da1c876 100644
      FastState* F = fast_;
      const Glm5Geometry& g = g_;
      cudaStream_t s = F->cs;
-@@ -6296,7 +6894,24 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
+@@ -6426,7 +7024,24 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
      }
      // the one-GPU MTP decode's NextN cache: its entry p - 1 from the trunk's hidden state of p - 1 and this token (on
      // the part with the block, queued before this token's layers there)
@@ -3006,7 +3015,7 @@ index 0eec4f0..da1c876 100644
          cudaSetDevice(last->dev_);
          if (!last->mtp_fill_prev(token, p, err)) return false;
          last->mtp_hx_pos_ = -1;
-@@ -6312,7 +6927,10 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
+@@ -6442,7 +7057,10 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
                   g.n_embd);
      if (const float* img = image_row(p)) std::memcpy(F->emb_h, img, (size_t) g.n_embd * sizeof(float));   // an image
      cudaMemcpyAsync(F->emb, F->emb_h, (size_t) g.n_embd * sizeof(float), cudaMemcpyHostToDevice, F->cs);
@@ -3018,7 +3027,7 @@ index 0eec4f0..da1c876 100644
      if (!fast_layers(p, false, err)) return false;
      // each later part of a split: the residual crosses over through the previous part's pinned hop buffer, the
      // copy ordered on the devices by an event (the host never waits between the parts)
-@@ -6333,8 +6951,11 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
+@@ -6463,8 +7081,11 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
      }
      FastState* FT = tail->fast_;
      cudaSetDevice(tail->dev_);
@@ -3032,7 +3041,7 @@ index 0eec4f0..da1c876 100644
      // GLM_DUMP_H=<file> (debug): append every position's final hidden state (output_norm of the stream mean - what the
      // NextN/MTP block reads) as n_embd floats
      static const char* dh = getenv("GLM_DUMP_H");
-@@ -6347,6 +6968,7 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
+@@ -6477,6 +7098,7 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
              std::fclose(f);
          }
      }
@@ -3040,7 +3049,7 @@ index 0eec4f0..da1c876 100644
      const WSlot& ow = tail->ws_map_.at("output.weight");
      gf::MvJob o = {ow.q, FT->head_xq, FT->head_x, tail->sc_ + tail->sc_logits, nullptr, 1.0f, ow.type, g.n_embd,
                     g.n_vocab};
-@@ -6355,8 +6977,10 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
+@@ -6485,8 +7107,10 @@ bool Glm5Model::fast_token(int32_t token, std::string& err) {
          err = "glm fast: output head (type " + std::to_string(ow.type) + ")";
          return false;
      }
@@ -3051,7 +3060,7 @@ index 0eec4f0..da1c876 100644
      cudaEventRecord(FT->ev_done, FT->cs);
      // wait for the token (the service threads answer misses meanwhile)
      const auto tw = std::chrono::steady_clock::now();
-@@ -6467,7 +7091,7 @@ bool Glm5Model::fast_mtp(int64_t p, int32_t next_tok, std::string& err, int step
+@@ -6599,7 +7223,7 @@ bool Glm5Model::fast_mtp(int64_t p, int32_t next_tok, std::string& err, int step
      }
      gf::rms_q8(F->mtp_h, nullptr, Ly.attn_norm, g.norm_eps, E, F->x, F->xq, s);
      if (glmfast::submit_every() > 0) glmfast::submit_queued(s);   // (Windows HIP: the GPU starts while the rest queues)
@@ -3060,7 +3069,7 @@ index 0eec4f0..da1c876 100644
      gf::rms_q8(F->mtp_h, F->mixer, Ly.ffn_norm, g.norm_eps, E, F->x, F->xq, s);
      bool pf_pending = false;
      if (!fast_moe(il, pf_pending, err)) return false;
-@@ -6980,7 +7604,7 @@ bool Glm5Model::spec_head(int64_t p, int32_t token, std::string& err) {
+@@ -7112,7 +7736,7 @@ bool Glm5Model::spec_head(int64_t p, int32_t token, std::string& err) {
                   g.n_embd);
      if (const float* img = image_row(p)) std::memcpy(F->emb_h, img, (size_t) g.n_embd * sizeof(float));   // an image
      cudaMemcpyAsync(F->emb, F->emb_h, (size_t) g.n_embd * sizeof(float), cudaMemcpyHostToDevice, F->cs);
@@ -3069,7 +3078,7 @@ index 0eec4f0..da1c876 100644
      lap(2);
      if (cancellable) {
          F->spec_gate = true;            // a skip_gate before each layer ...
-@@ -7108,7 +7732,7 @@ bool Glm5Model::spec_tail(Glm5Model* head, int64_t p, std::string& err) {
+@@ -7242,7 +7866,7 @@ bool Glm5Model::spec_tail(Glm5Model* head, int64_t p, std::string& err) {
          }
          cudaSetDevice(m->dev_);
          FastState* FL = m->fast_;
@@ -3078,7 +3087,7 @@ index 0eec4f0..da1c876 100644
          const WSlot& owl = m->ws_map_.at("output.weight");
          gf::MvJob ol = {owl.q, FL->head_xq, FL->head_x, m->sc_ + m->sc_logits, nullptr, 1.0f, owl.type, g.n_embd,
                          g.n_vocab};
-@@ -7121,7 +7745,7 @@ bool Glm5Model::spec_tail(Glm5Model* head, int64_t p, std::string& err) {
+@@ -7255,7 +7879,7 @@ bool Glm5Model::spec_tail(Glm5Model* head, int64_t p, std::string& err) {
          cudaSetDevice(dev_);
          return true;
      }
@@ -3087,7 +3096,7 @@ index 0eec4f0..da1c876 100644
      const WSlot& ow = ws_map_.at("output.weight");
      gf::MvJob o = {ow.q, F->head_xq, F->head_x, sc_ + sc_logits, nullptr, 1.0f, ow.type, g.n_embd, g.n_vocab};
      if (ow.type == 0) o.w = ow.f32;
-@@ -7470,7 +8094,7 @@ bool Glm5Model::snapshot_save() {
+@@ -7648,7 +8272,7 @@ bool Glm5Model::snapshot_save() {
          m->snap_pos_ = pos_;
          m->snap_pool_copy(false);
          cudaStreamSynchronize(m->fast_->cs);
@@ -3097,10 +3106,10 @@ index 0eec4f0..da1c876 100644
              return false;
          }
 diff --git a/src/core/glm_fast_state.hpp b/src/core/glm_fast_state.hpp
-index 3a92d16..e3030ba 100644
+index ac390d3..01ba2c3 100644
 --- a/src/core/glm_fast_state.hpp
 +++ b/src/core/glm_fast_state.hpp
-@@ -300,6 +300,13 @@ private:
+@@ -327,6 +327,13 @@ private:
      }
      void loop_c(int id) {
          for (;;) {
@@ -3114,7 +3123,7 @@ index 3a92d16..e3030ba 100644
              const auto t0 = std::chrono::steady_clock::now();
              int spins = 0;
              for (;;) {
-@@ -411,6 +418,8 @@ struct Glm5Model::FastState {
+@@ -438,6 +445,8 @@ struct Glm5Model::FastState {
      float* rep = nullptr;   // a window commit's replay (win_commit_part): kKdaLayers x 5 x d_inner (q k v g1 g2)
      float *qr_raw = nullptr, *qr = nullptr, *kv_raw = nullptr, *ik_raw = nullptr, *ig_raw = nullptr, *iw = nullptr;
      float *q = nullptr, *iq = nullptr, *score = nullptr;
@@ -3123,7 +3132,7 @@ index 3a92d16..e3030ba 100644
      int* cells = nullptr;
      int* slot_cells = nullptr;   // KV streaming: the selection in VRAM slot rows (glm_kv_resolve), what the attention reads
      void *qr_q = nullptr, *attn_q = nullptr;
-@@ -507,6 +516,9 @@ struct Glm5Model::FastState {
+@@ -534,6 +543,9 @@ struct Glm5Model::FastState {
          const float *q_a_norm = nullptr, *kv_a_norm = nullptr, *k_norm_w = nullptr, *k_norm_b = nullptr, *ape = nullptr;
          const uint16_t *idx_k = nullptr, *idx_gate = nullptr, *idx_q_b = nullptr, *idx_proj = nullptr;
          const uint16_t *k_b = nullptr, *v_b = nullptr;
@@ -3133,7 +3142,7 @@ index 3a92d16..e3030ba 100644
          const uint16_t* router = nullptr;
          const float* router_bias = nullptr;
          WSlot sh_gate, sh_up, sh_down;
-@@ -661,6 +673,7 @@ struct Glm5Model::FastState {
+@@ -688,6 +700,7 @@ struct Glm5Model::FastState {
          cudaEvent_t ev;
      };
      std::vector<BgMove> bg;
@@ -3141,7 +3150,7 @@ index 3a92d16..e3030ba 100644
      bool bg_hold = false;   // lend_tail: no new moves while the pool's tail is lent
      volatile int* route_error_h = nullptr;   // in the mapped ring allocation, visible after compute completion
      uint64_t bg_up = 0, bg_down = 0;
-@@ -832,6 +845,22 @@ struct Glm5Model::FastState {
+@@ -864,6 +877,22 @@ struct Glm5Model::FastState {
      unsigned int* dcnt_d = nullptr;                          // the device's route counts (the coldest go to the host)
      std::vector<strata::kernels::cpu::NativeFmt> cpu_fmt;   // per layer; n_ff == 0: the lane skips that layer
      std::vector<uint8_t> cpu_act, cpu_hq;                    // x's activation quant; 8 h quants
@@ -3165,10 +3174,10 @@ index 3a92d16..e3030ba 100644
      struct CpuWin {                                          // a merged window layer (win_cpu_merged):
          std::vector<uint8_t> act, hq;                        // each token's activation quant; each entry's h quant
 diff --git a/src/core/glm_model.cu b/src/core/glm_model.cu
-index 62c73b4..9a332e2 100644
+index 8813166..f898ede 100644
 --- a/src/core/glm_model.cu
 +++ b/src/core/glm_model.cu
-@@ -247,14 +247,39 @@ static bool exl3_table(const std::string& pack_dir, Exl3Table& t, std::string& e
+@@ -248,14 +248,39 @@ static bool exl3_table(const std::string& pack_dir, Exl3Table& t, std::string& e
  // a dense row's VRAM bytes as load_pack uploads it (0: not uploaded), and how: the fast path keeps the pack's big BF16
  // rows (kind 4) BF16 and the natively served rows (kind 0) quantized, dequantizes the rest to F32, and leaves
  // token_embd on the host (the embedding row is dequantized there from the shard mapping)
@@ -3210,7 +3219,7 @@ index 62c73b4..9a332e2 100644
          if (how) *how = " f32";
          return ((uint64_t) t->elements() * 4 + 255u) & ~(uint64_t) 255u;
      }
-@@ -275,23 +300,45 @@ static const char* const kMtpF32[] = {"attn_norm.weight", "ffn_norm.weight", "at
+@@ -276,23 +301,45 @@ static const char* const kMtpF32[] = {"attn_norm.weight", "ffn_norm.weight", "at
                                        "indexer_compressor_ape.weight", "exp_probs_b.bias", "nextn.enorm.weight",
                                        "nextn.hnorm.weight", "nextn.shared_head_norm.weight"};
  
@@ -3260,7 +3269,7 @@ index 62c73b4..9a332e2 100644
          const strata::TensorInfo* t = find(P + n);
          if (t == nullptr) { err = "mtp: " + P + n + " missing"; return false; }
          bytes += ((uint64_t) t->elements() * 4 + 255u) & ~(uint64_t) 255u;
-@@ -426,20 +473,107 @@ __global__ void mean_streams_kernel(const float* __restrict__ R, float* __restri
+@@ -427,20 +474,107 @@ __global__ void mean_streams_kernel(const float* __restrict__ R, float* __restri
      y[e + (size_t) n_embd * t] = acc / (float) hc;
  }
  
@@ -3370,7 +3379,7 @@ index 62c73b4..9a332e2 100644
  int blocks(int n) { return (n + GM_THREADS - 1) / GM_THREADS; }
  
  __global__ void bias_apply_kernel(float* __restrict__ y, const float* __restrict__ bias, float alpha,
-@@ -504,10 +638,125 @@ static bool pack_dequant_tensor(const strata::TensorInfo& t, const uint8_t* src,
+@@ -505,10 +639,125 @@ static bool pack_dequant_tensor(const strata::TensorInfo& t, const uint8_t* src,
  
  // ================================ geometry ================================
  
@@ -3498,7 +3507,7 @@ index 62c73b4..9a332e2 100644
      const auto num = [&](const std::string& key, double def, bool& ok) -> double {
          const auto* v = g.get(p + key);
          if (!v) return def;
-@@ -557,6 +806,16 @@ bool Glm5Geometry::from_gguf(const strata::GgufFile& g, Glm5Geometry& out, std::
+@@ -558,6 +807,16 @@ bool Glm5Geometry::from_gguf(const strata::GgufFile& g, Glm5Geometry& out, std::
      out.norm_eps = (float) num("attention.layer_norm_rms_epsilon", out.norm_eps, ok);
      out.n_expert = (int) num("expert_count", out.n_expert, ok);
      out.n_exp_used = (int) num("expert_used_count", out.n_exp_used, ok);
@@ -3515,7 +3524,7 @@ index 62c73b4..9a332e2 100644
      out.n_ff_exp = (int) num("expert_feed_forward_length", out.n_ff_exp, ok);
      out.n_shared = (int) num("expert_shared_count", out.n_shared, ok);
      out.n_ff_dense = (int) num("feed_forward_length", out.n_ff_dense, ok);
-@@ -567,6 +826,8 @@ bool Glm5Geometry::from_gguf(const strata::GgufFile& g, Glm5Geometry& out, std::
+@@ -568,6 +827,8 @@ bool Glm5Geometry::from_gguf(const strata::GgufFile& g, Glm5Geometry& out, std::
      out.swiglu_shexp = (float) num("swiglu_clamp_shexp", out.swiglu_shexp, ok);
      if (const auto* v = g.get(p + "vocab_size")) out.n_vocab = (int) v->u;
  
@@ -3524,7 +3533,7 @@ index 62c73b4..9a332e2 100644
      // the layer-type array: 0 marks a KDA (recurrent) layer
      out.n_head_kv.assign((size_t) out.n_layers, 0);
      arr_i("attention.head_count_kv", out.n_head_kv, out.n_layers);
-@@ -624,6 +885,7 @@ Glm5Model::~Glm5Model() {
+@@ -625,6 +886,7 @@ Glm5Model::~Glm5Model() {
      ckpt_join();
      if (split_next_) split_next_.reset();   // the tail half first (its service thread, its device)
      cudaSetDevice(dev_);   // every free below belongs to this half's device
@@ -3532,7 +3541,7 @@ index 62c73b4..9a332e2 100644
      if (!seq_.empty()) {   // STRATA_GLM_SEQS: sequence 0 goes back to the members (freed below), the others here
          seq_bind(0);
          for (size_t s = 0; s < seq_.size(); ++s) {
-@@ -756,6 +1018,7 @@ bool Glm5Model::load(const std::string& gguf_path, int64_t max_ctx, std::string&
+@@ -757,6 +1019,7 @@ bool Glm5Model::load(const std::string& gguf_path, int64_t max_ctx, std::string&
      dsa_ik_.assign(g_.n_layers, 0);
      dsa_ig_.assign(g_.n_layers, 0);
      dsa_pool_.assign(g_.n_layers, 0);
@@ -3540,7 +3549,7 @@ index 62c73b4..9a332e2 100644
      ik_ring_ = (int) max_ctx;   // the reference path keeps every position's indexer key / gate
      for (int il = 0; il < g_.n_layers; ++il) {
          if (il < l0_ || il >= l1_) continue;   // the other half's caches stay on the other device
-@@ -764,6 +1027,20 @@ bool Glm5Model::load(const std::string& gguf_path, int64_t max_ctx, std::string&
+@@ -765,6 +1028,20 @@ bool Glm5Model::load(const std::string& gguf_path, int64_t max_ctx, std::string&
              floats += (int64_t) g_.d_inner() * g_.kda_head_dim;
              kda_conv_[(size_t) il] = floats;
              floats += (int64_t) 3 * g_.d_inner() * (g_.d_conv - 1);
@@ -3561,7 +3570,7 @@ index 62c73b4..9a332e2 100644
          } else {
              dsa_lat_[(size_t) il] = floats;
              floats += (int64_t) g_.kv_lora * max_ctx;
-@@ -804,9 +1081,9 @@ bool Glm5Model::load(const std::string& gguf_path, int64_t max_ctx, std::string&
+@@ -805,9 +1082,9 @@ bool Glm5Model::load(const std::string& gguf_path, int64_t max_ctx, std::string&
      sc_scan = take(g_.d_inner());
      sc_g2 = take(g_.d_inner());
      sc_gated = take(g_.d_inner());
@@ -3574,7 +3583,7 @@ index 62c73b4..9a332e2 100644
      sc_qabs = take((int64_t) g_.kv_lora * g_.n_head);
      sc_iq = take((int64_t) g_.idx_heads * g_.idx_key);
      sc_iw = take(g_.idx_heads);
-@@ -882,11 +1159,17 @@ int64_t Glm5Model::kv_resident() const {
+@@ -883,11 +1160,17 @@ int64_t Glm5Model::kv_resident() const {
  // an error.  Null with err empty: no DSA layer on this part.
  Glm5Model::KvStream* Glm5Model::kv_stream_make(int64_t cells, int64_t ctx, std::string& err) {
      namespace k = strata::kernels;
@@ -3594,7 +3603,7 @@ index 62c73b4..9a332e2 100644
      K->slots = cells / K->page;
      K->n_blocks = (ctx + K->page - 1) / K->page;
      const auto fail = [&](const std::string& e) {
-@@ -940,6 +1223,11 @@ Glm5Model::KvStream* Glm5Model::kv_stream_make(int64_t cells, int64_t ctx, std::
+@@ -941,6 +1224,11 @@ Glm5Model::KvStream* Glm5Model::kv_stream_make(int64_t cells, int64_t ctx, std::
          m.n_slots = K->slots;
          k::kv_stream_reset(m, nullptr);
      }
@@ -3606,7 +3615,7 @@ index 62c73b4..9a332e2 100644
      if (cudaDeviceSynchronize() != cudaSuccess) return fail("KV streaming: the residency maps did not reset");
      std::fprintf(stderr, "glm pack: CUDA%d KV streaming: %lld of %lld positions of each of %zu DSA layers in VRAM (%.2f "
                           "GB), the latent cache in %.2f GB of pinned RAM\n", dev_, (long long) cells, (long long) ctx,
-@@ -1333,6 +1621,47 @@ bool Glm5Model::load_pack_split(const std::string& pack_dir, int64_t max_ctx, co
+@@ -1334,6 +1622,47 @@ bool Glm5Model::load_pack_split(const std::string& pack_dir, int64_t max_ctx, co
          }
      }
      }
@@ -3654,7 +3663,7 @@ index 62c73b4..9a332e2 100644
      // the chunks are the smallest part's (as Strata's split): the others keep their pinned staging to that, and a
      // later card that holds the first one's chunk down is named (Strata #448: a small card in a split caps every
      // stage's chunk - prompts read slower than on the first card alone)
-@@ -1525,7 +1854,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
+@@ -1526,7 +1855,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
              const strata::TensorInfo* t = find(nm);
              const auto xm = xtab.mats.find(nm);
              if (t == nullptr && (kind != "x" || xm == xtab.mats.end())) continue;
@@ -3663,7 +3672,7 @@ index 62c73b4..9a332e2 100644
              if (nm.rfind("blk.", 0) == 0) {
                  const int il = std::atoi(nm.c_str() + 4);
                  if (il >= 0 && il < L) dense[(size_t) il] += b;
-@@ -1544,8 +1873,17 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
+@@ -1545,8 +1874,17 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
      const int64_t kv_cells = fast ? Glm5Model::kv_resident_cells(g.idx_kpool, max_ctx) : 0;
      const double lat_rows = (double) (kv_cells > 0 ? kv_cells : max_ctx);
      const double lat = fast ? (double) g.kv_lora * lat_rows / 2 : (double) g.kv_lora * lat_rows;
@@ -3682,7 +3691,7 @@ index 62c73b4..9a332e2 100644
      const double kda_state = 4.0 * ((double) g.d_inner() * g.kda_head_dim + 3.0 * g.d_inner() * (g.d_conv - 1));
      // a DFlash drafter (STRATA_GLM_DFLASH): its file and ring on the last part; every part keeps the verify window's
      // buffers - per KDA layer its state backup and the window's inputs, and ~32 MB of rows and logits
-@@ -1600,7 +1938,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
+@@ -1601,7 +1939,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
          const strata::TensorInfo* tu = findm(P + "ffn_up_exps.weight");
          const strata::TensorInfo* td = findm(P + "ffn_down_exps.weight");
          if ((g.nextn > 0 || extra) && findm(P + "nextn.eh_proj.weight") != nullptr && tg && tu && td &&
@@ -3691,7 +3700,7 @@ index 62c73b4..9a332e2 100644
              blob[(size_t) L] = (tensor_bytes(tg) + tensor_bytes(tu) + tensor_bytes(td)) / g.n_expert;
              stride[(size_t) L] = (double) glmfast::expert_stride((size_t) blob[(size_t) L], (int) tg->type, (int) td->type);
              mtp_dense = (double) b;
-@@ -1748,7 +2086,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
+@@ -1749,7 +2087,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
          double bsum = 0, ssum = 0, smax = 0;
          bool kda = false, dsa = false, dense_ffn = false, moe = false;
          for (int l = lb; l < le; ++l) {
@@ -3700,7 +3709,7 @@ index 62c73b4..9a332e2 100644
              (g.is_recr(l) ? kda : dsa) = true;
              if (moe_layer(l)) {
                  bsum += blob[(size_t) l];
-@@ -1762,7 +2100,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
+@@ -1763,7 +2101,7 @@ static std::vector<int> glm_search_bounds(const std::string& pack_dir, int64_t m
          if (last) {
              used += head + dflash;
              if (mtp) {
@@ -3709,7 +3718,7 @@ index 62c73b4..9a332e2 100644
                  bsum += blob[(size_t) L];
                  ssum += stride[(size_t) L];
                  smax = std::max(smax, stride[(size_t) L]);
-@@ -1961,6 +2299,17 @@ bool Glm5Model::load_pack_place(const std::string& pack_dir, int64_t max_ctx, st
+@@ -1962,6 +2300,17 @@ bool Glm5Model::load_pack_place(const std::string& pack_dir, int64_t max_ctx, st
      // two-part split (default 1), STRATA_GLM_DEVS the devices of any split.
      const char* sp = getenv("STRATA_GLM_SPLIT");
      const std::string spec = sp != nullptr ? std::string(sp) : layer_split;
@@ -3727,7 +3736,7 @@ index 62c73b4..9a332e2 100644
      // STRATA_GLM_EXPERT_HELPER=<device>: the expert helper - alone beside one trunk GPU (no split: dense, state and
      // MTP stay on device 0), or beside a layer split, which then leaves the helper's device out and gives each part
      // its own share of the helper over its own layers (fast_helper_setup): two cards and a Ryzen AI Max APU
-@@ -2020,6 +2369,11 @@ bool Glm5Model::load_pack_place(const std::string& pack_dir, int64_t max_ctx, st
+@@ -2022,6 +2371,11 @@ bool Glm5Model::load_pack_place(const std::string& pack_dir, int64_t max_ctx, st
      }
      if (devs.size() == 2 && getenv("STRATA_GLM_DEVS") == nullptr && !spec.empty() && spec != "auto")
          if (const char* d1 = getenv("STRATA_GLM_DEV1")) devs[1] = std::atoi(d1);
@@ -3739,7 +3748,7 @@ index 62c73b4..9a332e2 100644
      bool ok = devs.size() == bounds.size() + 1;
      for (size_t i = 0; ok && i < bounds.size(); ++i)
          ok = bounds[i] >= 1 && bounds[i] < g_.n_layers && (i == 0 || bounds[i] > bounds[i - 1]);
-@@ -2221,6 +2575,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2223,6 +2577,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
      strata::kernels::GlmHcWorkspace hcws;
      strata::kernels::glm_hc_workspace_init(hcs, A + sc_inv, hcws);
      const float prescale = 1.0f / std::sqrt((float) (g.idx_key * g.idx_heads));
@@ -3747,7 +3756,7 @@ index 62c73b4..9a332e2 100644
  
      for (int il = l0_; il < l1_; ++il) {
          if (timing_ && !tev_rec(tev_a_, "a")) timing_ = false;
-@@ -2228,19 +2583,130 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2230,19 +2585,130 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
          const auto W = [&](const char* suffix) { return w_.at("blk." + L + "." + suffix); };
          const auto ws_ = [&](const std::string& suffix) -> WSlot& { return ws_map_.at("blk." + L + "." + suffix); };
  
@@ -3889,7 +3898,7 @@ index 62c73b4..9a332e2 100644
              // ---- the KDA mixer
              const char* streams[] = {"q", "k", "v"};
              for (int si = 0; si < 3; ++si) {
-@@ -2293,7 +2759,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2295,7 +2761,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
  
              GM_CHECK(gm_gemv(ws_("attn_q_b.weight"), A + sc_qr, nullptr, 1.0f, A + sc_q, g.n_head * g.qk_nope, g.q_lora), err);
              q_absorb_kernel<<<blocks((int64_t) g.kv_lora * g.n_head), GM_THREADS>>>(
@@ -3898,7 +3907,7 @@ index 62c73b4..9a332e2 100644
  
              // the indexer: per-token key/gate into their buffers; a pool's key when it completes
              GM_CHECK(gm_gemv(ws_("indexer.attn_k.weight"), A + sc_x, nullptr,
-@@ -2343,15 +2809,21 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2345,15 +2811,21 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
                               A + sc_mixer, g.n_embd, (int64_t) g.n_head * g.v_head), err);
          }
  
@@ -3929,7 +3938,7 @@ index 62c73b4..9a332e2 100644
          cb_dump("ffn_norm-" + L, A + sc_x, g.n_embd);
  
          if (il < g.dense_lead) {
-@@ -2367,8 +2839,12 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2369,8 +2841,12 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
              GM_CHECK(gm_gemv(ws_("ffn_gate_inp.weight"), A + sc_x, nullptr, 1.0f,
                                                                   A + sc_tmp, g.n_expert, g.n_embd), err);
              cb_dump("glm_moe_logits-" + L, A + sc_tmp, g.n_expert);
@@ -3944,7 +3953,7 @@ index 62c73b4..9a332e2 100644
              cb_dump("glm_moe_topk-" + L, A + sc_ids, g.n_exp_used);
              cb_dump("glm_moe_rw-" + L, A + sc_rw, g.n_exp_used);
              std::vector<int> ids((size_t) g.n_exp_used);
-@@ -2419,8 +2895,12 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2421,8 +2897,12 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
          }
          cb_dump("ffn_out-" + L, A + sc_ffn, g.n_embd);
  
@@ -3959,7 +3968,7 @@ index 62c73b4..9a332e2 100644
          cb_dump("l_out-" + L, R, g.hc * g.n_embd);
          if (timing_) {
              if (!tev_rec(tev_d_, "d")) timing_ = false;
-@@ -2454,6 +2934,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
+@@ -2456,6 +2936,7 @@ bool Glm5Model::step_layers(int64_t p, std::string& err) {
                                             g.norm_eps);
          GM_CHECK(gm_gemv(ws_map_.at("output.weight"), A + sc_head, nullptr, 1.0f,
                                       A + sc_logits, g.n_vocab, g.n_embd), err);
@@ -3967,7 +3976,7 @@ index 62c73b4..9a332e2 100644
      }
      return true;
  }
-@@ -2474,7 +2955,7 @@ cudaError_t strata::core::Glm5Model::pack_moe_tail(std::string& err, const std::
+@@ -2476,7 +2957,7 @@ cudaError_t strata::core::Glm5Model::pack_moe_tail(std::string& err, const std::
      }
  
      { cudaError_t e_ = cudaMemcpy(host_x_.data(), A + sc_x, (size_t) g.n_embd * sizeof(float),
@@ -3976,7 +3985,7 @@ index 62c73b4..9a332e2 100644
  
      const void* act[1] = {host_act_.data()};
      float* ff1[1] = {host_ff_.data()};
-@@ -2499,7 +2980,7 @@ cudaError_t strata::core::Glm5Model::pack_moe_tail(std::string& err, const std::
+@@ -2501,7 +2982,7 @@ cudaError_t strata::core::Glm5Model::pack_moe_tail(std::string& err, const std::
          for (int j = 0; j < g.n_embd; ++j) host_moe_[(size_t) j] += w * host_dn_[(size_t) j];
      }
      { cudaError_t e_ = cudaMemcpy(A + sc_moe, host_moe_.data(), (size_t) g.n_embd * sizeof(float),
@@ -3985,7 +3994,7 @@ index 62c73b4..9a332e2 100644
      return cudaSuccess;
  }
  
-@@ -2726,12 +3207,12 @@ bool strata::core::Glm5Model::pack_moe_tail_device(std::string& err, const std::
+@@ -2728,12 +3209,12 @@ bool strata::core::Glm5Model::pack_moe_tail_device(std::string& err, const std::
                                             (const int32_t*) (plan_dev_ + offsetof(DevPlan, tok)),
                                             (int64_t) ids.size(), (int64_t) ids.size(), dev_xq_, dev_scratch_,
                                             dev_hit_out_, nullptr, g.swiglu_exp);
@@ -4000,7 +4009,7 @@ index 62c73b4..9a332e2 100644
      return true;
  }
  
-@@ -3033,8 +3514,12 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3035,8 +3516,12 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
      // token_embd stays QUANTIZED too (Q4_K, 0.36 GB instead of 2.54 GB F32): step() dequantizes
      // the one row it needs per token from the host mapping (pack_emb_*), and the 2.2 GB go to
      // the expert pool instead
@@ -4014,7 +4023,7 @@ index 62c73b4..9a332e2 100644
      };
      // the fast path keeps the pack's BIG BF16 rows as BF16 on the device (dense.bin stores them BF16,
      // so this is lossless; F32 expansion doubled their bytes and their read time) and does not upload
-@@ -3086,7 +3571,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3088,7 +3573,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
          }
          if (skip_upload(r)) continue;
          std::string how;
@@ -4023,7 +4032,7 @@ index 62c73b4..9a332e2 100644
          bytes += b;
          by_kind[kind_of(r.name.substr(r.name.find('.', 4) + 1)) + how] += b;
      }
-@@ -3110,7 +3595,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3112,7 +3597,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
                   // a draft's head rows (GlmDflash::split_head)
                   al((uint64_t) kWinMax * g_.n_embd * 4) + al((uint64_t) kWinMax * nc * 4) + al(kHdCandBytes) + al(4);
      }
@@ -4032,7 +4041,7 @@ index 62c73b4..9a332e2 100644
      w_arena_bytes_ = bytes;
      std::ifstream dense(pack_dir + "/dense.bin", std::ios::binary);
      if (!dense) {
-@@ -3135,7 +3620,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3137,7 +3622,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
                      return false;
                  }
                  dst[j] = (uint8_t*) w_arena_ + at;
@@ -4041,7 +4050,7 @@ index 62c73b4..9a332e2 100644
                  at += (nb[j] + 255u) & ~(uint64_t) 255u;
              }
              x3::Mat M;
-@@ -3190,7 +3675,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3192,7 +3677,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
                  err = "pack: short read on dense.bin for " + r.name;
                  return false;
              }
@@ -4050,7 +4059,7 @@ index 62c73b4..9a332e2 100644
              w16_[r.name] = (const uint16_t*) ((uint8_t*) w_arena_ + at);
              at += (r.bytes + 255u) & ~(uint64_t) 255u;
              continue;
-@@ -3206,7 +3691,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3208,7 +3693,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
              const size_t nbytes = strata::kernels::native_mmvq_weight_bytes(ti->type, (int) ti->shape[0],
                                                                              (int) ti->shape[1]);
              const uint8_t* src = pack_shards_[(size_t) si].base + gfs[(size_t) si]->data_start() + ti->offset;
@@ -4059,7 +4068,7 @@ index 62c73b4..9a332e2 100644
              ws_map_[r.name] = strata::core::WSlot{nullptr, (int) ti->type, (const void*) ((uint8_t*) w_arena_ + at),
                                      (int64_t) ti->shape[0], (int64_t) ti->shape[1]};
              if (r.name == "token_embd.weight") {
-@@ -3263,8 +3748,18 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3265,8 +3750,18 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
              err = "pack: unsupported dense kind '" + r.kind + "' for " + r.name;
              return false;
          }
@@ -4079,7 +4088,7 @@ index 62c73b4..9a332e2 100644
          w_[r.name] = (const float*) ((uint8_t*) w_arena_ + at);
          ws_map_[r.name] = strata::core::WSlot{(const float*) ((uint8_t*) w_arena_ + at), 0, nullptr, 0, 0};
          at += (n_f32 * 4 + 255u) & ~(uint64_t) 255u;
-@@ -3385,12 +3880,15 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3388,12 +3883,15 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
      int64_t floats = 2 * hc_dim;
      // the fast path keeps the DSA latent cache in FP16 (half the bytes: at 128k context ~0.8 GB more for experts on
      // each card, and the prompt attention reads half as much); the reference path (STRATA_GLM_SLOW) keeps F32
@@ -4096,7 +4105,7 @@ index 62c73b4..9a332e2 100644
      // (INT8: lat8_rec_bytes per position, a multiple of 16 bytes at kv_lora 512)
      const int64_t lat_floats = lat_q8_      ? (int64_t) strata::kernels::glmf::lat8_rec_bytes(g_.kv_lora) / 4 * lat_rows
                                 : fast_mode_ ? (int64_t) g_.kv_lora * lat_rows / 2
-@@ -3404,10 +3902,20 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3407,10 +3905,20 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
      dsa_ik_.assign((size_t) g_.n_layers + 1, 0);
      dsa_ig_.assign((size_t) g_.n_layers + 1, 0);
      dsa_pool_.assign((size_t) g_.n_layers + 1, 0);
@@ -4118,7 +4127,7 @@ index 62c73b4..9a332e2 100644
          dsa_lat_[(size_t) mtp_il_] = floats;
          floats += lat_floats;
          dsa_ik_[(size_t) mtp_il_] = floats;
-@@ -3424,6 +3932,45 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3427,6 +3935,45 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
              floats += (int64_t) g_.d_inner() * g_.kda_head_dim;
              kda_conv_[(size_t) il] = floats;
              floats += (int64_t) 3 * g_.d_inner() * (g_.d_conv - 1);
@@ -4164,7 +4173,7 @@ index 62c73b4..9a332e2 100644
          } else {
              dsa_lat_[(size_t) il] = floats;
              floats += lat_floats;
-@@ -3436,7 +3983,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3439,7 +3986,7 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
          }
      }
      state_bytes_ = (uint64_t) floats * sizeof(float);
@@ -4173,7 +4182,7 @@ index 62c73b4..9a332e2 100644
      if (kv_cells > 0 && !kv_stream_setup(kv_cells, err)) return false;
      if (fast_mode_ && !seq_alloc_arenas(err)) return false;   // STRATA_GLM_SEQS: before the expert pool takes the rest
  
-@@ -3465,9 +4012,9 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3468,9 +4015,9 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
      sc_scan = take(g_.d_inner());
      sc_g2 = take(g_.d_inner());
      sc_gated = take(g_.d_inner());
@@ -4186,7 +4195,7 @@ index 62c73b4..9a332e2 100644
      sc_qabs = take((int64_t) g_.kv_lora * g_.n_head);
      sc_iq = take((int64_t) g_.idx_heads * g_.idx_key);
      sc_iw = take(g_.idx_heads);
-@@ -3487,8 +4034,8 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
+@@ -3490,8 +4037,8 @@ bool strata::core::Glm5Model::load_pack(const std::string& pack_dir, int64_t max
      sc_ids = take(g_.n_exp_used);
      sc_rw = take(g_.n_exp_used);
      sc_bytes_ = (uint64_t) s * sizeof(float);
@@ -4197,7 +4206,7 @@ index 62c73b4..9a332e2 100644
  
      // STRATA_GLM_TIMING=1: the phase events (step() records them; ~10 us/token)
      if (getenv("STRATA_GLM_TIMING")) {
-@@ -3682,9 +4229,10 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
+@@ -3685,9 +4232,10 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
          return true;   // a GGUF without the draft block
      }
      const auto x3 = [&](const std::string& n) { return exl3_ && xt.mats.count(n) != 0; };
@@ -4211,7 +4220,7 @@ index 62c73b4..9a332e2 100644
      uint64_t bytes = 0;
      if (exl3_) {
          for (const char* n : raw_names) {
-@@ -3702,7 +4250,7 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
+@@ -3705,7 +4253,7 @@ bool strata::core::Glm5Model::load_mtp(const std::vector<std::unique_ptr<strata:
              if (t == nullptr) { err = "mtp: " + P + n + " missing"; return false; }
              bytes += ((uint64_t) t->elements() * 4 + 255u) & ~(uint64_t) 255u;
          }
@@ -4221,10 +4230,10 @@ index 62c73b4..9a332e2 100644
      }
      if (cudaMalloc(&mtp_arena_, bytes) != cudaSuccess) {
 diff --git a/src/core/glm_mtp.cu b/src/core/glm_mtp.cu
-index 232e88f..81a71af 100644
+index 7603d05..01c5bb3 100644
 --- a/src/core/glm_mtp.cu
 +++ b/src/core/glm_mtp.cu
-@@ -93,7 +93,27 @@ bool Glm5Model::mtp_decode_wanted(int dev, int n_parts) {
+@@ -95,7 +95,27 @@ bool Glm5Model::mtp_decode_wanted(int dev, int n_parts) {
  #endif
  }
  
@@ -4253,7 +4262,7 @@ index 232e88f..81a71af 100644
  
  // ---------------------------------------------------------------- the draft head
  // A draft step ran the whole output head - 154880 x 4096 Q6_K, 0.52 GB, ~2.4 ms of the ~4 ms a step on the Radeon 8065S
-@@ -381,6 +401,11 @@ bool Glm5Model::mtp_cache_rows(int64_t p0, int n, const float* h, const int32_t*
+@@ -386,6 +406,11 @@ bool Glm5Model::mtp_cache_rows(int64_t p0, int n, const float* h, const int32_t*
          else tt->to_float(pack_emb_src_ + (size_t) next[i] * row_b, row, g.n_embd);
      }
      cudaMemcpyAsync(C.emb, emb_h, (size_t) n * E * sizeof(float), cudaMemcpyHostToDevice, s);
@@ -4265,7 +4274,7 @@ index 232e88f..81a71af 100644
      for (int i = 0; i < n; ++i)
          gf::mtp_in(C.emb + (size_t) i * E, h + (size_t) i * E, Ly.enorm, Ly.hnorm, g.norm_eps, g.n_embd,
                     (uint8_t*) C.catq + (size_t) i * q8_bytes(2 * E), s);
-@@ -545,10 +570,24 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
+@@ -550,10 +575,24 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
          return false;
      }
      FastState* F = fast_;
@@ -4290,7 +4299,7 @@ index 232e88f..81a71af 100644
      // the first token: the prompt's last forward left its logits (and greedy argmax)
      int y = -1;
      if (sp.greedy && sp.penalty_last_n <= 0 && last_tok_ >= 0) {   // (penalties: picked through the sampler)
-@@ -581,11 +620,12 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
+@@ -586,11 +625,12 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
          return w > 0 ? 1.0 - 1.0 / (double) w : 1.0;
      }();
      int64_t n_out = 0, n_full = 0, n_drafting = 0;
@@ -4306,7 +4315,7 @@ index 232e88f..81a71af 100644
      };
      note(y);
      // the drafting rounds' host time: drafts, verify (to the tokens), accept + commit + cache
-@@ -599,7 +639,7 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
+@@ -604,7 +644,7 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
          int n = mtp_choose(n_cap);
          n = (int) std::min<int64_t>(n, max_new - produced - 1);
          n = (int) std::min<int64_t>(n, max_ctx_ - 1 - p0);
@@ -4315,7 +4324,7 @@ index 232e88f..81a71af 100644
          n = std::max(n, 0);
          win[0] = y;
          int nd = 0;
-@@ -607,43 +647,45 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
+@@ -612,45 +652,47 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
              // ---- 1. the drafts: the NextN block at p0 - 1 + i on (its last hidden state, the last token)
              // (the chain queues them behind the last round's commit and cache rows: nothing of the host's they read
              // is still in flight)
@@ -4344,8 +4353,10 @@ index 232e88f..81a71af 100644
 +                    cudaEventRecord(FM->ev_mtp, FM->cs);
 +                    ok = glmfast::wait_event(FM->ev_mtp, "glm mtp drafts", err) && FM->route_ok(err);
                  }
--                for (int i = 0; i < n && ok; ++i) win[(size_t) i + 1] = F->mtp_tok_h[i];
-+                for (int i = 0; i < n && ok; ++i) win[(size_t) i + 1] = FM->mtp_tok_h[i];
+                 // (a draft that is no token id: the token before it in its place - glmfast::draft_id, #860)
+                 for (int i = 0; i < n && ok; ++i)
+-                    win[(size_t) i + 1] = glmfast::draft_id(F->mtp_tok_h[i], win[(size_t) i], g.n_vocab, "glm mtp");
++                    win[(size_t) i + 1] = glmfast::draft_id(FM->mtp_tok_h[i], win[(size_t) i], g.n_vocab, "glm mtp");
                  if (ok) nd = n;
              } else {
                  int32_t tok = y;
@@ -4357,8 +4368,8 @@ index 232e88f..81a71af 100644
                          ok = false;
                          break;
                      }
--                    tok = F->mtp_tok_h[i];
-+                    tok = FM->mtp_tok_h[i];
+-                    tok = glmfast::draft_id(F->mtp_tok_h[i], tok, g.n_vocab, "glm mtp");
++                    tok = glmfast::draft_id(FM->mtp_tok_h[i], tok, g.n_vocab, "glm mtp");
                      win[(size_t) i + 1] = tok;
                      ++nd;
                  }
@@ -4374,7 +4385,7 @@ index 232e88f..81a71af 100644
          const int T = 1 + nd;
          int keep = 1, acc = 0;
          bool more = true;
-@@ -677,6 +719,7 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
+@@ -684,6 +726,7 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
                  ok = false;
                  break;
              }
@@ -4382,7 +4393,7 @@ index 232e88f..81a71af 100644
              const auto t2 = std::chrono::steady_clock::now();
              ph[0] += std::chrono::duration<double, std::milli>(t1 - t0).count();
              ph[1] += std::chrono::duration<double, std::milli>(t2 - t1).count();
-@@ -703,17 +746,21 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
+@@ -710,17 +753,21 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
                  ok = false;
                  break;
              }
@@ -4409,7 +4420,7 @@ index 232e88f..81a71af 100644
              ph[2] += ms_since(t2);
              ++n_ph;
          }
-@@ -743,20 +790,24 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
+@@ -750,21 +797,25 @@ bool Glm5Model::decode_mtp(strata::kernels::SamplerParams& sp, int64_t max_new,
      }
      // drain: the device idle, the routes checked
      {
@@ -4427,6 +4438,7 @@ index 232e88f..81a71af 100644
 +            }
          }
 +        cudaSetDevice(dev_);
+         if (ok) glmfast::argmax_nonfinite_note(dev_, "glm mtp");   // (the drafts' picks that found nothing finite)
      }
      win_prof_report();   // (STRATA_GLM_WIN_PROF: the verify windows' phases)
      if (n_ph > 0)
@@ -4441,7 +4453,7 @@ index 232e88f..81a71af 100644
      if (ok && gf::launch_errors() > 0) {
          err = "glm mtp: a kernel launch failed (see stderr)";
 diff --git a/src/core/glm_mtp_rows.cu b/src/core/glm_mtp_rows.cu
-index 1ea255a..627f952 100644
+index 570b996..f5be27b 100644
 --- a/src/core/glm_mtp_rows.cu
 +++ b/src/core/glm_mtp_rows.cu
 @@ -371,7 +371,7 @@ bool Glm5Model::mtpw_part(const int* seqs, const int* counts, int n, const int32
@@ -5259,10 +5271,10 @@ index bfe8a42..3faac0a 100644
      return 0;
  }
 diff --git a/src/core/glm_prefill.cu b/src/core/glm_prefill.cu
-index 21cd243..688e890 100644
+index ebe3150..168f1b1 100644
 --- a/src/core/glm_prefill.cu
 +++ b/src/core/glm_prefill.cu
-@@ -231,14 +231,15 @@ struct DsaBufs {
+@@ -232,14 +232,15 @@ struct DsaBufs {
  };
  DsaBufs carve_dsa(Carve& c, size_t T, const Glm5Geometry& g, int max_pools) {
      DsaBufs b{};
@@ -5282,7 +5294,7 @@ index 21cd243..688e890 100644
      b.iq = c.take<float>(T * (size_t) g.idx_heads * g.idx_key);
      b.cells = c.take<int>(T * (size_t) g.n_sel_max());
      b.n_sel = c.take<int>(T);
-@@ -281,6 +282,7 @@ int moe_window_rows(size_t T, const Glm5Geometry& g) {
+@@ -282,6 +283,7 @@ int moe_window_rows(size_t T, const Glm5Geometry& g) {
  // the MoE runs on the WHOLE chunk (every expert's weights are read once per chunk); the shared expert in sub-batches
  struct MoeBufs {
      float *logits, *rw, *OUTP, *OUTPc;
@@ -5290,7 +5302,7 @@ index 21cd243..688e890 100644
      float *sh_g, *sh_u;
      uint16_t* sh16;
      int *ids, *rank, *counts, *base, *row_tok, *pos, *bounds;
-@@ -326,6 +328,7 @@ MoeBufs carve_moe(Carve& c, size_t T, size_t sub, const Glm5Geometry& g) {
+@@ -327,6 +329,7 @@ MoeBufs carve_moe(Carve& c, size_t T, size_t sub, const Glm5Geometry& g) {
      // each set's gate/up rows live in its own OUTP rows until the down product, the swiglu over their gate halves
      b.OUTP = c.take<float>(W * g.n_embd);
      b.OUTPc = c.take<float>(W * g.n_embd);
@@ -5298,7 +5310,7 @@ index 21cd243..688e890 100644
      const size_t ts = std::min(T, sub);   // the shared expert's sub-batch
      b.sh_g = c.take<float>(ts * FF);
      b.sh_u = c.take<float>(ts * FF);
-@@ -549,6 +552,12 @@ void x3_run_set(const X3Lane& L, const uint8_t* wbase, int n_exp, size_t stride,
+@@ -550,6 +553,12 @@ void x3_run_set(const X3Lane& L, const uint8_t* wbase, int n_exp, size_t stride,
  }
  
  // y[i] += a[i] (the waiting part's weighted sum into the working part's ffn rows)
@@ -5311,7 +5323,7 @@ index 21cd243..688e890 100644
  __global__ void add_f32_kernel(float* __restrict__ y, const float* __restrict__ a, int64_t n) {
      for (int64_t i = blockIdx.x * (int64_t) blockDim.x + threadIdx.x; i < n; i += (int64_t) gridDim.x * blockDim.x)
          y[i] += a[i];
-@@ -592,6 +601,7 @@ struct Glm5Model::PrefillState {
+@@ -593,6 +602,7 @@ struct Glm5Model::PrefillState {
      float *pre = nullptr, *post = nullptr, *comb = nullptr, *ss = nullptr, *mix = nullptr;
      uint16_t* x16 = nullptr;
      int* iota = nullptr;
@@ -5319,7 +5331,7 @@ index 21cd243..688e890 100644
      // KV streaming: one layer's latent cache in position order, staged from its host copy - what the prompt attention
      // reads (a chunk's selections can name any position, so the slots' window does not hold them).  The copy runs on
      // kv_ss once the attention before has read the stage (kv_free), while the layers in between compute; the layer it
-@@ -1032,12 +1042,14 @@ void Glm5Model::prefill_settle(double pinned_share) {
+@@ -1033,12 +1043,14 @@ void Glm5Model::prefill_settle(double pinned_share) {
  static std::pair<int64_t, int64_t> weight_scratch(const Glm5Geometry& g, bool has_dsa) {
      const int64_t E = g.n_embd;
      int64_t w32 = 2 << 20;
@@ -5337,7 +5349,7 @@ index 21cd243..688e890 100644
  #endif
      return {w16, w32};
  }
-@@ -1074,10 +1086,11 @@ bool Glm5Model::prefill_setup(std::string& err) {
+@@ -1075,10 +1087,11 @@ bool Glm5Model::prefill_setup(std::string& err) {
              deq_ok(Ly.v, "attn_v", il);
          } else {
              has_dsa = true;
@@ -5352,7 +5364,7 @@ index 21cd243..688e890 100644
          }
          deq_ok(Ly.out, "attn_output", il);
          if (Ly.moe) {
-@@ -1101,7 +1114,7 @@ bool Glm5Model::prefill_setup(std::string& err) {
+@@ -1102,7 +1115,7 @@ bool Glm5Model::prefill_setup(std::string& err) {
                       why.substr(0, 400).c_str());
          return true;
      }
@@ -5361,7 +5373,7 @@ index 21cd243..688e890 100644
          std::fprintf(stderr, "glm prefill: geometry not covered by the batched kernels - token by token\n");
          return true;
      }
-@@ -1163,8 +1176,10 @@ bool Glm5Model::prefill_setup(std::string& err) {
+@@ -1164,8 +1177,10 @@ bool Glm5Model::prefill_setup(std::string& err) {
      const char* pct_env = getenv("STRATA_PREFILL_LEND_PCT");
      const char* mb_env = getenv("STRATA_GLM_PREFILL_MB");
      const size_t gbuf = has_moe ? (size_t) PrefillState::NG * PrefillState::GE * gstride : 0;
@@ -5374,7 +5386,7 @@ index 21cd243..688e890 100644
      if (const char* v = getenv("STRATA_GLM_PRESTAGE")) ring_max = has_moe ? std::max(0, std::atoi(v)) : 0;
      // A COMPLETE pool to come (fast_setup: every expert and the spares in each layer's main slots, this path's buffers
      // in the tail beyond them - the Windows APU's carve-out): no expert is outside VRAM, so there is nothing to prestage
-@@ -1480,6 +1495,7 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
+@@ -1481,6 +1496,7 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
      a.take<float>(T);
      a.take<float>(T * 24);
      a.take<int>(T * (size_t) g.n_exp_used + mmq::IDS_PAD);   // iota (MMQ reads whole tiles of ids past its last row)
@@ -5382,7 +5394,7 @@ index 21cd243..688e890 100644
      a.take<uint8_t>(kv_stage);
      size_t uni = 0;
      const size_t ts = std::min<size_t>(T, mixer_sub(T, g, has_kda, has_dsa, has_dense, has_moe, max_pools, sub_env));
-@@ -1488,7 +1504,7 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
+@@ -1489,7 +1505,7 @@ static std::pair<size_t, size_t> chunk_bytes(const Glm5Geometry& g, size_t T, bo
      if (has_dense) { Carve d; carve_dense(d, ts, g); uni = std::max(uni, d.off); }
      if (has_moe) { Carve m; carve_moe(m, T, (size_t) shexp_sub(sub_env), g); uni = std::max(uni, m.off); }
      // the NextN block's cache fill (the last half) carves 4 n_embd + 1.5 n_embd rows of its own
@@ -5391,7 +5403,7 @@ index 21cd243..688e890 100644
      return {a.off, uni};
  }
  
-@@ -1564,6 +1580,7 @@ bool Glm5Model::prefill_carve(int Tn, int64_t end) {
+@@ -1565,6 +1581,7 @@ bool Glm5Model::prefill_carve(int Tn, int64_t end) {
      S->ss = a.take<float>(T);
      S->mix = a.take<float>(T * 24);
      S->iota = a.take<int>(T * (size_t) g.n_exp_used + mmq::IDS_PAD);   // (see mmq::IDS_PAD)
@@ -5399,7 +5411,7 @@ index 21cd243..688e890 100644
      S->kv_stage = stage > 0 ? a.take<uint8_t>(stage) : nullptr;
      S->uni = S->arena + a.off;
      blas_ck(cublasSetWorkspace(S->blas, S->ws, S->ws_bytes), "set workspace");
-@@ -2097,6 +2114,14 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2098,6 +2115,14 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
      // the mHC read half for the whole chunk: (write half of the previous block,) mix dots, gates, x / x16
      const auto hc_read = [&](const float* block_out, const uint16_t* fn, const float* scale, const float* base,
                               const float* norm) {
@@ -5414,7 +5426,7 @@ index 21cd243..688e890 100644
          gb::hc_update(block_out, S->R, S->post, S->comb, S->ss, T, E, s);
          sgemm_bf16(fn, 24, 4 * E, S->R, 4 * E, S->mix, 24, T, 1.0f);
          gb::HcFinishArgs h;
-@@ -2126,7 +2151,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2127,7 +2152,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
      // updates, but omit the output projection and FFN (including both mHC write halves). Split boundaries and seam
      // dumps consume these rows, so keep their full path. STRATA_GLM_PREFILL_TAIL_SKIP=0 is the A/B baseline.
      const char* tail_env = getenv("STRATA_GLM_PREFILL_TAIL_SKIP");
@@ -5423,7 +5435,7 @@ index 21cd243..688e890 100644
                             (cb_dir == nullptr || !cb_dir[0]) && (tail_env == nullptr || std::atoi(tail_env) != 0);
      const auto dump_row = [&](const std::string& name, const float* rows, int width, int row = -1) {
          if (cb_dir == nullptr || !cb_dir[0]) return;
-@@ -2412,7 +2437,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2413,7 +2438,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
          return -1;
      };
      const auto kv_prefetch = [&](int il) -> bool {
@@ -5433,7 +5445,7 @@ index 21cd243..688e890 100644
          if (!glmfast::cuda_ok(cudaEventRecord(S->kv_free, s), "glm prefill: the KV stage", err) ||
              !glmfast::cuda_ok(cudaStreamWaitEvent(S->kv_ss, S->kv_free, 0), "glm prefill: the KV stage", err) ||
              !glmfast::cuda_ok(cudaMemcpyAsync(S->kv_stage, kv_->host[(size_t) il], kv_stage_bytes(), cudaMemcpyDefault,
-@@ -2474,6 +2500,11 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2475,6 +2501,11 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
      if (!kv_prefetch(kv_dsa_from(l0_))) return false;   // (the layers before the first DSA layer run meanwhile)
      prestage(next_moe(l0_));   // (the dense layers before the first MoE one run meanwhile)
      for (auto& t : S->tr) t.on = false;
@@ -5445,7 +5457,7 @@ index 21cd243..688e890 100644
      for (int il = l0_; il < l1_; ++il) {
          progress_at("the prompt: layer", il);   // a layer is the serve watchdog's heartbeat (issue #40)
          progress_beat();
-@@ -2490,23 +2521,156 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2491,23 +2522,156 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
          // chunk starting inside one finds it complete), which the chunk's rows are written into too and the attention
          // reads; the host copy and the resident slots get the chunk's rows as well (dsa_prep)
          uint8_t* const kv_host = !Ly.recr && kv_ != nullptr ? kv_->host[(size_t) il] : nullptr;
@@ -5605,7 +5617,7 @@ index 21cd243..688e890 100644
              const int tn = std::min(S->sub, T - t0);
              const float* xs = S->x + (size_t) t0 * E;
              const uint16_t* x16 = S->x16 + (size_t) t0 * E;
-@@ -2783,7 +2947,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -2784,7 +2948,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
          }
          S->mark("shexp", s);
          sgemm_bf16(Ly.router, NE, E, S->x, E, M.logits, NE, T, 1.0f);
@@ -5614,7 +5626,7 @@ index 21cd243..688e890 100644
          gb::expert_count(M.ids, T * K, NE, M.counts, M.rank, s);
          gb::copy_i32(M.counts, S->h_counts, NE, s);   // (not a copy: the engine may be busy with x, x_down)
          if (calc_on) {   // the routes for the other part, the same way (landed by the sync below)
-@@ -3310,7 +3474,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3311,7 +3475,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
                          continue;
                      }
  #endif
@@ -5624,7 +5636,7 @@ index 21cd243..688e890 100644
                      if (wmma && !wmma_fell_back) {
                          // the FP16 tensor-core products: the part's rows gathered from S->x into Xq (the q8_1 sizing
                          // covers W * E halves), the FP32 gate/up split through the clamped swiglu into Hq (its q8_1
-@@ -3425,7 +3590,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3426,7 +3591,7 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
              return blas_dev[dev] - 1;
  #endif
          }();
@@ -5633,7 +5645,7 @@ index 21cd243..688e890 100644
                                mmq::to_f16_supported(Ly.d_type) && S->w16_elems >= (int64_t) 2 * nff * E + E;
          const auto run_blas_q = [&](const uint8_t* blob, int a, int nrows, int r0) {
              namespace x3 = strata::kernels::exl3;
-@@ -3480,8 +3645,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3481,8 +3646,8 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
              else if (use_blas) run_set_q(wbase, n_exp, stride, d_bounds, hb, r0);
              else run_set(wbase, n_exp, stride, d_bounds, hb, r0);
          };
@@ -5644,7 +5656,7 @@ index 21cd243..688e890 100644
              return false;
          }
          // the disk-only experts (staged last, ascending): their indices in the reader's order - inside the segment
-@@ -3988,7 +4153,11 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -3989,7 +4154,11 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
      }
      // the last layer's write half: R = post x ffn + comb . R
      if (!tail_skip) {
@@ -5657,7 +5669,7 @@ index 21cd243..688e890 100644
          S->mark("hc", s);
      }
      // ---- the NextN block's caches for these positions (the half that carries it): position p reads h_p and the
-@@ -4013,63 +4182,75 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
+@@ -4014,63 +4183,75 @@ bool Glm5Model::prefill_half(int64_t p0, int T, std::string& err, const int32_t*
                  else
                      tt->to_float(pack_emb_src_ + (size_t) next_ids[t] * row_b, S->emb_h + (size_t) t * E, E);
              }
@@ -5789,7 +5801,7 @@ index 21cd243..688e890 100644
          }
      }
      S->collect();
-@@ -4528,7 +4709,8 @@ bool Glm5Model::prefill_run(const std::vector<int32_t>& tokens, std::string& err
+@@ -4529,7 +4710,8 @@ bool Glm5Model::prefill_run(const std::vector<int32_t>& tokens, std::string& err
          }
          // the embedding lands in x (free until the first layer's gates write it) and fans out to the 4 streams
          cudaMemcpyAsync(S->x, S->emb_h, (size_t) T * E * sizeof(float), cudaMemcpyHostToDevice, fast_->cs);
@@ -5822,10 +5834,10 @@ index da17c68..9e72d84 100644
      const WSlot& ow = ws_map_.at("output.weight");
      gf::MvJob o = {ow.q, S->head_xq, S->head_x, S->logits, nullptr, 1.0f, ow.type, E, g.n_vocab};
 diff --git a/src/core/glm_window.cu b/src/core/glm_window.cu
-index 0b4ea34..d9a35ae 100644
+index df566b6..bb8dd84 100644
 --- a/src/core/glm_window.cu
 +++ b/src/core/glm_window.cu
-@@ -630,10 +630,11 @@ bool Glm5Model::fast_moe_window(int il, int t0, int T, int part, int gid, std::s
+@@ -615,10 +615,11 @@ bool Glm5Model::fast_moe_window(int il, int t0, int T, int part, int gid, std::s
      const bool lane = (F->cpu_plan != 0ull || F->helper.device() >= 0) && F->cpu_fmt[(size_t) il].n_ff > 0;
      // STRATA_GLM_TRUNK_KEEP / _MAP: a window token leaves out the same experts the token path would (8: none)
      const int keep = il == mtp_il_ ? 8 : glmfast::trunk_skip_from(il);
@@ -5838,7 +5850,7 @@ index 0b4ea34..d9a35ae 100644
      const float* ah_bias[gf::kAhead] = {nullptr, nullptr, nullptr, nullptr};
      // the batched window's routes on two window lanes (both sockets' pools answer it, win_lane): every RAM-tier expert
      // to the CPU - the calibrated plan priced one pool against PCIe, and a merged layer has two (a 3090's 2.1 ms PCIe
-@@ -692,7 +693,7 @@ bool Glm5Model::fast_moe_window(int il, int t0, int T, int part, int gid, std::s
+@@ -677,7 +678,7 @@ bool Glm5Model::fast_moe_window(int il, int t0, int T, int part, int gid, std::s
                            g.norm_w != 0, il, W.x + (size_t) t * E, E, mt, W.sh_g + (size_t) t * FFs,
                            W.sh_u + (size_t) t * FFs, g.swiglu_shexp, FFs, (uint8_t*) W.sh_hq + (size_t) t * W.sh_hq_s, s,
                            nullptr, nullptr, 0, nullptr, ah_bias, 0, keep, lane ? win_plan : 0ull, promote_min, 0, 0, t,
@@ -5847,7 +5859,7 @@ index 0b4ea34..d9a35ae 100644
              ++F->expected;
              // (every expert in VRAM: the wait and the fetch are no-ops - fast_moe's all_resident, 2 launches a token)
              if (!F->all_resident) {
-@@ -847,7 +848,7 @@ bool Glm5Model::fast_moe_window(int il, int t0, int T, int part, int gid, std::s
+@@ -832,7 +833,7 @@ bool Glm5Model::fast_moe_window(int il, int t0, int T, int part, int gid, std::s
          gf::moe_route(W.rlog + (size_t) t * g.n_expert, Ly.router_bias, g.n_expert, g.n_exp_used, g.w_scale,
                        g.norm_w != 0, il, x, E, md, W.sh_g + (size_t) t * FFs, W.sh_u + (size_t) t * FFs,
                        g.swiglu_shexp, FFs, F->sh_hq, s, nullptr, nullptr, 0, nullptr, ah_bias, 0, keep,
@@ -5856,7 +5868,7 @@ index 0b4ea34..d9a35ae 100644
          ++F->expected;
          if (!F->all_resident) {
              gf::moe_wait(md, E, s);
-@@ -934,6 +935,88 @@ bool Glm5Model::fast_window_layers(int64_t p0, int T, std::string& err) {
+@@ -919,6 +920,88 @@ bool Glm5Model::fast_window_layers(int64_t p0, int T, std::string& err) {
      const auto mark = [&](const char* nm) {
          if (prof) W.mark(nm, s);
      };
@@ -5945,7 +5957,7 @@ index 0b4ea34..d9a35ae 100644
      // a layer's first half for tokens t0 .. t0 + n - 1: the attention side, the FFN-side read, and the FFN up to its
      // routes (moe part 1) - or all of it (moe part 0 / a dense FFN).  The second half (moe part 2): the experts and the
      // CPU lane's answers.
-@@ -1116,7 +1199,7 @@ bool Glm5Model::window(const int32_t* tokens, int T, int32_t* out, std::string&
+@@ -1101,7 +1184,7 @@ bool Glm5Model::window(const int32_t* tokens, int T, int32_t* out, std::string&
          }
          cudaMemcpyAsync(W.emb, W.emb_h, (size_t) T * E * sizeof(float), cudaMemcpyHostToDevice, F->cs);
          for (int t = 0; t < T; ++t)
@@ -5953,8 +5965,8 @@ index 0b4ea34..d9a35ae 100644
 +            embed_res(W.emb + (size_t) t * E, W.R[0] + (size_t) t * hcE, F->cs);
      }
      if (!fast_window_layers(p0, T, err)) return false;
-     // each later part: the rows cross over through the previous part's pinned buffer (or direct P2P BAR when enabled)
-@@ -1150,8 +1233,7 @@ bool Glm5Model::window(const int32_t* tokens, int T, int32_t* out, std::string&
+     // each later part: the rows cross over through the previous part's pinned buffer (or direct peer copies when enabled)
+@@ -1132,8 +1215,7 @@ bool Glm5Model::window(const int32_t* tokens, int T, int32_t* out, std::string&
      auto& WT = FT->win;
      cudaSetDevice(tail->dev_);
      for (int t = 0; t < T; ++t)
@@ -5964,7 +5976,7 @@ index 0b4ea34..d9a35ae 100644
      const WSlot& ow = tail->ws_map_.at("output.weight");
      gf::MvJob o = {ow.q, WT.head_xq, WT.head_x, WT.logits, nullptr, 1.0f, ow.type, E, g.n_vocab};
      if (ow.type == 0) o.w = ow.f32;
-@@ -1163,6 +1245,9 @@ bool Glm5Model::window(const int32_t* tokens, int T, int32_t* out, std::string&
+@@ -1145,6 +1227,9 @@ bool Glm5Model::window(const int32_t* tokens, int T, int32_t* out, std::string&
          err = "glm window: output head (type " + std::to_string(ow.type) + ")";
          return false;
      }
@@ -5974,7 +5986,7 @@ index 0b4ea34..d9a35ae 100644
      if (sp != nullptr && (!sp->greedy || sp->penalty_last_n > 0)) {
          // row t is drawn with the counter the token loop would use for the token after tokens[t] (and, with
          // penalties, the history it would count: tokens[1..t] after what came before)
-@@ -1362,7 +1447,7 @@ bool Glm5Model::win_pipe_part(int k, int t, std::string& err) {
+@@ -1342,7 +1427,7 @@ bool Glm5Model::win_pipe_part(int k, int t, std::string& err) {
      if (prev == nullptr) {
          cudaMemcpyAsync(W.emb + (size_t) sl * E, W.emb_h + (size_t) sl * E, (size_t) E * sizeof(float),
                          cudaMemcpyHostToDevice, F->cs);
@@ -5982,8 +5994,8 @@ index 0b4ea34..d9a35ae 100644
 +        embed_res(W.emb + (size_t) sl * E, m->state_, F->cs);
      } else {
          cudaStreamWaitEvent(F->cs, prev->fast_->win.ev_tok[sl], 0);
- #if defined(STRATA_USE_HIP)
-@@ -1402,7 +1487,7 @@ bool Glm5Model::win_pipe_part(int k, int t, std::string& err) {
+         if (float* pbuf = get_p2p_buf(prev->dev_, m->dev_)) {
+@@ -1376,7 +1461,7 @@ bool Glm5Model::win_pipe_part(int k, int t, std::string& err) {
      float* hx = W.head_x + (size_t) sl * E;
      void* hq = (uint8_t*) W.head_xq + (size_t) sl * W.xq_s;
      float* lg = W.logits + (size_t) sl * g.n_vocab;
@@ -5992,7 +6004,7 @@ index 0b4ea34..d9a35ae 100644
      const WSlot& ow = m->ws_map_.at("output.weight");
      if (m->head_split_ready()) {
          if (!m->win_head_split(t, sl, hx, lg, err)) return false;
-@@ -1413,6 +1498,7 @@ bool Glm5Model::win_pipe_part(int k, int t, std::string& err) {
+@@ -1387,6 +1472,7 @@ bool Glm5Model::win_pipe_part(int k, int t, std::string& err) {
              err = "glm window: output head (type " + std::to_string(ow.type) + ")";
              return false;
          }
@@ -6000,7 +6012,7 @@ index 0b4ea34..d9a35ae 100644
          if (W.pick_sampled) {
              strata::kernels::SamplerParams sp = W.pick_sp;
              sp.counter += (uint64_t) t;
-@@ -1424,6 +1510,7 @@ bool Glm5Model::win_pipe_part(int k, int t, std::string& err) {
+@@ -1398,6 +1484,7 @@ bool Glm5Model::win_pipe_part(int k, int t, std::string& err) {
      }
      gf::set_skip(nullptr);
      cudaMemcpyAsync(W.tok_h + sl, W.tok + sl, sizeof(int), cudaMemcpyDeviceToHost, F->cs);
@@ -6008,7 +6020,7 @@ index 0b4ea34..d9a35ae 100644
      cudaEventRecord(W.ev_pick[sl], F->cs);
      return true;
  }
-@@ -1455,6 +1542,7 @@ bool Glm5Model::win_head_split(int t, int sl, const float* hx, float* lg, std::s
+@@ -1429,6 +1516,7 @@ bool Glm5Model::win_head_split(int t, int sl, const float* hx, float* lg, std::s
      const WSlot& hw = h->ws_map_.at("output.weight.hi");
      const gf::MvJob oh = {hw.q, nullptr, hxd, hlg, nullptr, 1.0f, hw.type, E, nc};
      const bool ok_h = gf::mv(&oh, 1, h->hh_s_);
@@ -6016,7 +6028,7 @@ index 0b4ea34..d9a35ae 100644
      if (W.pick_sampled) {
          cudaMemcpyAsync(ht_lg_h_ + (size_t) sl * nc, hlg, (size_t) nc * sizeof(float), cudaMemcpyDeviceToHost, h->hh_s_);
      } else {
-@@ -1477,6 +1565,7 @@ bool Glm5Model::win_head_split(int t, int sl, const float* hx, float* lg, std::s
+@@ -1451,6 +1539,7 @@ bool Glm5Model::win_head_split(int t, int sl, const float* hx, float* lg, std::s
          err = "glm window: the head's half";
          return false;
      }
@@ -6024,7 +6036,7 @@ index 0b4ea34..d9a35ae 100644
      if (W.pick_sampled) {
          cudaStreamWaitEvent(F->cs, h->hh_ev_[sl], 0);
          cudaMemcpyAsync(lg + c0, ht_lg_h_ + (size_t) sl * nc, (size_t) nc * sizeof(float), cudaMemcpyHostToDevice, F->cs);
-@@ -1505,6 +1594,7 @@ bool Glm5Model::win_head_split(int t, int sl, const float* hx, float* lg, std::s
+@@ -1479,6 +1568,7 @@ bool Glm5Model::win_head_split(int t, int sl, const float* hx, float* lg, std::s
              const gf::MvJob of = {ow.q, nullptr, hx, clg, nullptr, 1.0f, ow.type, E, V};
              gf::set_skip(nullptr);
              gf::mv(&of, 1, F->cs);
@@ -6032,7 +6044,7 @@ index 0b4ea34..d9a35ae 100644
              gf::argmax(clg, V, ctok, F->cs);
              gf::set_skip(W.from != nullptr ? W.skip_d : nullptr);
              cudaMemcpyAsync(pair_h, W.tok + sl, sizeof(int), cudaMemcpyDeviceToHost, F->cs);
-@@ -1854,6 +1944,29 @@ bool Glm5Model::window_pipe(const int32_t* tokens, int T, int32_t* out, std::str
+@@ -1828,6 +1918,29 @@ bool Glm5Model::window_pipe(const int32_t* tokens, int T, int32_t* out, std::str
      return true;
  }
  
@@ -6730,7 +6742,7 @@ index f9dd608..1525dff 100644
  
  }  // namespace strata::kernels
 diff --git a/src/kernels/cuda/glm_fast.cu b/src/kernels/cuda/glm_fast.cu
-index 91f61a3..29684d0 100644
+index c7785c1..0d10e45 100644
 --- a/src/kernels/cuda/glm_fast.cu
 +++ b/src/kernels/cuda/glm_fast.cu
 @@ -6,6 +6,7 @@
@@ -6861,7 +6873,7 @@ index 91f61a3..29684d0 100644
          const int e = tid + 1024 * i;
          if (e >= n) break;
          const float xv = v[i] * inv * w[e];
-@@ -5958,6 +5981,10 @@ bool mv_nt(const MvJob* jobs, int n, int nt, cudaStream_t s) {
+@@ -5966,6 +5989,10 @@ bool mv_nt(const MvJob* jobs, int n, int nt, cudaStream_t s) {
  }
  
  void quantize_q8_1(const float* x, void* xq, int n, cudaStream_t s) {
@@ -6872,7 +6884,7 @@ index 91f61a3..29684d0 100644
      quantize_kernel<<<(n + 255) / 256, 256, 0, s>>>(x, (block_q8_1*) xq, n);
      launch_check("quantize");
  }
-@@ -6594,7 +6621,7 @@ void moe_route(const float* logits, const float* bias, int n_expert, int k, floa
+@@ -6602,7 +6629,7 @@ void moe_route(const float* logits, const float* bias, int n_expert, int k, floa
                 int max_prefetch, const float* ahead_logits, const float* const* ahead_bias, int n_ahead,
                 int skip_from, unsigned long long cpu_plan, int promote_min, int pf_rank, int near_n, int win,
                 unsigned int* scr_used, int win_n, int disk_skip_from, float disk_skip_w, float miss_skip_w,
@@ -6881,7 +6893,7 @@ index 91f61a3..29684d0 100644
      RouteArgs a{logits, bias, n_expert, k, w_scale, norm_w ? 1 : 0, layer, x, n_embd, d,
                  sh_gate, sh_up, sh_limit, n_ff_sh, (block_q8_1*) sh_hq, pred_logits, pred_bias, max_prefetch,
                  ahead_logits, {}, 0, skip_from, d.cpu_seq != nullptr ? cpu_plan : 0ull, promote_min,
-@@ -6616,6 +6643,7 @@ void moe_route(const float* logits, const float* bias, int n_expert, int k, floa
+@@ -6624,6 +6651,7 @@ void moe_route(const float* logits, const float* bias, int n_expert, int k, floa
      }();
      a.res_w = resident_ok ? res_w : 0.0f;
      a.res_k = resident_ok ? res_k : 0;
@@ -6889,7 +6901,7 @@ index 91f61a3..29684d0 100644
      // STRATA_GLM_ROUTE_RANK=0: the selections by topk_warp's serial rounds again (A/B); topk_rank needs whole warps of
      // experts that one block's threads cover and at most 8 picks
      static const bool rank_on = [] {
-@@ -7381,4 +7409,314 @@ void argmax_join(const int* a, const int* b, int c0, int* out, cudaStream_t s) {
+@@ -7398,4 +7426,314 @@ void argmax_join(const int* a, const int* b, int c0, int* out, cudaStream_t s) {
      launch_check("argmax_join");
  }
  
@@ -7294,7 +7306,7 @@ index de676ec..84f3c3d 100644
      run(false, 6002, 2001, 4003, 1100, 7u);
      run(true, 6002, 2001, 4003, 1100, 8u);
 diff --git a/src/program/generate.cpp b/src/program/generate.cpp
-index 0882f31..5f445c7 100644
+index cafec59..5a73358 100644
 --- a/src/program/generate.cpp
 +++ b/src/program/generate.cpp
 @@ -14,6 +14,7 @@
@@ -7305,7 +7317,7 @@ index 0882f31..5f445c7 100644
  #include "strata/core/expert_cache.hpp"
  #include "strata/platform/env_alias.hpp"
  #include "strata/platform/idle_gate.hpp"
-@@ -2377,7 +2378,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -2385,7 +2386,7 @@ static int glm_pack_generate(const Options& o) {
                               (unsigned long long) (model.mtp_rounds_ - rounds0),
                               (double) n_spec / (double) (model.mtp_rounds_ - rounds0), lens.c_str());
              }
@@ -7314,7 +7326,7 @@ index 0882f31..5f445c7 100644
              // the pipelined speculative decode: the two halves of the split work on consecutive tokens, the head
              // running the NextN block's draft (same tokens as the loop below)
              // STRATA_GLM_SPEC_WIN=1: the MTP drafts + the pipelined verify window through a split (decode_spec_pipe)
-@@ -4546,6 +4547,7 @@ static int glm_pack_generate(const Options& o) {
+@@ -4558,6 +4559,7 @@ static int glm_pack_generate(const Options& o) {
  
  int main(int argc, char** argv) {
      strata::platform::env_aliases();   // (MAYA_* settings under their older names too)
@@ -7645,10 +7657,10 @@ index 0000000..0f96eb6
 +if __name__ == "__main__":
 +    sys.exit(main())
 diff --git a/tools/iq_pack.py b/tools/iq_pack.py
-index d536e3b..acc676d 100644
+index 73ff660..2ab23d6 100644
 --- a/tools/iq_pack.py
 +++ b/tools/iq_pack.py
-@@ -96,10 +96,21 @@ GLM5NEXT_NATIVE_OK = (
+@@ -97,10 +97,21 @@ GLM5NEXT_NATIVE_OK = (
      # dequantizes them into the F32 arena at load (2x ~1.2 GB quantized)
      "token_embd.weight", "output.weight",
  )
@@ -7671,7 +7683,7 @@ index d536e3b..acc676d 100644
      if arch in ("glm5-next", "glm5next"):
          # glm5-next has no PLE and no output_hc; its F32 router stays F32 (the runner reads it
          # as F32 by config), so ONLY the listed projections take the BF16 path.
-@@ -222,7 +233,7 @@ def index_standalone(src, out, model: Model, compat_bf16: bool = False, arch: st
+@@ -223,7 +234,7 @@ def index_standalone(src, out, model: Model, compat_bf16: bool = False, arch: st
              # a trailing ne3 of 1 adds no bytes: some converters write glm5-next's conv weights as
              # [4, 1, 8192, 1] instead of [4, 1, 8192], and index_shape packs both as (4, 8192)
              dims = len(t.shape) - (len(t.shape) == 4 and int(t.shape[3]) == 1)
@@ -7680,7 +7692,7 @@ index d536e3b..acc676d 100644
                  print("tensor %s has %d dimensions; the index holds two" % (t.name, len(t.shape)))
                  return 1
              ne0, ne1 = index_shape(t.shape)
-@@ -263,9 +274,10 @@ def index_standalone(src, out, model: Model, compat_bf16: bool = False, arch: st
+@@ -264,9 +275,10 @@ def index_standalone(src, out, model: Model, compat_bf16: bool = False, arch: st
                  pad = (-len(raw)) % ALIGN
                  fo.write(b"\0" * pad)
                  at += len(raw) + pad
@@ -7694,7 +7706,7 @@ index d536e3b..acc676d 100644
                  return 1
              else:
                  served += 1
-@@ -376,6 +388,12 @@ def main() -> int:
+@@ -377,6 +389,12 @@ def main() -> int:
      if arch not in ARCHITECTURES:
          print("general.architecture is %r; the packer knows %s" % (arch, " and ".join(ARCHITECTURES)))
          return 1
@@ -7707,7 +7719,7 @@ index d536e3b..acc676d 100644
      if arch in ("glm5-next", "glm5next"):
          # two spellings in the wild: llama.cpp's canonical "glm5-next" (llama-arch.cpp L156) and
          # unsloth's "glm5next" - the KV PREFIX follows the same spelling, so it is read per file
-@@ -385,9 +403,9 @@ def main() -> int:
+@@ -386,9 +404,9 @@ def main() -> int:
      block_count = None
      trunk = None
      # (a Qwen GGUF with its MTP block - qwen4exp, nextn_predict_layers 1, block_count 49 - the same: the trunk only)
@@ -7719,7 +7731,7 @@ index d536e3b..acc676d 100644
          bc = g.metadata.get(prefix + "block_count")
          if bc is None:
              print("%s: %sblock_count is missing; cannot tell the trunk from the NextN block" % (arch, prefix))
-@@ -436,7 +454,7 @@ def main() -> int:
+@@ -437,7 +455,7 @@ def main() -> int:
      else:
          n_layers = 1 + max(int(n.split(".")[1]) for n in T if n.startswith("blk.") and n.endswith("_exps.weight"))
      # the MoE layers only: the leading dense blocks ship no router and no experts
@@ -7923,10 +7935,10 @@ index 0000000..12ec731
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/tools/test_iq_pack_glm.py b/tools/test_iq_pack_glm.py
-index 1422407..0330a0e 100644
+index ef24e91..4ff17b0 100644
 --- a/tools/test_iq_pack_glm.py
 +++ b/tools/test_iq_pack_glm.py
-@@ -136,7 +136,8 @@ class ArchitectureCheck(unittest.TestCase):
+@@ -142,7 +142,8 @@ class ArchitectureCheck(unittest.TestCase):
          self.assertIn("qwen4exp", iq_pack.ARCHITECTURES)
          self.assertIn("glm5-next", iq_pack.ARCHITECTURES)
          self.assertIn("glm5next", iq_pack.ARCHITECTURES)   # unsloth's spelling, same KV family
