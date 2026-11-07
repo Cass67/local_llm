@@ -12,6 +12,9 @@ Small HIP programs that test one runtime behaviour each, with no model loaded. S
 
 - `graph-cost.cpp`: the GPU-side gap per kernel in a dependent chain, stream launches vs one
   captured HIP graph, for empty kernels and for kernels doing 20 µs of work. Arg: `device`.
+- `graph-multi.cpp`: DS4's segment pattern (graphs of N kernels, then one stream kernel), with one
+  host thread per card on 1, 2 and 4 cards at once. Kernels stamp `wall_clock64`, so gaps inside a
+  graph and at graph edges are measured on the GPU. Args: `spin_us n segs`.
 - `qpi-p2p.cpp`: 64 MB peer copy per `src:dst` pair: kernel write, kernel read, SDMA peer copy,
   and the same data staged through pinned host RAM. Args: `0:1 0:2 ...`.
 
@@ -70,3 +73,17 @@ every pair, so QPI itself is fast; only device-to-device traffic forwarded over 
 SDMA is as slow as a kernel, so it is the Broadwell-EP CPU, not the code or the kernel patch
 (which only allows the mapping). BIOS has Home Snoop, MMIO above 4G / Large, no QPI or ACS
 tokens; root-port ACS ReqRedir+ also applies to same-socket pairs, which run at full speed.
+
+**Graphs on several cards (`graph-multi 3 16 8`, v1.1.55 image):**
+
+| | gap between kernels | gap at a graph edge |
+|---|---|---|
+| stream launches | 2.1-2.2 us | same |
+| graph | 2.1-2.2 us | 5.4-6.7 us |
+| graph, `DEBUG_CLR_GRAPH_PACKET_CAPTURE=1` | 2.1-2.2 us | 5.8-6.3 us |
+
+- Running 2 or 4 cards at once from their own threads changes neither gap.
+- Graphs only save CPU launch cost; the GPU floor between kernels stays at ~2.2 us.
+- Each graph launch adds ~4 us on the GPU, so short segments, like DS4's four per layer, give back
+  much of what they save.
+- HIP 2's gaps under `DS4_SEG_GRAPH` are not caused by HIP running several cards at once.

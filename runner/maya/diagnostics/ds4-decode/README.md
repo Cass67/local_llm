@@ -111,3 +111,20 @@ Built with `devbuild.sh v1.1.56-seg`.
   graph's nodes lazily.
 - Greedy output at temp 0 differs between two graphs-off runs, from the first character, so text
   comparison cannot test correctness on DS4.
+
+## Drafter off the lead, and why lead-side fixes are flat, 2026-11-07
+
+`MAYA_DS4_DRAFT_DEV=1,2,3` warm mean is 61.5 tok/s, against 62.5 for `0,1,2` in the same session. Flat; production stays on 0,1,2.
+The lead's idle fell from 1342 to 959 ms per 3 s, and segment graphs had cut it to 619 ms, yet neither raised tok/s.
+In each case the saved idle moved into the lead's CPU-lane spin kernels (`wait_seq` + `mx_wait`, as % of the lead's wall):
+
+| | lead CPU-lane wait | lead idle per 3 s |
+|---|---|---|
+| base (0,1,2) | 8.0% | 1342 ms |
+| drafter 1,2,3 | 11.7% | 959 ms |
+| segment graphs | 20.9% | 619 ms |
+
+Two bottlenecks are about level: the lead's launch overhead and the CPU expert lane (RAM experts). A gain needs both
+cut together. A faster lead alone just waits for the CPU lane, and a faster CPU lane alone waits for the lead's
+launches. Next: profile the CPU lane (threads, NUMA placement of the RAM experts across the two sockets, memory
+bandwidth per socket), then retry `DS4_SEG_GRAPH=1` on top of any lane gain.
