@@ -6,7 +6,7 @@ shift
 (cd ~/scratch/ds4-ab && python3 -c "import pair; pair.req(pair.PROMPTS[\"story\"])" &)
 sleep 10
 docker exec $R rm -rf /tmp/rp
-docker exec --privileged $R /opt/rocm/bin/rocprofv3 --attach 8 --attach-duration-msec 2000 "$@" --output-format csv -d /tmp/rp -o t 2>&1 | grep -E "Error|error|success" | head -3
+docker exec --privileged $R /opt/rocm/bin/rocprofv3 --attach "$(docker exec $R pidof maya-ds4)" --attach-duration-msec 2000 "$@" --output-format csv -d /tmp/rp -o t 2>&1 | grep -E "Error|error|success" | head -3
 for _ in $(seq 40); do
   docker exec $R sh -c "ls /tmp/rp/*kernel_trace.csv" >/dev/null 2>&1 && break
   sleep 3

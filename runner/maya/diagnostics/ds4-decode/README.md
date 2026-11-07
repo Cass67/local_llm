@@ -190,3 +190,38 @@ PR 821 (cache-aware expert substitution) was tested on image `:v1.1.56-prs2` wit
 mass budget 0.6. It refuses to run with RAM_SKIP, so `MAYA_DS4_RAM_SKIP_W=0` in that arm. Warm mean 55.5 tok/s against
 61-62 for production's `RAM_SKIP` 0.16. It is slower and its quality on this model is unmeasured, so RAM_SKIP stays.
 Not adopted.
+
+## CPU lane read-ahead, 2026-11-07
+
+Branch `ds4-decode-graph`, commit a08d45e, image `:v1.1.56-pf`. `DS4_LANE_TRACE=<file>` writes one record per lane
+answer; it must point at a writable mount (`/mnt/hfcache/maya-slots`). `../gpu-micro/cpu-bw.c` measures host read
+bandwidth in the lane's shape.
+
+- The earlier "lane not bandwidth-bound" read was wrong: that figure averaged over wall time. The lane is busy 40% of wall
+  and reads 78 GB/s while it computes (p90 99). The box's ceiling is 129 GB/s steady and ~100 GB/s for a lane-sized
+  burst (16x64 GB DDR4-2400). Each call pays ~44 us fixed per phase; 1-expert calls (half of all calls) reach only
+  66-79 GB/s.
+- The layer cycle is 831 us: lane 333 + GPU part 498.
+- The engine guesses the next layer's picks only for layers with experts read from disk. Here every expert is in RAM,
+  so the guesses were off. `DS4_AHEAD_RAM=1` turns them on, at no measurable cost. The top 1/2/4/8 CPU-lane guesses
+  hold 42/64/80/88% of the lane's entries.
+- `DS4_LANE_PF=N`: once a layer is answered, the lane workers read the next layer's top N guesses into L3 (each socket
+  its own part); the next request stops the read.
+
+| arm (warm pair.py) | tok/s | lane compute | cycle = lane + GPU part |
+|---|---|---|---|
+| guesses only | 61.8 | 481 us | 837 = 332 + 506 |
+| PF=2 | 64.4 | 371 us | 802 = 275 + 526 |
+| PF=3 | 64.7 | 347 us | 801 = 272 + 529 |
+| PF=2 + DS4_SEG_GRAPH=1 | 64.5 | 350 us | 784 = 257 + 527 |
+
+PF=2 is the setting: +4%. The lane is now off the critical path; the GPU part is not.
+
+Kernel trace with PF=2 (`att.sh` now looks up the engine's PID; it is not 8 under `launch-img.py`): the lead still
+arrives last at every all-reduce (others wait a median of 410-460 us, the lead 26 us). The lead computes 25% of wall
+and idles 52%: 601 ms of 2 s in gaps under 50 us, 455 ms in gaps of 50 us or more, spread over ordinary kernel pairs
+(the expert path's q8_quant -> mx_gate_up, q8_mv, swiglu, and attention's ext_to_ring -> unpack_sel -> sparse_attn).
+Gaps of 500 us or more (draft-round boundaries) are 6%. Segment graphs cut the lead's idle to 868 ms but tok/s did not
+move: the expert path's kernels, which take per-token arguments, are still launched one at a time. The next lever is
+graph capture of the whole layer with per-token values read from device memory, so that all four launcher threads stop
+contending in the HIP runtime.
