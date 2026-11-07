@@ -51,7 +51,7 @@ launches and graph replay, on HIP 0 and 3. With empty kernels, graphs save only 
 **Launch, host side** (`launch-cost.cpp`): one `hipLaunchKernel` costs 2.1-2.4 µs with 8-byte
 args and 3.4-3.9 µs with 256 B-2 KB, on one thread. With four threads launching to four cards at
 once it costs 3.4-4.3 µs and 5.2-8.9 µs, which is runtime lock contention. `HIP_FORCE_DEV_KERNARG`
-makes no difference. `hipGraphLaunch` costs 0.05-0.09 µs per node, with one thread or four. Capturing the kernels again each step, then `hipGraphExecUpdate` and launch, costs 26-34 µs per node (`LAUNCH_MODES=2`), so a graph only pays when it is captured once and replayed.
+makes no difference. `hipGraphLaunch` costs 0.05-0.09 µs per node, with one thread or four. Capturing the kernels again each step, then `hipGraphExecUpdate` and launch, costs 26-34 µs per node (`LAUNCH_MODES=2`), so a graph only pays when it is captured once and replayed. Patching nodes before each replay with `hipGraphExecKernelNodeSetParams` (`LAUNCH_MODES=3`, `UPD_EVERY=k`) costs 25-30 µs per patched node, so it beats plain launches only when fewer than about 25% of nodes change.
 
 So a graph does not make the GPU faster, but it keeps the GPU fed whenever kernels are shorter
 than the launch cost. Maya DS4 is in that case: card 0's queue runs dry while its launcher is
