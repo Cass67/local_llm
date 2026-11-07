@@ -1,0 +1,20 @@
+{"t": 0.0, "stage": "starting", "queues": {}, "gpus": {"card0": {"busy": 0, "watts": 8.0}, "card1": {"busy": 0, "watts": 12.0}, "card2": {"busy": 0, "watts": 13.0}, "card3": {"busy": 0, "watts": 12.0}}}
+{"result": {"mode": "async", "cards": 1, "kernels": 1, "step_us_p50": 20.8, "step_us_p95": 27.2, "launch_us_p50": 1.8, "wait_us_p50": 18.9}}
+{"result": {"mode": "async", "cards": 1, "kernels": 2, "step_us_p50": 23.9, "step_us_p95": 29.6, "launch_us_p50": 3.5, "wait_us_p50": 19.8}}
+{"result": {"mode": "async", "cards": 1, "kernels": 4, "step_us_p50": 30.9, "step_us_p95": 35.8, "launch_us_p50": 7.0, "wait_us_p50": 22.9}}
+{"result": {"mode": "async", "cards": 1, "kernels": 8, "step_us_p50": 43.2, "step_us_p95": 48.3, "launch_us_p50": 13.9, "wait_us_p50": 28.8}}
+{"t": 0.51, "stage": "starting", "queues": {"3492648": 2}, "gpus": {"card0": {"busy": 0, "watts": 8.0}, "card1": {"busy": 97, "watts": 88.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 11.0}}}
+{"result": {"mode": "async", "cards": 1, "kernels": 16, "step_us_p50": 65.1, "step_us_p95": 67.6, "launch_us_p50": 35.5, "wait_us_p50": 28.9}}
+{"result": {"mode": "async", "cards": 1, "kernels": 32, "step_us_p50": 115.2, "step_us_p95": 118.5, "launch_us_p50": 70.5, "wait_us_p50": 43.5}}
+{"result": {"mode": "chain", "cards": 1, "kernels": 1, "step_us_p50": 20.9, "step_us_p95": 27.1, "launch_us_p50": 1.7, "wait_us_p50": 19.0}}
+{"result": {"mode": "chain", "cards": 1, "kernels": 2, "step_us_p50": 41.9, "step_us_p95": 52.8, "launch_us_p50": 3.6, "wait_us_p50": 38.0}}
+{"t": 1.01, "stage": "starting", "queues": {"3492648": 2}, "gpus": {"card0": {"busy": 0, "watts": 8.0}, "card1": {"busy": 96, "watts": 90.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 11.0}}}
+{"result": {"mode": "chain", "cards": 1, "kernels": 4, "step_us_p50": 83.5, "step_us_p95": 101.9, "launch_us_p50": 7.1, "wait_us_p50": 76.0}}
+{"t": 1.52, "stage": "starting", "queues": {"3492648": 2}, "gpus": {"card0": {"busy": 0, "watts": 8.0}, "card1": {"busy": 90, "watts": 85.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 11.0}}}
+{"result": {"mode": "chain", "cards": 1, "kernels": 8, "step_us_p50": 178.2, "step_us_p95": 208.6, "launch_us_p50": 23.3, "wait_us_p50": 152.4}}
+{"t": 2.02, "stage": "starting", "queues": {"3492648": 2}, "gpus": {"card0": {"busy": 0, "watts": 8.0}, "card1": {"busy": 89, "watts": 78.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 11.0}}}
+{"result": {"mode": "chain", "cards": 1, "kernels": 16, "step_us_p50": 349.0, "step_us_p95": 403.3, "launch_us_p50": 41.6, "wait_us_p50": 304.7}}
+{"t": 2.53, "stage": "starting", "queues": {"3492648": 2}, "gpus": {"card0": {"busy": 0, "watts": 9.0}, "card1": {"busy": 95, "watts": 81.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 11.0}}}
+{"t": 3.03, "stage": "starting", "queues": {"3492648": 2}, "gpus": {"card0": {"busy": 0, "watts": 9.0}, "card1": {"busy": 92, "watts": 80.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 11.0}}}
+{"t": 3.54, "stage": "starting", "queues": {"3492648": 2}, "gpus": {"card0": {"busy": 0, "watts": 9.0}, "card1": {"busy": 89, "watts": 78.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 11.0}}}
+{"result": {"mode": "chain", "cards": 1, "kernels": 32, "step_us_p50": 698.7, "step_us_p95": 785.1, "launch_us_p50": 82.1, "wait_us_p50": 611.7}}

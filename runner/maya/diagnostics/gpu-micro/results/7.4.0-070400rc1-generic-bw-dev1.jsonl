@@ -1,0 +1,19 @@
+{"t": 0.0, "stage": "starting", "queues": {}, "gpus": {"card0": {"busy": 0, "watts": 7.0}, "card1": {"busy": 0, "watts": 4.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 15.0}}}
+{"result": {"device": 1, "gib": 0.25, "stride_words": 1, "line_gbps_p50": 632.2, "line_gbps_max": 670.0, "pct_of_800": 83.7}}
+{"result": {"device": 1, "gib": 0.25, "stride_words": 2, "line_gbps_p50": 700.1, "line_gbps_max": 704.3, "pct_of_800": 88.0}}
+{"result": {"device": 1, "gib": 0.25, "stride_words": 4, "line_gbps_p50": 702.6, "line_gbps_max": 705.3, "pct_of_800": 88.2}}
+{"result": {"device": 1, "gib": 0.25, "stride_words": 8, "line_gbps_p50": 700.7, "line_gbps_max": 702.8, "pct_of_800": 87.9}}
+{"result": {"device": 1, "gib": 4.0, "stride_words": 1, "line_gbps_p50": 719.8, "line_gbps_max": 720.8, "pct_of_800": 90.1}}
+{"t": 0.51, "stage": "starting", "queues": {"3490053": 2}, "gpus": {"card0": {"busy": 59, "watts": 133.0}, "card1": {"busy": 0, "watts": 7.0}, "card2": {"busy": 0, "watts": 12.0}, "card3": {"busy": 0, "watts": 14.0}}}
+{"result": {"device": 1, "gib": 4.0, "stride_words": 2, "line_gbps_p50": 723.5, "line_gbps_max": 726.8, "pct_of_800": 90.9}}
+{"result": {"device": 1, "gib": 4.0, "stride_words": 4, "line_gbps_p50": 724.4, "line_gbps_max": 727.5, "pct_of_800": 90.9}}
+{"result": {"device": 1, "gib": 4.0, "stride_words": 8, "line_gbps_p50": 724.0, "line_gbps_max": 726.1, "pct_of_800": 90.8}}
+{"t": 1.01, "stage": "starting", "queues": {"3490053": 2}, "gpus": {"card0": {"busy": 100, "watts": 190.0}, "card1": {"busy": 0, "watts": 6.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 12.0}}}
+{"t": 1.51, "stage": "starting", "queues": {"3490053": 2}, "gpus": {"card0": {"busy": 98, "watts": 215.0}, "card1": {"busy": 0, "watts": 6.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 12.0}}}
+{"result": {"device": 1, "gib": 16.0, "stride_words": 1, "line_gbps_p50": 720.5, "line_gbps_max": 723.2, "pct_of_800": 90.4}}
+{"t": 2.02, "stage": "starting", "queues": {"3490053": 2}, "gpus": {"card0": {"busy": 100, "watts": 224.0}, "card1": {"busy": 0, "watts": 6.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 12.0}}}
+{"result": {"device": 1, "gib": 16.0, "stride_words": 2, "line_gbps_p50": 722.6, "line_gbps_max": 725.5, "pct_of_800": 90.7}}
+{"t": 2.53, "stage": "starting", "queues": {"3490053": 2}, "gpus": {"card0": {"busy": 100, "watts": 220.0}, "card1": {"busy": 0, "watts": 6.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 12.0}}}
+{"result": {"device": 1, "gib": 16.0, "stride_words": 4, "line_gbps_p50": 723.4, "line_gbps_max": 726.2, "pct_of_800": 90.8}}
+{"t": 3.03, "stage": "starting", "queues": {"3490053": 2}, "gpus": {"card0": {"busy": 100, "watts": 217.0}, "card1": {"busy": 0, "watts": 6.0}, "card2": {"busy": 0, "watts": 11.0}, "card3": {"busy": 0, "watts": 12.0}}}
+{"result": {"device": 1, "gib": 16.0, "stride_words": 8, "line_gbps_p50": 723.3, "line_gbps_max": 725.9, "pct_of_800": 90.7}}
