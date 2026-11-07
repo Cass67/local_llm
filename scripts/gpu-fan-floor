@@ -28,6 +28,7 @@ set -eu
 
 MIN_PWM=${MIN_PWM:-35}
 TARGET_TEMP=${TARGET_TEMP:-85}
+ZERO_RPM=${ZERO_RPM:-1}   # 1: fans stop below the zero-rpm stop temperature (idle quiet); 0: always at MIN_PWM
 
 apply_card() {
 	F="$1"
@@ -38,7 +39,7 @@ apply_card() {
 	echo "$MIN_PWM" > "$F/fan_minimum_pwm"; echo c > "$F/fan_minimum_pwm"
 	echo 2000 > "$F/acoustic_target_rpm_threshold"; echo c > "$F/acoustic_target_rpm_threshold"
 	echo "$TARGET_TEMP" > "$F/fan_target_temperature"; echo c > "$F/fan_target_temperature"
-	echo 0 > "$F/fan_zero_rpm_enable"; echo c > "$F/fan_zero_rpm_enable"
+	echo "$ZERO_RPM" > "$F/fan_zero_rpm_enable"; echo c > "$F/fan_zero_rpm_enable"
 }
 
 rc=0
