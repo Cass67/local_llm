@@ -47,14 +47,22 @@ _REASONING_OPTIONS = [{"type": "effort", "values": ["low", "medium", "high"]}]
 
 
 def _vision_for(family: str, profile: str | None) -> bool:
-    """True when the profile this model runs under loads an mmproj."""
+    """Configured image input through an external projector or a native Maya pack."""
     try:
         from .profiles import _load
 
         fam = _load().get("families", {}).get(family, {})
         profiles = fam.get("profiles", {})
         cfg = profiles.get(profile or fam.get("default")) or {}
-        return bool(cfg.get("mmproj"))
+        if cfg.get("mmproj"):
+            return True
+        args = cfg.get("maya_args") or []
+        if cfg.get("backend") != "maya" or "--pack" not in args:
+            return False
+        # DeepSeek/MiniMax use a native tower; their engine defaults to vision on.
+        # Respect the final explicit flag, matching the engine's argument parser.
+        flags = [i for i, arg in enumerate(args) if arg == "--vision"]
+        return not flags or (flags[-1] + 1 < len(args) and args[flags[-1] + 1] != "off")
     except Exception:  # nosec B110  # noqa: BLE001, S110
         return False
 
@@ -118,7 +126,7 @@ async def v1_models():
 
     # The router forwards to whichever model is live, so advertise the smallest
     # window it could land on -- overstating it makes a client overrun the ctx,
-    # and vision only holds if every candidate has an mmproj.
+    # and vision only holds if every candidate has configured image input.
     router_ctx = min(routed_ctx) if routed_ctx else None
     router_vision = bool(routed_vision) and all(routed_vision)
     router_rec: dict = {

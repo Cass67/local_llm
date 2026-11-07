@@ -678,6 +678,13 @@ app = FastAPI(title="model-router")
 router = APIRouter()
 
 
+# Some clients probe the base URL before use and treat a 404 as "server unreachable".
+@router.api_route("/v1", methods=["GET", "HEAD"])
+@router.api_route("/v1/", methods=["GET", "HEAD"])
+async def v1_root():
+    return {"status": "ok", "models": "/v1/models"}
+
+
 @router.get("/v1/models")
 async def v1_models():
     """Passthrough to backend."""
