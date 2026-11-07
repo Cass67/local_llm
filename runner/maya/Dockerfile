@@ -46,6 +46,8 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 # 0013: DS4 CPU-lane read-ahead (DS4_AHEAD_RAM=1: the next layer's picks guessed for RAM-held experts too;
 # DS4_LANE_PF=N: the lane's workers read the first N guesses into the caches while the GPU runs; DS4_LANE_TRACE),
 # branch ds4-decode-graph a08d45e on Cass67/project-maya. +3.5-5% warm decode on the T7910 (runner/maya/diagnostics).
+# 0014: upstream PR #906 (7dd91aa, open): after a STOP, a kept shared start left in the model is not taken for a
+# conversation - the kept one comes back. Drop when it lands in a release.
 # The ds4 NUMA (MPOL_LOCAL, needs CapAdd SYS_NICE - runtime.py) and down-act-copy patches landed in v1.1.36 (#562, #561);
 # --experts N (old 0006) in v1.1.41 (#564), DS4_IQ1S_ROWS + the HIP wall_clock64 pull clock (old 0007) in v1.1.41 (#563).
 COPY patches /opt/maya/patches
