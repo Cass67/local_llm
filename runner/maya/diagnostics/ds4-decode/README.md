@@ -41,3 +41,22 @@ Ruled out:
 
 The levers left are in the engine: take lane coordination off the lead's launch thread, fuse
 `q8_quant` into its consumers, or capture DS4 decode layers as graphs.
+
+## Gap breakdown, 2026-11-07
+
+- `att.sh OUTDIR FLAGS...`: attach for 2 s during a story decode (needs `ROCP_TOOL_ATTACH=1`).
+  `./att.sh C-trace --kernel-trace --memory-copy-trace --hip-runtime-trace` works when the flags are
+  given in that form.
+- `gapcause.py DIR "Agent 2"`: matches each kernel to its `hipLaunchKernel` by correlation ID, then
+  sorts every idle gap into one of three causes:
+  - the launch was submitted after the previous kernel ended, so the queue ran dry;
+  - a copy ran on that card during the gap;
+  - the kernel was already queued, so the GPU waited on its own.
+
+Tracing adds overhead, so read these as shares, not absolute times. Card 0's queue runs dry for 37%
+of wall (746 ms of 2 s), with the launcher inside `hipLaunchKernel` (429 ms) or in engine code
+(295 ms). Copies take 5% and GPU-side waits another 5%. Card 3 runs dry for 13%. Card 0's
+launcher cannot keep up with kernels that take 2.5-6 us. `../gpu-micro/launch-cost.cpp` shows why:
+lock contention between the four launcher threads plus 256 B+ by-value args make each launch cost
+5-9 us. `hipGraphLaunch` costs 0.05-0.09 us per node, so capturing DS4 decode as graphs is the
+fix to try. This replaces "Ruled out" above on graphs.
