@@ -185,3 +185,8 @@ The placement stays in the page cache across engine restarts, so later "off" arm
 | production v1.1.55, after | balanced | 60.4 |
 
 No effect inside the 60-62.5 noise band. Engram lookups are too small for placement to matter. Rejected.
+
+PR 821 (cache-aware expert substitution) was tested on image `:v1.1.56-prs2` with `MAYA_DS4_CACHE_SUB_RATIO=0.1`, top 12,
+mass budget 0.6. It refuses to run with RAM_SKIP, so `MAYA_DS4_RAM_SKIP_W=0` in that arm. Warm mean 55.5 tok/s against
+61-62 for production's `RAM_SKIP` 0.16. It is slower and its quality on this model is unmeasured, so RAM_SKIP stays.
+Not adopted.
