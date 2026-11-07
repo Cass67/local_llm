@@ -256,3 +256,12 @@ Engine commit c40e6c6 (`ds4-decode-graph`), images `:v1.1.56-probe`, `:v1.1.56-s
   1530 (+23%), cycle 802 -> 654 us = lane 35 + GPU part 619 (up from 526: some GPU work had hidden under the lane). Warm
   tok/s 74.2 with lower draft acceptance. So the lane's remaining share is at most ~20%, and ~400 us of each layer's
   619 us GPU part is cross-card waiting, not compute (~200 us), even with no CPU work.
+
+## Lane squeeze, 2026-11-07 (stopped)
+
+Engine trace now records how much read-ahead was done when the request came (image `:v1.1.56-pf2`, `ltan4.py`,
+`ltbrk.py` on ubt26). With PF=2 the read-ahead is complete 61% of the time (p50 100%, p10 83%). One-expert call
+compute: hit after a complete read-ahead 160 us, partial 185, miss 280, no read-ahead 381. Lane time by call: one-expert
+hits 23% (mean 236 us); draft-verify windows of 4+ experts with 3+ not read ahead 21% (mean 1136 us, ~83 GB/s, at RAM
+bandwidth); the rest mixed. Starting the read-ahead earlier saves ~10 us a call; wider read-ahead (PF=3) was flat. Left:
+the column split of the down matrix (one cross-socket barrier less a call), estimated +2-3%. Not pursued.
