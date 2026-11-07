@@ -40,6 +40,9 @@ When changing any live service, remote host, generated launcher, model config, o
    - active service/model/port,
    - verification result,
    - rollback path.
+9. Record it in `docs/LIVE-CHANGES.md`: a dated log entry (what, why, effect, rollback, commit) and an updated
+   "Live now" section, in the same commit as the change. This includes image bumps, profile env/args, host
+   settings and fan/power changes.
 
 Treat all credentials and private material as inaccessible by default.
 
