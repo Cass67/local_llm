@@ -1,16 +1,18 @@
 #!/bin/bash
-# devbuild.sh TAG: build maya-ds4 from /mnt/scratch/maya-ds4g/src (a Maya checkout + local edits, synced from the Mac)
+# devbuild.sh TAG [WORK]: build maya-ds4 from WORK/src (default /mnt/scratch/maya-ds4g; a Maya checkout + local edits,
+# synced from the Mac)
 # inside the v1.1.56 runner image, with the image's patches applied, then layer the binary onto that image as
 # local-llm-runner-maya:TAG. Run on ubt26. One heavy job at a time: nothing else should be building or benching.
 set -euo pipefail
 tag=$1
 base=local-llm-runner-maya:v1.1.56
-work=/mnt/scratch/maya-ds4g
+work=${2:-/mnt/scratch/maya-ds4g}
+patches=/mnt/scratch/maya-ds4g/context/patches
 cd "$work"
 mkdir -p build-src out
 # (incremental: build-hip stays; files the patch touched are copied back, then patched again)
 rsync -a --delete --exclude build-hip src/ build-src/
-for p in context/patches/0012-*.patch; do git -C build-src apply "$PWD/$p"; done
+for p in "$patches"/0012-*.patch; do git -C build-src apply "$p"; done
 docker run --rm -v "$work/build-src:/w" -v "$work/out:/out" -w /w "$base" bash -c '
   set -e; root=/opt/rocm
   export PATH="$root/bin:$root/llvm/bin:$PATH" ROCM_PATH=$root HIP_PATH=$root HIP_PLATFORM=amd LD_LIBRARY_PATH=$root/lib

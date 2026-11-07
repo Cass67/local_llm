@@ -160,3 +160,28 @@ One thread per physical core is best. Sibling threads slow the per-core workers 
 logical CPU starves the GPU launch threads, which is what turning off hyperthreading would do too. Not tried: why
 `os::pin_thread` does not stick in the container. Pinned workers plus reserved cores for the launchers is the
 remaining layout test.
+
+## Launch-thread pinning, and upstream PR 784 (Engram NUMA), 2026-11-07
+
+Pinning works: the 44 lane workers run one per core on CPUs 0-43. The 4 GPU launch threads and the service thread are
+unpinned and run on hyperthread siblings. `pinarm.py` sets `--cpu-threads 40` and confines those 5 threads to the 4
+freed whole cores. Results: 61.7 confined, 62.1 unconfined, 62.4 at 45. No gain, so the ~9 us launch cost is inside HIP,
+not contention with siblings.
+
+Locked Engram pages were skewed, 52 GB on node 0 vs 151 GB on node 1 (expert copies split 119/119). PR 784
+(`MAYA_DS4_ENGRAM_RAM_NUMA=1`) was tested on image `:v1.1.56-prs` (v1.1.56 + PR 784 + PR 906 + 0012, built with
+`devbuild.sh TAG /mnt/scratch/maya-prs`, launched with `launch-img.py`, which leaves the profile untouched). It relocated
+24k 2 MiB stripes and verified a 50/50 split.
+
+The placement stays in the page cache across engine restarts, so later "off" arms and production v1.1.55 also ran balanced.
+
+| run | Engram placement | warm tok/s |
+|---|---|---|
+| prs, off (first) | skewed | 60.3 |
+| prs, on | balanced | 62.2 |
+| prs, on, repeat | balanced | 61.0 |
+| prs, "off", repeat | balanced (inherited) | 61.2 |
+| production v1.1.55, before | skewed | 61.9-62.5 |
+| production v1.1.55, after | balanced | 60.4 |
+
+No effect inside the 60-62.5 noise band. Engram lookups are too small for placement to matter. Rejected.
