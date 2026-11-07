@@ -89,7 +89,10 @@ Sol's kernel `7.4.0-rc1-t7910-p2p` (`/mnt/scratch/t7910-p2p/t7910-p2p.patch`, bo
   Every prompt got slower. Rejected.
 
 A gain would need P2P within each socket (0-1, 2-3), then the existing host path between sockets.
-That is engine work, not a flag. The `arm.py` image comes from the cluster, not the profile, so
+Scoped and dropped. In B-trace the lead's `ar_rs16` takes a median of 21.8 us (p10 16.0) at ~1,500 per second.
+The lead usually arrives last, so this is the all-reduce's own cost: 2.4-3.3% of wall time, about 2 tok/s even if
+free. The other cards' 257-323 us is waiting for the lead. The hybrid keeps the cross-socket host round trips,
+writes then flags then polls then reads, and adds a peer stage and a broadcast, so the realistic gain is 0-1%. The `arm.py` image comes from the cluster, not the profile, so
 image A/Bs need `launch-test.py`.
 
 ## Segment graphs (DS4_SEG_GRAPH), 2026-11-07
