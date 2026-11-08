@@ -162,6 +162,19 @@ def _patch_model(m: dict, ctx: int, out: int, strip: bool) -> list[str]:
     return changes
 
 
+def _no_prune(data: dict) -> list[str]:
+    # opencode's prune rewrites old tool outputs in place: the prompt stops continuing the
+    # server's cached conversation and the whole history is read again (9.5 min at 470K).
+    if "opencode" not in str(data.get("$schema", "")):
+        return []
+    comp = data.setdefault("compaction", {})
+    if comp.get("prune") is False:
+        return []
+    old = comp.get("prune")
+    comp["prune"] = False
+    return [f"prune {old} -> False"]
+
+
 def patch_file(
     path: Path, ctx: int, out: int, write: bool = True, strip: bool = False
 ) -> list[str]:
@@ -199,6 +212,7 @@ def patch_file(
                 changes.append(f"reserved {comp.get('reserved')} -> {reserve}")
                 comp["reserved"] = reserve
 
+    changes += _no_prune(data)
     if changes and write:
         path.write_text(json.dumps(data, indent=2) + "\n")
     return changes

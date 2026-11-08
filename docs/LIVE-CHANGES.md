@@ -44,6 +44,17 @@ before -> after as that change's gain. The figures do not chain into one number.
 
 ## Log
 
+### 2026-11-08 OpenCode prune off (cache misses)
+- What: `compaction.prune: false` in Mac `~/.config/opencode/opencode.json`, ubt26
+  `~/.config/local_llm/agents/opencode{,2}/opencode.json`, repo seeds `agents/opencode{,2}.json`;
+  `scripts/model-switch.py sync` now enforces it. Backups `*.bak-20261108-pre-prune`.
+- Why: prune clears old tool outputs in place, so the prompt stops continuing Maya's kept conversation and the
+  whole history is read again. Seen 03:04: a 470,562-token turn read from 0 in 572 s (the turn before: 10 s). Proof:
+  the 470,188 slot was not superseded by the next save, so its tokens were no longer a prefix.
+- Effect: pending restart of the OpenCode instances (Mac `opencode serve`, `local-llm-opencode`, `-opencode2`).
+  Chats fill faster without pruning, so compaction comes sooner.
+- Rollback: restore the `.bak-20261108-pre-prune` files, restart the agents.
+
 ### 2026-11-08 Model router started again
 - What: `docker start local-llm-router` (:3200).
 - Why: it was stopped by hand at 2026-11-07 12:46 UTC, before the reboot. With `restart: unless-stopped`, an explicit stop

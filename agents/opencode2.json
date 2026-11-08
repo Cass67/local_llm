@@ -29,5 +29,8 @@
       }
     }
   },
-  "warming": false
+  "warming": false,
+  "compaction": {
+    "prune": false
+  }
 }

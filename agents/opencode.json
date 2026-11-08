@@ -19,5 +19,8 @@
         }
       }
     }
+  },
+  "compaction": {
+    "prune": false
   }
 }
