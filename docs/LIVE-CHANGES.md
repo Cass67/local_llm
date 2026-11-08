@@ -44,6 +44,14 @@ before -> after as that change's gain. The figures do not chain into one number.
 
 ## Log
 
+### 2026-11-08 Model router started again
+- What: `docker start local-llm-router` (:3200).
+- Why: it was stopped by hand at 2026-11-07 12:46 UTC, before the reboot. With `restart: unless-stopped`, an explicit stop
+  keeps it down across reboots, so OpenCode (Mac, phone) and anything using `auto` could not reach a model.
+- Effect: `/v1/models` 200; an `auto` prompt answers from maya-dsv41-q4xl-huihui.
+- Note: the running router image predates commit b008a60 (`GET /v1` answer for base-URL probes); its log shows clients
+  probing `/` and getting 404. Rebuild the router image to pick that up.
+
 ### 2026-11-07 Maya v1.1.56 + PR #906 (0014)
 - What: added upstream PR #906 (its own commit 7dd91aa only) as patch 0014. Image `:v1.1.56-ra906` 1c46e0191843.
 - Why: after a STOP, a kept shared start left in the model was taken for a conversation.
