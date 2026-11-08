@@ -1,9 +1,27 @@
+# /// script
+# requires-python = ">=3.11,<3.14"
+# dependencies = ["build123d"]
+# ///
+# run: uv run gpu_rack.py
+from itertools import combinations
 from pathlib import Path
 
-import trimesh
-from manifold3d import CrossSection, Manifold, OpType
+from build123d import (
+    Compound,
+    Face,
+    Plane,
+    Pos,
+    Rot,
+    Wire,
+    export_step,
+    export_stl,
+    extrude,
+    mirror,
+)
 
-OUT = Path(__file__).parent / "stl"
+HERE = Path(__file__).parent
+STL = HERE / "stl"
+STEP = HERE / "step"
 
 # name: (length, height, thickness) in mm
 CARDS = {
@@ -42,47 +60,38 @@ TIE_GAP = FRAME_Y - 2 * POST_Y  # post face to post face
 POST_CX = POST_X / 2
 
 
+def prism(points, direction, length):
+    return extrude(Face(Wire.make_polygon(points, close=True)), length, dir=direction)
+
+
 def box(x0, y0, z0, x1, y1, z1):
-    return Manifold.cube([x1 - x0, y1 - y0, z1 - z0]).translate([x0, y0, z0])
+    return prism([(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)], (0, 0, 1), z1 - z0)
 
 
-def prism_z(points, z0, z1):
-    return Manifold.extrude(CrossSection([points]), z1 - z0).translate([0, 0, z0])
+def prism_z(xy_points, z0, z1):
+    return prism([(x, y, z0) for x, y in xy_points], (0, 0, 1), z1 - z0)
 
 
 def prism_along_x(yz_points, x0, x1):
-    # extrude a (y, z) profile along +X
-    return (
-        Manifold.extrude(CrossSection([yz_points]), x1 - x0)
-        .rotate([90, 0, 90])
-        .translate([x0, 0, 0])
-    )
+    return prism([(x0, y, z) for y, z in yz_points], (1, 0, 0), x1 - x0)
 
 
 def prism_along_y(xz_points, y0, y1):
-    # extrude an (x, z) profile along +Y
-    return (
-        Manifold.extrude(CrossSection([xz_points]), y1 - y0)
-        .rotate([90, 0, 0])
-        .translate([0, y1, 0])
-    )
+    return prism([(x, y0, z) for x, z in xz_points], (0, 1, 0), y1 - y0)
 
 
 def mirror_x(m):
-    return m.mirror([1, 0, 0]).translate([FRAME_X, 0, 0])
+    return Pos(FRAME_X, 0, 0) * mirror(m, Plane.YZ)
 
 
 def corner():
-    body = Manifold.batch_boolean(
-        [
-            box(0, 0, 0, POST_X, POST_Y, PITCH),
-            box(0, 0, 0, ARM_X, WEB_Y, LIP_Z),
-            prism_along_y(
-                [(POST_X, LIP_Z), (POST_X + GUSSET, LIP_Z), (POST_X, LIP_Z + GUSSET)], 0, WEB_Y
-            ),
-            box(4, 3, PITCH, 12, 9, PITCH + PEG_LEN),
-        ],
-        OpType.Add,
+    body = (
+        box(0, 0, 0, POST_X, POST_Y, PITCH)
+        + box(0, 0, 0, ARM_X, WEB_Y, LIP_Z)
+        + prism_along_y(
+            [(POST_X, LIP_Z), (POST_X + GUSSET, LIP_Z), (POST_X, LIP_Z + GUSSET)], 0, WEB_Y
+        )
+        + box(4, 3, PITCH, 12, 9, PITCH + PEG_LEN)
     )
     neck = DOVE_NECK / 2 + DOVE_FIT
     wide = DOVE_WIDE / 2 + DOVE_FIT
@@ -123,19 +132,16 @@ def rail():
         RAIL_FLOOR,
         LIP_Z,
     )
-    return Manifold.batch_boolean(
-        [
-            box(x0, RAIL_Y0, RAIL_FLOOR, x1, WEB_Y, LIP_Z),
-            box(x0, WEB_Y, REST_Z - LEDGE_THICK, x1, WEB_Y + LEDGE_Y, REST_Z),
-            prism_along_x(
-                [(WEB_Y, 5), (WEB_Y + 12, REST_Z - LEDGE_THICK), (WEB_Y, REST_Z - LEDGE_THICK)],
-                x0,
-                x1,
-            ),
-            tail,
-            mirror_x(tail),
-        ],
-        OpType.Add,
+    return (
+        box(x0, RAIL_Y0, RAIL_FLOOR, x1, WEB_Y, LIP_Z)
+        + box(x0, WEB_Y, REST_Z - LEDGE_THICK, x1, WEB_Y + LEDGE_Y, REST_Z)
+        + prism_along_x(
+            [(WEB_Y, 5), (WEB_Y + 12, REST_Z - LEDGE_THICK), (WEB_Y, REST_Z - LEDGE_THICK)],
+            x0,
+            x1,
+        )
+        + tail
+        + mirror_x(tail)
     )
 
 
@@ -173,24 +179,19 @@ def foot():
     )
 
 
-def to_mesh(m):
-    mesh = m.to_mesh()
-    return trimesh.Trimesh(mesh.vert_properties[:, :3], mesh.tri_verts, process=True)
-
-
 def assembly(corner_m, rail_m, tie_m, foot_m):
-    other_side = lambda m: m.rotate([0, 0, 180]).translate([FRAME_X, FRAME_Y, 0])
+    sides = (lambda m: m, lambda m: Pos(FRAME_X, FRAME_Y, 0) * Rot(0, 0, 180) * m)
     corner_r = mirror_x(corner_m)
     foot_r = mirror_x(foot_m)
     parts = []
-    for side in (lambda m: m, other_side):
+    for side in sides:
         parts += [side(foot_m), side(foot_r)]
     for level in range(len(STACK)):
         z = FOOT_Z + level * PITCH
-        for side in (lambda m: m, other_side):
-            parts += [side(m).translate([0, 0, z]) for m in (corner_m, corner_r, rail_m)]
+        for side in sides:
+            parts += [Pos(0, 0, z) * side(m) for m in (corner_m, corner_r, rail_m)]
         for cx in (POST_CX, FRAME_X - POST_CX):
-            parts.append(tie_m.translate([cx, FRAME_Y / 2, z + TIE_FLOOR]))
+            parts.append(Pos(cx, FRAME_Y / 2, z + TIE_FLOOR) * tie_m)
     return parts
 
 
@@ -205,6 +206,14 @@ def card_boxes():
     return boxes
 
 
+def overlap(a, b):
+    ba, bb = a.bounding_box(), b.bounding_box()
+    if any(lo >= hi for lo, hi in zip([*ba.min, *bb.min], [*bb.max, *ba.max])):
+        return 0
+    common = a & b
+    return common.volume if common else 0
+
+
 def check(corner_m, rail_m, tie_m, foot_m):
     for name, (length, height, thick) in CARDS.items():
         assert length < BAY_X, name  # nosec B101
@@ -213,32 +222,36 @@ def check(corner_m, rail_m, tie_m, foot_m):
         assert worst_overlap > 5, f"{name} can slide off ledge: {worst_overlap}"  # nosec B101
         assert PITCH - thick - LEDGE_THICK > 25, f"{name} intake gap"  # nosec B101
     for name, m in (("corner", corner_m), ("rail", rail_m), ("tie", tie_m), ("foot", foot_m)):
-        assert to_mesh(m).is_watertight, name  # nosec B101
-        assert len(m.decompose()) == 1, f"{name} has loose pieces"  # nosec B101
-        assert max(to_mesh(m).extents[:2]) < 340, f"{name} too big for the bed"  # nosec B101
+        assert m.is_valid, name  # nosec B101
+        assert len(m.solids()) == 1, f"{name} has loose pieces"  # nosec B101
+        size = m.bounding_box().size
+        assert max(size.X, size.Y) < 340, f"{name} too big for the bed"  # nosec B101
     parts = assembly(corner_m, rail_m, tie_m, foot_m)
     for card in card_boxes():
         for part in parts:
-            assert (card ^ part).volume() < 1e-6, "card collides with rack"  # nosec B101
-    for i, a in enumerate(parts):
-        for b in parts[i + 1 :]:
-            assert (a ^ b).volume() < 1e-6, "rack parts collide"  # nosec B101
+            assert overlap(card, part) < 1e-6, "card collides with rack"  # nosec B101
+    for a, b in combinations(parts, 2):
+        assert overlap(a, b) < 1e-6, "rack parts collide"  # nosec B101
+    return parts
 
 
 if __name__ == "__main__":
     corner_m, rail_m, tie_m, foot_m = corner(), rail(), tie(), foot()
-    check(corner_m, rail_m, tie_m, foot_m)
-    OUT.mkdir(exist_ok=True)
+    parts = check(corner_m, rail_m, tie_m, foot_m)
+    STL.mkdir(exist_ok=True)
+    STEP.mkdir(exist_ok=True)
     for name, part, count in (
         ("corner_left", corner_m, 8),
         ("corner_right", mirror_x(corner_m), 8),
-        ("rail", rail_m.rotate([90, 0, 0]), 8),  # web on the bed, no supports
+        ("rail", Rot(90, 0, 0) * rail_m, 8),  # web on the bed, no supports
         ("tie", tie_m, 8),
         ("foot", foot_m, 4),
     ):
-        mesh = to_mesh(part)
-        mesh.export(OUT / f"{name}_print_x{count}.stl")
-        print(name, f"x{count}", mesh.extents.round(1).tolist(), f"{part.volume() / 1000:.0f} cm3")
-    whole = to_mesh(Manifold.compose(assembly(corner_m, rail_m, tie_m, foot_m)))
-    whole.export(OUT / "assembly_preview_only.stl")
-    print("overall", whole.extents.round(1).tolist())
+        export_stl(part, STL / f"{name}_print_x{count}.stl")
+        export_step(part, STEP / f"{name}_x{count}.step")
+        size = part.bounding_box().size
+        print(name, f"x{count}", [round(v, 1) for v in size], f"{part.volume / 1000:.0f} cm3")
+    whole = Compound(children=parts)
+    export_stl(whole, STL / "assembly_preview_only.stl")
+    export_step(whole, STEP / "assembly.step")
+    print("overall", [round(v, 1) for v in whole.bounding_box().size])
