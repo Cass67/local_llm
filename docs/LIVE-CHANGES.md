@@ -44,6 +44,15 @@ before -> after as that change's gain. The figures do not chain into one number.
 
 ## Log
 
+### 2026-11-10 Cluster PCI addresses after GPU rack move
+- What: all 9 mgmt cluster defs (`~/.local/share/local_llm/runs/clusters/*.json` = mgmt `/state/runs/clusters`)
+  rewritten `0000:05:00.0 -> 0000:04:00.0`, `0000:08:00.0 -> 0000:09:00.0` (a3/a6 unchanged). Backup
+  `runs/clusters.bak-20261110-pci/`.
+- Why: host moved and GPUs remounted in the rack; socket-0 cards re-enumerated. Start failed with "references GPUs
+  not present in the inventory".
+- Effect: maya-dsv41-q4xl-huihui back up on 0663b08f :8088, 0 restarts. HIP/rocm-smi order notes may be stale.
+- Rollback: copy the backup files back (only valid if cards return to old slots).
+
 ### 2026-11-08 OpenCode prune off (cache misses)
 - What: `compaction.prune: false` in Mac `~/.config/opencode/opencode.json`, ubt26
   `~/.config/local_llm/agents/opencode{,2}/opencode.json`, repo seeds `agents/opencode{,2}.json`;
