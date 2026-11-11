@@ -13,7 +13,7 @@ npm run build
 echo "=== Building runner images ==="
 cd "$PROJECT_ROOT"
 for backend in vulkan rocm cuda; do
-  docker build --network=host -t "local-llm-runner-${backend}:latest" -f "runner/${backend}/Dockerfile" "runner/${backend}"
+  scripts/build-runner.sh "$backend" latest --network=host
 done
 
 echo "=== Building management Docker image ==="

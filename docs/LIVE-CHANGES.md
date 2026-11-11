@@ -12,9 +12,8 @@ before -> after as that change's gain. The figures do not chain into one number.
 **Model:** `maya-dsv41-q4xl-huihui` (DeepSeek-V4.1-Flash UD-Q4_K_XL, huihui abliteration) on cluster `0663b08f`, port
 8088, 4x RX 7900 XT, Dell T7910 (2x E5-2699 v4, 1 TB RAM).
 
-**Image:** `local-llm-runner-maya:latest` = `:v1.1.56-ra906` (`1c46e0191843`): Maya v1.1.56 (22fc101) + patches in
-`runner/maya/patches`:
-- 0012: full GLM-5.3 and Mistral Large 4 on the GLM engine.
+**Image:** `local-llm-runner-maya:latest` = `:v1.1.58-ra906` (`bffe15327456`): Maya v1.1.58 (f406723) + patches in
+`runner/maya/patches` (0012 dropped; ML4 families need image `:v1.1.56-ra906`):
 - 0013: DS4 CPU-lane read-ahead (engine branch `ds4-decode-graph` a08d45e on Cass67/project-maya).
 - 0014: upstream PR #906, keeps the kept shared start after a STOP. Drop once #906 is in a release.
 
@@ -38,11 +37,21 @@ before -> after as that change's gain. The figures do not chain into one number.
 **Host:** runner containers get `CAP_SYS_NICE` (`container/backend/runtime.py`). GPU fans: `scripts/gpu-fan-floor`
 (target 85 C, min pwm 35, zero-rpm on), re-applied every 10 min by `gpu-fan-floor.timer`.
 
-**Speed now:** warm decode 65.5 tok/s (`pair.py`, temp 0, 1024 tokens). Prefill ~650 tok/s at 32K, ~900 at 64K.
+**Speed now:** warm decode 58.5 tok/s after the rack move (65.5 before it, on v1.1.56) (`pair.py`, temp 0, 1024 tokens). Prefill ~650 tok/s at 32K, ~900 at 64K.
 
-**Rollback tags:** `before-906-20261107` (read-ahead without 0014), `before-v1.1.56-20261107` (v1.1.55).
+**Rollback tags:** `before-v1.1.58-20261111` (v1.1.56 + 0012-0014), `before-906-20261107` (read-ahead without 0014), `before-v1.1.56-20261107` (v1.1.55).
 
 ## Log
+
+### 2026-11-11 Maya v1.1.58
+- What: image `local-llm-runner-maya:v1.1.58-ra906` bffe1532 = v1.1.58 + 0013 + 0014 (0014 regenerated for context
+  drift), retagged `:latest`; DS4 restarted on 0663b08f. 0012 (full GLM-5.3 + ML4) dropped: upstream's own glm-dsa
+  port (v1.1.57) conflicts in 19 files. `container/build.sh` now builds runners through `scripts/build-runner.sh` (zstd).
+- Why: latest release (loop guard #921, SIGTERM hang fix, think:false, Responses image detail #914, GLM-5.3 upstream).
+- Effect: health 1.1.58, 0 restarts, idle GPU busy 0%. Warm pair.py 58.5 tok/s vs 65.5 on 11-07; v1.1.58's DS4 diff
+  (per-request ablate, NVIDIA one-GPU path #920, stream tie rule #697) does not run here, so likely the rack move. Not A/B'd.
+- Rollback: `docker tag local-llm-runner-maya:before-v1.1.58-20261111 local-llm-runner-maya:latest`, then
+  POST /api/clusters/0663b08f/start {"family":"maya-dsv41-q4xl-huihui","profile":"default"}.
 
 ### 2026-11-10 Cluster PCI addresses after GPU rack move
 - What: all 9 mgmt cluster defs (`~/.local/share/local_llm/runs/clusters/*.json` = mgmt `/state/runs/clusters`)

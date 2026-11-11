@@ -1,9 +1,9 @@
 diff --git a/src/ds4/ds4_main.cpp b/src/ds4/ds4_main.cpp
-index ce1004a..9b4411a 100644
+index 36aa2e2..b75620a 100644
 --- a/src/ds4/ds4_main.cpp
 +++ b/src/ds4/ds4_main.cpp
-@@ -1477,10 +1477,20 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
-             if ((size_t) q.start < c && !pic_same(pics, q)) c = (size_t) q.start;
+@@ -1491,10 +1491,20 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
+         if (abl_flip) c = 0;
          size_t from = 0;
          bool continued = false;
 +        // a kept shared start is no conversation: prefix_take leaves it in the model when a prompt that begins with it
@@ -24,7 +24,7 @@ index ce1004a..9b4411a 100644
              from = n_state;
              continued = true;
          }
-@@ -1488,7 +1498,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
+@@ -1502,7 +1512,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
              // CONVERSATION SLOTS: this prompt does not continue the conversation in the model - that one is set aside
              // first (another one takes the model, and its state is lost otherwise), then the kept conversation this
              // prompt does continue is taken back - if it goes further back than the checkpoints the state itself holds

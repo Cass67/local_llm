@@ -12,8 +12,8 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
-# v1.1.56
-ARG MAYA_REF=22fc101f2c109b7e7174c975ff3c2d8e9ce0a867
+# v1.1.58
+ARG MAYA_REF=f4067232fa599494122508b55556c4dbaad945ba
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -39,10 +39,8 @@ RUN git init -q /opt/maya/src && cd /opt/maya/src \
 RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/third_party/llama.cpp; \
     git fetch -q --depth 1 https://github.com/ggml-org/llama.cpp.git "$LLAMA_CPP_COMMIT"; git checkout -q FETCH_HEAD
 
-# 0012: full GLM-5.3 (llama.cpp arch glm-dsa) on the GLM engine - roped MLA, the token indexer (top-k 2048),
-# plain residual, NextN MTP, batched prompt path - and Mistral Large 4 (mistral-large4: NoPE / shared-KV layers, SSMax,
-# YaRN, softmax router, the DSpark drafter via --dflash, serve's Mistral chat format); rebased onto v1.1.56 from ~/git/maya-ml4 branch ml4-port
-# (git diff v1.1.43 ml4-port, without data/ and the ML4 oracle files).
+# 0012 (full GLM-5.3 glm-dsa + Mistral Large 4) dropped at v1.1.58: upstream's own glm-dsa port (v1.1.57) conflicts
+# with it in 19 files. Full GLM-5.3 is upstream now; ML4 families stay on image :v1.1.56-ra906 (patch in git history).
 # 0013: DS4 CPU-lane read-ahead (DS4_AHEAD_RAM=1: the next layer's picks guessed for RAM-held experts too;
 # DS4_LANE_PF=N: the lane's workers read the first N guesses into the caches while the GPU runs; DS4_LANE_TRACE),
 # branch ds4-decode-graph a08d45e on Cass67/project-maya. +3.5-5% warm decode on the T7910 (runner/maya/diagnostics).
