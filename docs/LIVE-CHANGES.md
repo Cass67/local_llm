@@ -9,18 +9,23 @@ before -> after as that change's gain. The figures do not chain into one number.
 
 ## Live now
 
-**Model:** `maya-dsv41-q4xl-huihui` (DeepSeek-V4.1-Flash UD-Q4_K_XL, huihui abliteration) on cluster `0663b08f`, port
-8088, 4x RX 7900 XT, Dell T7910 (2x E5-2699 v4, 1 TB RAM).
+**Model:** `maya-dsv41-q4xl-huihui` (DeepSeek-V4.1-Flash huihui UD-Q4_K_XL, engine `maya-ds4`, args/env below) on
+cluster `0663b08f`, port 8088, 4x RX 7900 XT, Dell T7910 (2x E5-2699 v4, 1 TB RAM). Hy4 (`maya-hy4-flash-q4km`) is
+configured but stopped.
 
-**Image:** `local-llm-runner-maya:latest` = `:v1.1.58-ra906` (`bffe15327456`): Maya v1.1.58 (f406723) + patches in
-`runner/maya/patches` (0012 dropped; ML4 families need image `:v1.1.56-ra906`):
+**Image:** `local-llm-runner-maya:latest` = `:v1.1.70-ra` (`b90b1bc8`): Maya v1.1.70 (b6632a0b) + patches in
+`runner/maya/patches` (ML4 families need image `:v1.1.56-ra906`):
 - 0013: DS4 CPU-lane read-ahead (engine branch `ds4-decode-graph` a08d45e on Cass67/project-maya).
-- 0014: upstream PR #906, keeps the kept shared start after a STOP. Drop once #906 is in a release.
+- 0015 dropped: maya-hy4 on HIP is upstream since v1.1.68. 0014 dropped: #906 is upstream (c89ebef).
 
-**Args:** `--pack /mnt/models/unsloth-dsv41/UD-Q4_K_XL/maya-ds4 --tp 4 --reserve-mib 512 --vision on --dspark on
+**Hy4 args:** `--pack /mnt/models/angelslim-hy4-flash/maya-hy4 --max-context 524288 --tp 0 --mtp --chunk 2048
+--profile-out <pack>/expert-profile.bin` (layer split - TP needs every expert in VRAM; 50% of routed experts in VRAM,
+rest on the CPU lane), sampling temp 0.9 / top_p 1.0, effort high. No `HY4_*` env; DS4's switches do not apply.
+
+**DS4 args:** `--pack /mnt/models/unsloth-dsv41/UD-Q4_K_XL/maya-ds4 --tp 4 --reserve-mib 512 --vision on --dspark on
 --mmap-experts off --experts 6 --prefill-chunk 16384`
 
-**Env** (profile `default`, live state `~/.local/share/local_llm/profiles.json` on ubt26):
+**DS4 env** (profile `default`, live state `~/.local/share/local_llm/profiles.json` on ubt26):
 
 | Group | Settings |
 |---|---|
@@ -34,14 +39,95 @@ before -> after as that change's gain. The figures do not chain into one number.
 | Slots | `MAYA_DS4_SLOT_KEEP=1` |
 | CPU lane | `MAYA_DS4_RAM_SKIP_W=0.16` (lossy), `MAYA_DS4_AHEAD_RAM=1`, `MAYA_DS4_LANE_PF=2` |
 
-**Host:** runner containers get `CAP_SYS_NICE` (`container/backend/runtime.py`). GPU fans: `scripts/gpu-fan-floor`
-(target 85 C, min pwm 35, zero-rpm on), re-applied every 10 min by `gpu-fan-floor.timer`.
+**Host:** runner containers get `CAP_SYS_NICE` and the seccomp profile `container/backend/seccomp-runner.json`
+(Docker's default + `move_pages`) (`container/backend/runtime.py`). GPU fans: `scripts/gpu-fan-floor`
+(target 85 C, min pwm 35, zero-rpm on), re-applied every 10 min by `gpu-fan-floor.timer`. GPU board power: `scripts/gpu-power-cap` at boot,
+04/a3 253 W, 09/a6 238 W (BIOS floors); `amdgpu-powercap.service` (raise to 333 W) disabled.
+GPU 04:00.0 sits in Slot1 (root port 00:01.1, capped x4 Gen3); Slot2 (05:00.0, x16) is empty since the 11-10 rack move.
 
-**Speed now:** warm decode 58.5 tok/s after the rack move (65.5 before it, on v1.1.56) (`pair.py`, temp 0, 1024 tokens). Prefill ~650 tok/s at 32K, ~900 at 64K.
+**Speed now:** DS4 prefill ~375 tok/s at 40K warm, ~525 -> ~440 tok/s per chunk across a 456K read (x4 CUDA0 link,
+3.2 GB/s vs 13.6). Warm decode 55.6 tok/s on v1.1.65 with the 238/253 W caps. Hy4 (stopped): decode 25-30 tok/s.
 
-**Rollback tags:** `before-v1.1.58-20261111` (v1.1.56 + 0012-0014), `before-906-20261107` (read-ahead without 0014), `before-v1.1.56-20261107` (v1.1.55).
+**Rollback tags:** `before-v1.1.70-20261120` (v1.1.67 + #1040 + 0013/0015), `before-hy4b-20261118` (first 0015), `before-v1.1.67-20261118` (v1.1.65 + 0013/0014), `before-v1.1.65-20261117` (v1.1.58 + 0013/0014), `before-v1.1.58-20261111` (v1.1.56 + 0012-0014), `before-906-20261107` (read-ahead without 0014), `before-v1.1.56-20261107` (v1.1.55).
 
 ## Log
+
+### 2026-11-20 Maya v1.1.70: compactions in picture conversations stop re-reading from token 0
+- What: `local-llm-runner-maya:v1.1.70-ra` b90b1bc8 = v1.1.70 (b6632a0b) + 0013; 0015 dropped (upstream). Built in
+  ubt26 /mnt/scratch/maya-v1.1.70 (buildx zstd), retagged `:latest`, DS4 restarted on 0663b08f.
+- Why: opencode v2 compaction branches one response back; the old server gave prompts with pictures no restore points,
+  so every compaction in a 7-picture session read 407-456K tokens from 0 (6 in 46 h, 14-16 min each). Upstream #1007
+  fixes it; #1070 (vision tower no longer takes ROCm HW queues at load) comes along.
+- Effect: picture conversation branched one response back: 22060 reused + 12 read (0.3 s). Warm 40.5K read 375 tok/s
+  (old image 350-400 at 50-60K: flat). Health 1.1.70, /v1/models 524288, 0 restarts, idle GPUs 0% busy.
+- Rollback: `docker tag local-llm-runner-maya:before-v1.1.70-20261120 local-llm-runner-maya:latest`, then
+  POST /api/clusters/0663b08f/start {"family":"maya-dsv41-q4xl-huihui","profile":"default"}.
+
+### 2026-11-18 Runner seccomp profile: move_pages for maya-hy4's NUMA placer
+- What: new `container/backend/seccomp-runner.json` (Docker 29.1.3's default profile + `move_pages`, gated on
+  CAP_SYS_NICE); `runtime.py` passes it as `HostConfig.SecurityOpt` on every runner. mgmt HOT-PATCHED (docker cp of
+  both files into /app/backend, mgmt restarted; backup `~/.local/share/local_llm/runtime.py.bak-20261118-seccomp`),
+  Hy4 restarted on 0663b08f. Test in `container/tests/test_runtime_docker.py`.
+- Why: Docker's default profile has no rule for `move_pages` (EPERM even with SYS_NICE), so maya-hy4's placer silently
+  left ~96% of the model's pages on node 0 and both sockets' CPU-lane threads read socket 0's memory.
+- Effect: CPU-lane experts now split by expert number (node 1: 7.9 -> 27 GB). Lane 56 -> 70 GB/s, verify round
+  135 -> 121-126 ms; decode 27.2 -> 28.8/29.6 tok/s (`--gen` 512, code/prose), live 29.5-30.3 tok/s on 700-token
+  code answers. 0 restarts.
+- Rollback: `docker cp ~/.local/share/local_llm/runtime.py.bak-20261118-seccomp local-llm-mgmt:/app/backend/runtime.py`,
+  restart mgmt, restart the cluster (the pages already moved stay put until evicted).
+
+### 2026-11-18 Hy4 image with the upstream-candidate 0015
+- What: `local-llm-runner-maya:v1.1.67-hy4b` a9c5bc6c = same base, 0015 replaced by the version sent upstream
+  (Cass67 hy4-hip e73129a, PR needmorevram/project-maya#1): shared `include/strata/kernels/fresh_load.hpp`, clock
+  guarded to gfx11/12, setup takes HIP on Linux, docs. build-runner.sh (zstd), retagged `:latest`, Hy4 restarted.
+- Why: run what was submitted upstream.
+- Effect: same device code on gfx1100. Load 22.4 s, 512K, 79.4 GB VRAM; answers, 4.4K prompt (172 tok/s prefill),
+  tool call ok; 0 restarts.
+- Rollback: `docker tag local-llm-runner-maya:before-hy4b-20261118 local-llm-runner-maya:latest`, restart the family.
+
+### 2026-11-18 Hy4-flash: 512K context, chunk 2048, expert profile collection
+- What: `maya-hy4-flash-q4km` args `--max-context 524288 --chunk 2048 --profile-out <pack>/expert-profile.bin` (was
+  131072, default chunk 1024). Live `profiles.json` + `runs/accepted/` (backups `*.bak-20261118-hy4-512k`,
+  `maya-hy4-flash-q4km.json.bak-20261118`) and repo seeds.
+- Why: user needs 512K. Chunk 2048 is the PR's measured setting; the profile file feeds a later `--profile`.
+- Effect: experts in VRAM 61% -> 50%, 79.4 GB VRAM. Decode 24.6/29.6 tok/s short (was 28.4/33.3), 18.4 after 4.4K
+  (was 20.3); prefill 171 tok/s at 4.4K (was 158). Answers + tool call ok, 0 restarts, /v1/models 524288.
+  Upstream only tested to 128K.
+- Rollback: restore `profiles.json.bak-20261118-hy4-512k` + the accepted backup, then restart the family on 0663b08f.
+
+### 2026-11-18 Hy4-flash on maya-hy4 (Maya v1.1.67 + PR #1040)
+- What: image `local-llm-runner-maya:v1.1.67-hy4` 5aea13d9 = PR #1040 head 444855d (v1.1.67 + Hy4-flash engine) +
+  0013 + new 0015 (HIP port), 0014 dropped (upstream). build-runner.sh (zstd), retagged `:latest`. New family
+  `maya-hy4-flash-q4km` (repo `configs/profiles.json` + `configs/accepted/`, live `profiles.json` + `runs/accepted/`;
+  backup `profiles.json.bak-20261118-hy4`). `maya-runner.py` picks `maya-hy4` for a pack with `hy4.txt`. Model
+  `/mnt/models/angelslim-hy4-flash` (pinned ecd803c8, sha256 match), pack via `tools/hy4/pack_gguf.py`.
+  Cluster 0663b08f switched to Hy4; DS4 left stopped at the user's request.
+- Why: user wanted Hy4-flash on AMD; upstream engine was NVIDIA-only.
+- Effect: hy4_kernels_test + hy4_experts_test pass on gfx1100. Load 22.8 s, 77.5 GB VRAM, 12751/20992 experts in
+  VRAM. Decode 28-33 tok/s (MTP), 20 tok/s after 4.4K prompt; prefill 158 tok/s. Thinking, tool calls ok; 0 restarts;
+  /v1/models advertises 131072. DS4 started once on the new image (ready, 512K ctx) but was not benched.
+- Rollback: `docker tag local-llm-runner-maya:before-v1.1.67-20261118 local-llm-runner-maya:latest`, then
+  POST /api/clusters/0663b08f/start {"family":"maya-dsv41-q4xl-huihui","profile":"default"}.
+
+### 2026-11-17 Maya v1.1.65
+- What: image `local-llm-runner-maya:v1.1.65-ra906` d71f3f70 = v1.1.65 c81fab6 + 0013 + 0014 (0014 regenerated;
+  #906 still not upstream), built 11-16 via build-runner.sh (zstd), retagged `:latest`; DS4 restarted on 0663b08f.
+- Why: latest release. For this box: #956 (v1.1.64) turns the PCIe expert lane off again on `--tp` unless it measures
+  faster (cost ~4-5% decode since v1.1.58); v1.1.61 RDNA3 prompt path (+14-17% prefill measured on Halo APUs).
+- Effect: health 1.1.65, 0 restarts, idle GPUs 0% busy / 8-15 W, all 12607 CPU experts + 202.8 GB Engram in RAM,
+  0 GB SSD in bench. Warm pair.py 55.6 tok/s (code6k 58.4, pipeline 52.9, math 70.9, story 40.3) vs 58.5 on
+  v1.1.58 - but that bench ran uncapped (333 W boot race, fixed 11-15), so not comparable. Prefill not re-measured.
+- Rollback: `docker tag local-llm-runner-maya:before-v1.1.65-20261117 local-llm-runner-maya:latest`, then
+  POST /api/clusters/0663b08f/start {"family":"maya-dsv41-q4xl-huihui","profile":"default"}.
+
+### 2026-11-15 GPU power caps re-applied (boot race)
+- What: `scripts/gpu-power-cap` retries each card up to 60 s until the cap reads back; unit gets
+  `TimeoutStartSec=300`. Old `amdgpu-powercap.service` (raises every cap to 333 W) disabled. Caps now 253/238/253/238 W
+  (04/09/a3/a6). Live backups `/usr/local/bin/gpu-power-cap.bak-20261115`, `gpu-power-cap.service.bak-20261115`.
+- Why: both units ran at boot together; gpu-power-cap hit EBUSY on `power1_cap_min` and failed, the raise-to-max unit
+  retried and won. Cards ran uncapped at 333 W since the 11-10 boot.
+- Effect: caps hold; model not restarted. Not reboot-tested yet.
+- Rollback: restore the .bak files, `systemctl enable --now amdgpu-powercap` for 333 W.
 
 ### 2026-11-11 Maya v1.1.58
 - What: image `local-llm-runner-maya:v1.1.58-ra906` bffe1532 = v1.1.58 + 0013 + 0014 (0014 regenerated for context

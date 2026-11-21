@@ -12,8 +12,8 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
-# v1.1.58
-ARG MAYA_REF=f4067232fa599494122508b55556c4dbaad945ba
+# v1.1.70 (#1007: restore points for prompts with pictures; #1070: vision tower streams made at the first picture on AMD)
+ARG MAYA_REF=b6632a0b11dffd2b197c3bbdcb140bbabbe9fa12
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -44,14 +44,15 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 # 0013: DS4 CPU-lane read-ahead (DS4_AHEAD_RAM=1: the next layer's picks guessed for RAM-held experts too;
 # DS4_LANE_PF=N: the lane's workers read the first N guesses into the caches while the GPU runs; DS4_LANE_TRACE),
 # branch ds4-decode-graph a08d45e on Cass67/project-maya. +3.5-5% warm decode on the T7910 (runner/maya/diagnostics).
-# 0014: upstream PR #906 (7dd91aa, open): after a STOP, a kept shared start left in the model is not taken for a
-# conversation - the kept one comes back. Drop when it lands in a release.
+# 0014 (PR #906) dropped at v1.1.67: upstream as c89ebef.
+# 0015 (maya-hy4 on HIP) dropped at v1.1.70: upstream since v1.1.68 (device code, CMake HIP target).
 # The ds4 NUMA (MPOL_LOCAL, needs CapAdd SYS_NICE - runtime.py) and down-act-copy patches landed in v1.1.36 (#562, #561);
 # --experts N (old 0006) in v1.1.41 (#564), DS4_IQ1S_ROWS + the HIP wall_clock64 pull clock (old 0007) in v1.1.41 (#563).
 COPY patches /opt/maya/patches
 RUN cd /opt/maya/src && for p in /opt/maya/patches/*.patch; do git apply "$p"; done
 
-# maya.py's build_engine for HIP (one architecture, no tests): GLM's engine and DeepSeek-V4.1-Flash's (maya-ds4;
+# maya.py's build_engine for HIP (one architecture, no tests): GLM's engine, Hy4-flash's (maya-hy4) and
+# DeepSeek-V4.1-Flash's (maya-ds4;
 # v1.1.23 at least - v1.1.22's stops past 32K tokens on AMD)
 RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
     export PATH="$root/bin:$root/llvm/bin:$PATH" ROCM_PATH="$root" HIP_PATH="$root" HIP_PLATFORM=amd \
@@ -62,8 +63,8 @@ RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
       -DCMAKE_HIP_COMPILER="$root/llvm/bin/clang++" -DCMAKE_PREFIX_PATH="$root" \
       -DSTRATA_GGML_DIR=/opt/maya/src/third_party/llama.cpp \
       "-DCMAKE_HIP_FLAGS=--rocm-path=$root --rocm-device-lib-path=$root/lib/llvm/amdgcn/bitcode"; \
-    cmake --build build-hip --target maya maya-ds4 maya-mm3 ds4_index_score_tc -j"$BUILD_JOBS"; \
-    mkdir -p engine && cp build-hip/maya build-hip/maya-ds4 build-hip/maya-mm3 build-hip/ds4_index_score_tc engine/ && rm -rf build-hip
+    cmake --build build-hip --target maya maya-ds4 maya-mm3 maya-hy4 ds4_index_score_tc -j"$BUILD_JOBS"; \
+    mkdir -p engine && cp build-hip/maya build-hip/maya-ds4 build-hip/maya-mm3 build-hip/maya-hy4 build-hip/ds4_index_score_tc engine/ && rm -rf build-hip
 
 # The GLM CPU image encoder (docs/AMD_MAYA.md): llama.cpp mtmd. DeepSeek uses its native GPU tower.
 # with Maya's GLM-5.3-Flash patch, CPU only, static. Patched after the engine build so the engine's MMQ sources stay

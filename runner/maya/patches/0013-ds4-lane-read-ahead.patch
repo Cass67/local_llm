@@ -1,8 +1,8 @@
 diff --git a/src/ds4/ds4_model.cu b/src/ds4/ds4_model.cu
-index 3a8b521..c87b756 100644
+index 49247b1..cef972a 100644
 --- a/src/ds4/ds4_model.cu
 +++ b/src/ds4/ds4_model.cu
-@@ -1519,6 +1519,44 @@ struct Model::Impl {
+@@ -1523,6 +1523,44 @@ struct Model::Impl {
      std::vector<uint8_t> eg_q6k;   // Engram layer li's row format: 1 ggml Q6_K (superblocks of 256), 2 IQ4_NL (blocks of
                                     // 32), 0 FP8
      std::atomic<int64_t> eg_rows_n{0}, eg_hits_n{0}, eg_reads_n{0}, eg_wait_ns{0}, eg_io_ns{0};
@@ -47,7 +47,7 @@ index 3a8b521..c87b756 100644
      std::atomic<int64_t> eg_pf_rows_n{0}, eg_pf_hits_n{0}, eg_pf_reads_n{0}, eg_pf_wait_ns{0}, eg_pf_io_ns{0};
      uint16_t* h_emb = nullptr;        // the window's embedding rows
      std::vector<float> c_xh, c_xsb, c_acc, c_xhd, c_xsd, c_accd, c_yd;
-@@ -10829,6 +10867,8 @@ struct Model::Impl {
+@@ -11003,6 +11041,8 @@ struct Model::Impl {
      // row's expert output.
      using Ent = LaneEnt;
      void run_nodes(int n, const std::function<void(int)>* f, int ph = -1) {
@@ -56,7 +56,7 @@ index 3a8b521..c87b756 100644
          static const bool stats = std::getenv("DS4_CPU_STATS") != nullptr;
          if (stats && ph >= 0) {   // (each job's own time, summed: the phase's work beside its wall time)
              std::function<void(int)> g[4];
-@@ -10849,6 +10889,7 @@ struct Model::Impl {
+@@ -11023,6 +11063,7 @@ struct Model::Impl {
          for (int X = 0; X < NH; ++X) pools[(size_t) X]->start(n, f[X]);
          pools[0]->help();
          for (int X = 0; X < NH; ++X) pools[(size_t) X]->wait();
@@ -64,7 +64,7 @@ index 3a8b521..c87b756 100644
      }
  
      // a GGUF's MXFP4 experts on the CPU lane, read from the file's mapping or their copy in RAM (mx_part_ptr): each
-@@ -12543,7 +12584,7 @@ struct Model::Impl {
+@@ -12717,7 +12758,7 @@ struct Model::Impl {
              (int) n.slot.size() < n.n_exp)
              return nullptr;
          for (int e = 0; e < n.n_exp; ++e)
@@ -73,7 +73,7 @@ index 3a8b521..c87b756 100644
          return nullptr;
      }
      // lookahead on the CPU lane: request r (layer li, seq) carries the device's guesses for the next layers - the
-@@ -15180,9 +15221,69 @@ struct Model::Impl {
+@@ -15507,9 +15548,69 @@ struct Model::Impl {
              std::fwrite(v.data(), 4, v.size(), rtrace);
          }
      }
@@ -143,7 +143,7 @@ index 3a8b521..c87b756 100644
          auto last = std::chrono::steady_clock::now();
          // Idle (through a prompt, between requests) the thread backs off in stages instead of waking every 20 us for
          // good - a core of a server busy enough to show in `top` while nothing ran (issue #685).  A decode's routes
-@@ -15234,6 +15335,16 @@ struct Model::Impl {
+@@ -15561,6 +15662,16 @@ struct Model::Impl {
              }
              deep = false;
              std::atomic_thread_fence(std::memory_order_acquire);
@@ -160,7 +160,7 @@ index 3a8b521..c87b756 100644
              const int li = layer_of[next % kRing].load(std::memory_order_acquire);
              Resp& rp = resps[next % kRing];
              const int T = std::max(1, std::min(kWin, r.T));
-@@ -15386,8 +15497,32 @@ struct Model::Impl {
+@@ -15713,8 +15824,32 @@ struct Model::Impl {
                  }
                  if (!ents.empty()) {
                      const double tc = now_ms();
@@ -193,7 +193,7 @@ index 3a8b521..c87b756 100644
                      lt.c_ms = now_ms() - tc;
                      lt.n_cpu = (int) ents.size();
                      const int D = g.dim;
-@@ -15434,6 +15569,16 @@ struct Model::Impl {
+@@ -15761,6 +15896,16 @@ struct Model::Impl {
              std::atomic_thread_fence(std::memory_order_release);
              *(volatile unsigned*) &rp.seq = next;
              *(volatile unsigned*) lane_done = next;

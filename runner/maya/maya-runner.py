@@ -39,10 +39,12 @@ pack_flag = next((f for f in ("--glm-pack", "--pack") if f in args), None)
 if pack_flag is None:
     sys.exit("maya-runner: the engine args need --glm-pack <dir> (GLM) or --pack <dir> (DeepSeek)")
 deepseek = pack_flag == "--pack"
-# maya-mm3 (MiniMax-M3.1-Flash) takes --pack too; its pack is the one with an mm3.txt
-minimax = deepseek and (Path(args[args.index(pack_flag) + 1]) / "mm3.txt").is_file()
+# maya-mm3 (MiniMax-M3.1-Flash) and maya-hy4 (Hy4-flash, text only) take --pack too: mm3/hy4.txt
+pack_dir = Path(args[args.index(pack_flag) + 1])
+minimax = deepseek and (pack_dir / "mm3.txt").is_file()
+hy4 = deepseek and (pack_dir / "hy4.txt").is_file()
 # DeepSeek uses its native tower; preserve an explicit opt-out.
-if deepseek and not minimax and "--vision" not in args:
+if deepseek and not minimax and not hy4 and "--vision" not in args:
     args += ["--vision", "on"]
 if deepseek and a.vision_mmproj:
     sys.exit(
@@ -77,9 +79,13 @@ table = SRC / f"tools/hip/gfx1100-glm-hipblaslt-{hipblaslt_version()}.txt"
 if table.is_file() and not deepseek:
     env["MAYA_HIPBLASLT_TUNING"] = str(table)
 cfg = {
-    "exe": str(SRC / "engine" / ("maya-mm3" if minimax else "maya-ds4" if deepseek else "maya")),
+    "exe": str(
+        SRC
+        / "engine"
+        / ("maya-mm3" if minimax else "maya-hy4" if hy4 else "maya-ds4" if deepseek else "maya")
+    ),
     "cwd": str(SRC),
-    "tokenizer": str(Path(args[args.index(pack_flag) + 1]) / "tokenizer"),
+    "tokenizer": str(pack_dir / "tokenizer"),
     "model_name": a.model_name,
     "backend": "hip",
     # the engine's own log (placement, tiers, glm stat lines) into `docker logs` and mgmt's log view
