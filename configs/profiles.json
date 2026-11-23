@@ -3425,6 +3425,90 @@
      "maya_vision_model": "/mnt/hfcache/maya/vision/GLM-5.3-Flash-vocab.gguf"
     }
    }
+  },
+  "maya-hy4-flash-q4km": {
+   "default": "default",
+   "profiles": {
+    "default": {
+     "backend": "maya",
+     "context": 524288,
+     "visible_devices": "0,1,2,3",
+     "load_timeout_s": 600,
+     "served_model_name": "maya-hy4-flash-q4km",
+     "maya_gpus": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "maya_args": [
+      "--pack",
+      "/mnt/models/angelslim-hy4-flash/maya-hy4",
+      "--max-context",
+      "524288",
+      "--tp",
+      "0",
+      "--mtp",
+      "--chunk",
+      "2048",
+      "--profile-out",
+      "/mnt/models/angelslim-hy4-flash/maya-hy4/expert-profile.bin"
+     ],
+     "maya_server": {
+      "reasoning_effort": "high",
+      "shared": {
+       "max_tokens": 32768
+      }
+     },
+     "temperature": 0.9,
+     "top_p": 1.0
+    }
+   }
+  },
+  "maya-glm53-xs": {
+   "default": "default",
+   "profiles": {
+    "default": {
+     "backend": "maya",
+     "context": 65536,
+     "visible_devices": "0,1,2,3",
+     "load_timeout_s": 1800,
+     "served_model_name": "maya-glm53-xs",
+     "maya_gpus": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "maya_args": [
+      "--glm-pack",
+      "/mnt/models/maya-glm53/Maya-XS/pack",
+      "--expert-cache",
+      "auto",
+      "--prefill",
+      "auto",
+      "--kv-streaming",
+      "off"
+     ],
+     "maya_env": {
+      "MAYA_GLM_RESERVE_MB": "512",
+      "MAYA_GLM_RAM_HEADROOM_GB": "16",
+      "MAYA_GLM_PREFILL_SUB": "1024",
+      "MAYA_GLM_PREFILL_MB": "4096",
+      "MAYA_GLM_SPLIT_CARDS": "19.89:800,19.89:800,19.89:800,19.89:800",
+      "MAYA_GLM_SPLIT_LOG": "1",
+      "MAYA_GLM_SAME_ANSWERS": "0"
+     },
+     "maya_server": {
+      "reasoning_effort": "high",
+      "shared": {
+       "max_tokens": 32768
+      }
+     },
+     "temperature": 1.0,
+     "top_p": 0.95
+    }
+   }
   }
  }
 }

@@ -1,0 +1,12 @@
+{
+  "family": "maya-hy4-flash-q4km",
+  "alias": "maya-hy4-flash-q4km",
+  "model_name": "Hy4-flash AngelSlim Q4_K_M (Maya maya-hy4)",
+  "profile": "default",
+  "context": 524288,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 524288
+  }
+}

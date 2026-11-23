@@ -1,0 +1,12 @@
+{
+  "family": "maya-glm53-xs",
+  "alias": "maya-glm53-xs",
+  "model_name": "GLM-5.3 744B Maya-XS (Maya upstream glm-dsa)",
+  "profile": "default",
+  "context": 65536,
+  "reasoning": true,
+  "config": {
+    "backend": "maya",
+    "ctx": 65536
+  }
+}

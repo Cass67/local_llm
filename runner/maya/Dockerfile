@@ -12,8 +12,8 @@
 FROM ubuntu:24.04
 
 ARG MAYA_REPO=https://github.com/mw00/project-maya.git
-# v1.1.70 (#1007: restore points for prompts with pictures; #1070: vision tower streams made at the first picture on AMD)
-ARG MAYA_REF=b6632a0b11dffd2b197c3bbdcb140bbabbe9fa12
+# v1.1.75 (#1026 reserve held all run; GLM same-answers default - we set MAYA_GLM_SAME_ANSWERS=0; rest Inkling 2 Mini)
+ARG MAYA_REF=8621f7a7179840dbc2513130e3c0a11377a1e559
 ARG ROCM_TARBALL=https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-gfx110X-all-10.0.0a20260730.tar.gz
 # the ggml maya.py's setup pins (third_party/llama.cpp)
 ARG LLAMA_CPP_COMMIT=3cf03257f219afbe7334045ff7c6a06ac68c627d
@@ -45,6 +45,7 @@ RUN set -e; git init -q /opt/maya/src/third_party/llama.cpp; cd /opt/maya/src/th
 # DS4_LANE_PF=N: the lane's workers read the first N guesses into the caches while the GPU runs; DS4_LANE_TRACE),
 # branch ds4-decode-graph a08d45e on Cass67/project-maya. +3.5-5% warm decode on the T7910 (runner/maya/diagnostics).
 # 0014 (PR #906) dropped at v1.1.67: upstream as c89ebef.
+# 0016 (v1.1.75): glm-dsa layers set Ly.ff/ffd/f0 - upstream left them 0 (TP rework), full GLM-5.3 launches failed.
 # 0015 (maya-hy4 on HIP) dropped at v1.1.70: upstream since v1.1.68 (device code, CMake HIP target).
 # The ds4 NUMA (MPOL_LOCAL, needs CapAdd SYS_NICE - runtime.py) and down-act-copy patches landed in v1.1.36 (#562, #561);
 # --experts N (old 0006) in v1.1.41 (#564), DS4_IQ1S_ROWS + the HIP wall_clock64 pull clock (old 0007) in v1.1.41 (#563).
@@ -58,10 +59,10 @@ RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
     export PATH="$root/bin:$root/llvm/bin:$PATH" ROCM_PATH="$root" HIP_PATH="$root" HIP_PLATFORM=amd \
            LD_LIBRARY_PATH="$root/lib"; \
     cmake -S . -B build-hip -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DSTRATA_ENABLE_HIP=ON -DSTRATA_ENABLE_CUDA=OFF -DSTRATA_PREFILL_MMQ=ON \
-      -DSTRATA_NATIVE_EXPERTS=ON -DSTRATA_BUILD_TESTS=OFF -DCMAKE_HIP_ARCHITECTURES="$GPU_TARGETS" \
+      -DMAYA_ENABLE_HIP=ON -DMAYA_ENABLE_CUDA=OFF -DMAYA_PREFILL_MMQ=ON \
+      -DMAYA_NATIVE_EXPERTS=ON -DMAYA_BUILD_TESTS=OFF -DCMAKE_HIP_ARCHITECTURES="$GPU_TARGETS" \
       -DCMAKE_HIP_COMPILER="$root/llvm/bin/clang++" -DCMAKE_PREFIX_PATH="$root" \
-      -DSTRATA_GGML_DIR=/opt/maya/src/third_party/llama.cpp \
+      -DMAYA_GGML_DIR=/opt/maya/src/third_party/llama.cpp \
       "-DCMAKE_HIP_FLAGS=--rocm-path=$root --rocm-device-lib-path=$root/lib/llvm/amdgcn/bitcode"; \
     cmake --build build-hip --target maya maya-ds4 maya-mm3 maya-hy4 ds4_index_score_tc -j"$BUILD_JOBS"; \
     mkdir -p engine && cp build-hip/maya build-hip/maya-ds4 build-hip/maya-mm3 build-hip/maya-hy4 build-hip/ds4_index_score_tc engine/ && rm -rf build-hip
@@ -72,7 +73,7 @@ RUN set -e; cd /opt/maya/src; root=/opt/rocm; \
 RUN set -e; cd /opt/maya/src; \
     /opt/maya/venv/bin/python tools/vision/glm5next_patch.py third_party/llama.cpp; \
     cmake -S tools/vision -B build-vision-cpu -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DLLAMA_DIR=/opt/maya/src/third_party/llama.cpp -DSTRATA_VISION_CUDA=OFF; \
+      -DLLAMA_DIR=/opt/maya/src/third_party/llama.cpp -DMAYA_VISION_CUDA=OFF; \
     cmake --build build-vision-cpu --target maya-vision -j"$BUILD_JOBS"; \
     cp build-vision-cpu/bin/maya-vision engine/maya-vision && rm -rf build-vision-cpu
 

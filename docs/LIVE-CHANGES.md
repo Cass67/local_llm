@@ -9,13 +9,19 @@ before -> after as that change's gain. The figures do not chain into one number.
 
 ## Live now
 
-**Model:** `maya-dsv41-q4xl-huihui` (DeepSeek-V4.1-Flash huihui UD-Q4_K_XL, engine `maya-ds4`, args/env below) on
-cluster `0663b08f`, port 8088, 4x RX 7900 XT, Dell T7910 (2x E5-2699 v4, 1 TB RAM). Hy4 (`maya-hy4-flash-q4km`) is
-configured but stopped.
+**Model:** `maya-glm53-xs` (full GLM-5.3 744B, Maya-XS, upstream glm-dsa on engine `maya`, args/env below) on
+cluster `0663b08f`, port 8088, ctx 65536, 4x RX 7900 XT, Dell T7910 (2x E5-2699 v4, 1 TB RAM). DS4
+(`maya-dsv41-q4xl-huihui`, the usual default) and Hy4 (`maya-hy4-flash-q4km`) are configured but stopped.
 
-**Image:** `local-llm-runner-maya:latest` = `:v1.1.70-ra` (`b90b1bc8`): Maya v1.1.70 (b6632a0b) + patches in
+**GLM-5.3 args:** `--glm-pack /mnt/models/maya-glm53/Maya-XS/pack --expert-cache auto --prefill auto --kv-streaming off`;
+env `MAYA_GLM_RESERVE_MB=512`, `MAYA_GLM_RAM_HEADROOM_GB=16`, `MAYA_GLM_PREFILL_SUB=1024`, `MAYA_GLM_PREFILL_MB=4096`,
+`MAYA_GLM_SPLIT_CARDS=19.89:800,19.89:800,19.89:800,19.89:800` (real bandwidth for the split search; HIP reads 100 GB/s),
+`MAYA_GLM_SPLIT_LOG=1`, `MAYA_GLM_SAME_ANSWERS=0` (v1.1.75's fixed draft length / no lane re-plan off); temp 1.0 / top_p 0.95, effort high. Split auto -> 22/16/20/20.
+
+**Image:** `local-llm-runner-maya:latest` = `:v1.1.75-ra` (`a957a466`): Maya v1.1.75 (8621f7a7) + patches in
 `runner/maya/patches` (ML4 families need image `:v1.1.56-ra906`):
 - 0013: DS4 CPU-lane read-ahead (engine branch `ds4-decode-graph` a08d45e on Cass67/project-maya).
+- 0016: glm-dsa layers set `Ly.ff/ffd/f0` (v1.1.75 left them 0 -> every full GLM-5.3 launch failed).
 - 0015 dropped: maya-hy4 on HIP is upstream since v1.1.68. 0014 dropped: #906 is upstream (c89ebef).
 
 **Hy4 args:** `--pack /mnt/models/angelslim-hy4-flash/maya-hy4 --max-context 524288 --tp 0 --mtp --chunk 2048
@@ -45,12 +51,50 @@ rest on the CPU lane), sampling temp 0.9 / top_p 1.0, effort high. No `HY4_*` en
 04/a3 253 W, 09/a6 238 W (BIOS floors); `amdgpu-powercap.service` (raise to 333 W) disabled.
 GPU 04:00.0 sits in Slot1 (root port 00:01.1, capped x4 Gen3); Slot2 (05:00.0, x16) is empty since the 11-10 rack move.
 
-**Speed now:** DS4 prefill ~375 tok/s at 40K warm, ~525 -> ~440 tok/s per chunk across a 456K read (x4 CUDA0 link,
+**Speed now:** GLM-5.3 Maya-XS at 18.9K: prefill 292 tok/s, decode 11.3 cold / 12.7 cached (CPU-lane bound, 75% VRAM
+hit). DS4 (stopped) prefill ~375 tok/s at 40K warm, ~525 -> ~440 tok/s per chunk across a 456K read (x4 CUDA0 link,
 3.2 GB/s vs 13.6). Warm decode 55.6 tok/s on v1.1.65 with the 238/253 W caps. Hy4 (stopped): decode 25-30 tok/s.
 
-**Rollback tags:** `before-v1.1.70-20261120` (v1.1.67 + #1040 + 0013/0015), `before-hy4b-20261118` (first 0015), `before-v1.1.67-20261118` (v1.1.65 + 0013/0014), `before-v1.1.65-20261117` (v1.1.58 + 0013/0014), `before-v1.1.58-20261111` (v1.1.56 + 0012-0014), `before-906-20261107` (read-ahead without 0014), `before-v1.1.56-20261107` (v1.1.55).
+**Rollback tags:** `before-v1.1.75-20261123` (v1.1.72 + 0013), `before-v1.1.70-20261120` (v1.1.67 + #1040 + 0013/0015), `before-hy4b-20261118` (first 0015), `before-v1.1.67-20261118` (v1.1.65 + 0013/0014), `before-v1.1.65-20261117` (v1.1.58 + 0013/0014), `before-v1.1.58-20261111` (v1.1.56 + 0012-0014), `before-906-20261107` (read-ahead without 0014), `before-v1.1.56-20261107` (v1.1.55).
 
 ## Log
+
+### 2026-11-23 Maya v1.1.75 + 0016 (glm-dsa fix)
+- What: `local-llm-runner-maya:v1.1.75-ra` a957a466 = v1.1.75 (8621f7a7) + 0013 + new 0016, built in ubt26
+  /mnt/scratch/maya-v1.1.75 (buildx zstd), retagged `:latest`. Dockerfile CMake options renamed `STRATA_*` ->
+  `MAYA_*` (upstream rename; old names still accepted). `maya-glm53-xs` maya_env + `MAYA_GLM_SAME_ANSWERS=0`.
+- Why: user asked to move to the latest Maya and look for speedups. v1.1.73-75 is mostly Inkling 2 Mini / NVIDIA;
+  for us: #1026 reserve held for the whole run, GLM same-answers default (fixed MTP draft length 2 unless maya.py setup
+  calibrates it - our runner skips that; upstream measured decode -6% / prompt -2.5%), so turned off.
+- Bug: stock v1.1.75 fails every full GLM-5.3 request (`glm_fast mv` / `moe_gate_up: invalid configuration argument`,
+  with and without SAME_ANSWERS). GLM-TP rework (2e6d9410) made the shared MoE code size launches from `Ly.ff`, which
+  only the Flash loader sets; `fast_bind_dsa` (glm_dsa_fast.cu) leaves it 0. 0016 sets ff/ffd/f0 there. Hits CUDA too.
+- Effect (~/scratch/glm53-xs/depth.py, bench-v1175.log; prompts a bit longer than the v1.1.72 run): 3.1K 109 prefill /
+  11.9 decode (first request after restart); 18.9K prefill 292, decode 11.33 cold / 12.72 cached (v1.1.72 at 16.7K:
+  276, 11.39 / 13.21). Flat - no speedup for this model. VRAM hit 72-75%, CPU lane 41-50 ms/tok. Reserve held (510-618
+  MiB free/card), split 22/16/20/20, 0 restarts. ~15 min outage from the stock-image attempt (rolled back meanwhile).
+- Rollback: `docker tag local-llm-runner-maya:before-v1.1.75-20261123 local-llm-runner-maya:latest`, drop
+  `MAYA_GLM_SAME_ANSWERS` (harmless either way), restart 0663b08f (profile PUT). Profiles backup
+  ~/.local/share/local_llm/profiles.json.bak-20261123-pre-v1175.
+- Commit: this entry's commit ("runner/maya: v1.1.75 + 0013 + 0016 ...").
+
+### 2026-11-21 Maya v1.1.72 + full GLM-5.3 744B Maya-XS (upstream's glm-dsa port)
+- What: `local-llm-runner-maya:v1.1.72-ra` 886084fe = v1.1.72 (cce2de0e) + 0013, built in ubt26
+  /mnt/scratch/maya-v1.1.72 (buildx zstd), retagged `:latest`. New family `maya-glm53-xs`: peasantsmith
+  GLM-5.3-Maya-GGUF Maya-XS (rev 2fb34fe0, 4 shards sha256 OK) in /mnt/models/maya-glm53/Maya-XS, pack built in the
+  image (`tools/iq_pack.py --compat-bf16` + stamp/template). Started on 0663b08f in place of DS4.
+- Why: user asked to measure upstream's own full GLM-5.3 port against ours (Cass67/project-maya `glm53-port`, closed
+  10-29 at 8.9-9.0 decode / ~227-258 prefill at 16.7K, CPU-lane bound).
+- Split fix: HIP reports no memory clock/bus width, so the split search priced every card at 100 GB/s (= host RAM)
+  and put 1/1/52/24 layers on the cards, 0 expert slots on CUDA0/1, CUDA2 token-by-token prefill (~7 tok/s), 219 ms
+  predicted. `MAYA_GLM_SPLIT_CARDS=19.89:800,...` (glm-dsa only; stands in for the readings) -> auto picks 22/16/20/20,
+  ~58 GB of expert pools, batched prefill on all cards.
+- Effect (~/scratch/glm53-xs/depth.py = old port's harness, 400 tokens, no thinking): warm 2.5K 12.83 decode; 16.7K
+  prefill 276 tok/s, decode 11.39 cold / 13.21 prompt-cached. glm stat 75.5 ms/tok, VRAM hit 75%, CPU lane 48.7 ms/tok.
+  vs our port's base 8.9 at 16.7K: +28-48% decode. Context 65536 (KV in VRAM, no KV streaming upstream). 0 restarts.
+  Clients synced to ctx 63488 / output 32768 (model-switch sync on Mac, ubt26, fed).
+- Rollback: `docker tag local-llm-runner-maya:before-v1.1.72-20261121 local-llm-runner-maya:latest`, then
+  POST /api/clusters/0663b08f/start {"family":"maya-dsv41-q4xl-huihui","profile":"default"}; model-switch sync.
 
 ### 2026-11-20 Maya v1.1.70: compactions in picture conversations stop re-reading from token 0
 - What: `local-llm-runner-maya:v1.1.70-ra` b90b1bc8 = v1.1.70 (b6632a0b) + 0013; 0015 dropped (upstream). Built in
